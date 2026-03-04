@@ -130,9 +130,21 @@ export default function Editor({ file, mode, setMode }: EditorProps) {
             {parts[1]}
           </div>
         );
-      } else if (line.match(/\\[\\[.*\\]\\]/)) {
+      } else if (line.match(/\[\[.*\]\]/)) {
         // Links
-        className += " text-org-link underline underline-offset-2";
+        const match = line.match(/\[\[(.*)\]\]/);
+        const linkContent = match ? match[1] : "";
+        return (
+          <div key={i} className={className}>
+            <span 
+              className="text-org-link underline underline-offset-2 cursor-pointer hover:text-primary transition-colors flex items-center gap-1 w-fit"
+              onClick={() => alert(`Opening iCloud file reference:\n${linkContent}`)}
+              title="Open iCloud Reference"
+            >
+              [[{linkContent}]]
+            </span>
+          </div>
+        );
       }
 
       return (
