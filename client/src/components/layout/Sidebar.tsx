@@ -1,14 +1,16 @@
 import React from "react";
-import { Folder, FileText, Cloud, CloudOff, ChevronDown, ChevronRight, Hash } from "lucide-react";
+import { Folder, FileText, Cloud, Clipboard, ChevronDown, Hash } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
   activeFile: string;
   onSelectFile: (filename: string) => void;
+  toggleClipboard: () => void;
+  isClipboardActive: boolean;
 }
 
-export default function Sidebar({ activeFile, onSelectFile }: SidebarProps) {
+export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isClipboardActive }: SidebarProps) {
   const files = [
     { name: "dad.org", type: "org" },
     { name: "inbox.org", type: "org" },
@@ -33,9 +35,11 @@ export default function Sidebar({ activeFile, onSelectFile }: SidebarProps) {
       </div>
       
       <ScrollArea className="flex-1 py-2">
-        <div className="px-3 py-1 mt-2 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-          <ChevronDown className="w-3 h-3" />
-          <span>Workspace</span>
+        <div className="px-3 py-1 mt-2 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <ChevronDown className="w-3 h-3" />
+            <span>Workspace</span>
+          </div>
         </div>
         <div className="space-y-[2px] px-2">
           {files.map((file) => (
@@ -57,9 +61,27 @@ export default function Sidebar({ activeFile, onSelectFile }: SidebarProps) {
 
         <div className="px-3 py-1 mt-6 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
           <ChevronDown className="w-3 h-3" />
-          <span>iCloud Capture Streams</span>
+          <span>Capture Streams</span>
         </div>
         <div className="space-y-[2px] px-2">
+          <button
+            onClick={toggleClipboard}
+            className={cn(
+              "w-full flex items-center justify-between px-2 py-1.5 rounded-sm text-sm text-left transition-colors font-mono mb-1 group",
+              isClipboardActive 
+                ? "bg-secondary/10 text-secondary" 
+                : "text-foreground hover:bg-muted/50"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Clipboard className={cn("w-4 h-4", isClipboardActive ? "text-secondary" : "text-[#c678dd]")} />
+              <span>System Clipboard</span>
+            </div>
+            <span className="text-[10px] bg-secondary/20 text-secondary px-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+              live
+            </span>
+          </button>
+
           {icloudStreams.map((stream) => (
             <button
               key={stream.name}
