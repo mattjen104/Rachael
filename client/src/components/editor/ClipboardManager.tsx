@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { ClipboardList, Copy, Trash2, CheckCircle2 } from "lucide-react";
+import { ClipboardList, Copy, Trash2, CheckCircle2, ArrowRightToLine } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface ClipboardItem {
   id: string;
@@ -35,6 +36,7 @@ const initialClipboard: ClipboardItem[] = [
 export default function ClipboardManager() {
   const [items, setItems] = useState<ClipboardItem[]>(initialClipboard);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const { toast } = useToast();
 
   // In a real app, this would poll or listen to navigator.clipboard
   // For the mockup, we just show the static list
@@ -43,6 +45,14 @@ export default function ClipboardManager() {
     navigator.clipboard.writeText(content).catch(() => {});
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleAppend = (content: string) => {
+    toast({
+      title: "Appended to Workspace",
+      description: "Added snippet to the INBOX section of dad.org",
+      className: "bg-[#21242b] border-[#51afef] text-[#bbc2cf]",
+    });
   };
 
   const handleDelete = (id: string) => {
@@ -54,7 +64,7 @@ export default function ClipboardManager() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#21242b] border-l border-border w-80 flex-shrink-0 font-mono">
+    <div className="flex flex-col h-full bg-[#21242b] border-l border-border w-80 flex-shrink-0 font-mono z-20">
       <div className="p-3 border-b border-border flex items-center justify-between bg-[#1c1f24]">
         <div className="flex items-center gap-2 font-semibold text-secondary">
           <ClipboardList className="w-4 h-4" />
@@ -79,6 +89,13 @@ export default function ClipboardManager() {
                     {item.type} • {formatTime(item.timestamp)}
                   </span>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => handleAppend(item.content)}
+                      className="p-1 hover:bg-[#51afef]/20 hover:text-[#51afef] rounded text-muted-foreground transition-colors"
+                      title="Append to dad.org INBOX"
+                    >
+                      <ArrowRightToLine className="w-3 h-3" />
+                    </button>
                     <button 
                       onClick={() => handleCopy(item.id, item.content)}
                       className="p-1 hover:bg-secondary/20 hover:text-secondary rounded text-muted-foreground transition-colors"
