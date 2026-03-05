@@ -4,8 +4,8 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: 'JetBrains Mono', 'Fira Code', monospace;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: 'IBM Plex Mono', 'Share Tech Mono', 'Courier New', monospace;
+  --font-mono: 'IBM Plex Mono', 'Share Tech Mono', 'Courier New', monospace;
 
   --radius-sm: 0.125rem;
   --radius-md: 0.25rem;
