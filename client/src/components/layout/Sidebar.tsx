@@ -1,23 +1,24 @@
 import React from "react";
-import { FileText, Cloud, Clipboard, ChevronDown, Hash, Calendar, Code, Plus, Monitor } from "lucide-react";
+import { FileText, Cloud, Clipboard, ChevronDown, ChevronRight, Hash, Calendar, Code, Plus, Monitor, Layers } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useOrgFiles } from "@/hooks/use-org-data";
-import { useCrtTheme, PHOSPHOR_PROFILES, type ThemeKey } from "@/lib/crt-theme";
+import { useCrtTheme } from "@/lib/crt-theme";
 
 interface SidebarProps {
   activeFile: string;
   onSelectFile: (filename: string) => void;
   toggleClipboard: () => void;
   isClipboardActive: boolean;
-  viewMode: "editor" | "agenda";
-  onSwitchView: (mode: "editor" | "agenda") => void;
+  viewMode: "unified" | "editor" | "agenda";
+  onSwitchView: (mode: "unified" | "editor" | "agenda") => void;
   onOpenCapture: () => void;
 }
 
 export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isClipboardActive, viewMode, onSwitchView, onOpenCapture }: SidebarProps) {
   const { data: orgFiles = [] } = useOrgFiles();
-  const { theme, cycleTheme, t } = useCrtTheme();
+  const { cycleTheme, t } = useCrtTheme();
+  const [filesExpanded, setFilesExpanded] = React.useState(false);
 
   const icloudStreams = [
     { name: "Camera Roll", count: 12 },
@@ -44,23 +45,36 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
 
       <div className="flex border-b border-border">
         <button
+          onClick={() => onSwitchView("unified")}
+          data-testid="view-unified"
+          className={cn(
+            "flex-1 flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-semibold transition-colors uppercase tracking-wider",
+            viewMode === "unified"
+              ? "text-primary border-b-2 border-primary bg-primary/5 phosphor-glow"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Layers className="w-3 h-3" />
+          All
+        </button>
+        <button
           onClick={() => onSwitchView("editor")}
           data-testid="view-editor"
           className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors",
+            "flex-1 flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-semibold transition-colors uppercase tracking-wider",
             viewMode === "editor"
               ? "text-primary border-b-2 border-primary bg-primary/5 phosphor-glow"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
           <Code className="w-3 h-3" />
-          Editor
+          Edit
         </button>
         <button
           onClick={() => onSwitchView("agenda")}
           data-testid="view-agenda"
           className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors",
+            "flex-1 flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-semibold transition-colors uppercase tracking-wider",
             viewMode === "agenda"
               ? "text-primary border-b-2 border-primary bg-primary/5 phosphor-glow"
               : "text-muted-foreground hover:text-foreground"
@@ -84,32 +98,38 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
       </div>
 
       <ScrollArea className="flex-1 py-2">
-        <div className="px-3 py-1 mt-2 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
-          <div className="flex items-center gap-1">
-            <ChevronDown className="w-3 h-3" />
-            <span>Workspace</span>
+        <div className="px-3 py-1 mt-2 mb-1">
+          <button
+            onClick={() => setFilesExpanded(!filesExpanded)}
+            className="flex items-center gap-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-full hover:text-foreground transition-colors"
+          >
+            {filesExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            <span>Workspace Files</span>
+            <span className="text-[9px] ml-auto opacity-60">{orgFiles.length}</span>
+          </button>
+        </div>
+        {filesExpanded && (
+          <div className="space-y-[2px] px-2 mb-2">
+            {orgFiles.map((file) => (
+              <button
+                key={file.id}
+                onClick={() => onSelectFile(file.name)}
+                data-testid={`sidebar-file-${file.name}`}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-sm text-left transition-colors font-mono",
+                  activeFile === file.name && viewMode === "editor"
+                    ? "bg-primary/10 text-primary phosphor-glow"
+                    : "text-foreground hover:bg-muted/50"
+                )}
+              >
+                <FileText className={cn("w-4 h-4", activeFile === file.name && viewMode === "editor" ? "text-primary" : "text-muted-foreground")} />
+                {file.name}
+              </button>
+            ))}
           </div>
-        </div>
-        <div className="space-y-[2px] px-2">
-          {orgFiles.map((file) => (
-            <button
-              key={file.id}
-              onClick={() => onSelectFile(file.name)}
-              data-testid={`sidebar-file-${file.name}`}
-              className={cn(
-                "w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-sm text-left transition-colors font-mono",
-                activeFile === file.name && viewMode === "editor"
-                  ? "bg-primary/10 text-primary phosphor-glow"
-                  : "text-foreground hover:bg-muted/50"
-              )}
-            >
-              <FileText className={cn("w-4 h-4", activeFile === file.name && viewMode === "editor" ? "text-primary" : "text-muted-foreground")} />
-              {file.name}
-            </button>
-          ))}
-        </div>
+        )}
 
-        <div className="px-3 py-1 mt-6 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+        <div className="px-3 py-1 mt-4 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
           <ChevronDown className="w-3 h-3" />
           <span>Capture Streams</span>
         </div>

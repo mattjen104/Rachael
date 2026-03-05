@@ -18,7 +18,8 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 5. **Clipboard Manager** - Smart capture system with inline editing, `t` prefix for TODO tasks, `>` nesting for heading depth, `[[` backlink autocomplete for linking to existing headings. Content type detection (URL/gif/image/code) with metadata enrichment.
 6. **iCloud Capture Streams** - Sidebar showing incoming data sources (Camera Roll, Notes, Files)
 7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device, navigated with WASD keys
-8. **View Switcher** - Editor/Agenda tabs in sidebar to toggle main content area
+8. **View Switcher** - Three view modes (Unified/Editor/Agenda) via sidebar tabs. Unified is the default, showing all org files as concatenated sections in a single scrollable document. Clicking a file header switches to its editor view.
+9. **View-Centric Design** - Workspace is view-first, not file-first. Sidebar prioritizes view tabs; file list is collapsed under "Workspace Files". Clipboard capture always targets inbox.org (fallback: dad.org) regardless of active editor file.
 
 ## Key Server Components
 

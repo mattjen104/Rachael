@@ -1,31 +1,35 @@
 import React from "react";
-import { GitBranch, CheckCircle2, Calendar } from "lucide-react";
+import { GitBranch, CheckCircle2, Calendar, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useCrtTheme } from "@/lib/crt-theme";
 
 interface StatusBarProps {
   file: string;
   mode: "NORMAL" | "INSERT" | "VISUAL";
-  viewMode: "editor" | "agenda";
+  viewMode: "unified" | "editor" | "agenda";
 }
 
 export default function StatusBar({ file, mode, viewMode }: StatusBarProps) {
-  const { t } = useCrtTheme();
+  const modeLabel = viewMode === "unified" ? "UNIFIED" : viewMode === "agenda" ? "AGENDA" : mode;
 
   return (
     <div className="h-6 flex w-full text-xs font-mono select-none z-50 flex-shrink-0">
-      <div className={cn(
-        "flex items-center justify-center font-bold px-4 uppercase transition-colors phosphor-glow-bright",
-        "bg-primary text-primary-foreground"
-      )}>
-        {viewMode === "agenda" ? "AGENDA" : mode}
+      <div className="flex items-center justify-center font-bold px-4 uppercase transition-colors phosphor-glow-bright bg-primary text-primary-foreground">
+        {modeLabel}
       </div>
 
       <div className="bg-muted text-foreground flex items-center px-4 flex-1 gap-4 phosphor-glow-dim">
         <span className="flex items-center gap-1">
           <GitBranch className="w-3 h-3" /> main
         </span>
-        {viewMode === "agenda" ? (
+        {viewMode === "unified" ? (
+          <>
+            <span className="font-semibold text-primary flex items-center gap-1 phosphor-glow">
+              <Layers className="w-3 h-3" />
+              All Files
+            </span>
+            <span className="text-muted-foreground">[Unified]</span>
+          </>
+        ) : viewMode === "agenda" ? (
           <>
             <span className="font-semibold text-primary flex items-center gap-1 phosphor-glow">
               <Calendar className="w-3 h-3" />
