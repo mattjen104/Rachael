@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ClipboardList, Trash2, CheckCircle2, Calendar, FileText, Link, Code, Image, Type, Pencil } from "lucide-react";
+import { ClipboardList, Trash2, CheckCircle2, Calendar, FileText, Link, Code, Image, Type, Pencil, ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -10,6 +10,7 @@ import {
   useUpdateClipboardItem,
   useSmartCapture,
   useEnrichClipboard,
+  useHeadingsSearch,
 } from "@/hooks/use-org-data";
 import { queryClient } from "@/lib/queryClient";
 
@@ -17,12 +18,25 @@ interface ClipboardManagerProps {
   activeOrgFile: string;
 }
 
-function detectPrefix(content: string): { type: "task" | "appointment" | "note" | "plain"; label: string } | null {
-  const trimmed = content.trim().toLowerCase();
-  if (trimmed.startsWith("t ")) return { type: "task", label: "task" };
-  if (trimmed.startsWith("a ")) return { type: "appointment", label: "appt" };
-  if (trimmed.startsWith("n ")) return { type: "note", label: "note" };
-  return null;
+function parseCaptureSyntax(content: string): { hasTask: boolean; nestingLevel: number; label: string } {
+  const trimmed = content.trim();
+  let body = trimmed;
+  let nestingLevel = 0;
+
+  const nestMatch = body.match(/^(>+)\s*/);
+  if (nestMatch) {
+    nestingLevel = nestMatch[1].length;
+    body = body.slice(nestMatch[0].length);
+  }
+
+  const hasTask = /^t\s+/i.test(body);
+
+  let label = "";
+  if (hasTask && nestingLevel > 0) label = `${"›".repeat(nestingLevel)} todo`;
+  else if (hasTask) label = "todo";
+  else if (nestingLevel > 0) label = `${"›".repeat(nestingLevel)} note`;
+
+  return { hasTask, nestingLevel, label };
 }
 
 function getTypeIcon(type: string) {
@@ -43,13 +57,164 @@ function getTypeBadgeColor(type: string) {
   }
 }
 
-function getPrefixBadgeColor(type: string) {
-  switch (type) {
-    case "task": return "text-[#ECBE7B] bg-[#ECBE7B]/15";
-    case "appointment": return "text-[#c678dd] bg-[#c678dd]/15";
-    case "note": return "text-[#98be65] bg-[#98be65]/15";
-    default: return "";
-  }
+interface BacklinkDropdownProps {
+  query: string;
+  onSelect: (link: string) => void;
+  onClose: () => void;
+  visible: boolean;
+  selectedIdx: number;
+  onSelectedIdxChange: (idx: number) => void;
+}
+
+function BacklinkDropdown({ query, onSelect, onClose, visible, selectedIdx, onSelectedIdxChange }: BacklinkDropdownProps) {
+  const { data: headings = [] } = useHeadingsSearch(query);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { onSelectedIdxChange(0); }, [headings.length]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [visible, onClose]);
+
+  if (!visible || headings.length === 0) return null;
+
+  return (
+    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-[#1c1f24] border border-border rounded-sm shadow-xl z-50 max-h-40 overflow-y-auto" data-testid="backlink-dropdown">
+      {headings.map((h, i) => (
+        <button
+          key={`${h.sourceFile}-${h.lineNumber}`}
+          className={cn(
+            "w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors",
+            i === selectedIdx ? "bg-primary/20 text-primary" : "text-[#bbc2cf] hover:bg-[#282c34]"
+          )}
+          onClick={() => onSelect(`[[file:${h.sourceFile}::*${h.title}]]`)}
+          onMouseEnter={() => onSelectedIdxChange(i)}
+          data-testid={`backlink-option-${i}`}
+        >
+          <span className="text-muted-foreground text-[9px]">{"*".repeat(h.level)}</span>
+          <span className="flex-1 truncate">{h.title}</span>
+          <span className="text-[9px] text-muted-foreground">{h.sourceFile}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function useBacklinkHeadingsCount(query: string) {
+  const { data: headings = [] } = useHeadingsSearch(query);
+  return headings;
+}
+
+interface SmartInputProps {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel?: () => void;
+  placeholder?: string;
+  className?: string;
+  autoFocus?: boolean;
+  testId?: string;
+}
+
+function SmartInput({ value, onChange, onSubmit, onCancel, placeholder, className, autoFocus, testId }: SmartInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [backlinkQuery, setBacklinkQuery] = useState("");
+  const [showBacklinks, setShowBacklinks] = useState(false);
+  const [backlinkStart, setBacklinkStart] = useState(-1);
+  const [dropdownIdx, setDropdownIdx] = useState(0);
+  const headings = useBacklinkHeadingsCount(backlinkQuery);
+
+  useEffect(() => {
+    if (autoFocus && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.setSelectionRange(value.length, value.length);
+    }
+  }, [autoFocus]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    onChange(newVal);
+
+    const cursorPos = e.target.selectionStart || 0;
+    const before = newVal.slice(0, cursorPos);
+    const bracketIdx = before.lastIndexOf("[[");
+
+    if (bracketIdx !== -1 && !before.slice(bracketIdx).includes("]]")) {
+      const query = before.slice(bracketIdx + 2);
+      setBacklinkQuery(query);
+      setBacklinkStart(bracketIdx);
+      setShowBacklinks(true);
+    } else {
+      setShowBacklinks(false);
+      setBacklinkQuery("");
+    }
+  };
+
+  const handleBacklinkSelect = (link: string) => {
+    const before = value.slice(0, backlinkStart);
+    const cursorPos = inputRef.current?.selectionStart || value.length;
+    const afterBracket = value.slice(cursorPos);
+    const cleaned = afterBracket.replace(/^\]*/, "");
+    const newVal = before + link + (cleaned ? " " + cleaned : "");
+    onChange(newVal);
+    setShowBacklinks(false);
+    setBacklinkQuery("");
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showBacklinks && headings.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setDropdownIdx(i => Math.min(i + 1, headings.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setDropdownIdx(i => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const h = headings[dropdownIdx];
+        if (h) handleBacklinkSelect(`[[file:${h.sourceFile}::*${h.title}]]`);
+        return;
+      }
+    }
+    if (e.key === "Enter") { e.preventDefault(); onSubmit(); }
+    if (e.key === "Escape") {
+      if (showBacklinks) { setShowBacklinks(false); }
+      else if (onCancel) { onCancel(); }
+    }
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        className={className}
+        data-testid={testId}
+      />
+      <BacklinkDropdown
+        query={backlinkQuery}
+        onSelect={handleBacklinkSelect}
+        onClose={() => setShowBacklinks(false)}
+        visible={showBacklinks}
+        selectedIdx={dropdownIdx}
+        onSelectedIdxChange={setDropdownIdx}
+      />
+    </div>
+  );
 }
 
 interface EditableItemProps {
@@ -72,19 +237,11 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(item.content);
   const [showSuccess, setShowSuccess] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
   const updateMutation = useUpdateClipboardItem();
   const smartCaptureMutation = useSmartCapture();
   const { toast } = useToast();
 
-  useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.setSelectionRange(editValue.length, editValue.length);
-    }
-  }, [editing]);
-
-  const prefix = detectPrefix(editValue);
+  const syntax = parseCaptureSyntax(editValue);
   const displayType = item.detectedType || item.type;
 
   const handleStartEdit = () => {
@@ -99,18 +256,23 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
 
   const handleSubmit = () => {
     if (!editValue.trim()) return;
-    const detected = detectPrefix(editValue);
+    const parsed = parseCaptureSyntax(editValue);
 
-    if (detected) {
+    if (parsed.hasTask || parsed.nestingLevel > 0) {
       smartCaptureMutation.mutate(
-        { content: editValue.trim(), orgFileName: activeOrgFile, clipboardId: item.id },
+        {
+          content: editValue.trim(),
+          orgFileName: activeOrgFile,
+          clipboardId: item.id,
+          originalContent: item.content !== editValue.trim() ? item.content : undefined,
+        },
         {
           onSuccess: (data) => {
             setEditing(false);
             setShowSuccess(true);
-            const typeLabel = detected.type === "task" ? "Task" : detected.type === "appointment" ? "Appointment" : "Note";
+            const label = parsed.hasTask ? "Task" : "Note";
             toast({
-              title: `${typeLabel} captured`,
+              title: `${label} captured`,
               description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
               className: "bg-[#21242b] border-[#98be65] text-[#bbc2cf]",
             });
@@ -120,7 +282,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             setEditing(false);
             toast({
               title: "Capture failed",
-              description: "Could not parse the entry. Check your prefix.",
+              description: "Could not process the entry.",
               className: "bg-[#21242b] border-destructive text-[#bbc2cf]",
             });
           },
@@ -163,12 +325,14 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             {getTypeIcon(displayType)}
             {displayType}
           </span>
-          {prefix && (
-            <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase", getPrefixBadgeColor(prefix.type))}>
-              {prefix.type === "task" && <Calendar className="w-2.5 h-2.5" />}
-              {prefix.type === "appointment" && <Calendar className="w-2.5 h-2.5" />}
-              {prefix.type === "note" && <FileText className="w-2.5 h-2.5" />}
-              {prefix.label}
+          {syntax.label && (
+            <span className={cn(
+              "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
+              syntax.hasTask ? "text-[#ECBE7B] bg-[#ECBE7B]/15" : "text-muted-foreground bg-muted/30"
+            )}>
+              {syntax.hasTask && <Calendar className="w-2.5 h-2.5" />}
+              {!syntax.hasTask && syntax.nestingLevel > 0 && <ChevronRight className="w-2.5 h-2.5" />}
+              {syntax.label}
             </span>
           )}
           <span className="text-[9px] text-muted-foreground">
@@ -199,22 +363,19 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
 
       {editing ? (
         <div className="px-2 pb-2 pt-1">
-          <input
-            ref={inputRef}
-            type="text"
+          <SmartInput
             value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); handleSubmit(); }
-              if (e.key === "Escape") handleCancel();
-            }}
+            onChange={setEditValue}
+            onSubmit={handleSubmit}
+            onCancel={handleCancel}
+            autoFocus
             className="w-full bg-[#282c34] text-[#bbc2cf] text-xs p-2 rounded-sm border border-border outline-none focus:border-[#ECBE7B] transition-colors font-mono"
-            data-testid={`edit-input-${item.id}`}
+            testId={`edit-input-${item.id}`}
           />
           <div className="flex items-center justify-between mt-1.5">
             <span className="text-[9px] text-muted-foreground">
-              {prefix ? (
-                <span className={cn("font-bold", prefix.type === "task" ? "text-[#ECBE7B]" : prefix.type === "appointment" ? "text-[#c678dd]" : "text-[#98be65]")}>
+              {syntax.hasTask || syntax.nestingLevel > 0 ? (
+                <span className="font-bold text-[#ECBE7B]">
                   Enter → send to {activeOrgFile}
                 </span>
               ) : (
@@ -272,7 +433,6 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
   const addMutation = useAddClipboardItem();
   const smartCaptureMutation = useSmartCapture();
   const enrichMutation = useEnrichClipboard();
-  const updateMutation = useUpdateClipboardItem();
   const [newContent, setNewContent] = useState("");
   const { toast } = useToast();
 
@@ -294,21 +454,22 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
     }
   };
 
-  const newPrefix = detectPrefix(newContent);
+  const syntax = parseCaptureSyntax(newContent);
+  const showCaptureHint = syntax.hasTask || syntax.nestingLevel > 0;
 
   const handleAddManual = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newContent.trim()) return;
 
-    const detected = detectPrefix(newContent);
-    if (detected) {
+    const parsed = parseCaptureSyntax(newContent);
+    if (parsed.hasTask || parsed.nestingLevel > 0) {
       smartCaptureMutation.mutate(
         { content: newContent.trim(), orgFileName: activeOrgFile },
         {
           onSuccess: (data) => {
-            const typeLabel = detected.type === "task" ? "Task" : detected.type === "appointment" ? "Appointment" : "Note";
+            const label = parsed.hasTask ? "Task" : "Note";
             toast({
-              title: `${typeLabel} captured`,
+              title: `${label} captured`,
               description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
               className: "bg-[#21242b] border-[#98be65] text-[#bbc2cf]",
             });
@@ -363,29 +524,27 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
         <span className="text-[9px] text-muted-foreground">{items.length} items</span>
       </div>
 
-      <form onSubmit={handleAddManual} className="p-2 border-b border-border">
-        <div className="relative">
-          <input
-            type="text"
-            value={newContent}
-            onChange={(e) => setNewContent(e.target.value)}
-            placeholder="t task · a appt · n note"
-            className={cn(
-              "w-full bg-[#282c34] text-[#bbc2cf] text-xs p-2 rounded-sm border outline-none transition-colors",
-              newPrefix ? "border-[#ECBE7B] focus:border-[#ECBE7B]" : "border-border focus:border-secondary"
-            )}
-            data-testid="clipboard-input"
-          />
-          {newPrefix && (
-            <span className={cn(
-              "absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded",
-              getPrefixBadgeColor(newPrefix.type)
-            )}>
-              {newPrefix.label} → org
-            </span>
+      <div className="p-2 border-b border-border">
+        <SmartInput
+          value={newContent}
+          onChange={setNewContent}
+          onSubmit={() => {
+            if (!newContent.trim()) return;
+            handleAddManual({ preventDefault: () => {} } as React.FormEvent);
+          }}
+          placeholder="t todo · > nest · [[ link"
+          className={cn(
+            "w-full bg-[#282c34] text-[#bbc2cf] text-xs p-2 rounded-sm border outline-none transition-colors",
+            showCaptureHint ? "border-[#ECBE7B] focus:border-[#ECBE7B]" : "border-border focus:border-secondary"
           )}
-        </div>
-      </form>
+          testId="clipboard-input"
+        />
+        {showCaptureHint && (
+          <div className="mt-1 text-[9px] text-[#ECBE7B] font-bold">
+            {syntax.label} → {activeOrgFile}
+          </div>
+        )}
+      </div>
 
       <ScrollArea className="flex-1 p-2">
         <div className="space-y-2">

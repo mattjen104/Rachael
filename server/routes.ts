@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { insertOrgFileSchema, insertClipboardItemSchema, insertAgendaItemSchema } from "@shared/schema";
 import { z } from "zod";
 import { parseOrgFile, buildAgenda, toggleHeadingStatus } from "./org-parser";
-import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
+import { parseCaptureEntry, formatOrgEntry, formatNoteContent } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 
 export async function registerRoutes(
@@ -140,20 +140,22 @@ export async function registerRoutes(
   });
 
   app.post("/api/clipboard/smart-capture", async (req, res) => {
-    const { content, orgFileName, clipboardId } = req.body;
+    const { content, orgFileName, clipboardId, originalContent } = req.body;
     if (!content || !orgFileName) {
       return res.status(400).json({ message: "content and orgFileName required" });
-    }
-
-    const parsed = parseCaptureEntry(content);
-    if (parsed.type === "plain") {
-      return res.status(400).json({ message: "No capture prefix detected. Use t/a/n prefix.", parsed });
     }
 
     const orgFile = await storage.getOrgFileByName(orgFileName);
     if (!orgFile) return res.status(404).json({ message: "Org file not found" });
 
-    const entry = formatOrgEntry(parsed);
+    const parsed = parseCaptureEntry(content);
+
+    let entry: string;
+    if (parsed.type === "task") {
+      entry = formatOrgEntry(parsed, originalContent || undefined);
+    } else {
+      entry = formatNoteContent(parsed.title, originalContent || undefined);
+    }
 
     const inboxRegex = /^\*\s+INBOX/m;
     const inboxMatch = inboxRegex.exec(orgFile.content);
@@ -188,35 +190,52 @@ export async function registerRoutes(
 
     const parsed = parseCaptureEntry(clipItem.content);
 
-    if (parsed.type !== "plain") {
-      const entry = formatOrgEntry(parsed);
-      const inboxRegex = /^\*\s+INBOX/m;
-      const inboxMatch = inboxRegex.exec(orgFile.content);
-      let newContent: string;
-      if (inboxMatch) {
-        const afterInbox = orgFile.content.indexOf("\n", inboxMatch.index);
-        const insertAt = afterInbox !== -1 ? afterInbox + 1 : orgFile.content.length;
-        newContent = orgFile.content.slice(0, insertAt) + entry + orgFile.content.slice(insertAt);
-      } else {
-        newContent = orgFile.content + `\n* INBOX\n` + entry;
-      }
-      const updated = await storage.updateOrgFileContent(orgFile.id, newContent);
-      await storage.archiveClipboardItem(clipId);
-      return res.json({ file: updated, parsed });
+    let entry: string;
+    if (parsed.type === "task") {
+      entry = formatOrgEntry(parsed);
+    } else {
+      entry = formatNoteContent(clipItem.content);
     }
 
-    const now = new Date();
-    const dateStr = now.toISOString().split("T")[0];
-    const appendEntry = `\n** TODO Process clipboard capture                                        :capture:clipboard:\n   SCHEDULED: <${dateStr}>\n   :PROPERTIES:\n   :SOURCE: System Clipboard\n   :CAPTURED_AT: [${dateStr}]\n   :END:\n   \n   ${clipItem.content}\n`;
+    const inboxRegex = /^\*\s+INBOX/m;
+    const inboxMatch = inboxRegex.exec(orgFile.content);
+    let newContent: string;
+    if (inboxMatch) {
+      const afterInbox = orgFile.content.indexOf("\n", inboxMatch.index);
+      const insertAt = afterInbox !== -1 ? afterInbox + 1 : orgFile.content.length;
+      newContent = orgFile.content.slice(0, insertAt) + entry + orgFile.content.slice(insertAt);
+    } else {
+      newContent = orgFile.content + `\n* INBOX\n` + entry;
+    }
 
-    const updatedContent = orgFile.content + appendEntry;
-    const updated = await storage.updateOrgFileContent(orgFile.id, updatedContent);
+    const updated = await storage.updateOrgFileContent(orgFile.id, newContent);
     await storage.archiveClipboardItem(clipId);
 
-    res.json({ file: updated, parsed: { type: "plain" } });
+    res.json({ file: updated, parsed });
   });
 
   // ── Org Queries (parsed from file content) ──────────────────
+
+  app.get("/api/org-query/headings", async (req, res) => {
+    const q = (req.query.q as string || "").toLowerCase().trim();
+    const files = await storage.getOrgFiles();
+    const allHeadings = files.flatMap(f => parseOrgFile(f.content, f.name));
+
+    let results = allHeadings.map(h => ({
+      title: h.title,
+      sourceFile: h.sourceFile,
+      lineNumber: h.lineNumber,
+      level: h.level,
+      status: h.status,
+      tags: h.tags,
+    }));
+
+    if (q) {
+      results = results.filter(h => h.title.toLowerCase().includes(q));
+    }
+
+    res.json(results.slice(0, 20));
+  });
 
   app.get("/api/org-query/agenda", async (_req, res) => {
     const files = await storage.getOrgFiles();

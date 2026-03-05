@@ -70,7 +70,7 @@ export function useUpdateClipboardItem() {
 
 export function useSmartCapture() {
   return useMutation({
-    mutationFn: async (data: { content: string; orgFileName: string; clipboardId?: number }) => {
+    mutationFn: async (data: { content: string; orgFileName: string; clipboardId?: number; originalContent?: string }) => {
       const res = await apiRequest("POST", "/api/clipboard/smart-capture", data);
       return res.json();
     },
@@ -106,6 +106,18 @@ export function useAppendClipboardToOrg() {
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
     },
+  });
+}
+
+export function useHeadingsSearch(query: string) {
+  return useQuery<{ title: string; sourceFile: string; lineNumber: number; level: number; status: string | null; tags: string[] }[]>({
+    queryKey: ["/api/org-query/headings", query],
+    queryFn: async () => {
+      const res = await fetch(`/api/org-query/headings?q=${encodeURIComponent(query)}`);
+      if (!res.ok) throw new Error("Failed to fetch headings");
+      return res.json();
+    },
+    enabled: query.length > 0,
   });
 }
 

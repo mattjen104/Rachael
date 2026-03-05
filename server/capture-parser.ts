@@ -1,19 +1,14 @@
 import * as chrono from "chrono-node";
 
 export interface ParsedCapture {
-  type: "task" | "appointment" | "note" | "plain";
+  type: "task" | "note";
   title: string;
   scheduledDate?: string;
   deadlineDate?: string;
   scheduledTime?: string;
+  nestingLevel: number;
   tags: string[];
 }
-
-const prefixMap: Record<string, ParsedCapture["type"]> = {
-  "t ": "task",
-  "a ": "appointment",
-  "n ": "note",
-};
 
 function formatDate(d: Date): string {
   return d.toISOString().split("T")[0];
@@ -31,31 +26,33 @@ function getDayAbbrev(d: Date): string {
 
 export function parseCaptureEntry(input: string): ParsedCapture {
   const trimmed = input.trim();
-  if (!trimmed) return { type: "plain", title: "", tags: [] };
+  if (!trimmed) return { type: "note", title: "", nestingLevel: 0, tags: [] };
 
-  let type: ParsedCapture["type"] = "plain";
   let body = trimmed;
+  let nestingLevel = 0;
 
-  for (const [prefix, pType] of Object.entries(prefixMap)) {
-    if (trimmed.toLowerCase().startsWith(prefix)) {
-      type = pType;
-      body = trimmed.slice(prefix.length).trim();
-      break;
-    }
+  const nestMatch = body.match(/^(>+)\s*/);
+  if (nestMatch) {
+    nestingLevel = nestMatch[1].length;
+    body = body.slice(nestMatch[0].length);
   }
 
-  if (type === "plain") {
-    return { type: "plain", title: trimmed, tags: [] };
+  let type: ParsedCapture["type"] = "note";
+  if (/^t\s+/i.test(body)) {
+    type = "task";
+    body = body.replace(/^t\s+/i, "").trim();
   }
 
-  const tags: string[] = [];
-  if (type === "appointment") tags.push("appointment");
-
-  const byMatch = body.match(/\bby\s+(.+)/i);
-  let isDeadline = false;
-  if (byMatch && type === "task") {
-    isDeadline = true;
+  if (type === "note") {
+    return {
+      type: "note",
+      title: body,
+      nestingLevel,
+      tags: [],
+    };
   }
+
+  const isDeadline = /\b(due|by)\s+/i.test(body);
 
   const results = chrono.parse(body, new Date(), { forwardDate: true });
 
@@ -88,28 +85,33 @@ export function parseCaptureEntry(input: string): ParsedCapture {
   if (!title) title = body;
 
   title = title.replace(/\s+/g, " ").trim();
-  title = title.replace(/^by\s*/i, "").trim();
+  title = title.replace(/^(due|by)\s*/i, "").trim();
+
+  if (!title) title = body;
 
   return {
-    type,
+    type: "task",
     title: title.charAt(0).toUpperCase() + title.slice(1),
     scheduledDate,
     deadlineDate,
     scheduledTime,
-    tags,
+    nestingLevel,
+    tags: [],
   };
 }
 
-export function formatOrgEntry(parsed: ParsedCapture): string {
-  const { type, title, scheduledDate, deadlineDate, scheduledTime, tags } = parsed;
+export function formatOrgEntry(parsed: ParsedCapture, body?: string): string {
+  const { type, title, scheduledDate, deadlineDate, scheduledTime, nestingLevel, tags } = parsed;
 
+  const stars = "*".repeat(2 + nestingLevel);
   const tagStr = tags.length > 0 ? ` :${tags.join(":")}:` : "";
+  const indent = "   ";
 
   let heading: string;
-  if (type === "note") {
-    heading = `** ${title}${tagStr}`;
+  if (type === "task") {
+    heading = `${stars} TODO ${title}${tagStr}`;
   } else {
-    heading = `** TODO ${title}${tagStr}`;
+    heading = `${stars} ${title}${tagStr}`;
   }
 
   const lines = [heading];
@@ -118,22 +120,30 @@ export function formatOrgEntry(parsed: ParsedCapture): string {
     const d = new Date(scheduledDate + "T12:00:00");
     const dayAbbr = getDayAbbrev(d);
     const timeStr = scheduledTime ? ` ${scheduledTime}` : "";
-    lines.push(`   SCHEDULED: <${scheduledDate} ${dayAbbr}${timeStr}>`);
+    lines.push(`${indent}SCHEDULED: <${scheduledDate} ${dayAbbr}${timeStr}>`);
   }
 
   if (deadlineDate) {
     const d = new Date(deadlineDate + "T12:00:00");
     const dayAbbr = getDayAbbrev(d);
     const timeStr = scheduledTime ? ` ${scheduledTime}` : "";
-    lines.push(`   DEADLINE: <${deadlineDate} ${dayAbbr}${timeStr}>`);
+    lines.push(`${indent}DEADLINE: <${deadlineDate} ${dayAbbr}${timeStr}>`);
   }
 
-  if (!scheduledDate && !deadlineDate && type !== "note") {
-    const today = new Date();
-    const dateStr = formatDate(today);
-    const dayAbbr = getDayAbbrev(today);
-    lines.push(`   SCHEDULED: <${dateStr} ${dayAbbr}>`);
+  if (body) {
+    lines.push(`${indent}`);
+    const bodyLines = body.split("\n").map(l => `${indent}${l}`);
+    lines.push(...bodyLines);
   }
 
+  return "\n" + lines.join("\n") + "\n";
+}
+
+export function formatNoteContent(text: string, body?: string): string {
+  const lines: string[] = [];
+  lines.push(`   ${text}`);
+  if (body && body !== text) {
+    lines.push(`   ${body}`);
+  }
   return "\n" + lines.join("\n") + "\n";
 }

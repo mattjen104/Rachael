@@ -15,7 +15,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 2. **Agenda View** - Bullet-journal-style agenda derived by parsing org file content. Filters: Today, Week, All TODOs, Done. Toggles task status directly in the org file content.
 3. **Org Capture** - Quick task creation modal (keyboard shortcut `c` in NORMAL mode, or sidebar button). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section.
 4. **Inline Quick-Add** - Fast task input at top of Agenda Today view. Type and press Enter to add a TODO to default file with today's date.
-5. **Clipboard Manager** - Captures and persists clipboard items, can append them directly into org files
+5. **Clipboard Manager** - Smart capture system with inline editing, `t` prefix for TODO tasks, `>` nesting for heading depth, `[[` backlink autocomplete for linking to existing headings. Content type detection (URL/gif/image/code) with metadata enrichment.
 6. **iCloud Capture Streams** - Sidebar showing incoming data sources (Camera Roll, Notes, Files)
 7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device, navigated with WASD keys
 8. **View Switcher** - Editor/Agenda tabs in sidebar to toggle main content area
@@ -23,7 +23,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 ## Key Server Components
 
 - `server/org-parser.ts` - Parses raw org file content to extract headings, TODO/DONE status, SCHEDULED/DEADLINE dates, tags, and properties. Also provides `buildAgenda()` for grouping items by date (overdue/today/upcoming) and `toggleHeadingStatus()` for in-place status toggling.
-- `server/capture-parser.ts` - Prefix-based capture language parser (`t`/`a`/`n` for task/appointment/note). Uses `chrono-node` for Fantastical-style natural language date parsing ("tomorrow", "next friday 2pm", "by thursday"). Exports `parseCaptureEntry()` and `formatOrgEntry()`.
+- `server/capture-parser.ts` - Simplified capture language: single `t` prefix for TODO tasks, no prefix = plain note. Supports `>` nesting (`> t` = level 3, `>> t` = level 4). Uses `chrono-node` for NL date parsing; "due/by" → DEADLINE, other dates → SCHEDULED. Exports `parseCaptureEntry()`, `formatOrgEntry(parsed, body?)`, `formatNoteContent(text, body?)`.
 - `server/content-detector.ts` - Auto-detects clipboard content type (url/gif/image/code/text). `fetchUrlMetadata()` fetches page title, og:description, og:image, and domain from URLs.
 
 ## Data Model (shared/schema.ts)
@@ -41,6 +41,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `POST /api/org-files/capture` - Quick capture with explicit fields (title, fileName, scheduledDate, tags)
 
 ### Org Queries (parsed from file content)
+- `GET /api/org-query/headings?q=` - Search all org headings by title substring (max 20 results). Used for `[[` backlink autocomplete.
 - `GET /api/org-query/agenda` - Returns structured agenda (overdue, today, upcoming) parsed from all org files
 - `GET /api/org-query/todos` - Returns all TODO headings across files
 - `GET /api/org-query/done` - Returns all DONE headings across files
@@ -51,8 +52,8 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `PATCH /api/clipboard/:id` - Update clipboard item content and metadata
 - `DELETE /api/clipboard/:id` - Remove clipboard item
 - `POST /api/clipboard/enrich` - Detect content type and fetch URL metadata
-- `POST /api/clipboard/smart-capture` - Parse prefix language (t/a/n) with NL dates, append to org file
-- `POST /api/clipboard/:id/append-to-org` - Append clipboard item to org file (uses capture parser if prefix detected)
+- `POST /api/clipboard/smart-capture` - Parse `t` prefix with NL dates + `>` nesting, append to org file. Accepts optional `originalContent` for body embedding.
+- `POST /api/clipboard/:id/append-to-org` - Append clipboard item to org file (uses capture parser for tasks, note format for plain text)
 
 ### Other
 - `POST /api/seed` - Seed initial data
