@@ -273,7 +273,7 @@ export default function TUI() {
           <div
             className="whitespace-nowrap overflow-hidden font-mono leading-none tracking-tight w-full h-full"
             style={{
-              fontSize: "5.7mm",
+              fontSize: "3.2mm",
               lineHeight: "6mm",
             }}
           >
