@@ -505,13 +505,14 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
   };
 
   return (
-    <div className="flex flex-col h-full bg-card border-l border-border w-80 flex-shrink-0 font-mono z-20">
-      <div className="p-3 border-b border-border flex items-center justify-between bg-card">
+    <div className="flex-1 flex flex-col h-full bg-background font-mono z-20" data-testid="clipboard-view">
+      <div className="max-w-3xl mx-auto w-full flex flex-col h-full">
+      <div className="p-4 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2 font-semibold text-secondary phosphor-glow">
           <span>⎘</span>
           <span className="text-sm">Clipboard</span>
         </div>
-        <span className="text-[9px] text-muted-foreground">[{items.length}]</span>
+        <span className="text-xs text-muted-foreground">[{items.length}]</span>
       </div>
 
       <div className="p-2 border-b border-border">
@@ -556,6 +557,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
           )}
         </div>
       </ScrollArea>
+    </div>
     </div>
   );
 }

@@ -1,20 +1,17 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Sidebar from "@/components/layout/Sidebar";
-import Editor from "@/components/editor/Editor";
 import StatusBar from "@/components/layout/StatusBar";
 import ClipboardManager from "@/components/editor/ClipboardManager";
 import AgendaView from "@/components/editor/AgendaView";
-import UnifiedView from "@/components/editor/UnifiedView";
+import OrgBufferView from "@/components/editor/UnifiedView";
+import RoamView from "@/components/editor/RoamView";
 import OrgCapture from "@/components/editor/OrgCapture";
 import { useSeedData, useOrgFiles } from "@/hooks/use-org-data";
 
-type ViewMode = "unified" | "editor" | "agenda";
+type ViewMode = "org" | "agenda" | "roam" | "clipboard";
 
 export default function Workspace() {
-  const [activeFile, setActiveFile] = useState("dad.org");
-  const [mode, setMode] = useState<"NORMAL" | "INSERT" | "VISUAL">("NORMAL");
-  const [showClipboard, setShowClipboard] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("unified");
+  const [viewMode, setViewMode] = useState<ViewMode>("org");
   const [captureOpen, setCaptureOpen] = useState(false);
 
   const seedMutation = useSeedData();
@@ -38,20 +35,16 @@ export default function Workspace() {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (captureOpen) return;
-      if (mode !== "NORMAL") return;
       if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         e.preventDefault();
         setCaptureOpen(true);
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [mode, captureOpen]);
-
-  const handleNavigateToFile = (fileName: string) => {
-    setActiveFile(fileName);
-    setViewMode("editor");
-  };
+  }, [captureOpen]);
 
   return (
     <div className="crt-overlay flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground font-mono">
@@ -59,27 +52,20 @@ export default function Workspace() {
       <div className="crt-glow-bar" />
 
       <div className="flex flex-1 overflow-hidden relative z-0">
-        <Sidebar
-          activeFile={activeFile}
-          onSelectFile={handleNavigateToFile}
-          toggleClipboard={() => setShowClipboard(!showClipboard)}
-          isClipboardActive={showClipboard}
-          viewMode={viewMode}
-          onSwitchView={setViewMode}
-          onOpenCapture={() => setCaptureOpen(true)}
-        />
+        <Sidebar viewMode={viewMode} onSwitchView={setViewMode} />
         <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
-          {viewMode === "unified" ? (
-            <UnifiedView onNavigateToFile={handleNavigateToFile} />
-          ) : viewMode === "editor" ? (
-            <Editor file={activeFile} mode={mode} setMode={setMode} />
+          {viewMode === "org" ? (
+            <OrgBufferView />
+          ) : viewMode === "agenda" ? (
+            <AgendaView onNavigateToFile={() => {}} />
+          ) : viewMode === "roam" ? (
+            <RoamView />
           ) : (
-            <AgendaView onNavigateToFile={handleNavigateToFile} />
+            <ClipboardManager activeOrgFile={defaultCaptureFile} />
           )}
         </main>
-        {showClipboard && <ClipboardManager activeOrgFile={defaultCaptureFile} />}
       </div>
-      <StatusBar file={activeFile} mode={mode} viewMode={viewMode} />
+      <StatusBar viewMode={viewMode} />
       <OrgCapture open={captureOpen} onClose={() => setCaptureOpen(false)} defaultFile={defaultCaptureFile} />
     </div>
   );

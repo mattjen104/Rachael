@@ -237,6 +237,46 @@ export async function registerRoutes(
     res.json(results.slice(0, 20));
   });
 
+  app.get("/api/org-query/backlinks", async (_req, res) => {
+    const files = await storage.getOrgFiles();
+    const allHeadings = files.flatMap(f => parseOrgFile(f.content, f.name));
+
+    const nodes = allHeadings.map(h => ({
+      title: h.title,
+      sourceFile: h.sourceFile,
+      lineNumber: h.lineNumber,
+      level: h.level,
+      status: h.status,
+      tags: h.tags,
+      body: h.body,
+      backlinks: [] as { title: string; sourceFile: string; lineNumber: number; level: number; context: string }[],
+    }));
+
+    for (const node of nodes) {
+      for (const other of allHeadings) {
+        if (other.sourceFile === node.sourceFile && other.lineNumber === node.lineNumber) continue;
+        const fullText = other.body + " " + other.title;
+        if (fullText.includes(`[[`) && (
+          fullText.includes(`*${node.title}]]`) ||
+          fullText.includes(`${node.title}]]`) ||
+          fullText.toLowerCase().includes(node.title.toLowerCase())
+        )) {
+          const contextLine = other.body.split("\n").find(l => l.includes("[[") || l.toLowerCase().includes(node.title.toLowerCase())) || "";
+          node.backlinks.push({
+            title: other.title,
+            sourceFile: other.sourceFile,
+            lineNumber: other.lineNumber,
+            level: other.level,
+            context: contextLine.trim().slice(0, 120),
+          });
+        }
+      }
+    }
+
+    const nodesWithLinks = nodes.filter(n => n.backlinks.length > 0 || n.body.includes("[["));
+    res.json(nodesWithLinks);
+  });
+
   app.get("/api/org-query/agenda", async (_req, res) => {
     const files = await storage.getOrgFiles();
     const allHeadings = files.flatMap(f => parseOrgFile(f.content, f.name));

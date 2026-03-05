@@ -11,15 +11,14 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 
 ## Key Features
 
-1. **Org-mode Editor** - Syntax-highlighted viewer/editor for `.org` files with Vim-style modes (NORMAL/INSERT/VISUAL)
+1. **Org Buffer View** (default) - All org files rendered as one continuous buffer. Each file becomes a `*` top-level heading with its content's headings bumped one level deeper. Looks like a real Emacs org-mode terminal buffer.
 2. **Agenda View** - Bullet-journal-style agenda derived by parsing org file content. Filters: Today, Week, All TODOs, Done. Toggles task status directly in the org file content.
-3. **Org Capture** - Quick task creation modal (keyboard shortcut `c` in NORMAL mode, or sidebar button). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section.
-4. **Inline Quick-Add** - Fast task input at top of Agenda Today view. Type and press Enter to add a TODO to default file with today's date.
-5. **Clipboard Manager** - Smart capture system with inline editing, `t` prefix for TODO tasks, `>` nesting for heading depth, `[[` backlink autocomplete for linking to existing headings. Content type detection (URL/gif/image/code) with metadata enrichment.
-6. **iCloud Capture Streams** - Sidebar showing incoming data sources (Camera Roll, Notes, Files)
-7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device, navigated with WASD keys
-8. **View Switcher** - Three view modes (Unified/Editor/Agenda) via sidebar tabs. Unified is the default, showing all org files as concatenated sections in a single scrollable document. Clicking a file header switches to its editor view.
-9. **View-Centric Design** - Workspace is view-first, not file-first. Sidebar prioritizes view tabs; file list is collapsed under "Workspace Files". Clipboard capture always targets inbox.org (fallback: dad.org) regardless of active editor file.
+3. **Roam View** - Backlinks research system showing all nodes with `[[link]]` connections. Each node expandable to show its content and backlinks (other headings referencing it). Terminal-style bullet organization.
+4. **Clipboard/Capture View** - Full main view for smart capture. Inline editing, `t` prefix for TODO tasks, `>` nesting for heading depth, `[[` backlink autocomplete. Content type detection (URL/gif/image/code) with metadata enrichment. Always targets inbox.org.
+5. **Org Capture Modal** - Quick task creation (keyboard shortcut `c`). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section.
+6. **Inline Quick-Add** - Fast task input at top of Agenda Today view.
+7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device at `/tui`.
+8. **Four-View Architecture** - Workspace has exactly 4 swappable views (Org/Agenda/Roam/Capture) via a narrow icon sidebar. No file-centric navigation — everything is view-centric. All GUI icons replaced with ASCII/Unicode text characters for terminal authenticity.
 
 ## Key Server Components
 
