@@ -15,6 +15,7 @@ import { queryClient } from "@/lib/queryClient";
 
 interface ClipboardManagerProps {
   activeOrgFile: string;
+  onRefile?: (item: { id: number; content: string; urlTitle?: string | null }) => void;
 }
 
 function parseCaptureSyntax(content: string): { hasTask: boolean; nestingLevel: number; label: string } {
@@ -221,9 +222,10 @@ interface EditableItemProps {
   };
   activeOrgFile: string;
   onDelete: (id: number) => void;
+  onRefile?: (item: { id: number; content: string; urlTitle?: string | null }) => void;
 }
 
-function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
+function EditableItem({ item, activeOrgFile, onDelete, onRefile }: EditableItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(item.content);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -330,6 +332,16 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
           </span>
         </div>
         <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!editing && onRefile && (
+            <button
+              onClick={() => onRefile({ id: item.id, content: item.content, urlTitle: item.urlTitle })}
+              className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+              title="Refile to org"
+              data-testid={`refile-btn-${item.id}`}
+            >
+              [r]
+            </button>
+          )}
           {!editing && (
             <button
               onClick={handleStartEdit}
@@ -416,7 +428,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
   );
 }
 
-export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProps) {
+export default function ClipboardManager({ activeOrgFile, onRefile }: ClipboardManagerProps) {
   const { data: items = [], isLoading } = useClipboardItems();
   const deleteMutation = useDeleteClipboardItem();
   const addMutation = useAddClipboardItem();
@@ -551,6 +563,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
                 item={item}
                 activeOrgFile={activeOrgFile}
                 onDelete={handleDelete}
+                onRefile={onRefile}
               />
             ))
           )}
