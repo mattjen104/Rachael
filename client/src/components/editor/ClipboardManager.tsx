@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ClipboardList, Trash2, CheckCircle2, Calendar, FileText, Link, Code, Image, Type, Pencil, ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -39,12 +38,12 @@ function parseCaptureSyntax(content: string): { hasTask: boolean; nestingLevel: 
   return { hasTask, nestingLevel, label };
 }
 
-function getTypeIcon(type: string) {
+function getTypeLabel(type: string): string {
   switch (type) {
-    case "url": return <Link className="w-3 h-3" />;
-    case "gif": case "image": return <Image className="w-3 h-3" />;
-    case "code": return <Code className="w-3 h-3" />;
-    default: return <Type className="w-3 h-3" />;
+    case "url": return "~>";
+    case "gif": case "image": return "▦";
+    case "code": return "{}";
+    default: return "Aa";
   }
 }
 
@@ -75,7 +74,7 @@ function BacklinkDropdown({ query, onSelect, onClose, visible, selectedIdx, onSe
   if (!visible || headings.length === 0) return null;
 
   return (
-    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-card border border-border rounded-sm shadow-xl z-50 max-h-40 overflow-y-auto crt-border-glow" data-testid="backlink-dropdown">
+    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-card border border-border shadow-xl z-50 max-h-40 overflow-y-auto crt-border-glow" data-testid="backlink-dropdown">
       {headings.map((h, i) => (
         <button
           key={`${h.sourceFile}-${h.lineNumber}`}
@@ -289,8 +288,8 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
 
   if (showSuccess) {
     return (
-      <div className="flex items-center gap-2 bg-secondary/10 border border-secondary/30 rounded-sm p-2.5 text-secondary text-xs animate-in fade-in phosphor-glow">
-        <CheckCircle2 className="w-4 h-4" />
+      <div className="flex items-center gap-2 bg-secondary/10 border border-secondary/30 p-2.5 text-secondary text-xs animate-in fade-in phosphor-glow">
+        <span>[✓]</span>
         Captured to {activeOrgFile}
       </div>
     );
@@ -303,7 +302,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
   return (
     <div
       className={cn(
-        "group flex flex-col border rounded-sm transition-colors",
+        "group flex flex-col border transition-colors",
         editing
           ? "bg-muted border-primary/50"
           : "bg-background border-border hover:border-secondary/50"
@@ -312,17 +311,17 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
     >
       <div className="flex justify-between items-center px-2 pt-1.5 pb-0.5">
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase text-muted-foreground bg-muted/30">
-            {getTypeIcon(displayType)}
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted-foreground bg-muted/30">
+            <span>{getTypeLabel(displayType)}</span>
             {displayType}
           </span>
           {syntax.label && (
             <span className={cn(
-              "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
+              "inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase",
               syntax.hasTask ? "text-primary bg-primary/15 phosphor-glow" : "text-muted-foreground bg-muted/30"
             )}>
-              {syntax.hasTask && <Calendar className="w-2.5 h-2.5" />}
-              {!syntax.hasTask && syntax.nestingLevel > 0 && <ChevronRight className="w-2.5 h-2.5" />}
+              {syntax.hasTask && <span>[#]</span>}
+              {!syntax.hasTask && syntax.nestingLevel > 0 && <span>▸</span>}
               {syntax.label}
             </span>
           )}
@@ -334,20 +333,20 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
           {!editing && (
             <button
               onClick={handleStartEdit}
-              className="p-1 hover:bg-primary/20 hover:text-primary rounded text-muted-foreground transition-colors"
+              className="p-1 hover:bg-primary/20 hover:text-primary text-muted-foreground transition-colors text-xs"
               title="Edit"
               data-testid={`edit-btn-${item.id}`}
             >
-              <Pencil className="w-3 h-3" />
+              [✎]
             </button>
           )}
           <button
             onClick={() => onDelete(item.id)}
-            className="p-1 hover:bg-destructive/20 hover:text-destructive rounded text-muted-foreground transition-colors"
+            className="p-1 hover:bg-destructive/20 hover:text-destructive text-muted-foreground transition-colors text-xs"
             title="Remove"
             data-testid={`delete-btn-${item.id}`}
           >
-            <Trash2 className="w-3 h-3" />
+            [×]
           </button>
         </div>
       </div>
@@ -360,7 +359,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             onSubmit={handleSubmit}
             onCancel={handleCancel}
             autoFocus
-            className="w-full bg-background text-foreground text-xs p-2 rounded-sm border border-border outline-none focus:border-primary transition-colors font-mono phosphor-glow"
+            className="w-full bg-background text-foreground text-xs p-2 border border-border outline-none focus:border-primary transition-colors font-mono phosphor-glow"
             testId={`edit-input-${item.id}`}
           />
           <div className="flex items-center justify-between mt-1.5">
@@ -399,7 +398,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             <img
               src={item.urlImage}
               alt="Preview"
-              className="mt-1.5 rounded-sm max-h-24 object-cover border border-border"
+              className="mt-1.5 max-h-24 object-cover border border-border"
               data-testid={`preview-img-${item.id}`}
             />
           )}
@@ -407,7 +406,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             <img
               src={item.content.trim()}
               alt="Preview"
-              className="mt-1.5 rounded-sm max-h-24 object-cover border border-border"
+              className="mt-1.5 max-h-24 object-cover border border-border"
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               data-testid={`preview-img-${item.id}`}
             />
@@ -509,10 +508,10 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
     <div className="flex flex-col h-full bg-card border-l border-border w-80 flex-shrink-0 font-mono z-20">
       <div className="p-3 border-b border-border flex items-center justify-between bg-card">
         <div className="flex items-center gap-2 font-semibold text-secondary phosphor-glow">
-          <ClipboardList className="w-4 h-4" />
+          <span>⎘</span>
           <span className="text-sm">Clipboard</span>
         </div>
-        <span className="text-[9px] text-muted-foreground">{items.length} items</span>
+        <span className="text-[9px] text-muted-foreground">[{items.length}]</span>
       </div>
 
       <div className="p-2 border-b border-border">
@@ -525,7 +524,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
           }}
           placeholder="t todo · > nest · [[ link"
           className={cn(
-            "w-full bg-background text-foreground text-xs p-2 rounded-sm border outline-none transition-colors phosphor-glow",
+            "w-full bg-background text-foreground text-xs p-2 border outline-none transition-colors phosphor-glow",
             showCaptureHint ? "border-primary focus:border-primary" : "border-border focus:border-secondary"
           )}
           testId="clipboard-input"

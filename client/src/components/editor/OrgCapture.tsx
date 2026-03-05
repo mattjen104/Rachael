@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOrgFiles, useOrgCapture } from "@/hooks/use-org-data";
 
@@ -60,16 +59,16 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
       <div
-        className="relative bg-card border border-border rounded-md shadow-2xl w-full max-w-lg font-mono crt-border-glow"
+        className="relative bg-card border border-border shadow-2xl w-full max-w-lg font-mono crt-border-glow"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">
           <div className="flex items-center gap-2 text-primary font-bold text-sm phosphor-glow">
-            <Plus className="w-4 h-4" />
+            <span>[+]</span>
             Org Capture
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
-            <X className="w-4 h-4" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors text-xs font-mono">
+            [×]
           </button>
         </div>
 
@@ -82,7 +81,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to be done?"
-              className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors phosphor-glow"
+              className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors phosphor-glow"
               data-testid="capture-title"
             />
           </div>
@@ -93,7 +92,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               <select
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors"
                 data-testid="capture-file"
               >
                 {orgFiles.map((f) => (
@@ -107,7 +106,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
                 type="date"
                 value={scheduledDate}
                 onChange={(e) => setScheduledDate(e.target.value)}
-                className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors"
                 data-testid="capture-date"
               />
             </div>
@@ -120,20 +119,20 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               value={tagsInput}
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="e.g. work, urgent"
-              className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
+              className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors"
               data-testid="capture-tags"
             />
           </div>
 
           <div className="flex items-center justify-between pt-2">
             <span className="text-[10px] text-muted-foreground">
-              Press <kbd className="bg-muted px-1 py-0.5 rounded text-[9px] mx-0.5">Esc</kbd> to cancel
+              Press <kbd className="bg-muted px-1 py-0.5 text-[9px] mx-0.5">Esc</kbd> to cancel
             </span>
             <button
               type="submit"
               disabled={!title.trim() || captureMutation.isPending}
               className={cn(
-                "px-4 py-1.5 rounded-sm text-sm font-bold transition-colors",
+                "px-4 py-1.5 text-sm font-bold transition-colors",
                 title.trim()
                   ? "bg-primary text-primary-foreground hover:brightness-110 phosphor-glow-bright"
                   : "bg-muted text-muted-foreground cursor-not-allowed"

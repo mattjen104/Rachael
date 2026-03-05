@@ -1,5 +1,4 @@
 import React from "react";
-import { FileText } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useOrgFiles } from "@/hooks/use-org-data";
 import { renderOrgContent } from "./OrgRenderer";
@@ -38,7 +37,7 @@ export default function UnifiedView({ onNavigateToFile }: UnifiedViewProps) {
                 className="group flex items-center gap-2 mb-3 text-muted-foreground hover:text-primary transition-colors w-full"
                 data-testid={`unified-header-${file.name}`}
               >
-                <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="text-xs flex-shrink-0">§</span>
                 <span className="text-xs font-bold uppercase tracking-wider phosphor-glow-dim group-hover:phosphor-glow">
                   {file.name}
                 </span>

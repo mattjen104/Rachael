@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
-import { ArrowLeft, Smartphone } from "lucide-react";
 import { useOrgAgenda, useToggleOrgStatus } from "@/hooks/use-org-data";
 import { useCrtTheme, type ThemeKey } from "@/lib/crt-theme";
 
@@ -317,7 +316,7 @@ export default function TUI() {
       <style>{buildCrtStyles(t)}</style>
 
       <Link href="/" className="absolute top-6 left-6 flex items-center gap-2 transition-colors font-mono text-xs" style={{ color: `${t.dim}99` }} data-testid="link-back">
-        <ArrowLeft className="w-3 h-3" />
+        <span>←</span>
         ../workspace
       </Link>
 
@@ -326,7 +325,7 @@ export default function TUI() {
           <button
             key={k}
             onClick={() => setTheme(k)}
-            className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded transition-all"
+            className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 transition-all"
             style={{
               color: theme === k ? PHOSPHOR_THEMES[k].fontColor : `${PHOSPHOR_THEMES[k].dim}66`,
               borderWidth: "1px",
@@ -344,20 +343,20 @@ export default function TUI() {
 
       <div className="text-center mb-8">
         <h1 className="text-xl font-bold flex items-center justify-center gap-2 mb-2 font-mono" style={{ color: `${t.fontColor}cc`, textShadow: `0 0 8px ${t.fontColor}44` }}>
-          <Smartphone className="w-5 h-5" />
+          <span>▯</span>
           LilyGO T-Keyboard
         </h1>
         <p className="text-xs font-mono" style={{ color: `${t.dim}80` }}>
-          <kbd className="px-1.5 py-0.5 rounded text-[10px] mx-0.5" style={{ borderWidth: "1px", borderStyle: "solid", borderColor: `${t.fontColor}33`, color: `${t.fontColor}99` }}>W</kbd>
-          <kbd className="px-1.5 py-0.5 rounded text-[10px] mx-0.5" style={{ borderWidth: "1px", borderStyle: "solid", borderColor: `${t.fontColor}33`, color: `${t.fontColor}99` }}>S</kbd>
+          <kbd className="px-1.5 py-0.5 text-[10px] mx-0.5" style={{ borderWidth: "1px", borderStyle: "solid", borderColor: `${t.fontColor}33`, color: `${t.fontColor}99` }}>W</kbd>
+          <kbd className="px-1.5 py-0.5 text-[10px] mx-0.5" style={{ borderWidth: "1px", borderStyle: "solid", borderColor: `${t.fontColor}33`, color: `${t.fontColor}99` }}>S</kbd>
           {" nav "}
           <span className="mx-2" style={{ color: `${t.fontColor}33` }}>{"\u2502"}</span>
-          <kbd className="px-1.5 py-0.5 rounded text-[10px] mx-0.5" style={{ borderWidth: "1px", borderStyle: "solid", borderColor: `${t.fontColor}33`, color: `${t.fontColor}99` }}>D</kbd>
+          <kbd className="px-1.5 py-0.5 text-[10px] mx-0.5" style={{ borderWidth: "1px", borderStyle: "solid", borderColor: `${t.fontColor}33`, color: `${t.fontColor}99` }}>D</kbd>
           {" toggle"}
         </p>
       </div>
 
-      <div className="crt-bezel p-6 rounded-lg flex flex-col items-center">
+      <div className="crt-bezel p-6 flex flex-col items-center">
         <div
           className="crt-glass crt-screen overflow-hidden flex flex-col"
           style={{
@@ -391,22 +390,22 @@ export default function TUI() {
           <div className="text-[9px] uppercase tracking-[0.2em] font-mono" style={{ color: `${t.fontColor}4d` }}>BB Q10 Keyboard</div>
           <div className="grid grid-cols-10 gap-[2px] w-full">
             {"QWERTYUIOP".split("").map((k, i) => (
-              <div key={`r1-${i}`} className="h-[14px] bg-[#1a1a1a] rounded-[1px] border border-[#222] flex items-center justify-center">
+              <div key={`r1-${i}`} className="h-[14px] bg-[#1a1a1a] border border-[#222] flex items-center justify-center">
                 <span className="text-[5px] font-mono" style={{ color: `${t.fontColor}26` }}>{k}</span>
               </div>
             ))}
             {"ASDFGHJKL_".split("").map((k, i) => (
-              <div key={`r2-${i}`} className="h-[14px] bg-[#1a1a1a] rounded-[1px] border border-[#222] flex items-center justify-center">
+              <div key={`r2-${i}`} className="h-[14px] bg-[#1a1a1a] border border-[#222] flex items-center justify-center">
                 <span className="text-[5px] font-mono" style={{ color: `${t.fontColor}26` }}>{k === "_" ? "\u23CE" : k}</span>
               </div>
             ))}
             {"\u21E7ZXCVBNM\u232B.".split("").map((k, i) => (
-              <div key={`r3-${i}`} className="h-[14px] bg-[#1a1a1a] rounded-[1px] border border-[#222] flex items-center justify-center">
+              <div key={`r3-${i}`} className="h-[14px] bg-[#1a1a1a] border border-[#222] flex items-center justify-center">
                 <span className="text-[5px] font-mono" style={{ color: `${t.fontColor}26` }}>{k}</span>
               </div>
             ))}
           </div>
-          <div className="w-[60%] h-[10px] bg-[#1a1a1a] rounded-[2px] border border-[#222] mt-[2px]" />
+          <div className="w-[60%] h-[10px] bg-[#1a1a1a] border border-[#222] mt-[2px]" />
         </div>
       </div>
     </div>

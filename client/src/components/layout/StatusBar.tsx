@@ -1,5 +1,4 @@
 import React from "react";
-import { GitBranch, CheckCircle2, Calendar, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface StatusBarProps {
@@ -19,21 +18,19 @@ export default function StatusBar({ file, mode, viewMode }: StatusBarProps) {
 
       <div className="bg-muted text-foreground flex items-center px-4 flex-1 gap-4 phosphor-glow-dim">
         <span className="flex items-center gap-1">
-          <GitBranch className="w-3 h-3" /> main
+          Y- main
         </span>
         {viewMode === "unified" ? (
           <>
-            <span className="font-semibold text-primary flex items-center gap-1 phosphor-glow">
-              <Layers className="w-3 h-3" />
-              All Files
+            <span className="font-semibold text-primary phosphor-glow">
+              ≡ All Files
             </span>
             <span className="text-muted-foreground">[Unified]</span>
           </>
         ) : viewMode === "agenda" ? (
           <>
-            <span className="font-semibold text-primary flex items-center gap-1 phosphor-glow">
-              <Calendar className="w-3 h-3" />
-              Org Agenda
+            <span className="font-semibold text-primary phosphor-glow">
+              [#] Org Agenda
             </span>
             <span className="text-muted-foreground">[View]</span>
           </>
@@ -44,7 +41,7 @@ export default function StatusBar({ file, mode, viewMode }: StatusBarProps) {
           </>
         )}
         <span className="flex items-center gap-1 ml-auto text-secondary phosphor-glow-dim">
-          <CheckCircle2 className="w-3 h-3" /> Sync OK
+          [✓] Sync OK
         </span>
       </div>
 
