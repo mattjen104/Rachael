@@ -11,7 +11,7 @@ import { useSeedData, useOrgFiles } from "@/hooks/use-org-data";
 type ViewMode = "org" | "agenda" | "roam" | "clipboard";
 
 export default function Workspace() {
-  const [viewMode, setViewMode] = useState<ViewMode>("org");
+  const [viewMode, setViewMode] = useState<ViewMode>("clipboard");
   const [captureOpen, setCaptureOpen] = useState(false);
 
   const seedMutation = useSeedData();

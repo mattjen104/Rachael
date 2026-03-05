@@ -61,8 +61,8 @@ export default function RoamView() {
   return (
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="roam-view">
       <div className="flex items-center border-b border-border bg-card px-4 py-1 gap-2">
-        <span className="text-primary">{"{*}"}</span>
-        <span className="text-primary font-bold phosphor-glow">Roam</span>
+        <span className="text-foreground">{"{*}"}</span>
+        <span className="text-foreground font-bold phosphor-glow">Roam</span>
         <span className="text-muted-foreground ml-2">[{nodes.length} nodes]</span>
       </div>
 
@@ -88,9 +88,9 @@ export default function RoamView() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-org-level-1 font-bold phosphor-glow">
+                      <span className="text-foreground font-bold phosphor-glow">
                         {"*".repeat(node.level)} {node.status && (
-                          <span className={node.status === "DONE" ? "text-org-done" : "text-org-todo"}>
+                          <span className={node.status === "DONE" ? "text-muted-foreground" : "text-org-todo phosphor-glow-bright"}>
                             {node.status}{" "}
                           </span>
                         )}
@@ -100,17 +100,17 @@ export default function RoamView() {
                     <div className="flex items-center gap-2 mt-0.5 text-muted-foreground">
                       <span>§ {node.sourceFile}:{node.lineNumber}</span>
                       {node.tags.length > 0 && (
-                        <span className="text-org-date">
+                        <span>
                           :{node.tags.join(":")}:
                         </span>
                       )}
                       {hasBacklinks && (
-                        <span className="text-secondary phosphor-glow-dim">
+                        <span>
                           [{node.backlinks.length} backlink{node.backlinks.length !== 1 ? "s" : ""}]
                         </span>
                       )}
                       {hasOutlinks && (
-                        <span className="text-primary phosphor-glow-dim">
+                        <span>
                           [links]
                         </span>
                       )}
@@ -131,7 +131,7 @@ export default function RoamView() {
                               <span>
                                 {line.split(/(\[\[.*?\]\])/).map((part, j) =>
                                   part.startsWith("[[") ? (
-                                    <span key={j} className="text-org-link underline underline-offset-2 phosphor-glow">
+                                    <span key={j} className="underline underline-offset-2 phosphor-glow">
                                       {part}
                                     </span>
                                   ) : (
@@ -149,7 +149,7 @@ export default function RoamView() {
 
                     {hasBacklinks && (
                       <div>
-                        <div className="text-secondary uppercase tracking-wider mb-1 font-bold phosphor-glow-dim">
+                        <div className="text-muted-foreground uppercase tracking-wider mb-1 font-bold phosphor-glow-dim">
                           Backlinks
                         </div>
                         {node.backlinks.map((bl, i) => (

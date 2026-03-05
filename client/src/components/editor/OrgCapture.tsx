@@ -59,11 +59,11 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
       <div
-        className="relative bg-card border border-border shadow-2xl w-full max-w-lg font-mono crt-border-glow"
+        className="relative bg-card border border-border shadow-2xl w-full max-w-lg font-mono"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-          <div className="flex items-center gap-2 text-primary font-bold phosphor-glow">
+          <div className="flex items-center gap-2 text-foreground font-bold phosphor-glow">
             <span>[+]</span>
             Org Capture
           </div>
@@ -81,7 +81,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to be done?"
-              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors phosphor-glow"
+              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors phosphor-glow"
               data-testid="capture-title"
             />
           </div>
@@ -92,7 +92,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               <select
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
                 data-testid="capture-file"
               >
                 {orgFiles.map((f) => (
@@ -106,7 +106,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
                 type="date"
                 value={scheduledDate}
                 onChange={(e) => setScheduledDate(e.target.value)}
-                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
                 data-testid="capture-date"
               />
             </div>
@@ -119,7 +119,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               value={tagsInput}
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="e.g. work, urgent"
-              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors"
+              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
               data-testid="capture-tags"
             />
           </div>
@@ -134,7 +134,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               className={cn(
                 "px-4 py-1 font-bold transition-colors",
                 title.trim()
-                  ? "bg-primary text-primary-foreground hover:brightness-110 phosphor-glow-bright"
+                  ? "bg-foreground text-background hover:brightness-110 phosphor-glow-bright"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
               data-testid="capture-submit"

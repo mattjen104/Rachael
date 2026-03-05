@@ -74,19 +74,19 @@ function BacklinkDropdown({ query, onSelect, onClose, visible, selectedIdx, onSe
   if (!visible || headings.length === 0) return null;
 
   return (
-    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-card border border-border shadow-xl z-50 max-h-40 overflow-y-auto crt-border-glow" data-testid="backlink-dropdown">
+    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-card border border-border shadow-xl z-50 max-h-40 overflow-y-auto" data-testid="backlink-dropdown">
       {headings.map((h, i) => (
         <button
           key={`${h.sourceFile}-${h.lineNumber}`}
           className={cn(
             "w-full text-left px-3 py-1 flex items-center gap-2 transition-colors",
-            i === selectedIdx ? "bg-primary/20 text-primary phosphor-glow" : "text-foreground hover:bg-muted"
+            i === selectedIdx ? "bg-muted text-foreground phosphor-glow" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
           )}
           onClick={() => onSelect(`[[file:${h.sourceFile}::*${h.title}]]`)}
           onMouseEnter={() => onSelectedIdxChange(i)}
           data-testid={`backlink-option-${i}`}
         >
-          <span className="text-muted-foreground">{"*".repeat(h.level)}</span>
+          <span>{"*".repeat(h.level)}</span>
           <span className="flex-1 truncate">{h.title}</span>
           <span className="text-muted-foreground">{h.sourceFile}</span>
         </button>
@@ -264,7 +264,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             toast({
               title: `${label} captured`,
               description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
-              className: "bg-card border-secondary text-foreground",
+              className: "bg-card border-foreground text-foreground",
             });
             setTimeout(() => setShowSuccess(false), 1500);
           },
@@ -273,7 +273,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             toast({
               title: "Capture failed",
               description: "Could not process the entry.",
-              className: "bg-card border-destructive text-foreground",
+              className: "bg-card border-foreground text-foreground",
             });
           },
         }
@@ -288,7 +288,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
 
   if (showSuccess) {
     return (
-      <div className="flex items-center gap-2 bg-secondary/10 border border-secondary/30 p-2 text-secondary animate-in fade-in phosphor-glow">
+      <div className="flex items-center gap-2 bg-muted border border-border p-2 text-foreground animate-in fade-in phosphor-glow">
         <span>[✓]</span>
         Captured to {activeOrgFile}
       </div>
@@ -304,21 +304,21 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
       className={cn(
         "group flex flex-col border transition-colors",
         editing
-          ? "bg-muted border-primary/50"
-          : "bg-background border-border hover:border-secondary/50"
+          ? "bg-muted border-foreground/30"
+          : "bg-background border-border hover:border-foreground/30"
       )}
       data-testid={`clipboard-item-${item.id}`}
     >
       <div className="flex justify-between items-center px-2 pt-1 pb-0.5">
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-bold uppercase text-muted-foreground bg-muted/30">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-bold uppercase text-muted-foreground">
             <span>{getTypeLabel(displayType)}</span>
             {displayType}
           </span>
           {syntax.label && (
             <span className={cn(
               "inline-flex items-center gap-1 px-1.5 py-0.5 font-bold uppercase",
-              syntax.hasTask ? "text-primary bg-primary/15 phosphor-glow" : "text-muted-foreground bg-muted/30"
+              syntax.hasTask ? "text-foreground phosphor-glow" : "text-muted-foreground"
             )}>
               {syntax.hasTask && <span>[#]</span>}
               {!syntax.hasTask && syntax.nestingLevel > 0 && <span>▸</span>}
@@ -333,7 +333,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
           {!editing && (
             <button
               onClick={handleStartEdit}
-              className="p-1 hover:bg-primary/20 hover:text-primary text-muted-foreground transition-colors"
+              className="p-1 hover:text-foreground text-muted-foreground transition-colors"
               title="Edit"
               data-testid={`edit-btn-${item.id}`}
             >
@@ -342,7 +342,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
           )}
           <button
             onClick={() => onDelete(item.id)}
-            className="p-1 hover:bg-destructive/20 hover:text-destructive text-muted-foreground transition-colors"
+            className="p-1 hover:text-foreground text-muted-foreground transition-colors"
             title="Remove"
             data-testid={`delete-btn-${item.id}`}
           >
@@ -359,13 +359,13 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             onSubmit={handleSubmit}
             onCancel={handleCancel}
             autoFocus
-            className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors font-mono phosphor-glow"
+            className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors font-mono phosphor-glow"
             testId={`edit-input-${item.id}`}
           />
           <div className="flex items-center justify-between mt-1">
             <span className="text-muted-foreground">
               {syntax.hasTask || syntax.nestingLevel > 0 ? (
-                <span className="font-bold text-primary phosphor-glow">
+                <span className="font-bold text-foreground phosphor-glow">
                   Enter → send to {activeOrgFile}
                 </span>
               ) : (
@@ -377,7 +377,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
       ) : (
         <div className="px-2 pb-2 pt-0.5 cursor-pointer" onClick={handleStartEdit}>
           {item.urlTitle && (
-            <div className="text-primary font-semibold mb-0.5 truncate phosphor-glow" data-testid={`url-title-${item.id}`}>
+            <div className="text-foreground font-bold mb-0.5 truncate phosphor-glow" data-testid={`url-title-${item.id}`}>
               {item.urlTitle}
             </div>
           )}
@@ -385,9 +385,8 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             <div className="text-muted-foreground mb-0.5">{item.urlDomain}</div>
           )}
           <div className={cn(
-            "line-clamp-3 phosphor-glow-dim",
-            displayType === "code" ? "text-secondary font-mono" : "text-foreground",
-            displayType === "url" || displayType === "gif" || displayType === "image" ? "text-primary underline underline-offset-2" : ""
+            "line-clamp-3 phosphor-glow-dim text-foreground",
+            displayType === "url" || displayType === "gif" || displayType === "image" ? "underline underline-offset-2" : ""
           )}>
             {item.content}
           </div>
@@ -461,7 +460,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
             toast({
               title: `${label} captured`,
               description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
-              className: "bg-card border-secondary text-foreground",
+              className: "bg-card border-foreground text-foreground",
             });
             setNewContent("");
           },
@@ -469,7 +468,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
             toast({
               title: "Capture failed",
               description: "Could not process the entry.",
-              className: "bg-card border-destructive text-foreground",
+              className: "bg-card border-foreground text-foreground",
             });
           },
         }
@@ -508,7 +507,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
     <div className="flex-1 flex flex-col h-full bg-background font-mono z-20" data-testid="clipboard-view">
       <div className="max-w-3xl mx-auto w-full flex flex-col h-full">
       <div className="p-4 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-2 font-semibold text-secondary phosphor-glow">
+        <div className="flex items-center gap-2 font-bold text-foreground phosphor-glow">
           <span>⎘</span>
           <span>Clipboard</span>
         </div>
@@ -526,12 +525,12 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
           placeholder="t todo · > nest · [[ link"
           className={cn(
             "w-full bg-background text-foreground p-2 border outline-none transition-colors phosphor-glow",
-            showCaptureHint ? "border-primary focus:border-primary" : "border-border focus:border-secondary"
+            showCaptureHint ? "border-foreground/50" : "border-border focus:border-foreground/30"
           )}
           testId="clipboard-input"
         />
         {showCaptureHint && (
-          <div className="mt-1 text-primary font-bold phosphor-glow">
+          <div className="mt-1 text-foreground font-bold phosphor-glow">
             {syntax.label} → {activeOrgFile}
           </div>
         )}

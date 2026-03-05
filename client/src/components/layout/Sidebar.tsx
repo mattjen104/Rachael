@@ -8,10 +8,10 @@ interface SidebarProps {
 }
 
 const views: { key: "org" | "agenda" | "roam" | "clipboard"; label: string; icon: string }[] = [
-  { key: "org", label: "Org", icon: "*" },
+  { key: "clipboard", label: "Capture", icon: "⎘" },
   { key: "agenda", label: "Agenda", icon: "[#]" },
   { key: "roam", label: "Roam", icon: "{*}" },
-  { key: "clipboard", label: "Capture", icon: "⎘" },
+  { key: "org", label: "Org", icon: "*" },
 ];
 
 export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
@@ -22,7 +22,7 @@ export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
       <div className="py-2 border-b border-border w-full flex items-center justify-center">
         <button
           onClick={cycleTheme}
-          className="text-primary phosphor-glow-bright font-bold"
+          className="text-foreground phosphor-glow font-bold"
           title={`Theme: ${t.label}`}
           data-testid="theme-cycle-btn"
         >
@@ -39,8 +39,8 @@ export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
             className={cn(
               "w-full flex flex-col items-center py-2 px-1 transition-colors text-center",
               viewMode === v.key
-                ? "text-primary bg-primary/10 border-r-2 border-primary phosphor-glow"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                ? "text-foreground bg-muted border-r-2 border-foreground phosphor-glow"
+                : "text-muted-foreground hover:text-foreground"
             )}
             title={v.label}
           >

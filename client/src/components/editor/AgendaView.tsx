@@ -32,8 +32,8 @@ export default function AgendaView({ onNavigateToFile }: AgendaViewProps) {
   return (
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="agenda-view">
       <div className="flex items-center border-b border-border bg-card px-4 py-1 gap-1">
-        <span className="text-primary mr-2">[#]</span>
-        <span className="text-primary font-bold mr-4 phosphor-glow">Agenda</span>
+        <span className="text-foreground mr-2">[#]</span>
+        <span className="text-foreground font-bold mr-4 phosphor-glow">Agenda</span>
         {filters.map((f) => (
           <button
             key={f.key}
@@ -42,8 +42,8 @@ export default function AgendaView({ onNavigateToFile }: AgendaViewProps) {
             className={cn(
               "px-3 py-1 transition-colors",
               filter === f.key
-                ? "bg-primary/20 text-primary phosphor-glow"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                ? "text-foreground phosphor-glow font-bold"
+                : "text-muted-foreground hover:text-foreground"
             )}
           >
             {f.label}
@@ -92,7 +92,7 @@ function QuickAdd() {
 
   return (
     <form onSubmit={handleSubmit} className="flex items-center gap-2 mb-4">
-      <div className="flex-1 flex items-center bg-card border border-border overflow-hidden focus-within:border-primary transition-colors crt-border-glow">
+      <div className="flex-1 flex items-center bg-card border border-border overflow-hidden focus-within:border-foreground transition-colors">
         <span className="text-muted-foreground ml-2.5 flex-shrink-0">+</span>
         <input
           ref={inputRef}
@@ -108,7 +108,7 @@ function QuickAdd() {
         <button
           type="submit"
           disabled={captureMutation.isPending}
-          className="px-3 py-1 bg-primary text-primary-foreground font-bold hover:brightness-110 transition-all phosphor-glow-bright"
+          className="px-3 py-1 bg-foreground text-background font-bold hover:brightness-110 transition-all"
           data-testid="quick-add-submit"
         >
           Add
@@ -134,7 +134,7 @@ function TodayView({ agenda, onToggle, onNavigate }: {
 
       {hasOverdue && (
         <div>
-          <div className="flex items-center gap-2 mb-3 text-destructive phosphor-glow">
+          <div className="flex items-center gap-2 mb-3 text-foreground phosphor-glow-bright">
             <span>/!\</span>
             <span className="font-bold uppercase tracking-wider">Carried Over</span>
           </div>
@@ -146,8 +146,8 @@ function TodayView({ agenda, onToggle, onNavigate }: {
 
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-primary">[#]</span>
-          <span className="font-bold text-primary uppercase tracking-wider phosphor-glow">
+          <span className="text-foreground">[#]</span>
+          <span className="font-bold text-foreground uppercase tracking-wider phosphor-glow">
             Today — {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
           </span>
         </div>
@@ -205,13 +205,11 @@ function DaySection({ day, onToggle, onNavigate, variant }: {
 }) {
   if (day.items.length === 0) return null;
 
-  const borderColor = variant === "overdue" ? "border-destructive/30" : variant === "today" ? "border-primary/30" : "border-border";
-
   return (
-    <div className={cn("border-l-2 pl-4 mb-4", borderColor)}>
+    <div className="border-l-2 border-border pl-4 mb-4">
       <div className={cn(
         "font-bold uppercase tracking-wider mb-2 phosphor-glow-dim",
-        variant === "overdue" ? "text-destructive" : variant === "today" ? "text-primary" : "text-muted-foreground"
+        variant === "overdue" ? "text-foreground phosphor-glow-bright" : "text-muted-foreground"
       )}>
         {day.label} <span className="opacity-50 ml-1">{day.date}</span>
       </div>
@@ -239,9 +237,9 @@ function AgendaItemRow({ item, onToggle, onNavigate }: {
         data-testid={`toggle-status-${item.lineNumber}`}
       >
         {isDone ? (
-          <span className="text-org-done">[x]</span>
+          <span className="text-muted-foreground">[x]</span>
         ) : (
-          <span className="text-primary">[ ]</span>
+          <span className="text-foreground">[ ]</span>
         )}
       </button>
 
@@ -255,7 +253,7 @@ function AgendaItemRow({ item, onToggle, onNavigate }: {
         <div className="flex items-center gap-2 mt-0.5 text-muted-foreground">
           <button
             onClick={() => onNavigate(item.sourceFile)}
-            className="hover:text-primary transition-colors flex items-center gap-0.5"
+            className="hover:text-foreground transition-colors flex items-center gap-0.5"
             data-testid={`navigate-${item.sourceFile}`}
           >
             <span>§</span>
@@ -264,7 +262,7 @@ function AgendaItemRow({ item, onToggle, onNavigate }: {
           {item.tags.length > 0 && (
             <div className="flex items-center gap-1">
               {item.tags.map((tag) => (
-                <span key={tag} className="text-org-date">
+                <span key={tag}>
                   :{tag}:
                 </span>
               ))}

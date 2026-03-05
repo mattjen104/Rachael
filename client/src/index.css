@@ -55,19 +55,19 @@
   --popover: 30 80% 2%;
   --popover-foreground: 30 100% 50%;
 
-  --primary: 39 100% 63%;
+  --primary: 30 100% 50%;
   --primary-foreground: 30 80% 3%;
 
-  --secondary: 30 100% 45%;
+  --secondary: 30 100% 50%;
   --secondary-foreground: 30 80% 3%;
 
   --muted: 30 60% 8%;
-  --muted-foreground: 30 80% 30%;
+  --muted-foreground: 30 70% 28%;
 
   --accent: 30 100% 50%;
   --accent-foreground: 30 80% 3%;
 
-  --destructive: 30 100% 60%;
+  --destructive: 30 100% 50%;
   --destructive-foreground: 30 80% 3%;
 
   --border: 30 50% 10%;
@@ -79,17 +79,17 @@
   --crt-bright: #ffc940;
   --crt-dim: #aa5500;
 
-  --org-keyword: 30 50% 22%;
-  --org-document-title: 39 100% 63%;
-  --org-level-1: 39 100% 60%;
+  --org-keyword: 30 70% 28%;
+  --org-document-title: 30 100% 50%;
+  --org-level-1: 30 100% 50%;
   --org-level-2: 30 100% 50%;
-  --org-level-3: 30 90% 42%;
-  --org-level-4: 30 80% 37%;
+  --org-level-3: 30 100% 50%;
+  --org-level-4: 30 100% 50%;
   --org-todo: 39 100% 63%;
-  --org-done: 30 70% 30%;
-  --org-link: 30 100% 52%;
-  --org-date: 30 80% 40%;
-  --org-code: 30 90% 42%;
+  --org-done: 30 70% 28%;
+  --org-link: 30 100% 50%;
+  --org-date: 30 70% 28%;
+  --org-code: 30 100% 50%;
 }
 
 @layer base {
