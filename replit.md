@@ -23,11 +23,13 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 ## Key Server Components
 
 - `server/org-parser.ts` - Parses raw org file content to extract headings, TODO/DONE status, SCHEDULED/DEADLINE dates, tags, and properties. Also provides `buildAgenda()` for grouping items by date (overdue/today/upcoming) and `toggleHeadingStatus()` for in-place status toggling.
+- `server/capture-parser.ts` - Prefix-based capture language parser (`t`/`a`/`n` for task/appointment/note). Uses `chrono-node` for Fantastical-style natural language date parsing ("tomorrow", "next friday 2pm", "by thursday"). Exports `parseCaptureEntry()` and `formatOrgEntry()`.
+- `server/content-detector.ts` - Auto-detects clipboard content type (url/gif/image/code/text). `fetchUrlMetadata()` fetches page title, og:description, og:image, and domain from URLs.
 
 ## Data Model (shared/schema.ts)
 
 - `orgFiles` - Org-mode file storage (name, content)
-- `clipboardItems` - Clipboard capture history (content, type, timestamp, archived)
+- `clipboardItems` - Clipboard capture history (content, type, timestamp, archived, detectedType, urlTitle, urlDescription, urlImage, urlDomain)
 - `agendaItems` - Legacy task/agenda tracking (text, status, scheduledDate, carriedOver)
 
 ## API Routes (server/routes.ts)
@@ -36,6 +38,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `GET/POST /api/org-files` - List/create org files
 - `GET /api/org-files/by-name/:name` - Get file by name
 - `PATCH /api/org-files/:id` - Update file content
+- `POST /api/org-files/capture` - Quick capture with explicit fields (title, fileName, scheduledDate, tags)
 
 ### Org Queries (parsed from file content)
 - `GET /api/org-query/agenda` - Returns structured agenda (overdue, today, upcoming) parsed from all org files
@@ -45,8 +48,11 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 
 ### Clipboard
 - `GET/POST /api/clipboard` - List/create clipboard items
+- `PATCH /api/clipboard/:id` - Update clipboard item content and metadata
 - `DELETE /api/clipboard/:id` - Remove clipboard item
-- `POST /api/clipboard/:id/append-to-org` - Append clipboard item to org file
+- `POST /api/clipboard/enrich` - Detect content type and fetch URL metadata
+- `POST /api/clipboard/smart-capture` - Parse prefix language (t/a/n) with NL dates, append to org file
+- `POST /api/clipboard/:id/append-to-org` - Append clipboard item to org file (uses capture parser if prefix detected)
 
 ### Other
 - `POST /api/seed` - Seed initial data

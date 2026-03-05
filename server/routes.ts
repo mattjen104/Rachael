@@ -4,6 +4,8 @@ import { storage } from "./storage";
 import { insertOrgFileSchema, insertClipboardItemSchema, insertAgendaItemSchema } from "@shared/schema";
 import { z } from "zod";
 import { parseOrgFile, buildAgenda, toggleHeadingStatus } from "./org-parser";
+import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
+import { detectContentType, fetchUrlMetadata } from "./content-detector";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -109,17 +111,99 @@ export async function registerRoutes(
     res.status(200).json({ message: "Archived" });
   });
 
+  app.patch("/api/clipboard/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const { content, detectedType, urlTitle, urlDescription, urlImage, urlDomain } = req.body;
+    const data: Record<string, any> = {};
+    if (typeof content === "string") data.content = content;
+    if (typeof detectedType === "string") data.detectedType = detectedType;
+    if (typeof urlTitle === "string") data.urlTitle = urlTitle;
+    if (typeof urlDescription === "string") data.urlDescription = urlDescription;
+    if (typeof urlImage === "string") data.urlImage = urlImage;
+    if (typeof urlDomain === "string") data.urlDomain = urlDomain;
+    if (Object.keys(data).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    const updated = await storage.updateClipboardItem(id, data);
+    if (!updated) return res.status(404).json({ message: "Clipboard item not found" });
+    res.json(updated);
+  });
+
+  app.post("/api/clipboard/enrich", async (req, res) => {
+    const { content } = req.body;
+    if (typeof content !== "string") return res.status(400).json({ message: "content required" });
+
+    const detection = detectContentType(content);
+    let metadata = null;
+    if (detection.url) {
+      metadata = await fetchUrlMetadata(detection.url);
+    }
+    res.json({ detection, metadata });
+  });
+
+  app.post("/api/clipboard/smart-capture", async (req, res) => {
+    const { content, orgFileName, clipboardId } = req.body;
+    if (!content || !orgFileName) {
+      return res.status(400).json({ message: "content and orgFileName required" });
+    }
+
+    const parsed = parseCaptureEntry(content);
+    if (parsed.type === "plain") {
+      return res.status(400).json({ message: "No capture prefix detected. Use t/a/n prefix.", parsed });
+    }
+
+    const orgFile = await storage.getOrgFileByName(orgFileName);
+    if (!orgFile) return res.status(404).json({ message: "Org file not found" });
+
+    const entry = formatOrgEntry(parsed);
+
+    const inboxRegex = /^\*\s+INBOX/m;
+    const inboxMatch = inboxRegex.exec(orgFile.content);
+    let newContent: string;
+    if (inboxMatch) {
+      const afterInbox = orgFile.content.indexOf("\n", inboxMatch.index);
+      const insertAt = afterInbox !== -1 ? afterInbox + 1 : orgFile.content.length;
+      newContent = orgFile.content.slice(0, insertAt) + entry + orgFile.content.slice(insertAt);
+    } else {
+      newContent = orgFile.content + `\n* INBOX\n` + entry;
+    }
+
+    const updated = await storage.updateOrgFileContent(orgFile.id, newContent);
+
+    if (clipboardId) {
+      await storage.archiveClipboardItem(clipboardId);
+    }
+
+    res.status(201).json({ file: updated, parsed });
+  });
+
   app.post("/api/clipboard/:id/append-to-org", async (req, res) => {
     const clipId = parseInt(req.params.id, 10);
     const { orgFileName } = req.body;
     if (!orgFileName) return res.status(400).json({ message: "orgFileName required" });
 
-    const items = await storage.getClipboardItems();
-    const clipItem = items.find(i => i.id === clipId);
+    const clipItem = await storage.getClipboardItem(clipId);
     if (!clipItem) return res.status(404).json({ message: "Clipboard item not found" });
 
-    let orgFile = await storage.getOrgFileByName(orgFileName);
+    const orgFile = await storage.getOrgFileByName(orgFileName);
     if (!orgFile) return res.status(404).json({ message: "Org file not found" });
+
+    const parsed = parseCaptureEntry(clipItem.content);
+
+    if (parsed.type !== "plain") {
+      const entry = formatOrgEntry(parsed);
+      const inboxRegex = /^\*\s+INBOX/m;
+      const inboxMatch = inboxRegex.exec(orgFile.content);
+      let newContent: string;
+      if (inboxMatch) {
+        const afterInbox = orgFile.content.indexOf("\n", inboxMatch.index);
+        const insertAt = afterInbox !== -1 ? afterInbox + 1 : orgFile.content.length;
+        newContent = orgFile.content.slice(0, insertAt) + entry + orgFile.content.slice(insertAt);
+      } else {
+        newContent = orgFile.content + `\n* INBOX\n` + entry;
+      }
+      const updated = await storage.updateOrgFileContent(orgFile.id, newContent);
+      await storage.archiveClipboardItem(clipId);
+      return res.json({ file: updated, parsed });
+    }
 
     const now = new Date();
     const dateStr = now.toISOString().split("T")[0];
@@ -129,7 +213,7 @@ export async function registerRoutes(
     const updated = await storage.updateOrgFileContent(orgFile.id, updatedContent);
     await storage.archiveClipboardItem(clipId);
 
-    res.json(updated);
+    res.json({ file: updated, parsed: { type: "plain" } });
   });
 
   // ── Org Queries (parsed from file content) ──────────────────

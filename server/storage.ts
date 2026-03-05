@@ -14,7 +14,9 @@ export interface IStorage {
   updateOrgFileContent(id: number, content: string): Promise<OrgFile | undefined>;
 
   getClipboardItems(): Promise<ClipboardItem[]>;
+  getClipboardItem(id: number): Promise<ClipboardItem | undefined>;
   createClipboardItem(item: InsertClipboardItem): Promise<ClipboardItem>;
+  updateClipboardItem(id: number, data: Partial<InsertClipboardItem>): Promise<ClipboardItem | undefined>;
   deleteClipboardItem(id: number): Promise<void>;
   archiveClipboardItem(id: number): Promise<void>;
 
@@ -54,9 +56,19 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(clipboardItems).where(eq(clipboardItems.archived, false)).orderBy(desc(clipboardItems.capturedAt));
   }
 
+  async getClipboardItem(id: number): Promise<ClipboardItem | undefined> {
+    const [item] = await db.select().from(clipboardItems).where(eq(clipboardItems.id, id));
+    return item;
+  }
+
   async createClipboardItem(item: InsertClipboardItem): Promise<ClipboardItem> {
     const [created] = await db.insert(clipboardItems).values(item).returning();
     return created;
+  }
+
+  async updateClipboardItem(id: number, data: Partial<InsertClipboardItem>): Promise<ClipboardItem | undefined> {
+    const [updated] = await db.update(clipboardItems).set(data).where(eq(clipboardItems.id, id)).returning();
+    return updated;
   }
 
   async deleteClipboardItem(id: number): Promise<void> {

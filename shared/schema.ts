@@ -19,6 +19,11 @@ export const clipboardItems = pgTable("clipboard_items", {
   type: text("type").notNull().default("text"),
   capturedAt: timestamp("captured_at").notNull().defaultNow(),
   archived: boolean("archived").notNull().default(false),
+  detectedType: text("detected_type"),
+  urlTitle: text("url_title"),
+  urlDescription: text("url_description"),
+  urlImage: text("url_image"),
+  urlDomain: text("url_domain"),
 });
 
 export const insertClipboardItemSchema = createInsertSchema(clipboardItems).omit({ id: true, capturedAt: true, archived: true });

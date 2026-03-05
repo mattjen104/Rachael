@@ -56,6 +56,43 @@ export function useDeleteClipboardItem() {
   });
 }
 
+export function useUpdateClipboardItem() {
+  return useMutation({
+    mutationFn: async ({ id, content }: { id: number; content: string }) => {
+      const res = await apiRequest("PATCH", `/api/clipboard/${id}`, { content });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] });
+    },
+  });
+}
+
+export function useSmartCapture() {
+  return useMutation({
+    mutationFn: async (data: { content: string; orgFileName: string; clipboardId?: number }) => {
+      const res = await apiRequest("POST", "/api/clipboard/smart-capture", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
+    },
+  });
+}
+
+export function useEnrichClipboard() {
+  return useMutation({
+    mutationFn: async (content: string) => {
+      const res = await apiRequest("POST", "/api/clipboard/enrich", { content });
+      return res.json();
+    },
+  });
+}
+
 export function useAppendClipboardToOrg() {
   return useMutation({
     mutationFn: async ({ clipId, orgFileName }: { clipId: number; orgFileName: string }) => {
@@ -65,6 +102,9 @@ export function useAppendClipboardToOrg() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
     },
   });
 }
