@@ -46,6 +46,43 @@ export async function registerRoutes(
     res.json(file);
   });
 
+  // ── Org Capture (quick task creation) ──────────────────────
+
+  const captureSchema = z.object({
+    fileName: z.string().min(1),
+    title: z.string().min(1).transform(v => v.replace(/[\n\r]/g, " ").trim()),
+    scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    tags: z.array(z.string().transform(v => v.replace(/[\s:]/g, ""))).optional(),
+  });
+
+  app.post("/api/org-files/capture", async (req, res) => {
+    const parsed = captureSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    const { fileName, title, scheduledDate, tags } = parsed.data;
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const date = scheduledDate || new Date().toISOString().split("T")[0];
+    const cleanTags = tags?.filter(Boolean);
+    const tagStr = cleanTags && cleanTags.length > 0 ? ` :${cleanTags.join(":")}:` : "";
+    const entry = `\n** TODO ${title}${tagStr}\n   SCHEDULED: <${date}>\n`;
+
+    const inboxRegex = /^\*\s+INBOX/m;
+    const inboxMatch = inboxRegex.exec(file.content);
+    let newContent: string;
+    if (inboxMatch) {
+      const afterInbox = file.content.indexOf("\n", inboxMatch.index);
+      const insertAt = afterInbox !== -1 ? afterInbox + 1 : file.content.length;
+      newContent = file.content.slice(0, insertAt) + entry + file.content.slice(insertAt);
+    } else {
+      newContent = file.content + `\n* INBOX\n` + entry;
+    }
+
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.status(201).json(updated);
+  });
+
   // ── Clipboard ──────────────────────────────────────────────
 
   app.get("/api/clipboard", async (_req, res) => {

@@ -128,6 +128,21 @@ export function useToggleOrgStatus() {
   });
 }
 
+export function useOrgCapture() {
+  return useMutation({
+    mutationFn: async (data: { fileName: string; title: string; scheduledDate?: string; tags?: string[] }) => {
+      const res = await apiRequest("POST", "/api/org-files/capture", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
+    },
+  });
+}
+
 export function useAgendaItems() {
   return useQuery<AgendaItem[]>({
     queryKey: ["/api/agenda"],

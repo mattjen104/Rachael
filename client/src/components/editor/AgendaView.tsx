@@ -1,8 +1,8 @@
-import React, { useState } from "react";
-import { Calendar, CheckCircle2, Circle, AlertTriangle, FileText, Tag, ArrowRight } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { Calendar, CheckCircle2, Circle, AlertTriangle, FileText, Tag, ArrowRight, Plus } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { useOrgAgenda, useOrgTodos, useOrgDone, useToggleOrgStatus, type OrgHeading, type AgendaDay } from "@/hooks/use-org-data";
+import { useOrgAgenda, useOrgTodos, useOrgDone, useToggleOrgStatus, useOrgCapture, useOrgFiles, type OrgHeading, type AgendaDay } from "@/hooks/use-org-data";
 
 type FilterMode = "today" | "week" | "todos" | "done";
 
@@ -74,6 +74,51 @@ export default function AgendaView({ onNavigateToFile }: AgendaViewProps) {
   );
 }
 
+function QuickAdd() {
+  const [value, setValue] = useState("");
+  const captureMutation = useOrgCapture();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { data: orgFiles = [] } = useOrgFiles();
+  const defaultFile = orgFiles.find(f => f.name === "dad.org")?.name || orgFiles[0]?.name;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!value.trim() || !defaultFile) return;
+    const today = new Date().toISOString().split("T")[0];
+    captureMutation.mutate(
+      { fileName: defaultFile, title: value.trim(), scheduledDate: today },
+      { onSuccess: () => setValue("") }
+    );
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-center gap-2 mb-4">
+      <div className="flex-1 flex items-center bg-[#21242b] border border-border rounded-sm overflow-hidden focus-within:border-org-todo transition-colors">
+        <Plus className="w-4 h-4 text-muted-foreground ml-2.5 flex-shrink-0" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Add task to today..."
+          className="flex-1 bg-transparent text-foreground text-sm p-2 outline-none"
+          data-testid="quick-add-input"
+        />
+      </div>
+      {value.trim() && (
+        <button
+          type="submit"
+          disabled={captureMutation.isPending}
+          className="px-3 py-1.5 bg-org-todo text-[#282c34] rounded-sm text-xs font-bold hover:brightness-110 transition-all"
+          data-testid="quick-add-submit"
+        >
+          Add
+        </button>
+      )}
+    </form>
+  );
+}
+
 function TodayView({ agenda, onToggle, onNavigate }: {
   agenda: ReturnType<typeof useOrgAgenda>["data"];
   onToggle: (item: OrgHeading) => void;
@@ -86,6 +131,8 @@ function TodayView({ agenda, onToggle, onNavigate }: {
 
   return (
     <div className="space-y-6">
+      <QuickAdd />
+
       {hasOverdue && (
         <div>
           <div className="flex items-center gap-2 mb-3 text-destructive">
@@ -113,7 +160,7 @@ function TodayView({ agenda, onToggle, onNavigate }: {
           </div>
         ) : (
           <div className="text-muted-foreground text-xs italic py-4 pl-6">
-            No items scheduled for today. Use SCHEDULED: in your org files to add tasks.
+            No items scheduled for today. Type in the box above to add one.
           </div>
         )}
       </div>
@@ -122,7 +169,7 @@ function TodayView({ agenda, onToggle, onNavigate }: {
         <div className="text-center py-12 text-muted-foreground">
           <Calendar className="w-8 h-8 mx-auto mb-3 opacity-40" />
           <p className="text-sm">Your agenda is clear.</p>
-          <p className="text-xs mt-1 opacity-60">Add TODO items with SCHEDULED dates to your org files.</p>
+          <p className="text-xs mt-1 opacity-60">Type in the quick-add box above, or use the Capture modal.</p>
         </div>
       )}
     </div>

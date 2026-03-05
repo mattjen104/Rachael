@@ -1,5 +1,5 @@
 import React from "react";
-import { FileText, Cloud, Clipboard, ChevronDown, Hash, Calendar, Code } from "lucide-react";
+import { FileText, Cloud, Clipboard, ChevronDown, Hash, Calendar, Code, Plus } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useOrgFiles } from "@/hooks/use-org-data";
@@ -11,9 +11,10 @@ interface SidebarProps {
   isClipboardActive: boolean;
   viewMode: "editor" | "agenda";
   onSwitchView: (mode: "editor" | "agenda") => void;
+  onOpenCapture: () => void;
 }
 
-export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isClipboardActive, viewMode, onSwitchView }: SidebarProps) {
+export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isClipboardActive, viewMode, onSwitchView, onOpenCapture }: SidebarProps) {
   const { data: orgFiles = [] } = useOrgFiles();
 
   const icloudStreams = [
@@ -57,6 +58,18 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
         >
           <Calendar className="w-3 h-3" />
           Agenda
+        </button>
+      </div>
+
+      <div className="px-3 py-2 border-b border-border">
+        <button
+          onClick={onOpenCapture}
+          data-testid="button-capture"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-sm bg-org-todo/10 text-org-todo hover:bg-org-todo/20 transition-colors text-xs font-bold"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Capture
+          <span className="ml-auto text-[9px] text-org-todo/60 font-mono">c</span>
         </button>
       </div>
 

@@ -13,10 +13,12 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 
 1. **Org-mode Editor** - Syntax-highlighted viewer/editor for `.org` files with Vim-style modes (NORMAL/INSERT/VISUAL)
 2. **Agenda View** - Bullet-journal-style agenda derived by parsing org file content. Filters: Today, Week, All TODOs, Done. Toggles task status directly in the org file content.
-3. **Clipboard Manager** - Captures and persists clipboard items, can append them directly into org files
-4. **iCloud Capture Streams** - Sidebar showing incoming data sources (Camera Roll, Notes, Files)
-5. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device, navigated with WASD keys
-6. **View Switcher** - Editor/Agenda tabs in sidebar to toggle main content area
+3. **Org Capture** - Quick task creation modal (keyboard shortcut `c` in NORMAL mode, or sidebar button). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section.
+4. **Inline Quick-Add** - Fast task input at top of Agenda Today view. Type and press Enter to add a TODO to default file with today's date.
+5. **Clipboard Manager** - Captures and persists clipboard items, can append them directly into org files
+6. **iCloud Capture Streams** - Sidebar showing incoming data sources (Camera Roll, Notes, Files)
+7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device, navigated with WASD keys
+8. **View Switcher** - Editor/Agenda tabs in sidebar to toggle main content area
 
 ## Key Server Components
 
