@@ -10,12 +10,12 @@ import {
   useSmartCapture,
   useEnrichClipboard,
   useHeadingsSearch,
+  useOrgCapture,
 } from "@/hooks/use-org-data";
 import { queryClient } from "@/lib/queryClient";
 
 interface ClipboardManagerProps {
   activeOrgFile: string;
-  onRefile?: (item: { id: number; content: string; urlTitle?: string | null }) => void;
 }
 
 function parseCaptureSyntax(content: string): { hasTask: boolean; nestingLevel: number; label: string } {
@@ -222,19 +222,65 @@ interface EditableItemProps {
   };
   activeOrgFile: string;
   onDelete: (id: number) => void;
-  onRefile?: (item: { id: number; content: string; urlTitle?: string | null }) => void;
 }
 
-function EditableItem({ item, activeOrgFile, onDelete, onRefile }: EditableItemProps) {
+function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(item.content);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [successLabel, setSuccessLabel] = useState("");
   const updateMutation = useUpdateClipboardItem();
   const smartCaptureMutation = useSmartCapture();
+  const captureMutation = useOrgCapture();
   const { toast } = useToast();
 
   const syntax = parseCaptureSyntax(editValue);
   const displayType = item.detectedType || item.type;
+
+  const handleFileToOrg = (template: "todo" | "note" | "link") => {
+    const title = item.urlTitle || item.content.split("\n")[0].trim().slice(0, 100) || "Untitled";
+    let body: string | undefined;
+
+    if (template === "link") {
+      const parts: string[] = [];
+      if (item.content.match(/^https?:\/\//)) parts.push(item.content.trim());
+      if (item.urlDescription) parts.push(item.urlDescription);
+      if (item.urlImage) parts.push(`[[${item.urlImage}]]`);
+      if (item.urlDomain) parts.push(`Source: ${item.urlDomain}`);
+      body = parts.length > 0 ? parts.join("\n") : undefined;
+    } else if (template === "note") {
+      if (item.content.length > 100 || item.content.includes("\n")) {
+        body = item.content;
+      }
+    }
+
+    captureMutation.mutate(
+      {
+        fileName: activeOrgFile,
+        title,
+        template,
+        body,
+        scheduledDate: template === "todo" ? new Date().toISOString().split("T")[0] : undefined,
+      },
+      {
+        onSuccess: () => {
+          fetch(`/api/clipboard/${item.id}/archive`, { method: "POST" })
+            .then(() => queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] }))
+            .catch(() => {});
+          setSuccessLabel(template === "todo" ? "Task" : template === "link" ? "Link" : "Note");
+          setShowSuccess(true);
+          setTimeout(() => setShowSuccess(false), 1500);
+        },
+        onError: () => {
+          toast({
+            title: "Filing failed",
+            description: "Could not file to org.",
+            className: "bg-card border-foreground text-foreground",
+          });
+        },
+      }
+    );
+  };
 
   const handleStartEdit = () => {
     setEditValue(item.content);
@@ -292,7 +338,7 @@ function EditableItem({ item, activeOrgFile, onDelete, onRefile }: EditableItemP
     return (
       <div className="flex items-center gap-2 bg-muted border border-border p-2 text-foreground animate-in fade-in phosphor-glow">
         <span>[✓]</span>
-        Captured to {activeOrgFile}
+        {successLabel ? `${successLabel} filed to ${activeOrgFile}` : `Captured to ${activeOrgFile}`}
       </div>
     );
   }
@@ -332,25 +378,41 @@ function EditableItem({ item, activeOrgFile, onDelete, onRefile }: EditableItemP
           </span>
         </div>
         <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {!editing && onRefile && (
-            <button
-              onClick={() => onRefile({ id: item.id, content: item.content, urlTitle: item.urlTitle })}
-              className="p-1 hover:text-foreground text-muted-foreground transition-colors"
-              title="Refile to org"
-              data-testid={`refile-btn-${item.id}`}
-            >
-              [r]
-            </button>
-          )}
           {!editing && (
-            <button
-              onClick={handleStartEdit}
-              className="p-1 hover:text-foreground text-muted-foreground transition-colors"
-              title="Edit"
-              data-testid={`edit-btn-${item.id}`}
-            >
-              [✎]
-            </button>
+            <>
+              <button
+                onClick={() => handleFileToOrg("todo")}
+                className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                title="File as TODO"
+                data-testid={`file-todo-btn-${item.id}`}
+              >
+                [t]
+              </button>
+              <button
+                onClick={() => handleFileToOrg("note")}
+                className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                title="File as note"
+                data-testid={`file-note-btn-${item.id}`}
+              >
+                [n]
+              </button>
+              <button
+                onClick={() => handleFileToOrg("link")}
+                className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                title="File as link"
+                data-testid={`file-link-btn-${item.id}`}
+              >
+                [l]
+              </button>
+              <button
+                onClick={handleStartEdit}
+                className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                title="Edit"
+                data-testid={`edit-btn-${item.id}`}
+              >
+                [✎]
+              </button>
+            </>
           )}
           <button
             onClick={() => onDelete(item.id)}
@@ -409,7 +471,7 @@ function EditableItem({ item, activeOrgFile, onDelete, onRefile }: EditableItemP
             <img
               src={item.urlImage}
               alt="Preview"
-              className="mt-1 max-h-24 object-cover border border-border"
+              className={cn("mt-1 border border-border", displayType === "gif" ? "max-h-40 object-contain" : "max-h-24 object-cover")}
               data-testid={`preview-img-${item.id}`}
             />
           )}
@@ -417,7 +479,7 @@ function EditableItem({ item, activeOrgFile, onDelete, onRefile }: EditableItemP
             <img
               src={item.content.trim()}
               alt="Preview"
-              className="mt-1 max-h-24 object-cover border border-border"
+              className={cn("mt-1 border border-border", displayType === "gif" ? "max-h-40 object-contain" : "max-h-24 object-cover")}
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               data-testid={`preview-img-${item.id}`}
             />
@@ -428,7 +490,7 @@ function EditableItem({ item, activeOrgFile, onDelete, onRefile }: EditableItemP
   );
 }
 
-export default function ClipboardManager({ activeOrgFile, onRefile }: ClipboardManagerProps) {
+export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProps) {
   const { data: items = [], isLoading } = useClipboardItems();
   const deleteMutation = useDeleteClipboardItem();
   const addMutation = useAddClipboardItem();
@@ -563,7 +625,6 @@ export default function ClipboardManager({ activeOrgFile, onRefile }: ClipboardM
                 item={item}
                 activeOrgFile={activeOrgFile}
                 onDelete={handleDelete}
-                onRefile={onRefile}
               />
             ))
           )}

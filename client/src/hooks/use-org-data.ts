@@ -182,7 +182,7 @@ export function useToggleOrgStatus() {
 
 export function useOrgCapture() {
   return useMutation({
-    mutationFn: async (data: { fileName: string; title: string; scheduledDate?: string; tags?: string[] }) => {
+    mutationFn: async (data: { fileName: string; title: string; scheduledDate?: string; tags?: string[]; template?: "todo" | "note" | "link"; body?: string }) => {
       const res = await apiRequest("POST", "/api/org-files/capture", data);
       return res.json();
     },

@@ -55,20 +55,35 @@ export async function registerRoutes(
     title: z.string().min(1).transform(v => v.replace(/[\n\r]/g, " ").trim()),
     scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     tags: z.array(z.string().transform(v => v.replace(/[\s:]/g, ""))).optional(),
+    template: z.enum(["todo", "note", "link"]).optional().default("todo"),
+    body: z.string().optional(),
   });
 
   app.post("/api/org-files/capture", async (req, res) => {
     const parsed = captureSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
-    const { fileName, title, scheduledDate, tags } = parsed.data;
+    const { fileName, title, scheduledDate, tags, template, body } = parsed.data;
     const file = await storage.getOrgFileByName(fileName);
     if (!file) return res.status(404).json({ message: "File not found" });
 
-    const date = scheduledDate || new Date().toISOString().split("T")[0];
     const cleanTags = tags?.filter(Boolean);
     const tagStr = cleanTags && cleanTags.length > 0 ? ` :${cleanTags.join(":")}:` : "";
-    const entry = `\n** TODO ${title}${tagStr}\n   SCHEDULED: <${date}>\n`;
+
+    let entry: string;
+    if (template === "todo") {
+      const date = scheduledDate || new Date().toISOString().split("T")[0];
+      entry = `\n** TODO ${title}${tagStr}\n   SCHEDULED: <${date}>`;
+    } else {
+      entry = `\n** ${title}${tagStr}`;
+    }
+
+    if (body) {
+      const indentedBody = body.split("\n").map(line => `   ${line}`).join("\n");
+      entry += `\n${indentedBody}`;
+    }
+
+    entry += "\n";
 
     const inboxRegex = /^\*\s+INBOX/m;
     const inboxMatch = inboxRegex.exec(file.content);
