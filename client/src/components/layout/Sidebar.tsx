@@ -99,6 +99,25 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
             </button>
           ))}
         </div>
+
+        <div className="px-3 py-1 mt-6 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+          <ChevronDown className="w-3 h-3" />
+          <span>Hardware</span>
+        </div>
+        <div className="space-y-[2px] px-2 pb-4">
+          <a
+            href="/tui"
+            className="w-full flex items-center justify-between px-2 py-1.5 rounded-sm text-sm text-left transition-colors font-mono text-foreground hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-2">
+              <Hash className="w-4 h-4 text-[#98be65]" />
+              <span>LilyGO T-Keyboard</span>
+            </div>
+            <span className="text-[10px] bg-[#98be65]/20 text-[#98be65] px-1.5 rounded-full">
+              SSH
+            </span>
+          </a>
+        </div>
       </ScrollArea>
       
       <div className="p-3 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
