@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useOrgFileByName, useUpdateOrgFile } from "@/hooks/use-org-data";
 
 interface EditorProps {
   file: string;
@@ -6,47 +7,18 @@ interface EditorProps {
   setMode: (mode: "NORMAL" | "INSERT" | "VISUAL") => void;
 }
 
-const mockDadOrg = `#+TITLE: Dad Knowledge Space
-#+AUTHOR: Auto-Captured via iCloud
-#+DATE: [2026-03-04 Wed]
-#+STARTUP: showeverything
-
-* INBOX Recent Captures
-** TODO Process photo capture from Camera Roll                               :capture:photo:
-   SCHEDULED: <2026-03-04 Wed>
-   :PROPERTIES:
-   :SOURCE: iCloud/Camera Roll
-   :CAPTURED_AT: [2026-03-04 Wed 09:12]
-   :END:
-   
-   New diagram of the architecture sketched on whiteboard.
-   [[file:~/iCloud/Photos/IMG_20260304_0912.jpg]]
-
-** DONE Review voice memo about project ideas                                :capture:voice:
-   CLOSED: [2026-03-04 Wed 10:05]
-   :PROPERTIES:
-   :SOURCE: iCloud/Voice Memos
-   :END:
-
-* KNOWLEDGE BASE
-** The Web App Architecture
-   We are building a frontend React application that mimics Emacs/Doom mode 
-   but runs in the browser. 
-   
-   Key features required:
-   - [X] Vim keybindings (simulated visual states)
-   - [X] Org-mode syntax highlighting
-   - [ ] Auto-sync mechanism (mocked for now)
-   
-** Notes on React State Management
-   Remember to keep the UI snappy. The editor should ideally be completely 
-   uncontrolled for the actual typing, with only metadata synced back up.
-`;
-
 export default function Editor({ file, mode, setMode }: EditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { data: orgFile, isLoading } = useOrgFileByName(file);
+  const updateMutation = useUpdateOrgFile();
+  const [localContent, setLocalContent] = useState("");
 
-  // Focus effect for mode switching
+  useEffect(() => {
+    if (orgFile) {
+      setLocalContent(orgFile.content);
+    }
+  }, [orgFile]);
+
   useEffect(() => {
     if (textareaRef.current) {
       if (mode === "INSERT") {
@@ -57,13 +29,14 @@ export default function Editor({ file, mode, setMode }: EditorProps) {
     }
   }, [mode]);
 
-  // Handle Vim-like keybindings simply for mockup
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if they're typing normally in insert mode
       if (mode === "INSERT" && e.key !== "Escape") return;
 
       if (e.key === "Escape") {
+        if (mode === "INSERT" && orgFile && localContent !== orgFile.content) {
+          updateMutation.mutate({ id: orgFile.id, content: localContent });
+        }
         setMode("NORMAL");
         return;
       }
@@ -81,19 +54,15 @@ export default function Editor({ file, mode, setMode }: EditorProps) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mode, setMode]);
+  }, [mode, setMode, orgFile, localContent]);
 
-  // Render text with Org-mode syntax highlighting
   const renderOrgContent = (text: string) => {
-    return text.split("\\n").map((line, i) => {
+    return text.split("\n").map((line, i) => {
       let className = "font-mono whitespace-pre-wrap min-h-[1.5rem] leading-relaxed";
-      
-      // Basic Org-mode syntax parsing
+
       if (line.startsWith("#+")) {
-        className += " text-[#5B6268]"; // comments/meta
-        
-        // Highlight the keyword differently from value
-        const match = line.match(/^(#\\+[A-Z_]+:)(.*)$/);
+        className += " text-[#5B6268]";
+        const match = line.match(/^(#\+[A-Z_]+:)(.*)$/);
         if (match) {
           return (
             <div key={i} className={className}>
@@ -106,37 +75,38 @@ export default function Editor({ file, mode, setMode }: EditorProps) {
             </div>
           );
         }
-      } else if (line.match(/^\\*\\s/)) {
-        className += " text-org-level-1 font-bold text-lg mt-4";
-      } else if (line.match(/^\\*\\*\\s/)) {
-        className += " text-org-level-2 font-bold mt-2";
-      } else if (line.match(/^\\*\\*\\*\\s/)) {
+      } else if (/^\*{3}\s/.test(line)) {
         className += " text-org-level-3 font-semibold mt-1";
-      } else if (line.includes("TODO")) {
-        const parts = line.split("TODO");
-        return (
-          <div key={i} className={className}>
-            {parts[0]}
-            <span className="text-org-todo font-bold bg-[#3f444a] px-1 rounded-sm">TODO</span>
-            {parts[1]}
-          </div>
-        );
-      } else if (line.includes("DONE")) {
-         const parts = line.split("DONE");
-        return (
-          <div key={i} className={className}>
-            {parts[0]}
-            <span className="text-org-done font-bold bg-[#3f444a] px-1 rounded-sm">DONE</span>
-            {parts[1]}
-          </div>
-        );
-      } else if (line.match(/\[\[.*\]\]/)) {
-        // Links
+      } else if (/^\*{2}\s/.test(line)) {
+        if (line.includes("TODO")) {
+          const parts = line.split("TODO");
+          return (
+            <div key={i} className={className + " text-org-level-2 font-bold mt-2"}>
+              {parts[0]}
+              <span className="text-org-todo font-bold bg-[#3f444a] px-1 rounded-sm">TODO</span>
+              {parts[1]}
+            </div>
+          );
+        }
+        if (line.includes("DONE")) {
+          const parts = line.split("DONE");
+          return (
+            <div key={i} className={className + " text-org-level-2 font-bold mt-2"}>
+              {parts[0]}
+              <span className="text-org-done font-bold bg-[#3f444a] px-1 rounded-sm">DONE</span>
+              {parts[1]}
+            </div>
+          );
+        }
+        className += " text-org-level-2 font-bold mt-2";
+      } else if (/^\*\s/.test(line)) {
+        className += " text-org-level-1 font-bold text-lg mt-4";
+      } else if (/\[\[.*\]\]/.test(line)) {
         const match = line.match(/\[\[(.*)\]\]/);
         const linkContent = match ? match[1] : "";
         return (
           <div key={i} className={className}>
-            <span 
+            <span
               className="text-org-link underline underline-offset-2 cursor-pointer hover:text-primary transition-colors flex items-center gap-1 w-fit"
               onClick={() => alert(`Opening iCloud file reference:\n${linkContent}`)}
               title="Open iCloud Reference"
@@ -145,47 +115,78 @@ export default function Editor({ file, mode, setMode }: EditorProps) {
             </span>
           </div>
         );
+      } else if (line.match(/^\s+:.*:/)) {
+        className += " text-[#5B6268]";
+      } else if (line.match(/SCHEDULED:|CLOSED:|DEADLINE:/)) {
+        className += " text-org-date";
+      } else if (line.match(/^\s+-\s\[.\]/)) {
+        const checked = line.includes("[X]");
+        return (
+          <div key={i} className={className}>
+            <span className={checked ? "text-org-done line-through" : "text-foreground"}>
+              {line}
+            </span>
+          </div>
+        );
       }
 
       return (
         <div key={i} className={className}>
-          {line}
+          {line || "\u00A0"}
         </div>
       );
     });
   };
 
+  const content = localContent || "";
+  const lines = content.split("\n");
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-muted-foreground font-mono">
+        Loading {file}...
+      </div>
+    );
+  }
+
+  if (!orgFile) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-muted-foreground font-mono">
+        File not found: {file}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 w-full h-full relative font-mono text-sm flex">
-      {/* Gutter */}
-      <div className="w-12 border-r border-border bg-[#21242b] flex flex-col items-end py-4 pr-2 text-[#5B6268] select-none h-full overflow-y-auto hidden-scrollbar">
-        {mockDadOrg.split("\\n").map((_, i) => (
-          <div key={i} className="min-h-[1.5rem] leading-relaxed">
-            {mode === "NORMAL" && i === 10 ? <span className="text-primary">{i + 1}</span> : i + 1}
+    <div className="flex-1 w-full h-full relative font-mono text-sm flex" data-testid="editor-container">
+      <div className="w-12 border-r border-border bg-[#21242b] flex flex-col items-end py-4 pr-2 text-[#5B6268] select-none h-full overflow-y-auto"
+        style={{ scrollbarWidth: 'none' }}>
+        {lines.map((_, i) => (
+          <div key={i} className="min-h-[1.5rem] leading-relaxed text-xs">
+            {i + 1}
           </div>
         ))}
       </div>
 
-      {/* Editor Content area */}
       <div className="flex-1 h-full overflow-y-auto p-4 relative group">
         {mode !== "INSERT" ? (
-          <div className="w-full max-w-4xl mx-auto pb-32">
-             {renderOrgContent(mockDadOrg)}
-             {/* Mock Cursor for NORMAL mode */}
-             {mode === "NORMAL" && (
-                <div className="absolute top-[284px] left-[16px] w-2.5 h-[1.2rem] bg-primary animate-pulse mix-blend-difference pointer-events-none" />
-             )}
-             {/* Mock Selection for VISUAL mode */}
-             {mode === "VISUAL" && (
-                <div className="absolute top-[284px] left-[16px] w-64 h-[1.2rem] bg-secondary/40 pointer-events-none" />
-             )}
+          <div className="w-full max-w-4xl mx-auto pb-32" data-testid="editor-rendered">
+            {renderOrgContent(content)}
+            {mode === "NORMAL" && (
+              <div className="absolute top-[284px] left-[16px] w-2.5 h-[1.2rem] bg-primary animate-pulse mix-blend-difference pointer-events-none" />
+            )}
+            {mode === "VISUAL" && (
+              <div className="absolute top-[284px] left-[16px] w-64 h-[1.2rem] bg-secondary/40 pointer-events-none" />
+            )}
           </div>
         ) : (
           <textarea
             ref={textareaRef}
             className="w-full h-full max-w-4xl mx-auto bg-transparent text-foreground outline-none resize-none leading-relaxed pb-32 whitespace-pre-wrap"
-            defaultValue={mockDadOrg}
+            value={localContent}
+            onChange={(e) => setLocalContent(e.target.value)}
             spellCheck={false}
+            data-testid="editor-textarea"
           />
         )}
       </div>

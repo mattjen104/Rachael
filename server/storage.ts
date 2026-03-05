@@ -1,38 +1,112 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import {
+  type OrgFile, type InsertOrgFile, orgFiles,
+  type ClipboardItem, type InsertClipboardItem, clipboardItems,
+  type AgendaItem, type InsertAgendaItem, agendaItems,
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, lte, and, not } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getOrgFiles(): Promise<OrgFile[]>;
+  getOrgFile(id: number): Promise<OrgFile | undefined>;
+  getOrgFileByName(name: string): Promise<OrgFile | undefined>;
+  createOrgFile(file: InsertOrgFile): Promise<OrgFile>;
+  updateOrgFileContent(id: number, content: string): Promise<OrgFile | undefined>;
+
+  getClipboardItems(): Promise<ClipboardItem[]>;
+  createClipboardItem(item: InsertClipboardItem): Promise<ClipboardItem>;
+  deleteClipboardItem(id: number): Promise<void>;
+  archiveClipboardItem(id: number): Promise<void>;
+
+  getAgendaItems(): Promise<AgendaItem[]>;
+  getAgendaItemsByDate(date: string): Promise<AgendaItem[]>;
+  createAgendaItem(item: InsertAgendaItem): Promise<AgendaItem>;
+  updateAgendaItemStatus(id: number, status: string): Promise<AgendaItem | undefined>;
+  carryOverIncompleteTasks(today: string): Promise<AgendaItem[]>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  async getOrgFiles(): Promise<OrgFile[]> {
+    return db.select().from(orgFiles);
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getOrgFile(id: number): Promise<OrgFile | undefined> {
+    const [file] = await db.select().from(orgFiles).where(eq(orgFiles.id, id));
+    return file;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async getOrgFileByName(name: string): Promise<OrgFile | undefined> {
+    const [file] = await db.select().from(orgFiles).where(eq(orgFiles.name, name));
+    return file;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async createOrgFile(file: InsertOrgFile): Promise<OrgFile> {
+    const [created] = await db.insert(orgFiles).values(file).returning();
+    return created;
+  }
+
+  async updateOrgFileContent(id: number, content: string): Promise<OrgFile | undefined> {
+    const [updated] = await db.update(orgFiles).set({ content }).where(eq(orgFiles.id, id)).returning();
+    return updated;
+  }
+
+  async getClipboardItems(): Promise<ClipboardItem[]> {
+    return db.select().from(clipboardItems).where(eq(clipboardItems.archived, false)).orderBy(desc(clipboardItems.capturedAt));
+  }
+
+  async createClipboardItem(item: InsertClipboardItem): Promise<ClipboardItem> {
+    const [created] = await db.insert(clipboardItems).values(item).returning();
+    return created;
+  }
+
+  async deleteClipboardItem(id: number): Promise<void> {
+    await db.delete(clipboardItems).where(eq(clipboardItems.id, id));
+  }
+
+  async archiveClipboardItem(id: number): Promise<void> {
+    await db.update(clipboardItems).set({ archived: true }).where(eq(clipboardItems.id, id));
+  }
+
+  async getAgendaItems(): Promise<AgendaItem[]> {
+    return db.select().from(agendaItems).orderBy(agendaItems.scheduledDate);
+  }
+
+  async getAgendaItemsByDate(date: string): Promise<AgendaItem[]> {
+    return db.select().from(agendaItems).where(eq(agendaItems.scheduledDate, date));
+  }
+
+  async createAgendaItem(item: InsertAgendaItem): Promise<AgendaItem> {
+    const [created] = await db.insert(agendaItems).values(item).returning();
+    return created;
+  }
+
+  async updateAgendaItemStatus(id: number, status: string): Promise<AgendaItem | undefined> {
+    const [updated] = await db.update(agendaItems).set({ status }).where(eq(agendaItems.id, id)).returning();
+    return updated;
+  }
+
+  async carryOverIncompleteTasks(today: string): Promise<AgendaItem[]> {
+    const incomplete = await db
+      .select()
+      .from(agendaItems)
+      .where(
+        and(
+          eq(agendaItems.status, "TODO"),
+          not(eq(agendaItems.scheduledDate, today))
+        )
+      );
+
+    const carried: AgendaItem[] = [];
+    for (const task of incomplete) {
+      const [updated] = await db
+        .update(agendaItems)
+        .set({ scheduledDate: today, carriedOver: true })
+        .where(eq(agendaItems.id, task.id))
+        .returning();
+      carried.push(updated);
+    }
+    return carried;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
