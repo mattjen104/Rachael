@@ -2,9 +2,10 @@ import React from "react";
 
 interface StatusBarProps {
   viewMode: "org" | "agenda" | "roam" | "clipboard";
+  lastCommand?: string | null;
 }
 
-export default function StatusBar({ viewMode }: StatusBarProps) {
+export default function StatusBar({ viewMode, lastCommand }: StatusBarProps) {
   const modeLabels: Record<string, string> = {
     org: "ORG",
     agenda: "AGENDA",
@@ -26,13 +27,19 @@ export default function StatusBar({ viewMode }: StatusBarProps) {
       </div>
 
       <div className="bg-muted text-foreground flex items-center px-4 flex-1 gap-4 phosphor-glow-dim">
-        <span>Y- main</span>
-        <span className="font-bold phosphor-glow">
-          {viewDescriptions[viewMode]}
-        </span>
-        <span className="flex items-center gap-1 ml-auto text-muted-foreground">
-          [✓] Sync OK
-        </span>
+        {lastCommand ? (
+          <span className="phosphor-glow" data-testid="statusbar-echo">{lastCommand}</span>
+        ) : (
+          <>
+            <span>Y- main</span>
+            <span className="font-bold phosphor-glow">
+              {viewDescriptions[viewMode]}
+            </span>
+            <span className="flex items-center gap-1 ml-auto text-muted-foreground">
+              [✓] Sync OK
+            </span>
+          </>
+        )}
       </div>
 
       <div className="bg-card text-muted-foreground flex items-center px-4 gap-4 border-t border-border">

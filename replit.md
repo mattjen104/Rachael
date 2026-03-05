@@ -19,6 +19,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 6. **Inline Quick-Add** - Fast task input at top of Agenda Today view.
 7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device at `/tui`.
 8. **Four-View Architecture** - Workspace has exactly 4 swappable views (Org/Agenda/Roam/Capture) via a narrow icon sidebar. No file-centric navigation — everything is view-centric. All GUI icons replaced with ASCII/Unicode text characters for terminal authenticity.
+9. **Minibuffer (M-x Command Launcher)** - Emacs-authentic minibuffer at screen bottom, activated by `SPC` (Doom leader key) or `Ctrl+K`/`Cmd+K`. Fuzzy-matched completion candidates expand upward from the input line. Built-in commands: view switching, org-capture, theme cycling, carry-over tasks, heading search (prefix `/`). After execution, the StatusBar echo area briefly displays the command result. Designed as the universal interaction paradigm — scales from TUI to desktop. Uses `cmdk` for fuzzy matching.
 
 ## Key Server Components
 
