@@ -110,7 +110,7 @@ export default function Workspace() {
           onCommandExecuted={handleCommandExecuted}
         />
       ) : (
-        <StatusBar viewMode={viewMode} lastCommand={lastCommand} />
+        <StatusBar viewMode={viewMode} lastCommand={lastCommand} onOpenMinibuffer={() => setMinibufferOpen(true)} />
       )}
       <OrgCapture open={captureOpen} onClose={() => setCaptureOpen(false)} defaultFile={defaultCaptureFile} />
     </div>

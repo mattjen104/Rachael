@@ -3,9 +3,10 @@ import React from "react";
 interface StatusBarProps {
   viewMode: "org" | "agenda" | "roam" | "clipboard";
   lastCommand?: string | null;
+  onOpenMinibuffer?: () => void;
 }
 
-export default function StatusBar({ viewMode, lastCommand }: StatusBarProps) {
+export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: StatusBarProps) {
   const modeLabels: Record<string, string> = {
     org: "ORG",
     agenda: "AGENDA",
@@ -42,9 +43,13 @@ export default function StatusBar({ viewMode, lastCommand }: StatusBarProps) {
         )}
       </div>
 
-      <div className="bg-card text-muted-foreground flex items-center px-4 gap-4 border-t border-border">
-        <span>utf-8[unix]</span>
-      </div>
+      <button
+        onClick={onOpenMinibuffer}
+        className="bg-card text-muted-foreground flex items-center px-4 gap-4 border-t border-border cursor-pointer hover:text-foreground hover:phosphor-glow transition-colors"
+        data-testid="statusbar-mx-button"
+      >
+        <span>M-x</span>
+      </button>
     </div>
   );
 }
