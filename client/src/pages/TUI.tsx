@@ -1,37 +1,40 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { ArrowLeft, Smartphone } from "lucide-react";
-import { useAgendaItems, useToggleAgendaStatus, useCarryOverTasks } from "@/hooks/use-org-data";
+import { useOrgAgenda, useToggleOrgStatus } from "@/hooks/use-org-data";
 
 export default function TUI() {
-  const { data: agendaItems = [] } = useAgendaItems();
-  const toggleMutation = useToggleAgendaStatus();
-  const carryOverMutation = useCarryOverTasks();
+  const { data: agenda } = useOrgAgenda();
+  const toggleMutation = useToggleOrgStatus();
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  useEffect(() => {
-    carryOverMutation.mutate();
-  }, []);
+  const displayItems: { type: "header" | "task"; text: string; status?: string; fileName?: string; lineNumber?: number }[] = [];
 
-  const today = new Date().toISOString().split("T")[0];
+  if (agenda) {
+    if (agenda.overdue.length > 0) {
+      for (const day of agenda.overdue) {
+        displayItems.push({ type: "header", text: `${day.label} (carry)` });
+        day.items.forEach(t => {
+          displayItems.push({ type: "task", text: t.title, status: t.status || "TODO", fileName: t.sourceFile, lineNumber: t.lineNumber });
+        });
+      }
+    }
 
-  const displayItems: { id: number | null; type: "header" | "task"; text: string; status?: string; carriedOver?: boolean }[] = [];
+    if (agenda.today.items.length > 0) {
+      displayItems.push({ type: "header", text: `${agenda.today.label}` });
+      agenda.today.items.forEach(t => {
+        displayItems.push({ type: "task", text: t.title, status: t.status || "TODO", fileName: t.sourceFile, lineNumber: t.lineNumber });
+      });
+    }
 
-  const todayTasks = agendaItems.filter(t => t.scheduledDate === today);
-  const futureTasks = agendaItems.filter(t => t.scheduledDate > today);
-
-  if (todayTasks.length > 0) {
-    displayItems.push({ id: null, type: "header", text: `${today} Today` });
-    todayTasks.forEach(t => {
-      displayItems.push({ id: t.id, type: "task", text: `${t.carriedOver ? "[Carried] " : ""}${t.text}`, status: t.status, carriedOver: t.carriedOver });
-    });
-  }
-
-  if (futureTasks.length > 0) {
-    displayItems.push({ id: null, type: "header", text: "Upcoming" });
-    futureTasks.forEach(t => {
-      displayItems.push({ id: t.id, type: "task", text: t.text, status: t.status });
-    });
+    if (agenda.upcoming.length > 0) {
+      displayItems.push({ type: "header", text: "Upcoming" });
+      for (const day of agenda.upcoming) {
+        day.items.forEach(t => {
+          displayItems.push({ type: "task", text: t.title, status: t.status || "TODO", fileName: t.sourceFile, lineNumber: t.lineNumber });
+        });
+      }
+    }
   }
 
   useEffect(() => {
@@ -44,9 +47,8 @@ export default function TUI() {
         setSelectedIndex(prev => Math.max(prev - 1, 0));
       } else if (key === "d" || key === "enter") {
         const item = displayItems[selectedIndex];
-        if (item && item.type === "task" && item.id !== null) {
-          const newStatus = item.status === "DONE" ? "TODO" : "DONE";
-          toggleMutation.mutate({ id: item.id, status: newStatus });
+        if (item && item.type === "task" && item.fileName && item.lineNumber) {
+          toggleMutation.mutate({ fileName: item.fileName, lineNumber: item.lineNumber });
         }
       }
     };

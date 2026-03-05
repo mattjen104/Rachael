@@ -1,5 +1,5 @@
 import React from "react";
-import { FileText, Cloud, Clipboard, ChevronDown, Hash } from "lucide-react";
+import { FileText, Cloud, Clipboard, ChevronDown, Hash, Calendar, Code } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useOrgFiles } from "@/hooks/use-org-data";
@@ -9,9 +9,11 @@ interface SidebarProps {
   onSelectFile: (filename: string) => void;
   toggleClipboard: () => void;
   isClipboardActive: boolean;
+  viewMode: "editor" | "agenda";
+  onSwitchView: (mode: "editor" | "agenda") => void;
 }
 
-export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isClipboardActive }: SidebarProps) {
+export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isClipboardActive, viewMode, onSwitchView }: SidebarProps) {
   const { data: orgFiles = [] } = useOrgFiles();
 
   const icloudStreams = [
@@ -29,6 +31,35 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
         </div>
       </div>
 
+      <div className="flex border-b border-border">
+        <button
+          onClick={() => onSwitchView("editor")}
+          data-testid="view-editor"
+          className={cn(
+            "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors",
+            viewMode === "editor"
+              ? "text-primary border-b-2 border-primary bg-primary/5"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Code className="w-3 h-3" />
+          Editor
+        </button>
+        <button
+          onClick={() => onSwitchView("agenda")}
+          data-testid="view-agenda"
+          className={cn(
+            "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors",
+            viewMode === "agenda"
+              ? "text-org-todo border-b-2 border-[#ECBE7B] bg-[#ECBE7B]/5"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Calendar className="w-3 h-3" />
+          Agenda
+        </button>
+      </div>
+
       <ScrollArea className="flex-1 py-2">
         <div className="px-3 py-1 mt-2 mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
           <div className="flex items-center gap-1">
@@ -44,12 +75,12 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
               data-testid={`sidebar-file-${file.name}`}
               className={cn(
                 "w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-sm text-left transition-colors font-mono",
-                activeFile === file.name
+                activeFile === file.name && viewMode === "editor"
                   ? "bg-primary/10 text-primary"
                   : "text-foreground hover:bg-muted/50"
               )}
             >
-              <FileText className={cn("w-4 h-4", activeFile === file.name ? "text-primary" : "text-muted-foreground")} />
+              <FileText className={cn("w-4 h-4", activeFile === file.name && viewMode === "editor" ? "text-primary" : "text-muted-foreground")} />
               {file.name}
             </button>
           ))}

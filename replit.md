@@ -12,33 +12,46 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 ## Key Features
 
 1. **Org-mode Editor** - Syntax-highlighted viewer/editor for `.org` files with Vim-style modes (NORMAL/INSERT/VISUAL)
-2. **Clipboard Manager** - Captures and persists clipboard items, can append them directly into org files
-3. **iCloud Capture Streams** - Sidebar showing incoming data sources (Camera Roll, Notes, Files)
-4. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device, navigated with WASD keys
-5. **Agenda System** - Task tracking with automatic carryover of incomplete tasks
+2. **Agenda View** - Bullet-journal-style agenda derived by parsing org file content. Filters: Today, Week, All TODOs, Done. Toggles task status directly in the org file content.
+3. **Clipboard Manager** - Captures and persists clipboard items, can append them directly into org files
+4. **iCloud Capture Streams** - Sidebar showing incoming data sources (Camera Roll, Notes, Files)
+5. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device, navigated with WASD keys
+6. **View Switcher** - Editor/Agenda tabs in sidebar to toggle main content area
+
+## Key Server Components
+
+- `server/org-parser.ts` - Parses raw org file content to extract headings, TODO/DONE status, SCHEDULED/DEADLINE dates, tags, and properties. Also provides `buildAgenda()` for grouping items by date (overdue/today/upcoming) and `toggleHeadingStatus()` for in-place status toggling.
 
 ## Data Model (shared/schema.ts)
 
 - `orgFiles` - Org-mode file storage (name, content)
 - `clipboardItems` - Clipboard capture history (content, type, timestamp, archived)
-- `agendaItems` - Task/agenda tracking (text, status, scheduledDate, carriedOver)
+- `agendaItems` - Legacy task/agenda tracking (text, status, scheduledDate, carriedOver)
 
 ## API Routes (server/routes.ts)
 
+### Org Files
 - `GET/POST /api/org-files` - List/create org files
 - `GET /api/org-files/by-name/:name` - Get file by name
 - `PATCH /api/org-files/:id` - Update file content
+
+### Org Queries (parsed from file content)
+- `GET /api/org-query/agenda` - Returns structured agenda (overdue, today, upcoming) parsed from all org files
+- `GET /api/org-query/todos` - Returns all TODO headings across files
+- `GET /api/org-query/done` - Returns all DONE headings across files
+- `POST /api/org-query/toggle` - Toggle TODO/DONE status in org file content by fileName + lineNumber
+
+### Clipboard
 - `GET/POST /api/clipboard` - List/create clipboard items
 - `DELETE /api/clipboard/:id` - Remove clipboard item
 - `POST /api/clipboard/:id/append-to-org` - Append clipboard item to org file
-- `GET/POST /api/agenda` - List/create agenda items
-- `PATCH /api/agenda/:id/status` - Toggle TODO/DONE
-- `POST /api/agenda/carry-over` - Move incomplete past tasks to today
+
+### Other
 - `POST /api/seed` - Seed initial data
 
 ## Pages
 
-- `/` - Main workspace (editor + sidebar + clipboard)
+- `/` - Main workspace (editor/agenda + sidebar + clipboard)
 - `/tui` - LilyGO T-Keyboard terminal simulation
 
 ## Design

@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrgFileSchema, insertClipboardItemSchema, insertAgendaItemSchema } from "@shared/schema";
 import { z } from "zod";
+import { parseOrgFile, buildAgenda, toggleHeadingStatus } from "./org-parser";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -94,7 +95,44 @@ export async function registerRoutes(
     res.json(updated);
   });
 
-  // ── Agenda ─────────────────────────────────────────────────
+  // ── Org Queries (parsed from file content) ──────────────────
+
+  app.get("/api/org-query/agenda", async (_req, res) => {
+    const files = await storage.getOrgFiles();
+    const allHeadings = files.flatMap(f => parseOrgFile(f.content, f.name));
+    const today = new Date().toISOString().split("T")[0];
+    const agenda = buildAgenda(allHeadings, today);
+    res.json(agenda);
+  });
+
+  app.get("/api/org-query/todos", async (_req, res) => {
+    const files = await storage.getOrgFiles();
+    const allHeadings = files.flatMap(f => parseOrgFile(f.content, f.name));
+    const todos = allHeadings.filter(h => h.status === "TODO");
+    res.json(todos);
+  });
+
+  app.get("/api/org-query/done", async (_req, res) => {
+    const files = await storage.getOrgFiles();
+    const allHeadings = files.flatMap(f => parseOrgFile(f.content, f.name));
+    const done = allHeadings.filter(h => h.status === "DONE");
+    res.json(done);
+  });
+
+  app.post("/api/org-query/toggle", async (req, res) => {
+    const { fileName, lineNumber } = req.body;
+    if (!fileName || !lineNumber) {
+      return res.status(400).json({ message: "fileName and lineNumber required" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const { newContent, newStatus } = toggleHeadingStatus(file.content, lineNumber);
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated, newStatus });
+  });
+
+  // ── Agenda (legacy table-based) ────────────────────────────
 
   app.get("/api/agenda", async (_req, res) => {
     const items = await storage.getAgendaItems();

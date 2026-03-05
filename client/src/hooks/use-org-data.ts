@@ -69,6 +69,65 @@ export function useAppendClipboardToOrg() {
   });
 }
 
+export interface OrgHeading {
+  level: number;
+  status: "TODO" | "DONE" | null;
+  title: string;
+  tags: string[];
+  scheduledDate: string | null;
+  deadlineDate: string | null;
+  closedDate: string | null;
+  properties: Record<string, string>;
+  body: string;
+  sourceFile: string;
+  lineNumber: number;
+}
+
+export interface AgendaDay {
+  date: string;
+  label: string;
+  items: OrgHeading[];
+}
+
+export interface AgendaData {
+  overdue: AgendaDay[];
+  today: AgendaDay;
+  upcoming: AgendaDay[];
+}
+
+export function useOrgAgenda() {
+  return useQuery<AgendaData>({
+    queryKey: ["/api/org-query/agenda"],
+  });
+}
+
+export function useOrgTodos() {
+  return useQuery<OrgHeading[]>({
+    queryKey: ["/api/org-query/todos"],
+  });
+}
+
+export function useOrgDone() {
+  return useQuery<OrgHeading[]>({
+    queryKey: ["/api/org-query/done"],
+  });
+}
+
+export function useToggleOrgStatus() {
+  return useMutation({
+    mutationFn: async ({ fileName, lineNumber }: { fileName: string; lineNumber: number }) => {
+      const res = await apiRequest("POST", "/api/org-query/toggle", { fileName, lineNumber });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+    },
+  });
+}
+
 export function useAgendaItems() {
   return useQuery<AgendaItem[]>({
     queryKey: ["/api/agenda"],
