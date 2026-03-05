@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 
 export const PHOSPHOR_PROFILES = {
   amber: {
@@ -9,22 +9,38 @@ export const PHOSPHOR_PROFILES = {
     dim: "#aa5500",
     faint: "#663300",
     glow: "255, 129, 0",
-    bg: "#0c0800",
-    bgPanel: "#0a0600",
-    bgInput: "#100a00",
-    borderColor: "#2a1a00",
-    borderActive: "#ff810044",
-    bloom: 0.6,
-    burnIn: 0.3,
-    staticNoise: 0.1,
-    screenCurvature: 0.2,
-    jitter: 0.2,
-    glowingLine: 0.2,
-    horizontalSync: 0.1,
-    flickering: 0.1,
-    ambientLight: 0.3,
-    chromaColor: 0.2,
-    frameShininess: 0.3,
+    hsl: {
+      bg: "30 80% 3%",
+      card: "30 80% 2%",
+      cardFg: "30 100% 50%",
+      popover: "30 80% 2%",
+      popoverFg: "30 100% 50%",
+      foreground: "30 100% 50%",
+      primary: "39 100% 63%",
+      primaryFg: "30 80% 3%",
+      secondary: "30 100% 45%",
+      secondaryFg: "30 80% 3%",
+      muted: "30 60% 8%",
+      mutedFg: "30 80% 30%",
+      accent: "30 100% 50%",
+      accentFg: "30 80% 3%",
+      destructive: "30 100% 60%",
+      destructiveFg: "30 80% 3%",
+      border: "30 50% 10%",
+      input: "30 50% 8%",
+      ring: "30 100% 50%",
+      orgKeyword: "30 50% 22%",
+      orgDocTitle: "39 100% 63%",
+      orgLevel1: "39 100% 60%",
+      orgLevel2: "30 100% 50%",
+      orgLevel3: "30 90% 42%",
+      orgLevel4: "30 80% 37%",
+      orgTodo: "39 100% 63%",
+      orgDone: "30 70% 30%",
+      orgLink: "30 100% 52%",
+      orgDate: "30 80% 40%",
+      orgCode: "30 90% 42%",
+    },
   },
   green: {
     label: "Mono Green",
@@ -34,22 +50,38 @@ export const PHOSPHOR_PROFILES = {
     dim: "#088844",
     faint: "#044422",
     glow: "12, 204, 104",
-    bg: "#000c04",
-    bgPanel: "#000a03",
-    bgInput: "#001008",
-    borderColor: "#002a10",
-    borderActive: "#0ccc6844",
-    bloom: 0.5,
-    burnIn: 0.3,
-    staticNoise: 0.1,
-    screenCurvature: 0.3,
-    jitter: 0.2,
-    glowingLine: 0.2,
-    horizontalSync: 0.1,
-    flickering: 0.1,
-    ambientLight: 0.3,
-    chromaColor: 0.0,
-    frameShininess: 0.1,
+    hsl: {
+      bg: "149 80% 2%",
+      card: "149 80% 1.5%",
+      cardFg: "149 89% 42%",
+      popover: "149 80% 1.5%",
+      popoverFg: "149 89% 42%",
+      foreground: "149 89% 42%",
+      primary: "145 100% 58%",
+      primaryFg: "149 80% 2%",
+      secondary: "149 89% 38%",
+      secondaryFg: "149 80% 2%",
+      muted: "149 50% 7%",
+      mutedFg: "148 70% 26%",
+      accent: "149 89% 42%",
+      accentFg: "149 80% 2%",
+      destructive: "145 100% 55%",
+      destructiveFg: "149 80% 2%",
+      border: "149 40% 9%",
+      input: "149 40% 7%",
+      ring: "149 89% 42%",
+      orgKeyword: "149 40% 18%",
+      orgDocTitle: "145 100% 58%",
+      orgLevel1: "145 100% 55%",
+      orgLevel2: "149 89% 42%",
+      orgLevel3: "149 80% 35%",
+      orgLevel4: "149 70% 30%",
+      orgTodo: "145 100% 58%",
+      orgDone: "149 60% 26%",
+      orgLink: "149 89% 44%",
+      orgDate: "149 70% 34%",
+      orgCode: "149 80% 35%",
+    },
   },
   blue: {
     label: "Deep Blue",
@@ -59,22 +91,38 @@ export const PHOSPHOR_PROFILES = {
     dim: "#4477aa",
     faint: "#223855",
     glow: "127, 180, 255",
-    bg: "#000410",
-    bgPanel: "#00030c",
-    bgInput: "#000614",
-    borderColor: "#001a3a",
-    borderActive: "#7fb4ff44",
-    bloom: 0.6,
-    burnIn: 0.3,
-    staticNoise: 0.1,
-    screenCurvature: 0.4,
-    jitter: 0.2,
-    glowingLine: 0.2,
-    horizontalSync: 0.1,
-    flickering: 0.1,
-    ambientLight: 0.0,
-    chromaColor: 1.0,
-    frameShininess: 0.9,
+    hsl: {
+      bg: "215 80% 3%",
+      card: "215 80% 2%",
+      cardFg: "215 100% 75%",
+      popover: "215 80% 2%",
+      popoverFg: "215 100% 75%",
+      foreground: "215 100% 75%",
+      primary: "212 100% 80%",
+      primaryFg: "215 80% 3%",
+      secondary: "215 90% 68%",
+      secondaryFg: "215 80% 3%",
+      muted: "210 40% 8%",
+      mutedFg: "210 50% 40%",
+      accent: "215 100% 75%",
+      accentFg: "215 80% 3%",
+      destructive: "212 100% 78%",
+      destructiveFg: "215 80% 3%",
+      border: "210 40% 10%",
+      input: "210 40% 8%",
+      ring: "215 100% 75%",
+      orgKeyword: "210 35% 22%",
+      orgDocTitle: "212 100% 80%",
+      orgLevel1: "212 100% 78%",
+      orgLevel2: "215 100% 75%",
+      orgLevel3: "215 80% 60%",
+      orgLevel4: "215 70% 50%",
+      orgTodo: "212 100% 80%",
+      orgDone: "210 40% 35%",
+      orgLink: "215 100% 76%",
+      orgDate: "215 70% 55%",
+      orgCode: "215 80% 60%",
+    },
   },
 } as const;
 
@@ -117,6 +165,49 @@ export function CrtThemeProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const p = PHOSPHOR_PROFILES[theme];
+    const h = p.hsl;
+
+    root.style.setProperty("--background", h.bg);
+    root.style.setProperty("--foreground", h.foreground);
+    root.style.setProperty("--card", h.card);
+    root.style.setProperty("--card-foreground", h.cardFg);
+    root.style.setProperty("--popover", h.popover);
+    root.style.setProperty("--popover-foreground", h.popoverFg);
+    root.style.setProperty("--primary", h.primary);
+    root.style.setProperty("--primary-foreground", h.primaryFg);
+    root.style.setProperty("--secondary", h.secondary);
+    root.style.setProperty("--secondary-foreground", h.secondaryFg);
+    root.style.setProperty("--muted", h.muted);
+    root.style.setProperty("--muted-foreground", h.mutedFg);
+    root.style.setProperty("--accent", h.accent);
+    root.style.setProperty("--accent-foreground", h.accentFg);
+    root.style.setProperty("--destructive", h.destructive);
+    root.style.setProperty("--destructive-foreground", h.destructiveFg);
+    root.style.setProperty("--border", h.border);
+    root.style.setProperty("--input", h.input);
+    root.style.setProperty("--ring", h.ring);
+
+    root.style.setProperty("--crt-glow", p.glow);
+    root.style.setProperty("--crt-font-color", p.fontColor);
+    root.style.setProperty("--crt-bright", p.bright);
+    root.style.setProperty("--crt-dim", p.dim);
+
+    root.style.setProperty("--org-keyword", h.orgKeyword);
+    root.style.setProperty("--org-document-title", h.orgDocTitle);
+    root.style.setProperty("--org-level-1", h.orgLevel1);
+    root.style.setProperty("--org-level-2", h.orgLevel2);
+    root.style.setProperty("--org-level-3", h.orgLevel3);
+    root.style.setProperty("--org-level-4", h.orgLevel4);
+    root.style.setProperty("--org-todo", h.orgTodo);
+    root.style.setProperty("--org-done", h.orgDone);
+    root.style.setProperty("--org-link", h.orgLink);
+    root.style.setProperty("--org-date", h.orgDate);
+    root.style.setProperty("--org-code", h.orgCode);
+  }, [theme]);
 
   return (
     <Ctx.Provider value={{ theme, t: PHOSPHOR_PROFILES[theme], setTheme: handleSetTheme, cycleTheme }}>

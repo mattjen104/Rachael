@@ -44,8 +44,11 @@ export default function Workspace() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground font-sans">
-      <div className="flex flex-1 overflow-hidden">
+    <div className="crt-overlay flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground font-mono">
+      <div className="crt-noise-overlay" />
+      <div className="crt-glow-bar" />
+
+      <div className="flex flex-1 overflow-hidden relative z-0">
         <Sidebar
           activeFile={activeFile}
           onSelectFile={(name) => { setActiveFile(name); setViewMode("editor"); }}
@@ -55,7 +58,7 @@ export default function Workspace() {
           onSwitchView={setViewMode}
           onOpenCapture={() => setCaptureOpen(true)}
         />
-        <main className="flex-1 flex flex-col relative overflow-hidden bg-[#282c34]">
+        <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
           {viewMode === "editor" ? (
             <Editor file={activeFile} mode={mode} setMode={setMode} />
           ) : (

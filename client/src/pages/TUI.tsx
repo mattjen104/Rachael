@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { ArrowLeft, Smartphone } from "lucide-react";
 import { useOrgAgenda, useToggleOrgStatus } from "@/hooks/use-org-data";
+import { useCrtTheme, type ThemeKey } from "@/lib/crt-theme";
 
 const PHOSPHOR_THEMES = {
   amber: {
@@ -243,7 +244,7 @@ export default function TUI() {
   const { data: agenda } = useOrgAgenda();
   const toggleMutation = useToggleOrgStatus();
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [theme, setTheme] = useState<ThemeKey>("amber");
+  const { theme, setTheme } = useCrtTheme();
 
   const t = PHOSPHOR_THEMES[theme];
 

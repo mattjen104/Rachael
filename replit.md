@@ -65,7 +65,12 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 
 ## Design
 
-- Doom One color palette (dark theme)
-- JetBrains Mono for editor typography
-- Inter for UI text
+- CRT phosphor monochrome theme system (`client/src/lib/crt-theme.tsx`):
+  - Three profiles from cool-retro-term source: Default Amber (#ff8100), Mono Green (#0ccc68), Deep Blue (#7fb4ff)
+  - Each profile defines full HSL color maps for all CSS variables (background, foreground, primary, muted, border, org-syntax colors)
+  - Global CRT effects via CSS: scanlines, vignette, static noise, traveling glow bar, text phosphor bloom, subtle flicker
+  - Theme persists in localStorage, synced between workspace and TUI pages
+  - Toggle button in sidebar header cycles through profiles
+- JetBrains Mono font used site-wide (monospace everywhere for terminal feel)
 - Vim-style status bar with mode indicators
+- Org-mode syntax highlighting uses brightness variations within the single phosphor hue

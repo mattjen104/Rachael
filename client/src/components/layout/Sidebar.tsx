@@ -1,8 +1,9 @@
 import React from "react";
-import { FileText, Cloud, Clipboard, ChevronDown, Hash, Calendar, Code, Plus } from "lucide-react";
+import { FileText, Cloud, Clipboard, ChevronDown, Hash, Calendar, Code, Plus, Monitor } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useOrgFiles } from "@/hooks/use-org-data";
+import { useCrtTheme, PHOSPHOR_PROFILES, type ThemeKey } from "@/lib/crt-theme";
 
 interface SidebarProps {
   activeFile: string;
@@ -16,6 +17,7 @@ interface SidebarProps {
 
 export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isClipboardActive, viewMode, onSwitchView, onOpenCapture }: SidebarProps) {
   const { data: orgFiles = [] } = useOrgFiles();
+  const { theme, cycleTheme, t } = useCrtTheme();
 
   const icloudStreams = [
     { name: "Camera Roll", count: 12 },
@@ -24,12 +26,20 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
   ];
 
   return (
-    <aside className="w-64 border-r border-border bg-[#21242b] flex flex-col h-full flex-shrink-0">
+    <aside className="w-64 border-r border-border bg-card flex flex-col h-full flex-shrink-0">
       <div className="p-3 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-2 font-semibold text-primary">
+        <div className="flex items-center gap-2 font-semibold text-primary phosphor-glow-bright">
           <Hash className="w-4 h-4" />
           <span>OrgCloud Space</span>
         </div>
+        <button
+          onClick={cycleTheme}
+          className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          title={`Theme: ${t.label}`}
+          data-testid="theme-cycle-btn"
+        >
+          <Monitor className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       <div className="flex border-b border-border">
@@ -39,7 +49,7 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
           className={cn(
             "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors",
             viewMode === "editor"
-              ? "text-primary border-b-2 border-primary bg-primary/5"
+              ? "text-primary border-b-2 border-primary bg-primary/5 phosphor-glow"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
@@ -52,7 +62,7 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
           className={cn(
             "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors",
             viewMode === "agenda"
-              ? "text-org-todo border-b-2 border-[#ECBE7B] bg-[#ECBE7B]/5"
+              ? "text-primary border-b-2 border-primary bg-primary/5 phosphor-glow"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
@@ -65,11 +75,11 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
         <button
           onClick={onOpenCapture}
           data-testid="button-capture"
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-sm bg-org-todo/10 text-org-todo hover:bg-org-todo/20 transition-colors text-xs font-bold"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-sm bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-bold phosphor-glow"
         >
           <Plus className="w-3.5 h-3.5" />
           Capture
-          <span className="ml-auto text-[9px] text-org-todo/60 font-mono">c</span>
+          <span className="ml-auto text-[9px] text-primary/60 font-mono">c</span>
         </button>
       </div>
 
@@ -89,7 +99,7 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
               className={cn(
                 "w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-sm text-left transition-colors font-mono",
                 activeFile === file.name && viewMode === "editor"
-                  ? "bg-primary/10 text-primary"
+                  ? "bg-primary/10 text-primary phosphor-glow"
                   : "text-foreground hover:bg-muted/50"
               )}
             >
@@ -110,12 +120,12 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
             className={cn(
               "w-full flex items-center justify-between px-2 py-1.5 rounded-sm text-sm text-left transition-colors font-mono mb-1 group",
               isClipboardActive
-                ? "bg-secondary/10 text-secondary"
+                ? "bg-secondary/10 text-secondary phosphor-glow"
                 : "text-foreground hover:bg-muted/50"
             )}
           >
             <div className="flex items-center gap-2">
-              <Clipboard className={cn("w-4 h-4", isClipboardActive ? "text-secondary" : "text-[#c678dd]")} />
+              <Clipboard className="w-4 h-4" />
               <span>System Clipboard</span>
             </div>
             <span className="text-[10px] bg-secondary/20 text-secondary px-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
@@ -129,7 +139,7 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
               className="w-full flex items-center justify-between px-2 py-1.5 rounded-sm text-sm text-left transition-colors text-foreground hover:bg-muted/50 group"
             >
               <div className="flex items-center gap-2">
-                <Cloud className="w-4 h-4 text-[#51afef]" />
+                <Cloud className="w-4 h-4 text-muted-foreground" />
                 <span>{stream.name}</span>
               </div>
               {stream.count > 0 && (
@@ -152,18 +162,18 @@ export default function Sidebar({ activeFile, onSelectFile, toggleClipboard, isC
             data-testid="link-tui"
           >
             <div className="flex items-center gap-2">
-              <Hash className="w-4 h-4 text-[#98be65]" />
+              <Hash className="w-4 h-4 text-muted-foreground" />
               <span>LilyGO T-Keyboard</span>
             </div>
-            <span className="text-[10px] bg-[#98be65]/20 text-[#98be65] px-1.5 rounded-full">
+            <span className="text-[10px] bg-primary/20 text-primary px-1.5 rounded-full">
               SSH
             </span>
           </a>
         </div>
       </ScrollArea>
 
-      <div className="p-3 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
-        <Cloud className="w-3 h-3 text-[#98be65]" />
+      <div className="p-3 border-t border-border flex items-center gap-2 text-xs text-muted-foreground phosphor-glow-dim">
+        <Cloud className="w-3 h-3" />
         <span>iCloud Sync Active</span>
       </div>
     </aside>

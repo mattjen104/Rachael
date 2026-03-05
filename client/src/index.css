@@ -4,8 +4,8 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   --radius-sm: 0.125rem;
   --radius-md: 0.25rem;
@@ -32,49 +32,64 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
-  /* Org-mode syntax colors based on Doom One */
-  --color-org-keyword: hsl(218 8% 47%);
-  --color-org-document-title: hsl(204 82% 63%);
-  --color-org-level-1: hsl(204 82% 63%);
-  --color-org-level-2: hsl(286 60% 67%);
-  --color-org-level-3: hsl(85 39% 57%);
-  --color-org-level-4: hsl(35 84% 62%);
-  --color-org-todo: hsl(35 84% 62%);
-  --color-org-done: hsl(85 39% 57%);
-  --color-org-link: hsl(204 82% 63%);
-  --color-org-date: hsl(286 60% 67%);
-  --color-org-code: hsl(85 39% 57%);
+  --color-org-keyword: hsl(var(--org-keyword));
+  --color-org-document-title: hsl(var(--org-document-title));
+  --color-org-level-1: hsl(var(--org-level-1));
+  --color-org-level-2: hsl(var(--org-level-2));
+  --color-org-level-3: hsl(var(--org-level-3));
+  --color-org-level-4: hsl(var(--org-level-4));
+  --color-org-todo: hsl(var(--org-todo));
+  --color-org-done: hsl(var(--org-done));
+  --color-org-link: hsl(var(--org-link));
+  --color-org-date: hsl(var(--org-date));
+  --color-org-code: hsl(var(--org-code));
 }
 
 :root {
-  /* Default to dark mode (Doom One inspired) */
-  --background: 220 13% 18%; /* #282c34 */
-  --foreground: 219 22% 77%; /* #bbc2cf */
-  
-  --card: 223 13% 15%; /* #21242b */
-  --card-foreground: 219 22% 77%;
-  
-  --popover: 223 13% 15%;
-  --popover-foreground: 219 22% 77%;
-  
-  --primary: 204 82% 63%; /* #51afef */
-  --primary-foreground: 220 13% 18%;
-  
-  --secondary: 286 60% 67%; /* #c678dd */
-  --secondary-foreground: 220 13% 18%;
-  
-  --muted: 218 8% 27%; /* #3f444a */
-  --muted-foreground: 218 8% 47%; /* #5B6268 */
-  
-  --accent: 85 39% 57%; /* #98be65 */
-  --accent-foreground: 220 13% 18%;
-  
-  --destructive: 359 100% 71%; /* #ff6c6b */
-  --destructive-foreground: 220 13% 18%;
+  --background: 30 80% 3%;
+  --foreground: 30 100% 50%;
 
-  --border: 218 8% 27%;
-  --input: 218 8% 27%;
-  --ring: 204 82% 63%;
+  --card: 30 80% 2%;
+  --card-foreground: 30 100% 50%;
+
+  --popover: 30 80% 2%;
+  --popover-foreground: 30 100% 50%;
+
+  --primary: 39 100% 63%;
+  --primary-foreground: 30 80% 3%;
+
+  --secondary: 30 100% 45%;
+  --secondary-foreground: 30 80% 3%;
+
+  --muted: 30 60% 8%;
+  --muted-foreground: 30 80% 30%;
+
+  --accent: 30 100% 50%;
+  --accent-foreground: 30 80% 3%;
+
+  --destructive: 30 100% 60%;
+  --destructive-foreground: 30 80% 3%;
+
+  --border: 30 50% 10%;
+  --input: 30 50% 8%;
+  --ring: 30 100% 50%;
+
+  --crt-glow: 255, 129, 0;
+  --crt-font-color: #ff8100;
+  --crt-bright: #ffc940;
+  --crt-dim: #aa5500;
+
+  --org-keyword: 30 50% 22%;
+  --org-document-title: 39 100% 63%;
+  --org-level-1: 39 100% 60%;
+  --org-level-2: 30 100% 50%;
+  --org-level-3: 30 90% 42%;
+  --org-level-4: 30 80% 37%;
+  --org-todo: 39 100% 63%;
+  --org-done: 30 70% 30%;
+  --org-link: 30 100% 52%;
+  --org-date: 30 80% 40%;
+  --org-code: 30 90% 42%;
 }
 
 @layer base {
@@ -82,22 +97,126 @@
     @apply border-border;
   }
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    @apply font-mono antialiased bg-background text-foreground;
   }
-  
-  /* Scrollbar styling for that IDE feel */
+
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
-    background: hsl(var(--background)); 
+    background: hsl(var(--background));
   }
   ::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted)); 
-    border-radius: 5px;
+    background: hsl(var(--muted));
+    border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground)); 
+    background: hsl(var(--muted-foreground));
   }
+}
+
+@keyframes crt-scanline-scroll {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes crt-noise-drift {
+  0% { background-position: 0 0; }
+  100% { background-position: 100px 50px; }
+}
+
+@keyframes crt-flicker-global {
+  0%   { opacity: 0.97; }
+  5%   { opacity: 1; }
+  10%  { opacity: 0.98; }
+  50%  { opacity: 1; }
+  80%  { opacity: 0.985; }
+  100% { opacity: 0.975; }
+}
+
+@keyframes crt-glowbar-anim {
+  0% { top: -4px; }
+  100% { top: 100%; }
+}
+
+.crt-overlay {
+  position: relative;
+  animation: crt-flicker-global 8s infinite;
+}
+
+.crt-overlay::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.04) 1px,
+    rgba(0, 0, 0, 0.04) 2px
+  );
+  pointer-events: none;
+  z-index: 9998;
+}
+
+.crt-overlay::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 75%,
+    rgba(0, 0, 0, 0.15) 100%
+  );
+  pointer-events: none;
+  z-index: 9997;
+}
+
+.crt-noise-overlay {
+  position: fixed;
+  inset: 0;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 80px 80px;
+  animation: crt-noise-drift 0.3s steps(4) infinite;
+  pointer-events: none;
+  z-index: 9996;
+  mix-blend-mode: overlay;
+}
+
+.crt-glow-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(var(--crt-glow), 0.03),
+    transparent
+  );
+  animation: crt-glowbar-anim 6s linear infinite;
+  pointer-events: none;
+  z-index: 9995;
+}
+
+.phosphor-glow {
+  text-shadow: 0 0 4px rgba(var(--crt-glow), 0.3),
+               0 0 8px rgba(var(--crt-glow), 0.15);
+}
+
+.phosphor-glow-bright {
+  text-shadow: 0 0 6px rgba(var(--crt-glow), 0.5),
+               0 0 12px rgba(var(--crt-glow), 0.25),
+               0 0 2px var(--crt-bright);
+}
+
+.phosphor-glow-dim {
+  text-shadow: 0 0 3px rgba(var(--crt-glow), 0.2);
+}
+
+.crt-border-glow {
+  box-shadow: 0 0 6px rgba(var(--crt-glow), 0.05),
+              inset 0 0 4px rgba(var(--crt-glow), 0.02);
 }

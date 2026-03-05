@@ -48,15 +48,6 @@ function getTypeIcon(type: string) {
   }
 }
 
-function getTypeBadgeColor(type: string) {
-  switch (type) {
-    case "url": return "text-[#51afef] bg-[#51afef]/10";
-    case "gif": case "image": return "text-[#c678dd] bg-[#c678dd]/10";
-    case "code": return "text-[#98be65] bg-[#98be65]/10";
-    default: return "text-muted-foreground bg-muted/30";
-  }
-}
-
 interface BacklinkDropdownProps {
   query: string;
   onSelect: (link: string) => void;
@@ -84,13 +75,13 @@ function BacklinkDropdown({ query, onSelect, onClose, visible, selectedIdx, onSe
   if (!visible || headings.length === 0) return null;
 
   return (
-    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-[#1c1f24] border border-border rounded-sm shadow-xl z-50 max-h-40 overflow-y-auto" data-testid="backlink-dropdown">
+    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-card border border-border rounded-sm shadow-xl z-50 max-h-40 overflow-y-auto crt-border-glow" data-testid="backlink-dropdown">
       {headings.map((h, i) => (
         <button
           key={`${h.sourceFile}-${h.lineNumber}`}
           className={cn(
             "w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors",
-            i === selectedIdx ? "bg-primary/20 text-primary" : "text-[#bbc2cf] hover:bg-[#282c34]"
+            i === selectedIdx ? "bg-primary/20 text-primary phosphor-glow" : "text-foreground hover:bg-muted"
           )}
           onClick={() => onSelect(`[[file:${h.sourceFile}::*${h.title}]]`)}
           onMouseEnter={() => onSelectedIdxChange(i)}
@@ -274,7 +265,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             toast({
               title: `${label} captured`,
               description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
-              className: "bg-[#21242b] border-[#98be65] text-[#bbc2cf]",
+              className: "bg-card border-secondary text-foreground",
             });
             setTimeout(() => setShowSuccess(false), 1500);
           },
@@ -283,7 +274,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             toast({
               title: "Capture failed",
               description: "Could not process the entry.",
-              className: "bg-[#21242b] border-destructive text-[#bbc2cf]",
+              className: "bg-card border-destructive text-foreground",
             });
           },
         }
@@ -298,7 +289,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
 
   if (showSuccess) {
     return (
-      <div className="flex items-center gap-2 bg-[#98be65]/10 border border-[#98be65]/30 rounded-sm p-2.5 text-[#98be65] text-xs animate-in fade-in">
+      <div className="flex items-center gap-2 bg-secondary/10 border border-secondary/30 rounded-sm p-2.5 text-secondary text-xs animate-in fade-in phosphor-glow">
         <CheckCircle2 className="w-4 h-4" />
         Captured to {activeOrgFile}
       </div>
@@ -314,21 +305,21 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
       className={cn(
         "group flex flex-col border rounded-sm transition-colors",
         editing
-          ? "bg-[#1c1f24] border-[#ECBE7B]/50"
-          : "bg-[#282c34] border-border hover:border-secondary/50"
+          ? "bg-muted border-primary/50"
+          : "bg-background border-border hover:border-secondary/50"
       )}
       data-testid={`clipboard-item-${item.id}`}
     >
       <div className="flex justify-between items-center px-2 pt-1.5 pb-0.5">
         <div className="flex items-center gap-1.5">
-          <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase", getTypeBadgeColor(displayType))}>
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase text-muted-foreground bg-muted/30">
             {getTypeIcon(displayType)}
             {displayType}
           </span>
           {syntax.label && (
             <span className={cn(
               "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
-              syntax.hasTask ? "text-[#ECBE7B] bg-[#ECBE7B]/15" : "text-muted-foreground bg-muted/30"
+              syntax.hasTask ? "text-primary bg-primary/15 phosphor-glow" : "text-muted-foreground bg-muted/30"
             )}>
               {syntax.hasTask && <Calendar className="w-2.5 h-2.5" />}
               {!syntax.hasTask && syntax.nestingLevel > 0 && <ChevronRight className="w-2.5 h-2.5" />}
@@ -343,7 +334,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
           {!editing && (
             <button
               onClick={handleStartEdit}
-              className="p-1 hover:bg-[#ECBE7B]/20 hover:text-[#ECBE7B] rounded text-muted-foreground transition-colors"
+              className="p-1 hover:bg-primary/20 hover:text-primary rounded text-muted-foreground transition-colors"
               title="Edit"
               data-testid={`edit-btn-${item.id}`}
             >
@@ -369,13 +360,13 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             onSubmit={handleSubmit}
             onCancel={handleCancel}
             autoFocus
-            className="w-full bg-[#282c34] text-[#bbc2cf] text-xs p-2 rounded-sm border border-border outline-none focus:border-[#ECBE7B] transition-colors font-mono"
+            className="w-full bg-background text-foreground text-xs p-2 rounded-sm border border-border outline-none focus:border-primary transition-colors font-mono phosphor-glow"
             testId={`edit-input-${item.id}`}
           />
           <div className="flex items-center justify-between mt-1.5">
             <span className="text-[9px] text-muted-foreground">
               {syntax.hasTask || syntax.nestingLevel > 0 ? (
-                <span className="font-bold text-[#ECBE7B]">
+                <span className="font-bold text-primary phosphor-glow">
                   Enter → send to {activeOrgFile}
                 </span>
               ) : (
@@ -387,7 +378,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
       ) : (
         <div className="px-2 pb-2 pt-0.5 cursor-pointer" onClick={handleStartEdit}>
           {item.urlTitle && (
-            <div className="text-[10px] text-[#51afef] font-semibold mb-0.5 truncate" data-testid={`url-title-${item.id}`}>
+            <div className="text-[10px] text-primary font-semibold mb-0.5 truncate phosphor-glow" data-testid={`url-title-${item.id}`}>
               {item.urlTitle}
             </div>
           )}
@@ -395,9 +386,9 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             <div className="text-[9px] text-muted-foreground mb-0.5">{item.urlDomain}</div>
           )}
           <div className={cn(
-            "text-xs line-clamp-3",
-            displayType === "code" ? "text-[#98be65] font-mono" : "text-[#bbc2cf]",
-            displayType === "url" || displayType === "gif" || displayType === "image" ? "text-[#51afef] underline underline-offset-2" : ""
+            "text-xs line-clamp-3 phosphor-glow-dim",
+            displayType === "code" ? "text-secondary font-mono" : "text-foreground",
+            displayType === "url" || displayType === "gif" || displayType === "image" ? "text-primary underline underline-offset-2" : ""
           )}>
             {item.content}
           </div>
@@ -471,7 +462,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
             toast({
               title: `${label} captured`,
               description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
-              className: "bg-[#21242b] border-[#98be65] text-[#bbc2cf]",
+              className: "bg-card border-secondary text-foreground",
             });
             setNewContent("");
           },
@@ -479,7 +470,7 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
             toast({
               title: "Capture failed",
               description: "Could not process the entry.",
-              className: "bg-[#21242b] border-destructive text-[#bbc2cf]",
+              className: "bg-card border-destructive text-foreground",
             });
           },
         }
@@ -515,9 +506,9 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#21242b] border-l border-border w-80 flex-shrink-0 font-mono z-20">
-      <div className="p-3 border-b border-border flex items-center justify-between bg-[#1c1f24]">
-        <div className="flex items-center gap-2 font-semibold text-secondary">
+    <div className="flex flex-col h-full bg-card border-l border-border w-80 flex-shrink-0 font-mono z-20">
+      <div className="p-3 border-b border-border flex items-center justify-between bg-card">
+        <div className="flex items-center gap-2 font-semibold text-secondary phosphor-glow">
           <ClipboardList className="w-4 h-4" />
           <span className="text-sm">Clipboard</span>
         </div>
@@ -534,13 +525,13 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
           }}
           placeholder="t todo · > nest · [[ link"
           className={cn(
-            "w-full bg-[#282c34] text-[#bbc2cf] text-xs p-2 rounded-sm border outline-none transition-colors",
-            showCaptureHint ? "border-[#ECBE7B] focus:border-[#ECBE7B]" : "border-border focus:border-secondary"
+            "w-full bg-background text-foreground text-xs p-2 rounded-sm border outline-none transition-colors phosphor-glow",
+            showCaptureHint ? "border-primary focus:border-primary" : "border-border focus:border-secondary"
           )}
           testId="clipboard-input"
         />
         {showCaptureHint && (
-          <div className="mt-1 text-[9px] text-[#ECBE7B] font-bold">
+          <div className="mt-1 text-[9px] text-primary font-bold phosphor-glow">
             {syntax.label} → {activeOrgFile}
           </div>
         )}
@@ -549,9 +540,9 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
       <ScrollArea className="flex-1 p-2">
         <div className="space-y-2">
           {isLoading ? (
-            <div className="text-center p-4 text-muted-foreground text-xs italic">Loading...</div>
+            <div className="text-center p-4 text-muted-foreground text-xs italic phosphor-glow-dim">Loading...</div>
           ) : items.length === 0 ? (
-            <div className="text-center p-4 text-muted-foreground text-xs italic">
+            <div className="text-center p-4 text-muted-foreground text-xs italic phosphor-glow-dim">
               Clipboard is empty. Type above to capture.
             </div>
           ) : (

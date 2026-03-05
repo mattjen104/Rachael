@@ -60,11 +60,11 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
       <div
-        className="relative bg-[#21242b] border border-border rounded-md shadow-2xl w-full max-w-lg font-mono"
+        className="relative bg-card border border-border rounded-md shadow-2xl w-full max-w-lg font-mono crt-border-glow"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-          <div className="flex items-center gap-2 text-org-todo font-bold text-sm">
+          <div className="flex items-center gap-2 text-primary font-bold text-sm phosphor-glow">
             <Plus className="w-4 h-4" />
             Org Capture
           </div>
@@ -82,7 +82,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to be done?"
-              className="w-full bg-[#282c34] text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-org-todo transition-colors"
+              className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors phosphor-glow"
               data-testid="capture-title"
             />
           </div>
@@ -93,7 +93,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               <select
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                className="w-full bg-[#282c34] text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
                 data-testid="capture-file"
               >
                 {orgFiles.map((f) => (
@@ -107,7 +107,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
                 type="date"
                 value={scheduledDate}
                 onChange={(e) => setScheduledDate(e.target.value)}
-                className="w-full bg-[#282c34] text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
                 data-testid="capture-date"
               />
             </div>
@@ -120,7 +120,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               value={tagsInput}
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="e.g. work, urgent"
-              className="w-full bg-[#282c34] text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
+              className="w-full bg-background text-foreground text-sm p-2.5 rounded-sm border border-border outline-none focus:border-primary transition-colors"
               data-testid="capture-tags"
             />
           </div>
@@ -135,7 +135,7 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               className={cn(
                 "px-4 py-1.5 rounded-sm text-sm font-bold transition-colors",
                 title.trim()
-                  ? "bg-org-todo text-[#282c34] hover:brightness-110"
+                  ? "bg-primary text-primary-foreground hover:brightness-110 phosphor-glow-bright"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
               data-testid="capture-submit"
