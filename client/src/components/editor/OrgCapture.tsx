@@ -63,36 +63,36 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-          <div className="flex items-center gap-2 text-primary font-bold text-sm phosphor-glow">
+          <div className="flex items-center gap-2 text-primary font-bold phosphor-glow">
             <span>[+]</span>
             Org Capture
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors text-xs font-mono">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors font-mono">
             [×]
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-3">
           <div>
-            <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">Task</label>
+            <label className="text-muted-foreground uppercase tracking-wider block mb-1">Task</label>
             <input
               ref={inputRef}
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to be done?"
-              className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors phosphor-glow"
+              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors phosphor-glow"
               data-testid="capture-title"
             />
           </div>
 
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">File</label>
+              <label className="text-muted-foreground uppercase tracking-wider block mb-1">File</label>
               <select
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors"
                 data-testid="capture-file"
               >
                 {orgFiles.map((f) => (
@@ -101,38 +101,38 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
               </select>
             </div>
             <div className="flex-1">
-              <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">Scheduled</label>
+              <label className="text-muted-foreground uppercase tracking-wider block mb-1">Scheduled</label>
               <input
                 type="date"
                 value={scheduledDate}
                 onChange={(e) => setScheduledDate(e.target.value)}
-                className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors"
                 data-testid="capture-date"
               />
             </div>
           </div>
 
           <div>
-            <label className="text-[10px] text-muted-foreground uppercase tracking-wider block mb-1">Tags (comma separated)</label>
+            <label className="text-muted-foreground uppercase tracking-wider block mb-1">Tags (comma separated)</label>
             <input
               type="text"
               value={tagsInput}
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="e.g. work, urgent"
-              className="w-full bg-background text-foreground text-sm p-2.5 border border-border outline-none focus:border-primary transition-colors"
+              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors"
               data-testid="capture-tags"
             />
           </div>
 
           <div className="flex items-center justify-between pt-2">
-            <span className="text-[10px] text-muted-foreground">
-              Press <kbd className="bg-muted px-1 py-0.5 text-[9px] mx-0.5">Esc</kbd> to cancel
+            <span className="text-muted-foreground">
+              Press <kbd className="bg-muted px-1 py-0.5 mx-0.5">Esc</kbd> to cancel
             </span>
             <button
               type="submit"
               disabled={!title.trim() || captureMutation.isPending}
               className={cn(
-                "px-4 py-1.5 text-sm font-bold transition-colors",
+                "px-4 py-1 font-bold transition-colors",
                 title.trim()
                   ? "bg-primary text-primary-foreground hover:brightness-110 phosphor-glow-bright"
                   : "bg-muted text-muted-foreground cursor-not-allowed"

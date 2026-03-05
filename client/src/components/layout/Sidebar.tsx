@@ -19,10 +19,10 @@ export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
 
   return (
     <aside className="w-14 border-r border-border bg-card flex flex-col h-full flex-shrink-0 items-center">
-      <div className="py-3 border-b border-border w-full flex items-center justify-center">
+      <div className="py-2 border-b border-border w-full flex items-center justify-center">
         <button
           onClick={cycleTheme}
-          className="text-primary phosphor-glow-bright font-bold text-sm"
+          className="text-primary phosphor-glow-bright font-bold"
           title={`Theme: ${t.label}`}
           data-testid="theme-cycle-btn"
         >
@@ -30,7 +30,7 @@ export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
         </button>
       </div>
 
-      <div className="flex-1 flex flex-col items-center py-3 gap-1 w-full">
+      <div className="flex-1 flex flex-col items-center py-2 gap-0.5 w-full">
         {views.map((v) => (
           <button
             key={v.key}
@@ -44,14 +44,13 @@ export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
             )}
             title={v.label}
           >
-            <span className="text-[10px] font-bold">{v.icon}</span>
-            <span className="text-[8px] uppercase tracking-wider mt-0.5 font-semibold">{v.label}</span>
+            <span className="font-bold">{v.icon}</span>
           </button>
         ))}
       </div>
 
-      <div className="py-3 border-t border-border w-full flex items-center justify-center">
-        <span className="text-[8px] text-muted-foreground phosphor-glow-dim" title="iCloud Sync Active">☁</span>
+      <div className="py-2 border-t border-border w-full flex items-center justify-center">
+        <span className="text-muted-foreground phosphor-glow-dim" title="iCloud Sync Active">☁</span>
       </div>
     </aside>
   );

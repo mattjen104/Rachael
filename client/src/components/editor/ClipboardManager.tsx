@@ -79,16 +79,16 @@ function BacklinkDropdown({ query, onSelect, onClose, visible, selectedIdx, onSe
         <button
           key={`${h.sourceFile}-${h.lineNumber}`}
           className={cn(
-            "w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors",
+            "w-full text-left px-3 py-1 flex items-center gap-2 transition-colors",
             i === selectedIdx ? "bg-primary/20 text-primary phosphor-glow" : "text-foreground hover:bg-muted"
           )}
           onClick={() => onSelect(`[[file:${h.sourceFile}::*${h.title}]]`)}
           onMouseEnter={() => onSelectedIdxChange(i)}
           data-testid={`backlink-option-${i}`}
         >
-          <span className="text-muted-foreground text-[9px]">{"*".repeat(h.level)}</span>
+          <span className="text-muted-foreground">{"*".repeat(h.level)}</span>
           <span className="flex-1 truncate">{h.title}</span>
-          <span className="text-[9px] text-muted-foreground">{h.sourceFile}</span>
+          <span className="text-muted-foreground">{h.sourceFile}</span>
         </button>
       ))}
     </div>
@@ -288,7 +288,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
 
   if (showSuccess) {
     return (
-      <div className="flex items-center gap-2 bg-secondary/10 border border-secondary/30 p-2.5 text-secondary text-xs animate-in fade-in phosphor-glow">
+      <div className="flex items-center gap-2 bg-secondary/10 border border-secondary/30 p-2 text-secondary animate-in fade-in phosphor-glow">
         <span>[✓]</span>
         Captured to {activeOrgFile}
       </div>
@@ -309,15 +309,15 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
       )}
       data-testid={`clipboard-item-${item.id}`}
     >
-      <div className="flex justify-between items-center px-2 pt-1.5 pb-0.5">
+      <div className="flex justify-between items-center px-2 pt-1 pb-0.5">
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted-foreground bg-muted/30">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-bold uppercase text-muted-foreground bg-muted/30">
             <span>{getTypeLabel(displayType)}</span>
             {displayType}
           </span>
           {syntax.label && (
             <span className={cn(
-              "inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold uppercase",
+              "inline-flex items-center gap-1 px-1.5 py-0.5 font-bold uppercase",
               syntax.hasTask ? "text-primary bg-primary/15 phosphor-glow" : "text-muted-foreground bg-muted/30"
             )}>
               {syntax.hasTask && <span>[#]</span>}
@@ -325,7 +325,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
               {syntax.label}
             </span>
           )}
-          <span className="text-[9px] text-muted-foreground">
+          <span className="text-muted-foreground">
             {formatTime(item.capturedAt)}
           </span>
         </div>
@@ -333,7 +333,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
           {!editing && (
             <button
               onClick={handleStartEdit}
-              className="p-1 hover:bg-primary/20 hover:text-primary text-muted-foreground transition-colors text-xs"
+              className="p-1 hover:bg-primary/20 hover:text-primary text-muted-foreground transition-colors"
               title="Edit"
               data-testid={`edit-btn-${item.id}`}
             >
@@ -342,7 +342,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
           )}
           <button
             onClick={() => onDelete(item.id)}
-            className="p-1 hover:bg-destructive/20 hover:text-destructive text-muted-foreground transition-colors text-xs"
+            className="p-1 hover:bg-destructive/20 hover:text-destructive text-muted-foreground transition-colors"
             title="Remove"
             data-testid={`delete-btn-${item.id}`}
           >
@@ -359,11 +359,11 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             onSubmit={handleSubmit}
             onCancel={handleCancel}
             autoFocus
-            className="w-full bg-background text-foreground text-xs p-2 border border-border outline-none focus:border-primary transition-colors font-mono phosphor-glow"
+            className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-primary transition-colors font-mono phosphor-glow"
             testId={`edit-input-${item.id}`}
           />
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[9px] text-muted-foreground">
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-muted-foreground">
               {syntax.hasTask || syntax.nestingLevel > 0 ? (
                 <span className="font-bold text-primary phosphor-glow">
                   Enter → send to {activeOrgFile}
@@ -377,28 +377,28 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
       ) : (
         <div className="px-2 pb-2 pt-0.5 cursor-pointer" onClick={handleStartEdit}>
           {item.urlTitle && (
-            <div className="text-[10px] text-primary font-semibold mb-0.5 truncate phosphor-glow" data-testid={`url-title-${item.id}`}>
+            <div className="text-primary font-semibold mb-0.5 truncate phosphor-glow" data-testid={`url-title-${item.id}`}>
               {item.urlTitle}
             </div>
           )}
           {item.urlDomain && (
-            <div className="text-[9px] text-muted-foreground mb-0.5">{item.urlDomain}</div>
+            <div className="text-muted-foreground mb-0.5">{item.urlDomain}</div>
           )}
           <div className={cn(
-            "text-xs line-clamp-3 phosphor-glow-dim",
+            "line-clamp-3 phosphor-glow-dim",
             displayType === "code" ? "text-secondary font-mono" : "text-foreground",
             displayType === "url" || displayType === "gif" || displayType === "image" ? "text-primary underline underline-offset-2" : ""
           )}>
             {item.content}
           </div>
           {item.urlDescription && (
-            <div className="text-[9px] text-muted-foreground mt-1 line-clamp-2">{item.urlDescription}</div>
+            <div className="text-muted-foreground mt-1 line-clamp-2">{item.urlDescription}</div>
           )}
           {(displayType === "gif" || displayType === "image") && item.urlImage && (
             <img
               src={item.urlImage}
               alt="Preview"
-              className="mt-1.5 max-h-24 object-cover border border-border"
+              className="mt-1 max-h-24 object-cover border border-border"
               data-testid={`preview-img-${item.id}`}
             />
           )}
@@ -406,7 +406,7 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
             <img
               src={item.content.trim()}
               alt="Preview"
-              className="mt-1.5 max-h-24 object-cover border border-border"
+              className="mt-1 max-h-24 object-cover border border-border"
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               data-testid={`preview-img-${item.id}`}
             />
@@ -510,9 +510,9 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
       <div className="p-4 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2 font-semibold text-secondary phosphor-glow">
           <span>⎘</span>
-          <span className="text-sm">Clipboard</span>
+          <span>Clipboard</span>
         </div>
-        <span className="text-xs text-muted-foreground">[{items.length}]</span>
+        <span className="text-muted-foreground">[{items.length}]</span>
       </div>
 
       <div className="p-2 border-b border-border">
@@ -525,13 +525,13 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
           }}
           placeholder="t todo · > nest · [[ link"
           className={cn(
-            "w-full bg-background text-foreground text-xs p-2 border outline-none transition-colors phosphor-glow",
+            "w-full bg-background text-foreground p-2 border outline-none transition-colors phosphor-glow",
             showCaptureHint ? "border-primary focus:border-primary" : "border-border focus:border-secondary"
           )}
           testId="clipboard-input"
         />
         {showCaptureHint && (
-          <div className="mt-1 text-[9px] text-primary font-bold phosphor-glow">
+          <div className="mt-1 text-primary font-bold phosphor-glow">
             {syntax.label} → {activeOrgFile}
           </div>
         )}
@@ -540,9 +540,9 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
       <ScrollArea className="flex-1 p-2">
         <div className="space-y-2">
           {isLoading ? (
-            <div className="text-center p-4 text-muted-foreground text-xs italic phosphor-glow-dim">Loading...</div>
+            <div className="text-center p-4 text-muted-foreground italic phosphor-glow-dim">Loading...</div>
           ) : items.length === 0 ? (
-            <div className="text-center p-4 text-muted-foreground text-xs italic phosphor-glow-dim">
+            <div className="text-center p-4 text-muted-foreground italic phosphor-glow-dim">
               Clipboard is empty. Type above to capture.
             </div>
           ) : (

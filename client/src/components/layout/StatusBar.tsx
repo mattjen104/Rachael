@@ -20,7 +20,7 @@ export default function StatusBar({ viewMode }: StatusBarProps) {
   };
 
   return (
-    <div className="h-6 flex w-full text-xs font-mono select-none z-50 flex-shrink-0">
+    <div className="h-6 flex w-full font-mono select-none z-50 flex-shrink-0">
       <div className="flex items-center justify-center font-bold px-4 uppercase transition-colors phosphor-glow-bright bg-primary text-primary-foreground">
         {modeLabels[viewMode]}
       </div>

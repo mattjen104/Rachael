@@ -98,6 +98,13 @@
   }
   body {
     @apply font-mono antialiased bg-background text-foreground;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  * {
+    font-size: inherit;
+    line-height: inherit;
   }
 
   ::-webkit-scrollbar {

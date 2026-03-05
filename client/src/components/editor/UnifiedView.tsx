@@ -36,7 +36,7 @@ export default function OrgBufferView() {
     .join("\n\n");
 
   return (
-    <div className="flex-1 w-full h-full flex flex-col font-mono text-sm bg-background" data-testid="org-buffer-view">
+    <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="org-buffer-view">
       <ScrollArea className="flex-1">
         <div className="max-w-4xl mx-auto p-4 pb-32">
           {renderOrgContent(combinedContent, "org-")}

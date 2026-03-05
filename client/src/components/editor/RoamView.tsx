@@ -49,7 +49,7 @@ export default function RoamView() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground font-mono phosphor-glow-dim gap-2">
         <div>No linked nodes found.</div>
-        <div className="text-[10px]">Add [[links]] between headings to build the graph.</div>
+        <div>Add [[links]] between headings to build the graph.</div>
       </div>
     );
   }
@@ -59,11 +59,11 @@ export default function RoamView() {
   };
 
   return (
-    <div className="flex-1 w-full h-full flex flex-col font-mono text-sm bg-background" data-testid="roam-view">
-      <div className="flex items-center border-b border-border bg-card px-4 py-2 gap-2">
+    <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="roam-view">
+      <div className="flex items-center border-b border-border bg-card px-4 py-1 gap-2">
         <span className="text-primary">{"{*}"}</span>
         <span className="text-primary font-bold phosphor-glow">Roam</span>
-        <span className="text-muted-foreground text-xs ml-2">[{nodes.length} nodes]</span>
+        <span className="text-muted-foreground ml-2">[{nodes.length} nodes]</span>
       </div>
 
       <ScrollArea className="flex-1">
@@ -79,11 +79,11 @@ export default function RoamView() {
                 <button
                   onClick={() => toggleNode(nodeKey)}
                   className={cn(
-                    "w-full text-left flex items-start gap-2 py-1.5 px-2 hover:bg-muted/20 transition-colors",
+                    "w-full text-left flex items-start gap-2 py-1 px-2 hover:bg-muted/20 transition-colors",
                     isExpanded && "bg-muted/10"
                   )}
                 >
-                  <span className="text-muted-foreground text-xs mt-0.5 w-4 flex-shrink-0">
+                  <span className="text-muted-foreground w-4 flex-shrink-0">
                     {isExpanded ? "▾" : "▸"}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -97,20 +97,20 @@ export default function RoamView() {
                         {node.title}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground">§ {node.sourceFile}:{node.lineNumber}</span>
+                    <div className="flex items-center gap-2 mt-0.5 text-muted-foreground">
+                      <span>§ {node.sourceFile}:{node.lineNumber}</span>
                       {node.tags.length > 0 && (
-                        <span className="text-[10px] text-org-date">
+                        <span className="text-org-date">
                           :{node.tags.join(":")}:
                         </span>
                       )}
                       {hasBacklinks && (
-                        <span className="text-[10px] text-secondary phosphor-glow-dim">
+                        <span className="text-secondary phosphor-glow-dim">
                           [{node.backlinks.length} backlink{node.backlinks.length !== 1 ? "s" : ""}]
                         </span>
                       )}
                       {hasOutlinks && (
-                        <span className="text-[10px] text-primary phosphor-glow-dim">
+                        <span className="text-primary phosphor-glow-dim">
                           [links]
                         </span>
                       )}
@@ -122,11 +122,11 @@ export default function RoamView() {
                   <div className="ml-6 border-l border-border pl-4 pb-3 mt-1">
                     {node.body && (
                       <div className="mb-3">
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 font-bold">
+                        <div className="text-muted-foreground uppercase tracking-wider mb-1 font-bold">
                           Content
                         </div>
                         {node.body.split("\n").map((line, i) => (
-                          <div key={i} className="text-xs text-foreground phosphor-glow-dim min-h-[1.2rem] whitespace-pre-wrap">
+                          <div key={i} className="text-foreground phosphor-glow-dim min-h-[1.4em] whitespace-pre-wrap">
                             {line.includes("[[") ? (
                               <span>
                                 {line.split(/(\[\[.*?\]\])/).map((part, j) =>
@@ -149,7 +149,7 @@ export default function RoamView() {
 
                     {hasBacklinks && (
                       <div>
-                        <div className="text-[10px] text-secondary uppercase tracking-wider mb-1 font-bold phosphor-glow-dim">
+                        <div className="text-secondary uppercase tracking-wider mb-1 font-bold phosphor-glow-dim">
                           Backlinks
                         </div>
                         {node.backlinks.map((bl, i) => (
@@ -157,14 +157,14 @@ export default function RoamView() {
                             key={`${bl.sourceFile}-${bl.lineNumber}-${i}`}
                             className="py-1 px-2 mb-1 hover:bg-muted/20 transition-colors"
                           >
-                            <div className="text-xs text-foreground phosphor-glow">
+                            <div className="text-foreground phosphor-glow">
                               {"*".repeat(bl.level)} {bl.title}
                             </div>
-                            <div className="text-[10px] text-muted-foreground">
+                            <div className="text-muted-foreground">
                               § {bl.sourceFile}:{bl.lineNumber}
                             </div>
                             {bl.context && (
-                              <div className="text-[10px] text-muted-foreground mt-0.5 italic phosphor-glow-dim">
+                              <div className="text-muted-foreground mt-0.5 italic phosphor-glow-dim">
                                 {bl.context}
                               </div>
                             )}
@@ -174,7 +174,7 @@ export default function RoamView() {
                     )}
 
                     {!hasBacklinks && (
-                      <div className="text-[10px] text-muted-foreground italic phosphor-glow-dim">
+                      <div className="text-muted-foreground italic phosphor-glow-dim">
                         No backlinks to this node.
                       </div>
                     )}
