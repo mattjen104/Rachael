@@ -265,20 +265,16 @@ export default function TUI() {
         <div
           className="crt-glass crt-screen overflow-hidden flex flex-col rounded-sm"
           style={{
-            width: "160px",
-            height: "40px",
-            transform: "scale(3)",
-            transformOrigin: "center top",
-            marginBottom: "80px",
+            width: "24.1mm",
+            height: "6.0mm",
           }}
         >
           <div className="crt-scanline-bar" />
           <div
-            className="whitespace-nowrap overflow-hidden font-mono leading-none tracking-tight"
+            className="whitespace-nowrap overflow-hidden font-mono leading-none tracking-tight w-full h-full"
             style={{
-              fontSize: "16px",
-              lineHeight: "20px",
-              width: "160px",
+              fontSize: "2.85mm",
+              lineHeight: "3mm",
             }}
           >
             <div className="truncate w-full crt-text crt-text-selected" data-testid="tui-line-1">
