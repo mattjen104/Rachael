@@ -24,6 +24,7 @@ export const clipboardItems = pgTable("clipboard_items", {
   urlDescription: text("url_description"),
   urlImage: text("url_image"),
   urlDomain: text("url_domain"),
+  pinned: boolean("pinned").notNull().default(false),
 });
 
 export const insertClipboardItemSchema = createInsertSchema(clipboardItems).omit({ id: true, capturedAt: true, archived: true });

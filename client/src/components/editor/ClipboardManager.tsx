@@ -11,6 +11,9 @@ import {
   useEnrichClipboard,
   useHeadingsSearch,
   useOrgCapture,
+  useTogglePin,
+  useClipboardHistory,
+  useUnarchiveClipboardItem,
 } from "@/hooks/use-org-data";
 import { queryClient } from "@/lib/queryClient";
 
@@ -219,20 +222,39 @@ interface EditableItemProps {
     urlDescription?: string | null;
     urlImage?: string | null;
     urlDomain?: string | null;
+    pinned?: boolean;
   };
   activeOrgFile: string;
   onDelete: (id: number) => void;
+  isHistory?: boolean;
+  onUnarchive?: (id: number) => void;
 }
 
-function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
+function EditableItem({ item, activeOrgFile, onDelete, isHistory, onUnarchive }: EditableItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(item.content);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successLabel, setSuccessLabel] = useState("");
+  const [copyFlash, setCopyFlash] = useState(false);
   const updateMutation = useUpdateClipboardItem();
   const smartCaptureMutation = useSmartCapture();
   const captureMutation = useOrgCapture();
+  const pinMutation = useTogglePin();
   const { toast } = useToast();
+
+  const handleCopyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(item.content);
+      setCopyFlash(true);
+      setTimeout(() => setCopyFlash(false), 800);
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not access clipboard.",
+        className: "bg-card border-foreground text-foreground",
+      });
+    }
+  };
 
   const syntax = parseCaptureSyntax(editValue);
   const displayType = item.detectedType || item.type;
@@ -265,7 +287,10 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
       {
         onSuccess: () => {
           fetch(`/api/clipboard/${item.id}/archive`, { method: "POST" })
-            .then(() => queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] }))
+            .then(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/clipboard/history"] });
+            })
             .catch(() => {});
           setSuccessLabel(template === "todo" ? "Task" : template === "link" ? "Link" : "Note");
           setShowSuccess(true);
@@ -334,6 +359,15 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
     }
   };
 
+  if (copyFlash) {
+    return (
+      <div className="flex items-center gap-2 bg-muted border border-border p-2 text-foreground animate-in fade-in phosphor-glow">
+        <span>[⎘]</span>
+        Copied to clipboard
+      </div>
+    );
+  }
+
   if (showSuccess) {
     return (
       <div className="flex items-center gap-2 bg-muted border border-border p-2 text-foreground animate-in fade-in phosphor-glow">
@@ -353,13 +387,23 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
         "group flex flex-col border transition-colors",
         editing
           ? "bg-muted border-foreground/30"
-          : "bg-background border-border hover:border-foreground/30"
+          : isHistory
+            ? "bg-background/50 border-border/50 hover:border-foreground/20"
+            : item.pinned
+              ? "bg-muted/30 border-foreground/20 hover:border-foreground/40"
+              : "bg-background border-border hover:border-foreground/30"
       )}
       data-testid={`clipboard-item-${item.id}`}
     >
       <div className="flex justify-between items-center px-2 pt-1 pb-0.5">
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-bold uppercase text-muted-foreground">
+          {item.pinned && !isHistory && (
+            <span className="text-foreground phosphor-glow" title="Pinned">★</span>
+          )}
+          <span className={cn(
+            "inline-flex items-center gap-1 px-1.5 py-0.5 font-bold uppercase",
+            isHistory ? "text-muted-foreground/60" : "text-muted-foreground"
+          )}>
             <span>{getTypeLabel(displayType)}</span>
             {displayType}
           </span>
@@ -373,55 +417,107 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
               {syntax.label}
             </span>
           )}
-          <span className="text-muted-foreground">
+          <span className={cn("text-muted-foreground", isHistory && "text-muted-foreground/60")}>
             {formatTime(item.capturedAt)}
           </span>
         </div>
         <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {!editing && (
+          {isHistory ? (
             <>
               <button
-                onClick={() => handleFileToOrg("todo")}
+                onClick={handleCopyToClipboard}
                 className="p-1 hover:text-foreground text-muted-foreground transition-colors"
-                title="File as TODO"
-                data-testid={`file-todo-btn-${item.id}`}
+                title="Copy to clipboard"
+                data-testid={`copy-btn-${item.id}`}
               >
-                [t]
+                [⎘]
               </button>
+              {onUnarchive && (
+                <button
+                  onClick={() => onUnarchive(item.id)}
+                  className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                  title="Restore to clipboard"
+                  data-testid={`unarchive-btn-${item.id}`}
+                >
+                  [↑]
+                </button>
+              )}
               <button
-                onClick={() => handleFileToOrg("note")}
+                onClick={() => onDelete(item.id)}
                 className="p-1 hover:text-foreground text-muted-foreground transition-colors"
-                title="File as note"
-                data-testid={`file-note-btn-${item.id}`}
+                title="Remove"
+                data-testid={`delete-btn-${item.id}`}
               >
-                [n]
+                [×]
               </button>
+            </>
+          ) : (
+            <>
+              {!editing && (
+                <>
+                  <button
+                    onClick={handleCopyToClipboard}
+                    className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                    title="Copy to clipboard"
+                    data-testid={`copy-btn-${item.id}`}
+                  >
+                    [⎘]
+                  </button>
+                  <button
+                    onClick={() => pinMutation.mutate(item.id)}
+                    className={cn(
+                      "p-1 transition-colors",
+                      item.pinned ? "text-foreground phosphor-glow" : "hover:text-foreground text-muted-foreground"
+                    )}
+                    title={item.pinned ? "Unpin" : "Pin"}
+                    data-testid={`pin-btn-${item.id}`}
+                  >
+                    {item.pinned ? "[★]" : "[☆]"}
+                  </button>
+                  <button
+                    onClick={() => handleFileToOrg("todo")}
+                    className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                    title="File as TODO"
+                    data-testid={`file-todo-btn-${item.id}`}
+                  >
+                    [t]
+                  </button>
+                  <button
+                    onClick={() => handleFileToOrg("note")}
+                    className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                    title="File as note"
+                    data-testid={`file-note-btn-${item.id}`}
+                  >
+                    [n]
+                  </button>
+                  <button
+                    onClick={() => handleFileToOrg("link")}
+                    className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                    title="File as link"
+                    data-testid={`file-link-btn-${item.id}`}
+                  >
+                    [l]
+                  </button>
+                  <button
+                    onClick={handleStartEdit}
+                    className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                    title="Edit"
+                    data-testid={`edit-btn-${item.id}`}
+                  >
+                    [✎]
+                  </button>
+                </>
+              )}
               <button
-                onClick={() => handleFileToOrg("link")}
+                onClick={() => onDelete(item.id)}
                 className="p-1 hover:text-foreground text-muted-foreground transition-colors"
-                title="File as link"
-                data-testid={`file-link-btn-${item.id}`}
+                title="Remove"
+                data-testid={`delete-btn-${item.id}`}
               >
-                [l]
-              </button>
-              <button
-                onClick={handleStartEdit}
-                className="p-1 hover:text-foreground text-muted-foreground transition-colors"
-                title="Edit"
-                data-testid={`edit-btn-${item.id}`}
-              >
-                [✎]
+                [×]
               </button>
             </>
           )}
-          <button
-            onClick={() => onDelete(item.id)}
-            className="p-1 hover:text-foreground text-muted-foreground transition-colors"
-            title="Remove"
-            data-testid={`delete-btn-${item.id}`}
-          >
-            [×]
-          </button>
         </div>
       </div>
 
@@ -492,11 +588,14 @@ function EditableItem({ item, activeOrgFile, onDelete }: EditableItemProps) {
 
 export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProps) {
   const { data: items = [], isLoading } = useClipboardItems();
+  const { data: historyItems = [] } = useClipboardHistory();
   const deleteMutation = useDeleteClipboardItem();
   const addMutation = useAddClipboardItem();
   const smartCaptureMutation = useSmartCapture();
   const enrichMutation = useEnrichClipboard();
+  const unarchiveMutation = useUnarchiveClipboardItem();
   const [newContent, setNewContent] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
   const { toast } = useToast();
 
   const updateAfterEnrich = (id: number, enriched: any) => {
@@ -627,6 +726,34 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
                 onDelete={handleDelete}
               />
             ))
+          )}
+
+          {historyItems.length > 0 && (
+            <div className="mt-4 border-t border-border pt-2">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors w-full px-1 py-1"
+                data-testid="toggle-history-btn"
+              >
+                <span>{showHistory ? "▾" : "▸"}</span>
+                <span>history</span>
+                <span className="text-muted-foreground/60">[{historyItems.length}]</span>
+              </button>
+              {showHistory && (
+                <div className="space-y-1 mt-1">
+                  {historyItems.map((item) => (
+                    <EditableItem
+                      key={item.id}
+                      item={item}
+                      activeOrgFile={activeOrgFile}
+                      onDelete={handleDelete}
+                      isHistory
+                      onUnarchive={(id) => unarchiveMutation.mutate(id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </ScrollArea>

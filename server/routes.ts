@@ -126,6 +126,24 @@ export async function registerRoutes(
     res.status(200).json({ message: "Archived" });
   });
 
+  app.patch("/api/clipboard/:id/pin", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updated = await storage.togglePinClipboardItem(id);
+    if (!updated) return res.status(404).json({ message: "Item not found" });
+    res.json(updated);
+  });
+
+  app.get("/api/clipboard/history", async (_req, res) => {
+    const items = await storage.getArchivedClipboardItems();
+    res.json(items);
+  });
+
+  app.post("/api/clipboard/:id/unarchive", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.unarchiveClipboardItem(id);
+    res.status(200).json({ message: "Unarchived" });
+  });
+
   app.patch("/api/clipboard/:id", async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const { content, detectedType, urlTitle, urlDescription, urlImage, urlDomain } = req.body;

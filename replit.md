@@ -23,6 +23,8 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 10. **Clipboard Template Filing** - Each clipboard item has inline `[t]` (todo), `[n]` (note), `[l]` (link) buttons. One click files the item to the default org file using the selected template format. `[t]` creates a TODO with SCHEDULED date. `[n]` creates a plain heading. `[l]` creates a heading with URL, description, and image metadata as body content. After filing, the clipboard item is archived.
 11. **Rich Link Capture** - When filing a URL clipboard item as `[l]`, the org entry automatically includes enriched metadata: page title as heading, URL, og:description, og:image link, and source domain as body content.
 12. **Inline Gif/Image Preview** - Gif and image URLs in the clipboard render as inline previews. Gifs play at larger size (max-h-40) for visibility.
+13. **CopyQ-style Clipboard Management** - Clipboard items can be pinned (`[★]`/`[☆]` toggle) to float to the top and persist. `[⎘]` copy-back button copies content to system clipboard with visual flash. Collapsible `▸ history` section at bottom shows archived items with `[⎘]` copy and `[↑]` unarchive buttons.
+14. **Clipboard Pinning** - Pinned items (`pinned` boolean column) sort first in the list and get a subtle visual highlight. Toggle via `[★]`/`[☆]` button on hover.
 
 ## Key Server Components
 

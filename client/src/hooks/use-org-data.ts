@@ -56,6 +56,36 @@ export function useDeleteClipboardItem() {
   });
 }
 
+export function useTogglePin() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("PATCH", `/api/clipboard/${id}/pin`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] });
+    },
+  });
+}
+
+export function useClipboardHistory() {
+  return useQuery<ClipboardItem[]>({
+    queryKey: ["/api/clipboard/history"],
+  });
+}
+
+export function useUnarchiveClipboardItem() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("POST", `/api/clipboard/${id}/unarchive`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/clipboard/history"] });
+    },
+  });
+}
+
 export function useUpdateClipboardItem() {
   return useMutation({
     mutationFn: async ({ id, content }: { id: number; content: string }) => {

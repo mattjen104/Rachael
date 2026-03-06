@@ -19,6 +19,9 @@ export interface IStorage {
   updateClipboardItem(id: number, data: Partial<InsertClipboardItem>): Promise<ClipboardItem | undefined>;
   deleteClipboardItem(id: number): Promise<void>;
   archiveClipboardItem(id: number): Promise<void>;
+  togglePinClipboardItem(id: number): Promise<ClipboardItem | undefined>;
+  getArchivedClipboardItems(): Promise<ClipboardItem[]>;
+  unarchiveClipboardItem(id: number): Promise<void>;
 
   getAgendaItems(): Promise<AgendaItem[]>;
   getAgendaItemsByDate(date: string): Promise<AgendaItem[]>;
@@ -53,7 +56,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getClipboardItems(): Promise<ClipboardItem[]> {
-    return db.select().from(clipboardItems).where(eq(clipboardItems.archived, false)).orderBy(desc(clipboardItems.capturedAt));
+    return db.select().from(clipboardItems).where(eq(clipboardItems.archived, false)).orderBy(desc(clipboardItems.pinned), desc(clipboardItems.capturedAt));
   }
 
   async getClipboardItem(id: number): Promise<ClipboardItem | undefined> {
@@ -77,6 +80,21 @@ export class DatabaseStorage implements IStorage {
 
   async archiveClipboardItem(id: number): Promise<void> {
     await db.update(clipboardItems).set({ archived: true }).where(eq(clipboardItems.id, id));
+  }
+
+  async togglePinClipboardItem(id: number): Promise<ClipboardItem | undefined> {
+    const item = await this.getClipboardItem(id);
+    if (!item) return undefined;
+    const [updated] = await db.update(clipboardItems).set({ pinned: !item.pinned }).where(eq(clipboardItems.id, id)).returning();
+    return updated;
+  }
+
+  async getArchivedClipboardItems(): Promise<ClipboardItem[]> {
+    return db.select().from(clipboardItems).where(eq(clipboardItems.archived, true)).orderBy(desc(clipboardItems.capturedAt));
+  }
+
+  async unarchiveClipboardItem(id: number): Promise<void> {
+    await db.update(clipboardItems).set({ archived: false }).where(eq(clipboardItems.id, id));
   }
 
   async getAgendaItems(): Promise<AgendaItem[]> {
