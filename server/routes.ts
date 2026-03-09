@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrgFileSchema, insertClipboardItemSchema, insertAgendaItemSchema } from "@shared/schema";
 import { z } from "zod";
-import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading } from "./org-parser";
+import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading, moveHeadingWithinFile, extractHeadingBlock, changeHeadingLevel } from "./org-parser";
 import { parseCaptureEntry, formatOrgEntry, formatNoteContent } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 
@@ -251,6 +251,7 @@ export async function registerRoutes(
 
   app.get("/api/org-query/headings", async (req, res) => {
     const q = (req.query.q as string || "").toLowerCase().trim();
+    const all = req.query.all === "true";
     const files = await storage.getOrgFiles();
     const allHeadings = files.flatMap(f => parseOrgFile(f.content, f.name));
 
@@ -261,13 +262,16 @@ export async function registerRoutes(
       level: h.level,
       status: h.status,
       tags: h.tags,
+      scheduledDate: h.scheduledDate,
+      body: all ? h.body : undefined,
     }));
 
     if (q) {
       results = results.filter(h => h.title.toLowerCase().includes(q));
+      res.json(results.slice(0, 20));
+    } else {
+      res.json(results);
     }
-
-    res.json(results.slice(0, 20));
   });
 
   app.get("/api/org-query/backlinks", async (_req, res) => {
@@ -389,6 +393,59 @@ export async function registerRoutes(
     const { newContent } = deleteHeading(file.content, lineNumber);
     const updated = await storage.updateOrgFileContent(file.id, newContent);
     res.json({ file: updated });
+  });
+
+  app.post("/api/org-query/move-heading", async (req, res) => {
+    const { fileName, fromLine, toLine, newLevel } = req.body;
+    if (!fileName || !fromLine || toLine === undefined) {
+      return res.status(400).json({ message: "fileName, fromLine, and toLine required" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const { newContent } = moveHeadingWithinFile(file.content, fromLine, toLine, newLevel);
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated });
+  });
+
+  app.post("/api/org-query/move-heading-cross", async (req, res) => {
+    const { fromFileName, fromLine, toFileName, toLine, newLevel } = req.body;
+    if (!fromFileName || !fromLine || !toFileName) {
+      return res.status(400).json({ message: "fromFileName, fromLine, and toFileName required" });
+    }
+
+    const fromFile = await storage.getOrgFileByName(fromFileName);
+    const toFile = await storage.getOrgFileByName(toFileName);
+    if (!fromFile) return res.status(404).json({ message: "Source file not found" });
+    if (!toFile) return res.status(404).json({ message: "Target file not found" });
+
+    const extracted = extractHeadingBlock(fromFile.content, fromLine);
+    if (!extracted) return res.status(400).json({ message: "No heading at that line" });
+
+    let block = extracted.block;
+    const fromLevel = block[0].match(/^(\*+)/)?.[1].length || 1;
+    if (newLevel && newLevel !== fromLevel) {
+      block = changeHeadingLevel(block, fromLevel, newLevel);
+    }
+
+    const fromLines = fromFile.content.split("\n");
+    fromLines.splice(extracted.startIdx, extracted.endIdx - extracted.startIdx);
+    const newFromContent = fromLines.join("\n");
+
+    const toLines = toFile.content.split("\n");
+    const insertIdx = Math.max(0, Math.min((toLine || toLines.length + 1) - 1, toLines.length));
+    toLines.splice(insertIdx, 0, ...block);
+    const newToContent = toLines.join("\n");
+
+    try {
+      await storage.updateOrgFileContent(fromFile.id, newFromContent);
+      const updatedTo = await storage.updateOrgFileContent(toFile.id, newToContent);
+      res.json({ file: updatedTo });
+    } catch (err) {
+      await storage.updateOrgFileContent(fromFile.id, fromFile.content);
+      await storage.updateOrgFileContent(toFile.id, toFile.content);
+      res.status(500).json({ message: "Move failed, changes rolled back" });
+    }
   });
 
   // ── Agenda (legacy table-based) ────────────────────────────

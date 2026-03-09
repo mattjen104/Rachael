@@ -261,3 +261,71 @@ export function deleteHeading(
   lines.splice(idx, endIdx - idx);
   return { newContent: lines.join("\n") };
 }
+
+export function extractHeadingBlock(
+  content: string,
+  lineNumber: number
+): { block: string[]; startIdx: number; endIdx: number } | null {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  const line = lines[idx];
+
+  if (!line || !line.match(/^\*+\s/)) return null;
+
+  const headingLevel = line.match(/^(\*+)/)?.[1].length || 1;
+
+  let endIdx = idx + 1;
+  while (endIdx < lines.length) {
+    const nextHeading = lines[endIdx].match(/^(\*+)\s/);
+    if (nextHeading && nextHeading[1].length <= headingLevel) break;
+    endIdx++;
+  }
+
+  return { block: lines.slice(idx, endIdx), startIdx: idx, endIdx };
+}
+
+export function changeHeadingLevel(
+  block: string[],
+  fromLevel: number,
+  toLevel: number
+): string[] {
+  const diff = toLevel - fromLevel;
+  if (diff === 0) return block;
+
+  return block.map((line) => {
+    const match = line.match(/^(\*+)(\s.*)$/);
+    if (!match) return line;
+    const currentLevel = match[1].length;
+    const newLevel = Math.max(1, currentLevel + diff);
+    return "*".repeat(newLevel) + match[2];
+  });
+}
+
+export function moveHeadingWithinFile(
+  content: string,
+  fromLine: number,
+  toLine: number,
+  newLevel?: number
+): { newContent: string } {
+  const extracted = extractHeadingBlock(content, fromLine);
+  if (!extracted) return { newContent: content };
+
+  let block = extracted.block;
+  const fromLevel = block[0].match(/^(\*+)/)?.[1].length || 1;
+
+  if (newLevel && newLevel !== fromLevel) {
+    block = changeHeadingLevel(block, fromLevel, newLevel);
+  }
+
+  const lines = content.split("\n");
+  lines.splice(extracted.startIdx, extracted.endIdx - extracted.startIdx);
+
+  let insertIdx = toLine - 1;
+  if (insertIdx > extracted.startIdx) {
+    insertIdx -= block.length;
+  }
+  insertIdx = Math.max(0, Math.min(insertIdx, lines.length));
+
+  lines.splice(insertIdx, 0, ...block);
+  return { newContent: lines.join("\n") };
+}

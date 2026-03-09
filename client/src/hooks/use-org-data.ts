@@ -300,6 +300,58 @@ export function useToggleAgendaStatus() {
   });
 }
 
+export interface OutlineHeading {
+  title: string;
+  sourceFile: string;
+  lineNumber: number;
+  level: number;
+  status: string | null;
+  tags: string[];
+  scheduledDate: string | null;
+  body?: string;
+}
+
+export function useAllHeadings() {
+  return useQuery<OutlineHeading[]>({
+    queryKey: ["/api/org-query/headings", "all"],
+    queryFn: async () => {
+      const res = await fetch("/api/org-query/headings?all=true");
+      if (!res.ok) throw new Error("Failed to fetch headings");
+      return res.json();
+    },
+  });
+}
+
+export function useMoveHeading() {
+  return useMutation({
+    mutationFn: async (data: { fileName: string; fromLine: number; toLine: number; newLevel?: number }) => {
+      const res = await apiRequest("POST", "/api/org-query/move-heading", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/backlinks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+    },
+  });
+}
+
+export function useMoveHeadingCross() {
+  return useMutation({
+    mutationFn: async (data: { fromFileName: string; fromLine: number; toFileName: string; toLine?: number; newLevel?: number }) => {
+      const res = await apiRequest("POST", "/api/org-query/move-heading-cross", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/backlinks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+    },
+  });
+}
+
 export function useSeedData() {
   return useMutation({
     mutationFn: async () => {

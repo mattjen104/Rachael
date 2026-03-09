@@ -13,7 +13,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 
 1. **Org Buffer View** (default) - All org files rendered as one continuous buffer. Each file becomes a `*` top-level heading with its content's headings bumped one level deeper. Looks like a real Emacs org-mode terminal buffer.
 2. **Agenda View** - Emacs-style org-agenda with filters: Today, Week, All TODOs, Done. Overdue items display inline in the Today view with `Sched. Nx:` indicators (N = days overdue), matching Emacs behavior. Actions on each item: toggle TODO/DONE `[ ]/[x]`, inline title editing (click to edit), reschedule `[s]` (inline date picker), delete `[d]`. Quick-add input at top.
-3. **Roam View** - Backlinks research system showing all nodes with `[[link]]` connections. Each node expandable to show its content and backlinks (other headings referencing it). Terminal-style bullet organization.
+3. **Roam View** - Interactive outline editor (Roam Research-style). Displays all org headings as a hierarchical bullet tree grouped by file. Features: inline title editing (click to edit), drag-and-drop reordering within files, collapsible children (▸/▾), TODO/DONE status toggle, delete [d], backlinks expansion. Filter bar: "All" shows every heading, "TODOs" filters to only TODO items and their ancestors. Drag positions: drop at top third = before, middle = make child, bottom third = after. Prevents dropping onto descendants.
 4. **Clipboard/Capture View** - Full main view for smart capture. Inline editing, `t` prefix for TODO tasks, `>` nesting for heading depth, `[[` backlink autocomplete. Content type detection (URL/gif/image/code) with metadata enrichment. Always targets inbox.org.
 5. **Org Capture Modal** - Quick task creation (keyboard shortcut `c`). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section.
 6. **Inline Quick-Add** - Fast task input at top of Agenda Today view.
@@ -35,7 +35,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 
 ## Key Server Components
 
-- `server/org-parser.ts` - Parses raw org file content to extract headings, TODO/DONE status, SCHEDULED/DEADLINE dates, tags, and properties. Also provides `buildAgenda()` for grouping items by date (overdue/today/upcoming) and `toggleHeadingStatus()` for in-place status toggling.
+- `server/org-parser.ts` - Parses raw org file content to extract headings, TODO/DONE status, SCHEDULED/DEADLINE dates, tags, and properties. Also provides `buildAgenda()` for grouping items by date (overdue/today/upcoming), `toggleHeadingStatus()` for in-place status toggling, `moveHeadingWithinFile()` for drag-and-drop reordering, `extractHeadingBlock()` and `changeHeadingLevel()` for cross-file moves.
 - `server/capture-parser.ts` - Simplified capture language: single `t` prefix for TODO tasks, no prefix = plain note. Supports `>` nesting (`> t` = level 3, `>> t` = level 4). Uses `chrono-node` for NL date parsing; "due/by" → DEADLINE, other dates → SCHEDULED. Exports `parseCaptureEntry()`, `formatOrgEntry(parsed, body?)`, `formatNoteContent(text, body?)`.
 - `server/content-detector.ts` - Auto-detects clipboard content type (url/gif/image/code/text). `fetchUrlMetadata()` fetches page title, og:description, og:image, and domain from URLs.
 
@@ -62,6 +62,8 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `POST /api/org-query/reschedule` - Change SCHEDULED date for a heading by fileName + lineNumber + newDate
 - `POST /api/org-query/edit-title` - Edit heading title text by fileName + lineNumber + newTitle
 - `POST /api/org-query/delete-heading` - Delete a heading and its body by fileName + lineNumber
+- `POST /api/org-query/move-heading` - Move a heading within a file (drag-and-drop reorder) by fileName + fromLine + toLine + optional newLevel
+- `POST /api/org-query/move-heading-cross` - Move a heading between files with rollback on failure
 
 ### Clipboard
 - `GET/POST /api/clipboard` - List/create clipboard items
