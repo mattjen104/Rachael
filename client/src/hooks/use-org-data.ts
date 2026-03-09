@@ -210,6 +210,51 @@ export function useToggleOrgStatus() {
   });
 }
 
+export function useRescheduleHeading() {
+  return useMutation({
+    mutationFn: async ({ fileName, lineNumber, newDate }: { fileName: string; lineNumber: number; newDate: string }) => {
+      const res = await apiRequest("POST", "/api/org-query/reschedule", { fileName, lineNumber, newDate });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+    },
+  });
+}
+
+export function useEditHeadingTitle() {
+  return useMutation({
+    mutationFn: async ({ fileName, lineNumber, newTitle }: { fileName: string; lineNumber: number; newTitle: string }) => {
+      const res = await apiRequest("POST", "/api/org-query/edit-title", { fileName, lineNumber, newTitle });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+    },
+  });
+}
+
+export function useDeleteHeading() {
+  return useMutation({
+    mutationFn: async ({ fileName, lineNumber }: { fileName: string; lineNumber: number }) => {
+      const res = await apiRequest("POST", "/api/org-query/delete-heading", { fileName, lineNumber });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+    },
+  });
+}
+
 export function useOrgCapture() {
   return useMutation({
     mutationFn: async (data: { fileName: string; title: string; scheduledDate?: string; tags?: string[]; template?: "todo" | "note" | "link"; body?: string }) => {
@@ -247,18 +292,6 @@ export function useToggleAgendaStatus() {
   return useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
       const res = await apiRequest("PATCH", `/api/agenda/${id}/status`, { status });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/agenda"] });
-    },
-  });
-}
-
-export function useCarryOverTasks() {
-  return useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/agenda/carry-over");
       return res.json();
     },
     onSuccess: () => {

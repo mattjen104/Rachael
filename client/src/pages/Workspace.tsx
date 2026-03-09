@@ -9,7 +9,7 @@ import RoamView from "@/components/editor/RoamView";
 import OrgCapture from "@/components/editor/OrgCapture";
 import type { CaptureContext } from "@/components/editor/OrgCapture";
 import Minibuffer from "@/components/editor/Minibuffer";
-import { useSeedData, useOrgFiles, useCarryOverTasks } from "@/hooks/use-org-data";
+import { useSeedData, useOrgFiles } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
 
 type ViewMode = "org" | "agenda" | "roam" | "clipboard";
@@ -24,7 +24,6 @@ export default function Workspace() {
 
   const seedMutation = useSeedData();
   const { data: orgFiles } = useOrgFiles();
-  const carryOverMutation = useCarryOverTasks();
   const { cycleTheme } = useCrtTheme();
 
   const defaultCaptureFile = useMemo(() => {
@@ -154,7 +153,6 @@ export default function Workspace() {
           onSwitchView={(v) => setViewMode(v)}
           onOpenCapture={() => openCapture()}
           onCycleTheme={cycleTheme}
-          onCarryOver={() => carryOverMutation.mutate()}
           onCommandExecuted={handleCommandExecuted}
           onJumpToHeading={handleJumpToHeading}
         />

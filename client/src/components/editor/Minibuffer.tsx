@@ -15,7 +15,6 @@ interface MinibufferProps {
   onSwitchView: (view: "org" | "agenda" | "roam" | "clipboard") => void;
   onOpenCapture: () => void;
   onCycleTheme: () => void;
-  onCarryOver: () => void;
   onCommandExecuted: (label: string) => void;
   onJumpToHeading?: (sourceFile: string, title: string, lineNumber: number) => void;
 }
@@ -25,7 +24,6 @@ export default function Minibuffer({
   onSwitchView,
   onOpenCapture,
   onCycleTheme,
-  onCarryOver,
   onCommandExecuted,
   onJumpToHeading,
 }: MinibufferProps) {
@@ -57,11 +55,10 @@ export default function Minibuffer({
     { id: "switch-to-org", label: "switch-to-org", hint: "*", action: () => exec("Switched to Org Buffer", () => onSwitchView("org")) },
     { id: "org-capture", label: "org-capture", hint: "c", action: () => exec("Org Capture", () => onOpenCapture()) },
     { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
-    { id: "carry-over-tasks", label: "carry-over-tasks", hint: "", action: () => exec("Tasks carried over", () => onCarryOver()) },
     { id: "search-headings", label: "search-headings", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
     { id: "clipboard-search", label: "clipboard-search", hint: "⎘", action: () => { setMode("clipboard"); setQuery(""); setSelectedIdx(0); } },
     { id: "create-file", label: "create-file", hint: "+", action: () => { setMode("create-file"); setQuery(""); setSelectedIdx(0); } },
-  ], [exec, onSwitchView, onOpenCapture, onCycleTheme, onCarryOver]);
+  ], [exec, onSwitchView, onOpenCapture, onCycleTheme]);
 
   const filteredCommands = useMemo(() => {
     if (mode !== "command") return [];

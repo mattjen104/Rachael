@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrgFileSchema, insertClipboardItemSchema, insertAgendaItemSchema } from "@shared/schema";
 import { z } from "zod";
-import { parseOrgFile, buildAgenda, toggleHeadingStatus } from "./org-parser";
+import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading } from "./org-parser";
 import { parseCaptureEntry, formatOrgEntry, formatNoteContent } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 
@@ -345,6 +345,52 @@ export async function registerRoutes(
     res.json({ file: updated, newStatus });
   });
 
+  app.post("/api/org-query/reschedule", async (req, res) => {
+    const { fileName, lineNumber, newDate } = req.body;
+    if (!fileName || !lineNumber || !newDate) {
+      return res.status(400).json({ message: "fileName, lineNumber, and newDate required" });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}(?: \w{3}(?: \d{2}:\d{2})?)?$/.test(newDate)) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const { newContent } = rescheduleHeading(file.content, lineNumber, newDate);
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated });
+  });
+
+  app.post("/api/org-query/edit-title", async (req, res) => {
+    const { fileName, lineNumber, newTitle } = req.body;
+    if (!fileName || !lineNumber || !newTitle) {
+      return res.status(400).json({ message: "fileName, lineNumber, and newTitle required" });
+    }
+    const sanitizedTitle = String(newTitle).replace(/[\n\r]/g, " ").trim();
+    if (!sanitizedTitle) {
+      return res.status(400).json({ message: "Title cannot be empty" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const { newContent } = editHeadingTitle(file.content, lineNumber, sanitizedTitle);
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated });
+  });
+
+  app.post("/api/org-query/delete-heading", async (req, res) => {
+    const { fileName, lineNumber } = req.body;
+    if (!fileName || !lineNumber) {
+      return res.status(400).json({ message: "fileName and lineNumber required" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const { newContent } = deleteHeading(file.content, lineNumber);
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated });
+  });
+
   // ── Agenda (legacy table-based) ────────────────────────────
 
   app.get("/api/agenda", async (_req, res) => {
@@ -373,12 +419,6 @@ export async function registerRoutes(
     const item = await storage.updateAgendaItemStatus(id, status);
     if (!item) return res.status(404).json({ message: "Agenda item not found" });
     res.json(item);
-  });
-
-  app.post("/api/agenda/carry-over", async (req, res) => {
-    const today = new Date().toISOString().split("T")[0];
-    const carried = await storage.carryOverIncompleteTasks(today);
-    res.json(carried);
   });
 
   // ── Seed endpoint (creates default org files if none exist) ──

@@ -189,3 +189,75 @@ export function toggleHeadingStatus(
 
   return { newContent: lines.join("\n"), newStatus };
 }
+
+export function rescheduleHeading(
+  content: string,
+  lineNumber: number,
+  newDate: string
+): { newContent: string } {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  const line = lines[idx];
+
+  if (!line || !line.match(/^\*+\s/)) return { newContent: content };
+
+  const headingLevel = line.match(/^(\*+)/)?.[1].length || 1;
+
+  for (let i = idx + 1; i < lines.length; i++) {
+    const nextHeading = lines[i].match(/^(\*+)\s/);
+    if (nextHeading && nextHeading[1].length <= headingLevel) break;
+
+    if (lines[i].match(/^\s+SCHEDULED:\s*<[^>]*>/)) {
+      lines[i] = lines[i].replace(/SCHEDULED:\s*<[^>]*>/, `SCHEDULED: <${newDate}>`);
+      return { newContent: lines.join("\n") };
+    }
+  }
+
+  lines.splice(idx + 1, 0, `   SCHEDULED: <${newDate}>`);
+  return { newContent: lines.join("\n") };
+}
+
+export function editHeadingTitle(
+  content: string,
+  lineNumber: number,
+  newTitle: string
+): { newContent: string } {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  const line = lines[idx];
+
+  if (!line) return { newContent: content };
+
+  const match = line.match(/^(\*+\s+)(TODO\s+|DONE\s+)?(.*?)(\s+:[a-zA-Z0-9_:]+:)?\s*$/);
+  if (!match) return { newContent: content };
+
+  const stars = match[1];
+  const status = match[2] || "";
+  const tags = match[4] || "";
+
+  lines[idx] = `${stars}${status}${newTitle.trim()}${tags}`;
+  return { newContent: lines.join("\n") };
+}
+
+export function deleteHeading(
+  content: string,
+  lineNumber: number
+): { newContent: string } {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  const line = lines[idx];
+
+  if (!line || !line.match(/^\*+\s/)) return { newContent: content };
+
+  const headingLevel = line.match(/^(\*+)/)?.[1].length || 1;
+
+  let endIdx = idx + 1;
+  while (endIdx < lines.length) {
+    const nextHeading = lines[endIdx].match(/^(\*+)\s/);
+    if (nextHeading && nextHeading[1].length <= headingLevel) break;
+    endIdx++;
+  }
+
+  lines.splice(idx, endIdx - idx);
+  return { newContent: lines.join("\n") };
+}

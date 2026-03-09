@@ -12,14 +12,14 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 ## Key Features
 
 1. **Org Buffer View** (default) - All org files rendered as one continuous buffer. Each file becomes a `*` top-level heading with its content's headings bumped one level deeper. Looks like a real Emacs org-mode terminal buffer.
-2. **Agenda View** - Bullet-journal-style agenda derived by parsing org file content. Filters: Today, Week, All TODOs, Done. Toggles task status directly in the org file content.
+2. **Agenda View** - Emacs-style org-agenda with filters: Today, Week, All TODOs, Done. Overdue items display inline in the Today view with `Sched. Nx:` indicators (N = days overdue), matching Emacs behavior. Actions on each item: toggle TODO/DONE `[ ]/[x]`, inline title editing (click to edit), reschedule `[s]` (inline date picker), delete `[d]`. Quick-add input at top.
 3. **Roam View** - Backlinks research system showing all nodes with `[[link]]` connections. Each node expandable to show its content and backlinks (other headings referencing it). Terminal-style bullet organization.
 4. **Clipboard/Capture View** - Full main view for smart capture. Inline editing, `t` prefix for TODO tasks, `>` nesting for heading depth, `[[` backlink autocomplete. Content type detection (URL/gif/image/code) with metadata enrichment. Always targets inbox.org.
 5. **Org Capture Modal** - Quick task creation (keyboard shortcut `c`). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section.
 6. **Inline Quick-Add** - Fast task input at top of Agenda Today view.
 7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device at `/tui`.
 8. **Four-View Architecture** - Workspace has exactly 4 swappable views (Org/Agenda/Roam/Capture) via a narrow icon sidebar. No file-centric navigation — everything is view-centric. All GUI icons replaced with ASCII/Unicode text characters for terminal authenticity.
-9. **Minibuffer (M-x Command Launcher)** - Emacs-authentic minibuffer at screen bottom, activated by `SPC` (Doom leader key) or `Ctrl+K`/`Cmd+K`. Also clickable via `M-x` button in StatusBar. Fuzzy-matched completion candidates expand upward from the input line. Built-in commands: view switching, org-capture, theme cycling, carry-over tasks, heading search (prefix `/`). After execution, the StatusBar echo area briefly displays the command result. Designed as the universal interaction paradigm — scales from TUI to desktop. Uses `cmdk` for fuzzy matching.
+9. **Minibuffer (M-x Command Launcher)** - Emacs-authentic minibuffer at screen bottom, activated by `SPC` (Doom leader key) or `Ctrl+K`/`Cmd+K`. Also clickable via `M-x` button in StatusBar. Fuzzy-matched completion candidates expand upward from the input line. Built-in commands: view switching, org-capture, theme cycling, heading search (prefix `/`). After execution, the StatusBar echo area briefly displays the command result. Designed as the universal interaction paradigm — scales from TUI to desktop. Uses `cmdk` for fuzzy matching.
 10. **Clipboard Template Filing** - Each clipboard item has inline `[t]` (todo), `[n]` (note), `[l]` (link) buttons. One click files the item to the default org file using the selected template format. `[t]` creates a TODO with SCHEDULED date. `[n]` creates a plain heading. `[l]` creates a heading with URL, description, and image metadata as body content. After filing, the clipboard item is archived.
 11. **Rich Link Capture** - When filing a URL clipboard item as `[l]`, the org entry automatically includes enriched metadata: page title as heading, URL, og:description, og:image link, and source domain as body content.
 12. **Inline Gif/Image Preview** - Gif and image URLs in the clipboard render as inline previews. Gifs play at larger size (max-h-40) for visibility.
@@ -59,6 +59,9 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `GET /api/org-query/todos` - Returns all TODO headings across files
 - `GET /api/org-query/done` - Returns all DONE headings across files
 - `POST /api/org-query/toggle` - Toggle TODO/DONE status in org file content by fileName + lineNumber
+- `POST /api/org-query/reschedule` - Change SCHEDULED date for a heading by fileName + lineNumber + newDate
+- `POST /api/org-query/edit-title` - Edit heading title text by fileName + lineNumber + newTitle
+- `POST /api/org-query/delete-heading` - Delete a heading and its body by fileName + lineNumber
 
 ### Clipboard
 - `GET/POST /api/clipboard` - List/create clipboard items
