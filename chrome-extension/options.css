@@ -1,0 +1,98 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0a0a0a;
+  color: #ffb000;
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 13px;
+  padding: 20px;
+}
+
+#container {
+  max-width: 400px;
+}
+
+h1 {
+  font-size: 14px;
+  font-weight: normal;
+  margin-bottom: 4px;
+  color: #ffb000;
+}
+
+.hint {
+  color: #888;
+  font-size: 11px;
+  margin-bottom: 16px;
+}
+
+label {
+  display: block;
+  color: #888;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+input[type="url"] {
+  width: 100%;
+  background: #111;
+  border: 1px solid #333;
+  color: #ffb000;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+input[type="url"]:focus {
+  border-color: #ffb000;
+}
+
+#save-btn {
+  margin-top: 8px;
+  background: none;
+  border: 1px solid #ffb000;
+  color: #ffb000;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+#save-btn:hover {
+  background: #ffb000;
+  color: #0a0a0a;
+}
+
+#status {
+  margin-top: 8px;
+  font-size: 11px;
+  min-height: 16px;
+}
+
+#status.success {
+  color: #ffb000;
+}
+
+#status.error {
+  color: #ff4444;
+}
+
+#status.info {
+  color: #888;
+}
+
+#help {
+  margin-top: 24px;
+  border-top: 1px solid #222;
+  padding-top: 12px;
+}
+
+#help p {
+  color: #666;
+  font-size: 11px;
+  margin-bottom: 4px;
+}

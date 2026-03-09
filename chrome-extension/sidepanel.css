@@ -1,0 +1,96 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0a0a0a;
+  color: #ffb000;
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 12px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #111;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+#status-indicator {
+  font-size: 10px;
+}
+
+#status-indicator.connected {
+  color: #ffb000;
+}
+
+#status-indicator.disconnected {
+  color: #666;
+}
+
+#status-text {
+  flex: 1;
+  color: #888;
+  font-size: 11px;
+}
+
+#settings-btn {
+  background: none;
+  border: 1px solid #333;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-family: inherit;
+}
+
+#settings-btn:hover {
+  color: #ffb000;
+  border-color: #ffb000;
+}
+
+#not-configured {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+#not-configured p {
+  color: #888;
+}
+
+#open-settings-btn {
+  background: none;
+  border: 1px solid #ffb000;
+  color: #ffb000;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+#open-settings-btn:hover {
+  background: #ffb000;
+  color: #0a0a0a;
+}
+
+#app-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #0a0a0a;
+}

@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -11,6 +12,11 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 
 app.use(
   express.json({

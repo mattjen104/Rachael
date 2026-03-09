@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "OrgCloud Space",
+  "version": "1.0.0",
+  "description": "Org-capture and org-roam in your browser side panel",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open OrgCloud Space"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+C"
+      },
+      "description": "Open OrgCloud Space capture"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+}

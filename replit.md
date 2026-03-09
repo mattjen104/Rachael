@@ -76,6 +76,34 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `/` - Main workspace (editor/agenda + sidebar + clipboard)
 - `/tui` - LilyGO T-Keyboard terminal simulation
 
+## Chrome Extension (Side Panel)
+
+The `chrome-extension/` directory contains a Manifest V3 Chrome extension that embeds OrgCloud Space as a persistent side panel in the browser.
+
+### Features
+- Full OrgCloud Space interface (all 4 views) in Chrome's Side Panel
+- `Alt+C` keyboard shortcut opens the panel with page context (URL, title, selected text)
+- Capture modal pre-fills from the current page when triggered via the extension
+- Settings page to configure the OrgCloud Space API URL
+
+### Local Installation
+1. Publish the OrgCloud Space app on Replit (or use the dev preview URL)
+2. Open Chrome and go to `chrome://extensions`
+3. Enable "Developer mode" (toggle in top right)
+4. Click "Load unpacked" and select the `chrome-extension/` folder
+5. Click the extension icon or press `Alt+C` to open the side panel
+6. Click the ⚙ settings gear and enter your OrgCloud Space URL
+7. The full app loads in the side panel — capture, browse org files, check agenda, navigate Roam links
+
+### How Capture Works
+When you press `Alt+C` on any webpage, the extension grabs the page title, URL, and any selected text, then sends it to the app via `postMessage`. The OrgCapture modal opens pre-filled with this context — the title from the page, selected text as the body, and the URL. Choose a template ([t] todo, [n] note, [l] link), pick a target org file, and submit.
+
+### Files
+- `manifest.json` — Manifest V3 config with sidePanel, activeTab, scripting permissions
+- `background.js` — Service worker to open side panel on action click
+- `sidepanel.html/js/css` — Side panel UI with iframe embedding the app
+- `options.html/js/css` — Settings page for API URL configuration
+
 ## Design
 
 - CRT phosphor monochrome theme system (`client/src/lib/crt-theme.tsx`):

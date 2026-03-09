@@ -7,6 +7,7 @@ import OrgBufferView from "@/components/editor/UnifiedView";
 import type { ScrollTarget } from "@/components/editor/UnifiedView";
 import RoamView from "@/components/editor/RoamView";
 import OrgCapture from "@/components/editor/OrgCapture";
+import type { CaptureContext } from "@/components/editor/OrgCapture";
 import Minibuffer from "@/components/editor/Minibuffer";
 import { useSeedData, useOrgFiles, useCarryOverTasks } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
@@ -16,6 +17,7 @@ type ViewMode = "org" | "agenda" | "roam" | "clipboard";
 export default function Workspace() {
   const [viewMode, setViewMode] = useState<ViewMode>("clipboard");
   const [captureOpen, setCaptureOpen] = useState(false);
+  const [capturePrefill, setCapturePrefill] = useState<CaptureContext | null>(null);
   const [minibufferOpen, setMinibufferOpen] = useState(false);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<ScrollTarget | null>(null);
@@ -65,6 +67,33 @@ export default function Workspace() {
     setScrollTarget({ file: sourceFile, heading: title, lineNumber });
   }, []);
 
+  const openCapture = useCallback((prefill?: CaptureContext) => {
+    setCapturePrefill(prefill || null);
+    setCaptureOpen(true);
+  }, []);
+
+  const closeCapture = useCallback(() => {
+    setCaptureOpen(false);
+    setCapturePrefill(null);
+  }, []);
+
+  useEffect(() => {
+    if (window.parent !== window) {
+      window.parent.postMessage({ action: "orgcloud-ready" }, "*");
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.action === "capture") {
+        const { url, title, selection } = event.data;
+        openCapture({ url, title, selection });
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [openCapture]);
+
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (captureOpen) return;
@@ -90,7 +119,7 @@ export default function Workspace() {
 
       if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        setCaptureOpen(true);
+        openCapture();
       }
     };
     window.addEventListener("keydown", handleKey);
@@ -123,7 +152,7 @@ export default function Workspace() {
         <Minibuffer
           onClose={() => setMinibufferOpen(false)}
           onSwitchView={(v) => setViewMode(v)}
-          onOpenCapture={() => setCaptureOpen(true)}
+          onOpenCapture={() => openCapture()}
           onCycleTheme={cycleTheme}
           onCarryOver={() => carryOverMutation.mutate()}
           onCommandExecuted={handleCommandExecuted}
@@ -132,7 +161,7 @@ export default function Workspace() {
       ) : (
         <StatusBar viewMode={viewMode} lastCommand={lastCommand} onOpenMinibuffer={() => setMinibufferOpen(true)} />
       )}
-      <OrgCapture open={captureOpen} onClose={() => setCaptureOpen(false)} defaultFile={defaultCaptureFile} />
+      <OrgCapture open={captureOpen} onClose={closeCapture} defaultFile={defaultCaptureFile} prefill={capturePrefill} />
     </div>
   );
 }

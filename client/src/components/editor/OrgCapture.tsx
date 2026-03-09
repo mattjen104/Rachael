@@ -2,14 +2,25 @@ import React, { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useOrgFiles, useOrgCapture } from "@/hooks/use-org-data";
 
+export interface CaptureContext {
+  url?: string;
+  title?: string;
+  selection?: string;
+}
+
 interface OrgCaptureProps {
   open: boolean;
   onClose: () => void;
   defaultFile?: string;
+  prefill?: CaptureContext | null;
 }
 
-export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: OrgCaptureProps) {
+type Template = "todo" | "note" | "link";
+
+export default function OrgCapture({ open, onClose, defaultFile = "dad.org", prefill }: OrgCaptureProps) {
+  const [template, setTemplate] = useState<Template>("todo");
   const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
   const [fileName, setFileName] = useState(defaultFile);
   const [scheduledDate, setScheduledDate] = useState(new Date().toISOString().split("T")[0]);
   const [tagsInput, setTagsInput] = useState("");
@@ -23,12 +34,31 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
       setTimeout(() => inputRef.current?.focus(), 50);
     }
     if (open) {
-      setTitle("");
       setTagsInput("");
       setScheduledDate(new Date().toISOString().split("T")[0]);
       setFileName(defaultFile);
+
+      if (prefill) {
+        if (prefill.url) {
+          setTemplate("link");
+          setTitle(prefill.title || prefill.url);
+          setBody(prefill.selection ? `${prefill.selection}\n\n${prefill.url}` : prefill.url);
+        } else if (prefill.selection) {
+          setTemplate("note");
+          setTitle(prefill.title || "");
+          setBody(prefill.selection);
+        } else {
+          setTemplate("todo");
+          setTitle(prefill.title || "");
+          setBody("");
+        }
+      } else {
+        setTemplate("todo");
+        setTitle("");
+        setBody("");
+      }
     }
-  }, [open, defaultFile]);
+  }, [open, defaultFile, prefill]);
 
   useEffect(() => {
     if (!open) return;
@@ -48,7 +78,14 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
     const tags = tagsInput.split(",").map(t => t.trim()).filter(Boolean);
 
     captureMutation.mutate(
-      { fileName, title: title.trim(), scheduledDate, tags: tags.length > 0 ? tags : undefined },
+      {
+        fileName,
+        title: title.trim(),
+        template,
+        body: body.trim() || undefined,
+        scheduledDate: template === "todo" ? scheduledDate : undefined,
+        tags: tags.length > 0 ? tags : undefined,
+      },
       { onSuccess: () => onClose() }
     );
   };
@@ -73,16 +110,49 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-3">
+          <div className="flex items-center gap-2 mb-2">
+            {(["todo", "note", "link"] as Template[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTemplate(t)}
+                className={cn(
+                  "px-2 py-0.5 text-xs font-mono border transition-colors",
+                  template === t
+                    ? "border-foreground text-foreground phosphor-glow"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                )}
+                data-testid={`capture-template-${t}`}
+              >
+                [{t === "todo" ? "t" : t === "note" ? "n" : "l"}] {t}
+              </button>
+            ))}
+          </div>
+
           <div>
-            <label className="text-muted-foreground uppercase tracking-wider block mb-1">Task</label>
+            <label className="text-muted-foreground uppercase tracking-wider block mb-1">
+              {template === "todo" ? "Task" : template === "link" ? "Link Title" : "Note Title"}
+            </label>
             <input
               ref={inputRef}
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="What needs to be done?"
+              placeholder={template === "todo" ? "What needs to be done?" : template === "link" ? "Link description" : "Note title"}
               className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors phosphor-glow"
               data-testid="capture-title"
+            />
+          </div>
+
+          <div>
+            <label className="text-muted-foreground uppercase tracking-wider block mb-1">Body</label>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Additional content (optional)"
+              rows={3}
+              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors resize-none"
+              data-testid="capture-body"
             />
           </div>
 
@@ -100,16 +170,18 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org" }: O
                 ))}
               </select>
             </div>
-            <div className="flex-1">
-              <label className="text-muted-foreground uppercase tracking-wider block mb-1">Scheduled</label>
-              <input
-                type="date"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
-                data-testid="capture-date"
-              />
-            </div>
+            {template === "todo" && (
+              <div className="flex-1">
+                <label className="text-muted-foreground uppercase tracking-wider block mb-1">Scheduled</label>
+                <input
+                  type="date"
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                  className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
+                  data-testid="capture-date"
+                />
+              </div>
+            )}
           </div>
 
           <div>
