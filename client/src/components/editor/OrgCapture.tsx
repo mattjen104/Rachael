@@ -93,13 +93,13 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] sm:pt-[20vh] px-1" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
       <div
         className="relative bg-card border border-border shadow-2xl w-full max-w-lg font-mono"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border">
           <div className="flex items-center gap-2 text-foreground font-bold phosphor-glow">
             <span>[+]</span>
             Org Capture
@@ -109,15 +109,15 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-3">
-          <div className="flex items-center gap-2 mb-2">
+        <form onSubmit={handleSubmit} className="p-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-1.5 mb-2">
             {(["todo", "note", "link"] as Template[]).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTemplate(t)}
                 className={cn(
-                  "px-2 py-0.5 text-xs font-mono border transition-colors",
+                  "px-1.5 py-0.5 text-xs font-mono border transition-colors",
                   template === t
                     ? "border-foreground text-foreground phosphor-glow"
                     : "border-border text-muted-foreground hover:text-foreground"
@@ -156,13 +156,13 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
             />
           </div>
 
-          <div className="flex gap-3">
-            <div className="flex-1">
+          <div className="flex flex-wrap gap-2">
+            <div className="flex-1 min-w-[120px]">
               <label className="text-muted-foreground uppercase tracking-wider block mb-1">File</label>
               <select
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors text-xs"
                 data-testid="capture-file"
               >
                 {orgFiles.map((f) => (
@@ -171,13 +171,13 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
               </select>
             </div>
             {template === "todo" && (
-              <div className="flex-1">
+              <div className="flex-1 min-w-[120px]">
                 <label className="text-muted-foreground uppercase tracking-wider block mb-1">Scheduled</label>
                 <input
                   type="date"
                   value={scheduledDate}
                   onChange={(e) => setScheduledDate(e.target.value)}
-                  className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
+                  className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors text-xs"
                   data-testid="capture-date"
                 />
               </div>
@@ -196,15 +196,15 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
             />
           </div>
 
-          <div className="flex items-center justify-between pt-2">
-            <span className="text-muted-foreground">
-              Press <kbd className="bg-muted px-1 py-0.5 mx-0.5">Esc</kbd> to cancel
+          <div className="flex items-center justify-between pt-2 gap-2">
+            <span className="text-muted-foreground text-xs truncate">
+              <kbd className="bg-muted px-1 py-0.5">Esc</kbd> cancel
             </span>
             <button
               type="submit"
               disabled={!title.trim() || captureMutation.isPending}
               className={cn(
-                "px-4 py-1 font-bold transition-colors",
+                "px-3 py-1 font-bold transition-colors flex-shrink-0",
                 title.trim()
                   ? "bg-foreground text-background hover:brightness-110 phosphor-glow-bright"
                   : "bg-muted text-muted-foreground cursor-not-allowed"

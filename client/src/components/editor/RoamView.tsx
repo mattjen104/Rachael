@@ -131,14 +131,14 @@ export default function RoamView() {
 
   return (
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="roam-view">
-      <div className="flex items-center border-b border-border bg-card px-4 py-1 gap-2">
+      <div className="flex items-center border-b border-border bg-card px-2 py-1 gap-2">
         <span className="text-foreground">{"{*}"}</span>
         <span className="text-foreground font-bold phosphor-glow">Roam</span>
         <span className="text-muted-foreground ml-2">[{nodes.length} nodes]</span>
       </div>
 
       <ScrollArea className="flex-1">
-        <div ref={containerRef} className="max-w-3xl mx-auto p-4 pb-32">
+        <div ref={containerRef} className="w-full p-2 sm:p-4 pb-32">
           {nodes.map((node) => {
             const nodeKey = `${node.sourceFile}:${node.lineNumber}`;
             const isExpanded = expandedNode === nodeKey;

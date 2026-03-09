@@ -68,7 +68,7 @@ export default function OrgBufferView({ scrollTarget, onScrollComplete }: OrgBuf
   return (
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="org-buffer-view">
       <ScrollArea className="flex-1">
-        <div ref={containerRef} className="max-w-4xl mx-auto p-4 pb-32">
+        <div ref={containerRef} className="w-full p-2 sm:p-4 pb-32">
           {orgFiles.map((file) => {
             const lines = file.content.split("\n");
             let lineCounter = 0;

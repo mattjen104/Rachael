@@ -22,22 +22,21 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
   };
 
   return (
-    <div className="h-6 flex w-full font-mono select-none z-50 flex-shrink-0">
-      <div className="flex items-center justify-center font-bold px-4 uppercase transition-colors phosphor-glow-bright bg-foreground text-background">
+    <div className="h-6 flex w-full font-mono select-none z-50 flex-shrink-0 text-xs">
+      <div className="flex items-center justify-center font-bold px-2 uppercase transition-colors phosphor-glow-bright bg-foreground text-background flex-shrink-0">
         {modeLabels[viewMode]}
       </div>
 
-      <div className="bg-muted text-foreground flex items-center px-4 flex-1 gap-4 phosphor-glow-dim">
+      <div className="bg-muted text-foreground flex items-center px-2 flex-1 min-w-0 gap-2 phosphor-glow-dim overflow-hidden">
         {lastCommand ? (
-          <span className="phosphor-glow" data-testid="statusbar-echo">{lastCommand}</span>
+          <span className="phosphor-glow truncate" data-testid="statusbar-echo">{lastCommand}</span>
         ) : (
           <>
-            <span>Y- main</span>
-            <span className="font-bold phosphor-glow">
+            <span className="font-bold phosphor-glow truncate">
               {viewDescriptions[viewMode]}
             </span>
-            <span className="flex items-center gap-1 ml-auto text-muted-foreground">
-              [✓] Sync OK
+            <span className="hidden sm:flex items-center gap-1 ml-auto text-muted-foreground flex-shrink-0">
+              [✓] Sync
             </span>
           </>
         )}
@@ -45,7 +44,7 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
 
       <button
         onClick={onOpenMinibuffer}
-        className="bg-card text-muted-foreground flex items-center px-4 gap-4 border-t border-border cursor-pointer hover:text-foreground hover:phosphor-glow transition-colors"
+        className="bg-card text-muted-foreground flex items-center px-2 border-t border-border cursor-pointer hover:text-foreground hover:phosphor-glow transition-colors flex-shrink-0"
         data-testid="statusbar-mx-button"
       >
         <span>M-x</span>

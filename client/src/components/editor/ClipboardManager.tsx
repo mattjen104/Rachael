@@ -391,8 +391,8 @@ function EditableItem({ item, activeOrgFile, onDelete, isHistory, onUnarchive }:
       )}
       data-testid={`clipboard-item-${item.id}`}
     >
-      <div className="flex justify-between items-center px-2 pt-1 pb-0.5">
-        <div className="flex items-center gap-1.5">
+      <div className="flex justify-between items-start px-2 pt-1 pb-0.5 gap-1">
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
           {item.pinned && !isHistory && (
             <span className="text-foreground phosphor-glow" title="Pinned">★</span>
           )}
@@ -417,7 +417,7 @@ function EditableItem({ item, activeOrgFile, onDelete, isHistory, onUnarchive }:
             {formatTime(item.capturedAt)}
           </span>
         </div>
-        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 flex-wrap justify-end">
           {isHistory ? (
             <>
               <button
@@ -671,8 +671,8 @@ export default function ClipboardManager({ activeOrgFile, onEcho }: ClipboardMan
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background font-mono z-20" data-testid="clipboard-view">
-      <div className="max-w-3xl mx-auto w-full flex flex-col h-full">
-      <div className="p-4 border-b border-border flex items-center justify-between">
+      <div className="w-full flex flex-col h-full">
+      <div className="px-3 py-2 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2 font-bold text-foreground phosphor-glow">
           <span>⎘</span>
           <span>Clipboard</span>
@@ -680,7 +680,7 @@ export default function ClipboardManager({ activeOrgFile, onEcho }: ClipboardMan
         <span className="text-muted-foreground">[{items.length}]</span>
       </div>
 
-      <div className="p-2 border-b border-border">
+      <div className="px-2 py-1.5 border-b border-border">
         <SmartInput
           value={newContent}
           onChange={setNewContent}

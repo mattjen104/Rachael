@@ -18,7 +18,7 @@ export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
   const { cycleTheme, t } = useCrtTheme();
 
   return (
-    <aside className="w-14 border-r border-border bg-card flex flex-col h-full flex-shrink-0 items-center">
+    <aside className="w-10 border-r border-border bg-card flex flex-col h-full flex-shrink-0 items-center">
       <div className="py-2 border-b border-border w-full flex items-center justify-center">
         <button
           onClick={cycleTheme}
