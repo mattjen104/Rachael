@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { cn } from "@/lib/utils";
-import { useHeadingsSearch } from "@/hooks/use-org-data";
+import { useHeadingsSearch, useClipboardItems, useClipboardHistory } from "@/hooks/use-org-data";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 
 interface MinibufferCommand {
   id: string;
@@ -16,6 +17,7 @@ interface MinibufferProps {
   onCycleTheme: () => void;
   onCarryOver: () => void;
   onCommandExecuted: (label: string) => void;
+  onJumpToHeading?: (sourceFile: string, title: string, lineNumber: number) => void;
 }
 
 export default function Minibuffer({
@@ -25,15 +27,18 @@ export default function Minibuffer({
   onCycleTheme,
   onCarryOver,
   onCommandExecuted,
+  onJumpToHeading,
 }: MinibufferProps) {
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [mode, setMode] = useState<"command" | "search">("command");
+  const [mode, setMode] = useState<"command" | "search" | "clipboard" | "create-file">("command");
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const searchQuery = mode === "search" ? query : "";
   const { data: headings = [] } = useHeadingsSearch(searchQuery);
+  const { data: clipboardItems = [] } = useClipboardItems();
+  const { data: historyItems = [] } = useClipboardHistory();
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -54,6 +59,8 @@ export default function Minibuffer({
     { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
     { id: "carry-over-tasks", label: "carry-over-tasks", hint: "", action: () => exec("Tasks carried over", () => onCarryOver()) },
     { id: "search-headings", label: "search-headings", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
+    { id: "clipboard-search", label: "clipboard-search", hint: "⎘", action: () => { setMode("clipboard"); setQuery(""); setSelectedIdx(0); } },
+    { id: "create-file", label: "create-file", hint: "+", action: () => { setMode("create-file"); setQuery(""); setSelectedIdx(0); } },
   ], [exec, onSwitchView, onOpenCapture, onCycleTheme, onCarryOver]);
 
   const filteredCommands = useMemo(() => {
@@ -69,11 +76,42 @@ export default function Minibuffer({
       id: `heading-${h.sourceFile}-${h.lineNumber}`,
       label: `${"*".repeat(h.level)} ${h.status ? h.status + " " : ""}${h.title}`,
       hint: `${h.sourceFile}:${h.lineNumber}`,
-      action: () => exec(`Jumped to ${h.title}`, () => onSwitchView("org")),
+      action: () => {
+        if (onJumpToHeading) {
+          exec(`Jumped to ${h.title}`, () => onJumpToHeading(h.sourceFile, h.title, h.lineNumber));
+        } else {
+          exec(`Jumped to ${h.title}`, () => onSwitchView("org"));
+        }
+      },
     }));
-  }, [headings, mode, exec, onSwitchView]);
+  }, [headings, mode, exec, onSwitchView, onJumpToHeading]);
 
-  const items = mode === "search" ? headingItems : filteredCommands;
+  const clipboardSearchItems = useMemo(() => {
+    if (mode !== "clipboard") return [];
+    const all = [...clipboardItems, ...historyItems];
+    const q = query.toLowerCase();
+    const filtered = q ? all.filter(item =>
+      item.content.toLowerCase().includes(q) ||
+      (item.urlTitle && item.urlTitle.toLowerCase().includes(q))
+    ) : all;
+    return filtered.slice(0, 20).map((item) => ({
+      id: `clip-${item.id}`,
+      label: item.urlTitle || item.content.slice(0, 80).replace(/\n/g, " "),
+      hint: item.type,
+      action: () => {
+        navigator.clipboard.writeText(item.content).then(() => {
+          exec("Copied to clipboard", () => {});
+        }).catch(() => {
+          exec("Copy failed", () => {});
+        });
+      },
+    }));
+  }, [clipboardItems, historyItems, query, mode, exec]);
+
+  const items = mode === "search" ? headingItems
+    : mode === "clipboard" ? clipboardSearchItems
+    : mode === "create-file" ? []
+    : filteredCommands;
 
   useEffect(() => {
     setSelectedIdx(0);
@@ -88,14 +126,32 @@ export default function Minibuffer({
     }
   }, [selectedIdx]);
 
+  const handleCreateFile = async () => {
+    const name = query.trim();
+    if (!name) return;
+    const fileName = name.endsWith(".org") ? name : `${name}.org`;
+    try {
+      await apiRequest("POST", "/api/org-files", { name: fileName, content: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      exec(`Created ${fileName}`, () => {});
+    } catch {
+      exec(`Failed to create ${fileName}`, () => {});
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
-      if (mode === "search") {
+      if (mode !== "command") {
         setMode("command");
         setQuery("");
       } else {
         onClose();
       }
+      return;
+    }
+    if (mode === "create-file" && e.key === "Enter") {
+      e.preventDefault();
+      handleCreateFile();
       return;
     }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
@@ -127,7 +183,10 @@ export default function Minibuffer({
     setQuery(val);
   };
 
-  const prompt = mode === "search" ? "Search: " : "M-x ";
+  const prompt = mode === "search" ? "Search: "
+    : mode === "clipboard" ? "Clipboard: "
+    : mode === "create-file" ? "New file: "
+    : "M-x ";
 
   return (
     <div className="flex flex-col w-full font-mono z-50" data-testid="minibuffer">
@@ -160,9 +219,9 @@ export default function Minibuffer({
         </div>
       )}
 
-      {items.length === 0 && query.length > 0 && (
+      {items.length === 0 && query.length > 0 && mode !== "create-file" && (
         <div className="border-t border-border bg-card px-4 py-1 text-muted-foreground phosphor-glow-dim">
-          {mode === "search" ? "No headings found" : "No matching commands"}
+          {mode === "search" ? "No headings found" : mode === "clipboard" ? "No matching clips" : "No matching commands"}
         </div>
       )}
 
@@ -177,6 +236,7 @@ export default function Minibuffer({
           className="flex-1 bg-transparent text-foreground outline-none phosphor-glow caret-foreground"
           spellCheck={false}
           autoComplete="off"
+          placeholder={mode === "create-file" ? "filename.org" : undefined}
           data-testid="minibuffer-input"
         />
       </div>

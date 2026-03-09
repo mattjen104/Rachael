@@ -4,6 +4,7 @@ import StatusBar from "@/components/layout/StatusBar";
 import ClipboardManager from "@/components/editor/ClipboardManager";
 import AgendaView from "@/components/editor/AgendaView";
 import OrgBufferView from "@/components/editor/UnifiedView";
+import type { ScrollTarget } from "@/components/editor/UnifiedView";
 import RoamView from "@/components/editor/RoamView";
 import OrgCapture from "@/components/editor/OrgCapture";
 import Minibuffer from "@/components/editor/Minibuffer";
@@ -17,6 +18,7 @@ export default function Workspace() {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [minibufferOpen, setMinibufferOpen] = useState(false);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
+  const [scrollTarget, setScrollTarget] = useState<ScrollTarget | null>(null);
 
   const seedMutation = useSeedData();
   const { data: orgFiles } = useOrgFiles();
@@ -42,12 +44,26 @@ export default function Workspace() {
     setLastCommand(label);
   }, []);
 
+  const echoMessage = useCallback((msg: string) => {
+    setLastCommand(msg);
+  }, []);
+
   useEffect(() => {
     if (lastCommand) {
       const timer = setTimeout(() => setLastCommand(null), 2000);
       return () => clearTimeout(timer);
     }
   }, [lastCommand]);
+
+  const handleNavigateToFile = useCallback((fileName: string) => {
+    setViewMode("org");
+    setScrollTarget({ file: fileName });
+  }, []);
+
+  const handleJumpToHeading = useCallback((sourceFile: string, title: string, lineNumber: number) => {
+    setViewMode("org");
+    setScrollTarget({ file: sourceFile, heading: title, lineNumber });
+  }, []);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -90,13 +106,16 @@ export default function Workspace() {
         <Sidebar viewMode={viewMode} onSwitchView={setViewMode} />
         <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
           {viewMode === "org" ? (
-            <OrgBufferView />
+            <OrgBufferView
+              scrollTarget={scrollTarget}
+              onScrollComplete={() => setScrollTarget(null)}
+            />
           ) : viewMode === "agenda" ? (
-            <AgendaView onNavigateToFile={() => {}} />
+            <AgendaView onNavigateToFile={handleNavigateToFile} />
           ) : viewMode === "roam" ? (
             <RoamView />
           ) : (
-            <ClipboardManager activeOrgFile={defaultCaptureFile} />
+            <ClipboardManager activeOrgFile={defaultCaptureFile} onEcho={echoMessage} />
           )}
         </main>
       </div>
@@ -108,6 +127,7 @@ export default function Workspace() {
           onCycleTheme={cycleTheme}
           onCarryOver={() => carryOverMutation.mutate()}
           onCommandExecuted={handleCommandExecuted}
+          onJumpToHeading={handleJumpToHeading}
         />
       ) : (
         <StatusBar viewMode={viewMode} lastCommand={lastCommand} onOpenMinibuffer={() => setMinibufferOpen(true)} />

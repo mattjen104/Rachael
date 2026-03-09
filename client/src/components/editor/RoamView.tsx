@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -33,9 +33,50 @@ function useBacklinks() {
   });
 }
 
+function extractLinkTitle(link: string): string {
+  const inner = link.replace(/^\[\[/, "").replace(/\]\]$/, "");
+  if (inner.startsWith("*")) return inner.slice(1);
+  if (inner.startsWith("file:")) {
+    const headingMatch = inner.match(/::\*(.+)$/);
+    if (headingMatch) return headingMatch[1];
+  }
+  return inner;
+}
+
 export default function RoamView() {
   const { data: nodes = [], isLoading } = useBacklinks();
   const [expandedNode, setExpandedNode] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const findNodeKeyByTitle = (title: string): string | null => {
+    const normalized = title.toLowerCase();
+    const match = nodes.find(n => n.title.toLowerCase() === normalized);
+    if (match) return `${match.sourceFile}:${match.lineNumber}`;
+    return null;
+  };
+
+  const navigateToNode = (title: string) => {
+    const key = findNodeKeyByTitle(title);
+    if (key) {
+      setExpandedNode(key);
+      setTimeout(() => {
+        const el = containerRef.current?.querySelector(`[data-roam-key="${CSS.escape(key)}"]`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
+  };
+
+  const navigateToBacklinkSource = (sourceFile: string, lineNumber: number) => {
+    const key = `${sourceFile}:${lineNumber}`;
+    const match = nodes.find(n => `${n.sourceFile}:${n.lineNumber}` === key);
+    if (match) {
+      setExpandedNode(key);
+      setTimeout(() => {
+        const el = containerRef.current?.querySelector(`[data-roam-key="${CSS.escape(key)}"]`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -58,6 +99,36 @@ export default function RoamView() {
     setExpandedNode(prev => prev === key ? null : key);
   };
 
+  const renderBodyWithLinks = (body: string) => {
+    return body.split("\n").map((line, i) => (
+      <div key={i} className="text-foreground phosphor-glow-dim min-h-[1.4em] whitespace-pre-wrap">
+        {line.includes("[[") ? (
+          <span>
+            {line.split(/(\[\[.*?\]\])/).map((part, j) =>
+              part.startsWith("[[") ? (
+                <span
+                  key={j}
+                  className="underline underline-offset-2 phosphor-glow cursor-pointer hover:text-org-todo transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigateToNode(extractLinkTitle(part));
+                  }}
+                  data-testid={`roam-link-${i}-${j}`}
+                >
+                  {part}
+                </span>
+              ) : (
+                <span key={j}>{part}</span>
+              )
+            )}
+          </span>
+        ) : (
+          line || "\u00A0"
+        )}
+      </div>
+    ));
+  };
+
   return (
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="roam-view">
       <div className="flex items-center border-b border-border bg-card px-4 py-1 gap-2">
@@ -67,7 +138,7 @@ export default function RoamView() {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="max-w-3xl mx-auto p-4 pb-32">
+        <div ref={containerRef} className="max-w-3xl mx-auto p-4 pb-32">
           {nodes.map((node) => {
             const nodeKey = `${node.sourceFile}:${node.lineNumber}`;
             const isExpanded = expandedNode === nodeKey;
@@ -75,7 +146,7 @@ export default function RoamView() {
             const hasOutlinks = node.body.includes("[[");
 
             return (
-              <div key={nodeKey} className="mb-1" data-testid={`roam-node-${node.lineNumber}`}>
+              <div key={nodeKey} className="mb-1" data-roam-key={nodeKey} data-testid={`roam-node-${node.lineNumber}`}>
                 <button
                   onClick={() => toggleNode(nodeKey)}
                   className={cn(
@@ -125,25 +196,7 @@ export default function RoamView() {
                         <div className="text-muted-foreground uppercase tracking-wider mb-1 font-bold">
                           Content
                         </div>
-                        {node.body.split("\n").map((line, i) => (
-                          <div key={i} className="text-foreground phosphor-glow-dim min-h-[1.4em] whitespace-pre-wrap">
-                            {line.includes("[[") ? (
-                              <span>
-                                {line.split(/(\[\[.*?\]\])/).map((part, j) =>
-                                  part.startsWith("[[") ? (
-                                    <span key={j} className="underline underline-offset-2 phosphor-glow">
-                                      {part}
-                                    </span>
-                                  ) : (
-                                    <span key={j}>{part}</span>
-                                  )
-                                )}
-                              </span>
-                            ) : (
-                              line || "\u00A0"
-                            )}
-                          </div>
-                        ))}
+                        {renderBodyWithLinks(node.body)}
                       </div>
                     )}
 
@@ -155,7 +208,9 @@ export default function RoamView() {
                         {node.backlinks.map((bl, i) => (
                           <div
                             key={`${bl.sourceFile}-${bl.lineNumber}-${i}`}
-                            className="py-1 px-2 mb-1 hover:bg-muted/20 transition-colors"
+                            className="py-1 px-2 mb-1 hover:bg-muted/20 transition-colors cursor-pointer"
+                            onClick={() => navigateToBacklinkSource(bl.sourceFile, bl.lineNumber)}
+                            data-testid={`roam-backlink-${bl.lineNumber}-${i}`}
                           >
                             <div className="text-foreground phosphor-glow">
                               {"*".repeat(bl.level)} {bl.title}

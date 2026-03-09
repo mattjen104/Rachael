@@ -1,6 +1,64 @@
 import React from "react";
 
-export function renderOrgContent(text: string, keyPrefix: string = "") {
+interface RenderContext {
+  fileName?: string;
+  lineNumber?: number;
+  onToggleStatus?: (fileName: string, lineNumber: number) => void;
+}
+
+function renderHeadingWithStatus(
+  line: string,
+  key: string,
+  headingLevel: number,
+  ctx?: RenderContext
+) {
+  const isTopLevel = headingLevel === 1;
+  const isDeep = headingLevel >= 3;
+  const baseMt = isTopLevel ? "mt-2" : "mt-1";
+  const baseBright = isTopLevel ? "phosphor-glow-bright" : "phosphor-glow";
+
+  const hasTodo = line.includes("TODO");
+  const hasDone = line.includes("DONE");
+  const clickable = ctx?.onToggleStatus && ctx?.fileName;
+
+  if (hasTodo) {
+    const parts = line.split("TODO");
+    return (
+      <div key={key} className={`font-mono whitespace-pre-wrap min-h-[1.4em] text-foreground font-bold ${baseMt} ${baseBright}`}>
+        {parts[0]}
+        <span
+          className={`text-org-todo font-bold phosphor-glow-bright ${clickable ? "cursor-pointer hover:underline" : ""}`}
+          onClick={clickable ? () => ctx.onToggleStatus!(ctx.fileName!, ctx.lineNumber!) : undefined}
+          data-testid={clickable ? `toggle-status-${ctx!.lineNumber}` : undefined}
+        >TODO</span>
+        {parts[1]}
+      </div>
+    );
+  }
+
+  if (hasDone) {
+    const parts = line.split("DONE");
+    return (
+      <div key={key} className={`font-mono whitespace-pre-wrap min-h-[1.4em] text-muted-foreground font-bold ${baseMt} phosphor-glow-dim`}>
+        {parts[0]}
+        <span
+          className={`font-bold ${clickable ? "cursor-pointer hover:underline" : ""}`}
+          onClick={clickable ? () => ctx.onToggleStatus!(ctx.fileName!, ctx.lineNumber!) : undefined}
+          data-testid={clickable ? `toggle-status-${ctx!.lineNumber}` : undefined}
+        >DONE</span>
+        {parts[1]}
+      </div>
+    );
+  }
+
+  return (
+    <div key={key} className={`font-mono whitespace-pre-wrap min-h-[1.4em] text-foreground font-bold ${baseMt} ${baseBright}`}>
+      {line}
+    </div>
+  );
+}
+
+export function renderOrgContent(text: string, keyPrefix: string = "", ctx?: RenderContext) {
   return text.split("\n").map((line, i) => {
     const key = `${keyPrefix}${i}`;
     let className = "font-mono whitespace-pre-wrap min-h-[1.4em] phosphor-glow-dim";
@@ -20,32 +78,9 @@ export function renderOrgContent(text: string, keyPrefix: string = "") {
         );
       }
       className += " text-muted-foreground";
-    } else if (/^\*{3}\s/.test(line)) {
-      className = "font-mono whitespace-pre-wrap min-h-[1.4em] text-foreground font-bold mt-1 phosphor-glow";
-    } else if (/^\*{2}\s/.test(line)) {
-      if (line.includes("TODO")) {
-        const parts = line.split("TODO");
-        return (
-          <div key={key} className="font-mono whitespace-pre-wrap min-h-[1.4em] text-foreground font-bold mt-1 phosphor-glow">
-            {parts[0]}
-            <span className="text-org-todo font-bold phosphor-glow-bright">TODO</span>
-            {parts[1]}
-          </div>
-        );
-      }
-      if (line.includes("DONE")) {
-        const parts = line.split("DONE");
-        return (
-          <div key={key} className="font-mono whitespace-pre-wrap min-h-[1.4em] text-muted-foreground font-bold mt-1 phosphor-glow-dim">
-            {parts[0]}
-            <span className="font-bold">DONE</span>
-            {parts[1]}
-          </div>
-        );
-      }
-      className = "font-mono whitespace-pre-wrap min-h-[1.4em] text-foreground font-bold mt-1 phosphor-glow";
-    } else if (/^\*\s/.test(line)) {
-      className = "font-mono whitespace-pre-wrap min-h-[1.4em] text-foreground font-bold mt-2 phosphor-glow-bright";
+    } else if (/^\*+\s/.test(line)) {
+      const stars = line.match(/^(\*+)\s/)![1].length;
+      return renderHeadingWithStatus(line, key, stars, ctx);
     } else if (/\[\[.*\]\]/.test(line)) {
       const match = line.match(/\[\[(.*)\]\]/);
       const linkContent = match ? match[1] : "";
@@ -53,8 +88,7 @@ export function renderOrgContent(text: string, keyPrefix: string = "") {
         <div key={key} className="font-mono whitespace-pre-wrap min-h-[1.4em] phosphor-glow-dim">
           <span
             className="text-foreground underline underline-offset-2 cursor-pointer hover:phosphor-glow transition-colors w-fit"
-            onClick={() => alert(`Opening iCloud file reference:\n${linkContent}`)}
-            title="Open iCloud Reference"
+            title={linkContent}
           >
             [[{linkContent}]]
           </span>

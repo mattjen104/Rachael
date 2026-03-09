@@ -1,10 +1,49 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useOrgFiles } from "@/hooks/use-org-data";
+import { useOrgFiles, useToggleOrgStatus } from "@/hooks/use-org-data";
 import { renderOrgContent } from "./OrgRenderer";
 
-export default function OrgBufferView() {
+export interface ScrollTarget {
+  file: string;
+  heading?: string;
+  lineNumber?: number;
+}
+
+interface OrgBufferViewProps {
+  scrollTarget?: ScrollTarget | null;
+  onScrollComplete?: () => void;
+}
+
+export default function OrgBufferView({ scrollTarget, onScrollComplete }: OrgBufferViewProps) {
   const { data: orgFiles = [], isLoading } = useOrgFiles();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const toggleStatus = useToggleOrgStatus();
+
+  useEffect(() => {
+    if (!scrollTarget || !containerRef.current) return;
+    const timer = setTimeout(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      let el: Element | null = null;
+      if (scrollTarget.lineNumber && scrollTarget.file) {
+        el = container.querySelector(`[data-file="${CSS.escape(scrollTarget.file)}"][data-line="${scrollTarget.lineNumber}"]`);
+      }
+      if (!el && scrollTarget.heading) {
+        el = container.querySelector(`[data-heading="${CSS.escape(scrollTarget.heading)}"][data-file="${CSS.escape(scrollTarget.file)}"]`);
+        if (!el) {
+          el = container.querySelector(`[data-heading="${CSS.escape(scrollTarget.heading)}"]`);
+        }
+      }
+      if (!el) {
+        el = container.querySelector(`[data-file-header="${CSS.escape(scrollTarget.file)}"]`);
+      }
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      onScrollComplete?.();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [scrollTarget, orgFiles]);
 
   if (isLoading) {
     return (
@@ -22,24 +61,46 @@ export default function OrgBufferView() {
     );
   }
 
-  const combinedContent = orgFiles
-    .map((file) => {
-      const lines = file.content.split("\n");
-      const bumpedLines = lines.map((line) => {
-        if (/^\*+\s/.test(line)) {
-          return "*" + line;
-        }
-        return line;
-      });
-      return `* ${file.name}\n${bumpedLines.join("\n")}`;
-    })
-    .join("\n\n");
+  const handleToggleStatus = (fileName: string, lineNumber: number) => {
+    toggleStatus.mutate({ fileName, lineNumber });
+  };
 
   return (
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="org-buffer-view">
       <ScrollArea className="flex-1">
-        <div className="max-w-4xl mx-auto p-4 pb-32">
-          {renderOrgContent(combinedContent, "org-")}
+        <div ref={containerRef} className="max-w-4xl mx-auto p-4 pb-32">
+          {orgFiles.map((file) => {
+            const lines = file.content.split("\n");
+            let lineCounter = 0;
+            return (
+              <div key={file.name} data-file-header={file.name}>
+                <div className="font-mono whitespace-pre-wrap min-h-[1.4em] text-foreground font-bold mt-2 phosphor-glow-bright">
+                  * {file.name}
+                </div>
+                {lines.map((line, i) => {
+                  lineCounter = i + 1;
+                  const headingMatch = line.match(/^(\*+)\s+(TODO\s+|DONE\s+)?(.*)$/);
+                  const headingTitle = headingMatch ? headingMatch[3]?.replace(/\s*:[\w:]+:\s*$/, "").trim() : undefined;
+                  const headingStatus = headingMatch ? headingMatch[2]?.trim() : undefined;
+                  const dataAttrs: Record<string, string> = {};
+                  if (headingTitle) {
+                    dataAttrs["data-heading"] = headingTitle;
+                    dataAttrs["data-file"] = file.name;
+                    dataAttrs["data-line"] = String(lineCounter);
+                  }
+                  const rendered = renderOrgContent(line, `${file.name}-${i}-`, {
+                    fileName: file.name,
+                    lineNumber: lineCounter,
+                    onToggleStatus: headingStatus ? handleToggleStatus : undefined,
+                  });
+                  if (headingTitle) {
+                    return <div key={`${file.name}-${i}`} {...dataAttrs}>{rendered}</div>;
+                  }
+                  return <React.Fragment key={`${file.name}-${i}`}>{rendered}</React.Fragment>;
+                })}
+              </div>
+            );
+          })}
         </div>
       </ScrollArea>
     </div>

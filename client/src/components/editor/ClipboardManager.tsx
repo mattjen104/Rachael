@@ -19,6 +19,7 @@ import { queryClient } from "@/lib/queryClient";
 
 interface ClipboardManagerProps {
   activeOrgFile: string;
+  onEcho?: (msg: string) => void;
 }
 
 function parseCaptureSyntax(content: string): { hasTask: boolean; nestingLevel: number; label: string } {
@@ -330,15 +331,10 @@ function EditableItem({ item, activeOrgFile, onDelete, isHistory, onUnarchive }:
           originalContent: item.content !== editValue.trim() ? item.content : undefined,
         },
         {
-          onSuccess: (data) => {
+          onSuccess: () => {
             setEditing(false);
+            setSuccessLabel(parsed.hasTask ? "Task" : "Note");
             setShowSuccess(true);
-            const label = parsed.hasTask ? "Task" : "Note";
-            toast({
-              title: `${label} captured`,
-              description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
-              className: "bg-card border-foreground text-foreground",
-            });
             setTimeout(() => setShowSuccess(false), 1500);
           },
           onError: () => {
@@ -586,7 +582,7 @@ function EditableItem({ item, activeOrgFile, onDelete, isHistory, onUnarchive }:
   );
 }
 
-export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProps) {
+export default function ClipboardManager({ activeOrgFile, onEcho }: ClipboardManagerProps) {
   const { data: items = [], isLoading } = useClipboardItems();
   const { data: historyItems = [] } = useClipboardHistory();
   const deleteMutation = useDeleteClipboardItem();
@@ -630,11 +626,8 @@ export default function ClipboardManager({ activeOrgFile }: ClipboardManagerProp
         {
           onSuccess: (data) => {
             const label = parsed.hasTask ? "Task" : "Note";
-            toast({
-              title: `${label} captured`,
-              description: `Added to ${activeOrgFile}${data.parsed?.scheduledDate ? ` — ${data.parsed.scheduledDate}` : ""}`,
-              className: "bg-card border-foreground text-foreground",
-            });
+            const msg = `${label} captured → ${activeOrgFile}${data.parsed?.scheduledDate ? ` [${data.parsed.scheduledDate}]` : ""}`;
+            onEcho ? onEcho(msg) : toast({ title: msg, className: "bg-card border-foreground text-foreground" });
             setNewContent("");
           },
           onError: () => {

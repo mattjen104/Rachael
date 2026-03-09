@@ -25,6 +25,13 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 12. **Inline Gif/Image Preview** - Gif and image URLs in the clipboard render as inline previews. Gifs play at larger size (max-h-40) for visibility.
 13. **CopyQ-style Clipboard Management** - Clipboard items can be pinned (`[★]`/`[☆]` toggle) to float to the top and persist. `[⎘]` copy-back button copies content to system clipboard with visual flash. Collapsible `▸ history` section at bottom shows archived items with `[⎘]` copy and `[↑]` unarchive buttons.
 14. **Clipboard Pinning** - Pinned items (`pinned` boolean column) sort first in the list and get a subtle visual highlight. Toggle via `[★]`/`[☆]` button on hover.
+15. **Agenda § Navigation** - Clicking `§ filename.org` in the Agenda view switches to the Org buffer and scrolls to that file's section. Dead navigation links are now functional.
+16. **Heading Jump from Minibuffer** - Selecting a heading from minibuffer search (`/`) now switches to the Org view and scrolls to the exact heading, not just the view.
+17. **New Org File Creation** - `create-file` minibuffer command creates new empty `.org` files. Prompts for filename, auto-appends `.org` extension.
+18. **Clickable TODO Toggling in Org View** - TODO/DONE keywords in the unified Org buffer are now clickable. Clicking toggles status in-place (via `useToggleOrgStatus`), no need to enter INSERT mode.
+19. **Minibuffer Clipboard Search** - `clipboard-search` command in M-x opens a clipboard-specific fuzzy search. Shows all active + archived items, selecting one copies content to system clipboard.
+20. **Consistent StatusBar Echo Feedback** - Success messages (capture, filing) now echo through the StatusBar area instead of toast popups. Toasts reserved for errors only.
+21. **Navigable Roam Links** - `[[links]]` in the Roam view body content are clickable — clicking navigates to (expands) the target node. Backlink items are also clickable, expanding the source node and scrolling to it.
 
 ## Key Server Components
 
@@ -35,7 +42,7 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 ## Data Model (shared/schema.ts)
 
 - `orgFiles` - Org-mode file storage (name, content)
-- `clipboardItems` - Clipboard capture history (content, type, timestamp, archived, detectedType, urlTitle, urlDescription, urlImage, urlDomain)
+- `clipboardItems` - Clipboard capture history (content, type, timestamp, archived, pinned, detectedType, urlTitle, urlDescription, urlImage, urlDomain)
 - `agendaItems` - Legacy task/agenda tracking (text, status, scheduledDate, carriedOver)
 
 ## API Routes (server/routes.ts)
