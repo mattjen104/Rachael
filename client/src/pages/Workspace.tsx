@@ -118,7 +118,9 @@ export default function Workspace() {
 
       if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        openCapture();
+        if (window.parent === window) {
+          openCapture();
+        }
       }
     };
     window.addEventListener("keydown", handleKey);

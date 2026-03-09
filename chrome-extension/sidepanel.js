@@ -6,7 +6,7 @@ const openSettingsBtn = document.getElementById("open-settings-btn");
 const notConfigured = document.getElementById("not-configured");
 
 let apiUrl = "";
-let pendingCapture = false;
+let pendingCapture = null;
 let appReady = false;
 
 function setConnected(url) {
@@ -56,42 +56,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-async function getPageContext() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.id) return null;
-
-    const context = { url: tab.url || "", title: tab.title || "", selection: "" };
-
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => window.getSelection()?.toString() || "",
-      });
-      if (results && results[0]) {
-        context.selection = results[0].result || "";
-      }
-    } catch (e) {
-    }
-
-    return context;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function triggerCapture() {
-  const context = await getPageContext();
-  if (!context) return;
-
+function sendCaptureToApp(context) {
   if (appReady && appFrame.contentWindow) {
     appFrame.contentWindow.postMessage(
       { action: "capture", ...context },
       apiUrl
     );
   } else {
-    pendingCapture = true;
-    window._pendingCaptureContext = context;
+    pendingCapture = context;
   }
 }
 
@@ -106,19 +78,25 @@ window.addEventListener("message", (event) => {
 
   if (event.data?.action === "orgcloud-ready") {
     appReady = true;
-    if (pendingCapture && window._pendingCaptureContext && appFrame.contentWindow) {
+    if (pendingCapture && appFrame.contentWindow) {
       appFrame.contentWindow.postMessage(
-        { action: "capture", ...window._pendingCaptureContext },
+        { action: "capture", ...pendingCapture },
         apiUrl
       );
-      pendingCapture = false;
-      window._pendingCaptureContext = null;
+      pendingCapture = null;
     }
   }
 });
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.action === "trigger-capture") {
-    triggerCapture();
+  if (message.action === "trigger-capture" && message.context) {
+    sendCaptureToApp(message.context);
+  }
+});
+
+chrome.runtime.sendMessage({ action: "sidepanel-ready" }, (response) => {
+  if (chrome.runtime.lastError) return;
+  if (response && response.action === "trigger-capture" && response.context) {
+    sendCaptureToApp(response.context);
   }
 });
