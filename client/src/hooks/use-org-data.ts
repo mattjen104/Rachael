@@ -297,6 +297,21 @@ export function useJournalAdd() {
   });
 }
 
+export function useDailyCapture() {
+  return useMutation({
+    mutationFn: async (data: { content: string }) => {
+      const res = await apiRequest("POST", "/api/org-query/daily-capture", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/journal-daily"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+    },
+  });
+}
+
 export function useAgendaItems() {
   return useQuery<AgendaItem[]>({
     queryKey: ["/api/agenda"],

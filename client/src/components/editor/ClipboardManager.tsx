@@ -5,10 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import {
   useClipboardItems,
   useDeleteClipboardItem,
-  useAddClipboardItem,
   useUpdateClipboardItem,
   useSmartCapture,
-  useEnrichClipboard,
   useHeadingsSearch,
   useOrgCapture,
   useTogglePin,
@@ -586,84 +584,9 @@ export default function ClipboardManager({ activeOrgFile, onEcho }: ClipboardMan
   const { data: items = [], isLoading } = useClipboardItems();
   const { data: historyItems = [] } = useClipboardHistory();
   const deleteMutation = useDeleteClipboardItem();
-  const addMutation = useAddClipboardItem();
-  const smartCaptureMutation = useSmartCapture();
-  const enrichMutation = useEnrichClipboard();
   const unarchiveMutation = useUnarchiveClipboardItem();
-  const [newContent, setNewContent] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const { toast } = useToast();
-
-  const updateAfterEnrich = (id: number, enriched: any) => {
-    const updates: Record<string, string> = {};
-    if (enriched.detection?.type) updates.detectedType = enriched.detection.type;
-    if (enriched.detection?.domain) updates.urlDomain = enriched.detection.domain;
-    if (enriched.metadata?.title) updates.urlTitle = enriched.metadata.title;
-    if (enriched.metadata?.description) updates.urlDescription = enriched.metadata.description;
-    if (enriched.metadata?.image) updates.urlImage = enriched.metadata.image;
-    if (Object.keys(updates).length > 0) {
-      fetch(`/api/clipboard/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      }).then(() => {
-        queryClient.invalidateQueries({ queryKey: ["/api/clipboard"] });
-      });
-    }
-  };
-
-  const syntax = parseCaptureSyntax(newContent);
-  const showCaptureHint = syntax.hasTask || syntax.nestingLevel > 0;
-
-  const handleAddManual = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newContent.trim()) return;
-
-    const parsed = parseCaptureSyntax(newContent);
-    if (parsed.hasTask || parsed.nestingLevel > 0) {
-      smartCaptureMutation.mutate(
-        { content: newContent.trim(), orgFileName: activeOrgFile },
-        {
-          onSuccess: (data) => {
-            const label = parsed.hasTask ? "Task" : "Note";
-            const msg = `${label} captured → ${activeOrgFile}${data.parsed?.scheduledDate ? ` [${data.parsed.scheduledDate}]` : ""}`;
-            onEcho ? onEcho(msg) : toast({ title: msg, className: "bg-card border-foreground text-foreground" });
-            setNewContent("");
-          },
-          onError: () => {
-            toast({
-              title: "Capture failed",
-              description: "Could not process the entry.",
-              className: "bg-card border-foreground text-foreground",
-            });
-          },
-        }
-      );
-      return;
-    }
-
-    let type = "text";
-    if (newContent.startsWith("http")) type = "link";
-    else if (newContent.includes("{") || newContent.includes("function ")) type = "code";
-
-    addMutation.mutate(
-      { content: newContent, type },
-      {
-        onSuccess: (created) => {
-          setNewContent("");
-          if (newContent.startsWith("http")) {
-            enrichMutation.mutate(newContent, {
-              onSuccess: (enriched) => {
-                if (enriched.detection || enriched.metadata) {
-                  updateAfterEnrich(created.id, enriched);
-                }
-              },
-            });
-          }
-        },
-      }
-    );
-  };
 
   const handleDelete = (id: number) => {
     deleteMutation.mutate(id);
@@ -680,35 +603,13 @@ export default function ClipboardManager({ activeOrgFile, onEcho }: ClipboardMan
         <span className="text-muted-foreground">[{items.length}]</span>
       </div>
 
-      <div className="px-2 py-1.5 border-b border-border">
-        <SmartInput
-          value={newContent}
-          onChange={setNewContent}
-          onSubmit={() => {
-            if (!newContent.trim()) return;
-            handleAddManual({ preventDefault: () => {} } as React.FormEvent);
-          }}
-          placeholder="t todo · > nest · [[ link"
-          className={cn(
-            "w-full bg-background text-foreground p-2 border outline-none transition-colors phosphor-glow",
-            showCaptureHint ? "border-foreground/50" : "border-border focus:border-foreground/30"
-          )}
-          testId="clipboard-input"
-        />
-        {showCaptureHint && (
-          <div className="mt-1 text-foreground font-bold phosphor-glow">
-            {syntax.label} → {activeOrgFile}
-          </div>
-        )}
-      </div>
-
       <ScrollArea className="flex-1 p-2">
         <div className="space-y-2">
           {isLoading ? (
             <div className="text-center p-4 text-muted-foreground italic phosphor-glow-dim">Loading...</div>
           ) : items.length === 0 ? (
             <div className="text-center p-4 text-muted-foreground italic phosphor-glow-dim">
-              Clipboard is empty. Type above to capture.
+              No items yet. Paste anywhere or capture via extension.
             </div>
           ) : (
             items.map((item) => (

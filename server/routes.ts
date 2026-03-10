@@ -105,15 +105,19 @@ export async function registerRoutes(
 
     entry += "\n";
 
-    const inboxRegex = /^\*\s+INBOX/m;
-    const inboxMatch = inboxRegex.exec(file.content);
     let newContent: string;
-    if (inboxMatch) {
-      const afterInbox = file.content.indexOf("\n", inboxMatch.index);
-      const insertAt = afterInbox !== -1 ? afterInbox + 1 : file.content.length;
-      newContent = file.content.slice(0, insertAt) + entry + file.content.slice(insertAt);
+    if (fileName === "journal.org") {
+      newContent = appendToDaily(file.content, new Date(), entry);
     } else {
-      newContent = file.content + `\n* INBOX\n` + entry;
+      const inboxRegex = /^\*\s+INBOX/m;
+      const inboxMatch = inboxRegex.exec(file.content);
+      if (inboxMatch) {
+        const afterInbox = file.content.indexOf("\n", inboxMatch.index);
+        const insertAt = afterInbox !== -1 ? afterInbox + 1 : file.content.length;
+        newContent = file.content.slice(0, insertAt) + entry + file.content.slice(insertAt);
+      } else {
+        newContent = file.content + `\n* INBOX\n` + entry;
+      }
     }
 
     const updated = await storage.updateOrgFileContent(file.id, newContent);
@@ -223,15 +227,19 @@ export async function registerRoutes(
       entry = formatNoteContent(parsed.title, originalContent || undefined);
     }
 
-    const inboxRegex = /^\*\s+INBOX/m;
-    const inboxMatch = inboxRegex.exec(orgFile.content);
     let newContent: string;
-    if (inboxMatch) {
-      const afterInbox = orgFile.content.indexOf("\n", inboxMatch.index);
-      const insertAt = afterInbox !== -1 ? afterInbox + 1 : orgFile.content.length;
-      newContent = orgFile.content.slice(0, insertAt) + entry + orgFile.content.slice(insertAt);
+    if (orgFileName === "journal.org") {
+      newContent = appendToDaily(orgFile.content, new Date(), entry);
     } else {
-      newContent = orgFile.content + `\n* INBOX\n` + entry;
+      const inboxRegex = /^\*\s+INBOX/m;
+      const inboxMatch = inboxRegex.exec(orgFile.content);
+      if (inboxMatch) {
+        const afterInbox = orgFile.content.indexOf("\n", inboxMatch.index);
+        const insertAt = afterInbox !== -1 ? afterInbox + 1 : orgFile.content.length;
+        newContent = orgFile.content.slice(0, insertAt) + entry + orgFile.content.slice(insertAt);
+      } else {
+        newContent = orgFile.content + `\n* INBOX\n` + entry;
+      }
     }
 
     const updated = await storage.updateOrgFileContent(orgFile.id, newContent);
@@ -328,6 +336,47 @@ export async function registerRoutes(
       : children;
 
     res.json(filtered);
+  });
+
+  app.post("/api/org-query/daily-capture", async (req, res) => {
+    const { content } = req.body;
+    if (!content || !content.trim()) {
+      return res.status(400).json({ message: "content required" });
+    }
+
+    const journal = await storage.getOrgFileByName("journal.org");
+    if (!journal) return res.status(404).json({ message: "journal.org not found" });
+
+    const parsed = parseCaptureEntry(content);
+
+    const entry = formatOrgEntry(parsed);
+
+    const newJournalContent = appendToDaily(journal.content, new Date(), entry);
+    await storage.updateOrgFileContent(journal.id, newJournalContent);
+
+    if (parsed.type === "task") {
+      try {
+        const inbox = await storage.getOrgFileByName("inbox.org");
+        if (inbox) {
+          const refEntry = formatOrgEntry(parsed, `Referenced from [[file:journal.org]]`);
+          const inboxRegex = /^\*\s+INBOX/m;
+          const inboxMatch = inboxRegex.exec(inbox.content);
+          let newInboxContent: string;
+          if (inboxMatch) {
+            const afterInbox = inbox.content.indexOf("\n", inboxMatch.index);
+            const insertAt = afterInbox !== -1 ? afterInbox + 1 : inbox.content.length;
+            newInboxContent = inbox.content.slice(0, insertAt) + refEntry + inbox.content.slice(insertAt);
+          } else {
+            newInboxContent = inbox.content + `\n* INBOX\n` + refEntry;
+          }
+          await storage.updateOrgFileContent(inbox.id, newInboxContent);
+        }
+      } catch (e) {
+        console.error("[daily-capture] inbox cross-file failed:", e);
+      }
+    }
+
+    res.json({ success: true, parsed });
   });
 
   app.post("/api/org-query/journal-add", async (req, res) => {

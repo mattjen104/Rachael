@@ -85,6 +85,29 @@ export default function Workspace() {
   }, [openCapture]);
 
   useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      const isEditable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+        (document.activeElement as HTMLElement)?.isContentEditable;
+      if (isEditable || captureOpen) return;
+
+      const text = e.clipboardData?.getData("text/plain")?.trim();
+      if (!text) return;
+
+      e.preventDefault();
+
+      const isUrl = /^https?:\/\/\S+$/.test(text);
+      if (isUrl) {
+        openCapture({ url: text, title: "", selection: "" });
+      } else {
+        openCapture({ title: "", selection: text });
+      }
+    };
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [captureOpen, openCapture]);
+
+  useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (captureOpen) return;
 

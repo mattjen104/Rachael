@@ -16,6 +16,8 @@ import {
   useRescheduleHeading,
   useJournalDaily,
   useJournalAdd,
+  useDailyCapture,
+  useHeadingsSearch,
   type OutlineHeading,
   type OrgHeading,
   type AgendaDay,
@@ -454,48 +456,187 @@ function OutlineItem({
   );
 }
 
-function QuickAdd() {
-  const [value, setValue] = useState("");
-  const captureMutation = useOrgCapture();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { data: orgFiles = [] } = useOrgFiles();
-  const defaultFile = orgFiles.find(f => f.name === "dad.org")?.name || orgFiles[0]?.name;
+function parseCaptureSyntax(content: string): { hasTask: boolean; nestingLevel: number; label: string } {
+  const trimmed = content.trim();
+  let body = trimmed;
+  let nestingLevel = 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value.trim() || !defaultFile) return;
-    const today = new Date().toISOString().split("T")[0];
-    captureMutation.mutate(
-      { fileName: defaultFile, title: value.trim(), scheduledDate: today },
-      { onSuccess: () => setValue("") }
-    );
-  };
+  const nestMatch = body.match(/^(>+)\s*/);
+  if (nestMatch) {
+    nestingLevel = nestMatch[1].length;
+    body = body.slice(nestMatch[0].length);
+  }
+
+  const hasTask = /^t\s+/i.test(body);
+
+  let label = "";
+  if (hasTask && nestingLevel > 0) label = `${"›".repeat(nestingLevel)} todo`;
+  else if (hasTask) label = "todo";
+  else if (nestingLevel > 0) label = `${"›".repeat(nestingLevel)} note`;
+
+  return { hasTask, nestingLevel, label };
+}
+
+function DailyInputBacklinkDropdown({ query, onSelect, onClose, visible, selectedIdx, onSelectedIdxChange }: {
+  query: string;
+  onSelect: (link: string) => void;
+  onClose: () => void;
+  visible: boolean;
+  selectedIdx: number;
+  onSelectedIdxChange: (idx: number) => void;
+}) {
+  const { data: headings = [] } = useHeadingsSearch(query);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { onSelectedIdxChange(0); }, [headings.length]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [visible, onClose]);
+
+  if (!visible || headings.length === 0) return null;
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 mb-4">
-      <div className="flex-1 flex items-center bg-card border border-border overflow-hidden focus-within:border-foreground transition-colors">
-        <span className="text-muted-foreground ml-2.5 flex-shrink-0">+</span>
-        <input
-          ref={inputRef}
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Add task to today..."
-          className="flex-1 bg-transparent text-foreground p-2 outline-none phosphor-glow"
-          data-testid="quick-add-input"
+    <div ref={dropdownRef} className="absolute left-0 right-0 top-full mt-1 bg-card border border-border shadow-xl z-50 max-h-40 overflow-y-auto">
+      {headings.map((h, i) => (
+        <button
+          key={`${h.sourceFile}-${h.lineNumber}`}
+          className={cn(
+            "w-full text-left px-3 py-1 flex items-center gap-2 transition-colors",
+            i === selectedIdx ? "bg-muted text-foreground phosphor-glow" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          )}
+          onClick={() => onSelect(`[[file:${h.sourceFile}::*${h.title}]]`)}
+          onMouseEnter={() => onSelectedIdxChange(i)}
+          data-testid={`daily-backlink-option-${i}`}
+        >
+          <span>{"*".repeat(h.level)}</span>
+          <span className="flex-1 truncate">{h.title}</span>
+          <span className="text-muted-foreground">{h.sourceFile}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DailyInput() {
+  const [value, setValue] = useState("");
+  const dailyCapture = useDailyCapture();
+  const journalAdd = useJournalAdd();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [backlinkQuery, setBacklinkQuery] = useState("");
+  const [showBacklinks, setShowBacklinks] = useState(false);
+  const [backlinkStart, setBacklinkStart] = useState(-1);
+  const [dropdownIdx, setDropdownIdx] = useState(0);
+  const { data: blHeadings = [] } = useHeadingsSearch(backlinkQuery);
+
+  const syntax = parseCaptureSyntax(value);
+  const showHint = syntax.hasTask || syntax.nestingLevel > 0;
+
+  const handleSubmit = () => {
+    if (!value.trim()) return;
+    if (syntax.hasTask || syntax.nestingLevel > 0) {
+      dailyCapture.mutate(
+        { content: value.trim() },
+        { onSuccess: () => setValue("") }
+      );
+    } else {
+      journalAdd.mutate(
+        { text: value.trim() },
+        { onSuccess: () => setValue("") }
+      );
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    setValue(newVal);
+    const cursorPos = e.target.selectionStart || 0;
+    const before = newVal.slice(0, cursorPos);
+    const bracketIdx = before.lastIndexOf("[[");
+    if (bracketIdx !== -1 && !before.slice(bracketIdx).includes("]]")) {
+      setBacklinkQuery(before.slice(bracketIdx + 2));
+      setBacklinkStart(bracketIdx);
+      setShowBacklinks(true);
+    } else {
+      setShowBacklinks(false);
+      setBacklinkQuery("");
+    }
+  };
+
+  const handleBacklinkSelect = (link: string) => {
+    const before = value.slice(0, backlinkStart);
+    const cursorPos = inputRef.current?.selectionStart || value.length;
+    const afterBracket = value.slice(cursorPos).replace(/^\]*/, "");
+    setValue(before + link + (afterBracket ? " " + afterBracket : ""));
+    setShowBacklinks(false);
+    setBacklinkQuery("");
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showBacklinks && blHeadings.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setDropdownIdx(i => Math.min(i + 1, blHeadings.length - 1)); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setDropdownIdx(i => Math.max(i - 1, 0)); return; }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const h = blHeadings[dropdownIdx];
+        if (h) handleBacklinkSelect(`[[file:${h.sourceFile}::*${h.title}]]`);
+        return;
+      }
+    }
+    if (e.key === "Enter") { e.preventDefault(); handleSubmit(); }
+  };
+
+  const isPending = dailyCapture.isPending || journalAdd.isPending;
+
+  return (
+    <div className="mb-3">
+      <div className="relative">
+        <div className="flex items-center bg-card border border-border overflow-hidden focus-within:border-foreground transition-colors">
+          <span className="text-muted-foreground ml-2.5 flex-shrink-0">
+            {showHint ? "#" : "+"}
+          </span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={value}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder="t task · > nest · [[ link · or just type a note"
+            className="flex-1 bg-transparent text-foreground p-2 outline-none phosphor-glow"
+            data-testid="daily-input"
+          />
+          {value.trim() && (
+            <button
+              onClick={handleSubmit}
+              disabled={isPending}
+              className="px-3 py-1 mr-1 bg-foreground text-background font-bold hover:brightness-110 transition-all text-xs"
+              data-testid="daily-input-submit"
+            >
+              {isPending ? "..." : "Add"}
+            </button>
+          )}
+        </div>
+        <DailyInputBacklinkDropdown
+          query={backlinkQuery}
+          onSelect={handleBacklinkSelect}
+          onClose={() => setShowBacklinks(false)}
+          visible={showBacklinks}
+          selectedIdx={dropdownIdx}
+          onSelectedIdxChange={setDropdownIdx}
         />
       </div>
-      {value.trim() && (
-        <button
-          type="submit"
-          disabled={captureMutation.isPending}
-          className="px-3 py-1 bg-foreground text-background font-bold hover:brightness-110 transition-all"
-          data-testid="quick-add-submit"
-        >
-          Add
-        </button>
+      {showHint && (
+        <div className="mt-1 text-foreground/70 text-xs font-bold phosphor-glow-dim pl-2">
+          {syntax.label} → journal
+        </div>
       )}
-    </form>
+    </div>
   );
 }
 
@@ -671,58 +812,6 @@ function AgendaItemRow({ item, overdueDays, onToggle, onReschedule, onEditTitle,
   );
 }
 
-function SectionHeader({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-2 my-3 text-muted-foreground/60 text-xs uppercase tracking-widest">
-      <span className="flex-1 border-t border-border/40" />
-      <span className="phosphor-glow-dim">{label}</span>
-      <span className="flex-1 border-t border-border/40" />
-    </div>
-  );
-}
-
-function JournalScratchpad() {
-  const [value, setValue] = useState("");
-  const journalAdd = useJournalAdd();
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value.trim()) return;
-    journalAdd.mutate(
-      { text: value.trim() },
-      { onSuccess: () => setValue("") }
-    );
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2">
-      <div className="flex-1 flex items-center bg-card border border-border overflow-hidden focus-within:border-foreground transition-colors">
-        <span className="text-muted-foreground ml-2.5 flex-shrink-0">*</span>
-        <input
-          ref={inputRef}
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Add a journal note..."
-          className="flex-1 bg-transparent text-foreground p-2 outline-none phosphor-glow"
-          data-testid="journal-scratchpad-input"
-        />
-      </div>
-      {value.trim() && (
-        <button
-          type="submit"
-          disabled={journalAdd.isPending}
-          className="px-3 py-1 bg-foreground text-background font-bold hover:brightness-110 transition-all"
-          data-testid="journal-scratchpad-submit"
-        >
-          Add
-        </button>
-      )}
-    </form>
-  );
-}
-
 function JournalEntryRow({ item, onToggle, onNavigateFile, isCursored }: {
   item: OrgHeading;
   onToggle: (item: OrgHeading) => void;
@@ -809,19 +898,20 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
 
   const scheduledCount = scheduledItems.length;
   const journalCursorOffset = scheduledCount;
+  const hasScheduled = scheduledItems.length > 0;
+  const hasJournal = journalEntries.length > 0;
 
   return (
-    <div className="space-y-2">
-      <QuickAdd />
-
-      <div className="flex items-center gap-2 mb-1">
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 mb-2">
         <span className="font-bold text-foreground uppercase tracking-wider phosphor-glow">
           {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
         </span>
       </div>
 
-      <SectionHeader label="Scheduled" />
-      {scheduledItems.length > 0 ? (
+      <DailyInput />
+
+      {hasScheduled && (
         <div className="space-y-1">
           {scheduledItems.map((item, i) => (
             <div key={`sched-${item.sourceFile}-${item.lineNumber}`} data-cursor-index={i}>
@@ -838,14 +928,13 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
             </div>
           ))}
         </div>
-      ) : (
-        <div className="text-muted-foreground/40 italic py-2 pl-6 phosphor-glow-dim text-xs">
-          Nothing scheduled for today.
-        </div>
       )}
 
-      <SectionHeader label="Daily Log" />
-      {journalEntries.length > 0 ? (
+      {hasScheduled && hasJournal && (
+        <div className="my-2 border-t border-border/20" />
+      )}
+
+      {hasJournal && (
         <div className="space-y-0.5">
           {journalEntries.map((item, i) => (
             <div key={`jrnl-${item.lineNumber}`} data-cursor-index={journalCursorOffset + i}>
@@ -858,14 +947,13 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
             </div>
           ))}
         </div>
-      ) : (
-        <div className="text-muted-foreground/40 italic py-2 pl-6 phosphor-glow-dim text-xs">
-          No journal entries yet. Capture items or write below.
-        </div>
       )}
 
-      <SectionHeader label="Notes" />
-      <JournalScratchpad />
+      {!hasScheduled && !hasJournal && (
+        <div className="text-muted-foreground/40 italic py-4 pl-6 phosphor-glow-dim text-xs">
+          Empty day. Use the input above to capture tasks or notes.
+        </div>
+      )}
     </div>
   );
 }
