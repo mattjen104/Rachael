@@ -2,16 +2,15 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import StatusBar from "@/components/layout/StatusBar";
 import ClipboardManager from "@/components/editor/ClipboardManager";
-import AgendaView from "@/components/editor/AgendaView";
 import MailView from "@/components/editor/MailView";
-import RoamView from "@/components/editor/RoamView";
+import OrgView from "@/components/editor/OrgView";
 import OrgCapture from "@/components/editor/OrgCapture";
 import type { CaptureContext } from "@/components/editor/OrgCapture";
 import Minibuffer from "@/components/editor/Minibuffer";
 import { useSeedData, useOrgFiles } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
 
-type ViewMode = "mail" | "agenda" | "roam" | "clipboard";
+type ViewMode = "mail" | "org" | "clipboard";
 
 export default function Workspace() {
   const [viewMode, setViewMode] = useState<ViewMode>("clipboard");
@@ -55,7 +54,7 @@ export default function Workspace() {
   }, [lastCommand]);
 
   const handleJumpToHeading = useCallback((_sourceFile: string, _title: string, _lineNumber: number) => {
-    setViewMode("roam");
+    setViewMode("org");
   }, []);
 
   const openCapture = useCallback((prefill?: CaptureContext) => {
@@ -129,10 +128,8 @@ export default function Workspace() {
         <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
           {viewMode === "mail" ? (
             <MailView />
-          ) : viewMode === "agenda" ? (
-            <AgendaView onNavigateToFile={() => setViewMode("roam")} />
-          ) : viewMode === "roam" ? (
-            <RoamView />
+          ) : viewMode === "org" ? (
+            <OrgView />
           ) : (
             <ClipboardManager activeOrgFile={defaultCaptureFile} onEcho={echoMessage} />
           )}
