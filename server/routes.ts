@@ -468,6 +468,70 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/org-query/reorder-body", async (req, res) => {
+    const { fileName, headingLine, fromIndex, toIndex } = req.body;
+    if (!fileName || headingLine == null || fromIndex == null || toIndex == null) {
+      return res.status(400).json({ message: "fileName, headingLine, fromIndex, toIndex required" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const lines = file.content.split("\n");
+    const headingIdx = headingLine - 1;
+    if (headingIdx < 0 || headingIdx >= lines.length) {
+      return res.status(400).json({ message: "Invalid heading line" });
+    }
+
+    let bodyStart = headingIdx + 1;
+    let bodyEnd = lines.length;
+    const headingMatch = lines[headingIdx].match(/^(\*+)\s/);
+    if (!headingMatch) return res.status(400).json({ message: "Not a heading line" });
+    const headingLevel = headingMatch[1].length;
+
+    for (let i = bodyStart; i < lines.length; i++) {
+      const m = lines[i].match(/^(\*+)\s/);
+      if (m) {
+        bodyEnd = i;
+        break;
+      }
+    }
+
+    const rawBodyLines = lines.slice(bodyStart, bodyEnd);
+    const visibleIndices: number[] = [];
+    for (let i = 0; i < rawBodyLines.length; i++) {
+      const t = rawBodyLines[i].trim();
+      if (!t) continue;
+      if (t === ":PROPERTIES:" || t === ":END:") continue;
+      if (/^:[A-Z_]+:/.test(t)) continue;
+      if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) continue;
+      visibleIndices.push(i);
+    }
+
+    if (fromIndex < 0 || fromIndex >= visibleIndices.length || toIndex < 0 || toIndex >= visibleIndices.length) {
+      return res.status(400).json({ message: "Index out of range" });
+    }
+
+    const fromRawIdx = visibleIndices[fromIndex];
+    const movedLine = rawBodyLines.splice(fromRawIdx, 1)[0];
+    const updatedVisibleIndices: number[] = [];
+    for (let i = 0; i < rawBodyLines.length; i++) {
+      const t = rawBodyLines[i].trim();
+      if (!t) continue;
+      if (t === ":PROPERTIES:" || t === ":END:") continue;
+      if (/^:[A-Z_]+:/.test(t)) continue;
+      if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) continue;
+      updatedVisibleIndices.push(i);
+    }
+    const toRawIdx = toIndex >= updatedVisibleIndices.length
+      ? (updatedVisibleIndices.length > 0 ? updatedVisibleIndices[updatedVisibleIndices.length - 1] + 1 : rawBodyLines.length)
+      : updatedVisibleIndices[toIndex];
+    rawBodyLines.splice(toRawIdx, 0, movedLine);
+
+    const newLines = [...lines.slice(0, bodyStart), ...rawBodyLines, ...lines.slice(bodyEnd)];
+    const updated = await storage.updateOrgFileContent(file.id, newLines.join("\n"));
+    res.json({ file: updated });
+  });
+
   // ── Agenda (legacy table-based) ────────────────────────────
 
   app.get("/api/agenda", async (_req, res) => {

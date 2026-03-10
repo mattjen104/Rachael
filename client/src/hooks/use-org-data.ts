@@ -337,6 +337,19 @@ export function useMoveHeading() {
   });
 }
 
+export function useReorderBodyLine() {
+  return useMutation({
+    mutationFn: async (data: { fileName: string; headingLine: number; fromIndex: number; toIndex: number }) => {
+      const res = await apiRequest("POST", "/api/org-query/reorder-body", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+    },
+  });
+}
+
 export function useMoveHeadingCross() {
   return useMutation({
     mutationFn: async (data: { fromFileName: string; fromLine: number; toFileName: string; toLine?: number; newLevel?: number }) => {

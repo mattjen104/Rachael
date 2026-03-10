@@ -7,6 +7,7 @@ import {
   useEditHeadingTitle,
   useDeleteHeading,
   useMoveHeading,
+  useReorderBodyLine,
   useOrgFiles,
   type OutlineHeading,
 } from "@/hooks/use-org-data";
@@ -44,6 +45,55 @@ function useBacklinks() {
   });
 }
 
+function filterBodyLines(body: string): string[] {
+  return body.split("\n").filter(l => {
+    const t = l.trim();
+    if (!t) return false;
+    if (t === ":PROPERTIES:" || t === ":END:") return false;
+    if (/^:[A-Z_]+:/.test(t)) return false;
+    if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) return false;
+    return true;
+  });
+}
+
+interface BodyBulletProps {
+  line: string;
+  index: number;
+  headingLine: number;
+  depth: number;
+  onDragStart: (index: number) => void;
+  onDragOver: (e: React.DragEvent, index: number) => void;
+  onDrop: (e: React.DragEvent, index: number) => void;
+  dropTarget: number | null;
+}
+
+function BodyBullet({ line, index, headingLine, depth, onDragStart, onDragOver, onDrop, dropTarget }: BodyBulletProps) {
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-1 py-px text-sm text-muted-foreground cursor-grab",
+        dropTarget === index && "border-t border-foreground/40"
+      )}
+      style={{ paddingLeft: `${(depth + 1) * 16 + 4}px` }}
+      draggable
+      onDragStart={(e) => {
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/x-body-index", String(index));
+        e.dataTransfer.setData("text/x-heading-line", String(headingLine));
+        e.dataTransfer.setData("text/x-body-drag", "true");
+        onDragStart(index);
+      }}
+      onDragOver={(e) => onDragOver(e, index)}
+      onDrop={(e) => onDrop(e, index)}
+      data-testid={`body-line-${headingLine}-${index}`}
+    >
+      <span className="flex-shrink-0 mt-0.5">·</span>
+      <span className="whitespace-pre-wrap">{line.trim()}</span>
+    </div>
+  );
+}
+
 interface OutlineItemProps {
   heading: OutlineHeading;
   children: OutlineHeading[];
@@ -57,6 +107,7 @@ interface OutlineItemProps {
   onDelete: (h: OutlineHeading) => void;
   dragItem: React.MutableRefObject<OutlineHeading | null>;
   onDrop: (target: OutlineHeading, position: "before" | "after" | "child") => void;
+  onReorderBody: (heading: OutlineHeading, fromIndex: number, toIndex: number) => void;
   backlinksMap: Map<string, BacklinkRef[]>;
 }
 
@@ -103,11 +154,14 @@ function OutlineItem({
   onDelete,
   dragItem,
   onDrop,
+  onReorderBody,
   backlinksMap,
 }: OutlineItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(heading.title);
   const [dropZone, setDropZone] = useState<"before" | "after" | "child" | null>(null);
+  const [bodyDropTarget, setBodyDropTarget] = useState<number | null>(null);
+  const [bodyDragSource, setBodyDragSource] = useState<number | null>(null);
   const editRef = useRef<HTMLInputElement>(null);
   const itemRef = useRef<HTMLDivElement>(null);
 
@@ -115,8 +169,10 @@ function OutlineItem({
   const isExpanded = expandedKey === nodeKey;
   const backlinks = backlinksMap.get(nodeKey) || [];
   const hasBody = !!(heading.body && heading.body.trim());
+  const bodyLines = hasBody ? filterBodyLines(heading.body!) : [];
+  const hasVisibleBody = bodyLines.length > 0;
   const hasChildren = directChildren.length > 0;
-  const hasContent = hasChildren || hasBody;
+  const hasContent = hasChildren || hasVisibleBody;
   const [childrenOpen, setChildrenOpen] = useState(true);
 
   useEffect(() => {
@@ -143,6 +199,10 @@ function OutlineItem({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    if (e.dataTransfer.types.includes("text/x-body-drag")) {
+      setDropZone(null);
+      return;
+    }
     if (!dragItem.current || dragItem.current === heading) {
       setDropZone(null);
       return;
@@ -182,6 +242,31 @@ function OutlineItem({
     setDropZone(null);
   };
 
+  const handleBodyDragStart = (index: number) => {
+    setBodyDragSource(index);
+  };
+
+  const handleBodyDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes("text/x-body-index")) {
+      setBodyDropTarget(index);
+      e.dataTransfer.dropEffect = "move";
+    }
+  };
+
+  const handleBodyDrop = (e: React.DragEvent, toIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const fromIndex = parseInt(e.dataTransfer.getData("text/x-body-index"), 10);
+    const srcHeadingLine = parseInt(e.dataTransfer.getData("text/x-heading-line"), 10);
+    if (!isNaN(fromIndex) && fromIndex !== toIndex && srcHeadingLine === heading.lineNumber) {
+      onReorderBody(heading, fromIndex, toIndex);
+    }
+    setBodyDropTarget(null);
+    setBodyDragSource(null);
+  };
+
   const filteredChildren = filter === "todos"
     ? directChildren.filter(c => hasDescendantTodos(c, allHeadings))
     : directChildren;
@@ -191,6 +276,7 @@ function OutlineItem({
   }
 
   const isDone = heading.status === "DONE";
+  const guideLeft = depth * 16 + 4 + 7;
 
   return (
     <div data-testid={`outline-item-${heading.lineNumber}`}>
@@ -249,7 +335,7 @@ function OutlineItem({
                 if (e.key === "Escape") { setEditing(false); setEditValue(heading.title); }
               }}
               onBlur={handleEditSubmit}
-              className="w-full bg-transparent text-foreground outline-none border-b border-foreground/30 phosphor-glow text-sm"
+              className="w-full bg-transparent text-foreground outline-none border-b border-foreground/30 text-sm"
               data-testid={`edit-title-${heading.lineNumber}`}
             />
           ) : (
@@ -257,7 +343,7 @@ function OutlineItem({
               onClick={() => { setEditing(true); setEditValue(heading.title); }}
               className={cn(
                 "cursor-text text-sm leading-snug",
-                isDone ? "text-muted-foreground line-through phosphor-glow-dim" : "text-foreground phosphor-glow"
+                isDone ? "text-muted-foreground line-through" : "text-foreground"
               )}
               data-testid={`title-${heading.lineNumber}`}
             >
@@ -298,8 +384,8 @@ function OutlineItem({
       </div>
 
       {isExpanded && backlinks.length > 0 && (
-        <div className="ml-8 border-l border-border pl-3 py-1 mb-1" style={{ marginLeft: `${depth * 16 + 24}px` }}>
-          <div className="text-muted-foreground uppercase tracking-wider text-xs font-bold mb-1 phosphor-glow-dim">
+        <div className="border-l border-border pl-3 py-1 mb-1" style={{ marginLeft: `${guideLeft}px` }}>
+          <div className="text-muted-foreground uppercase tracking-wider text-xs font-bold mb-1">
             Backlinks
           </div>
           {backlinks.map((bl, i) => (
@@ -308,41 +394,38 @@ function OutlineItem({
               className="py-0.5 text-xs text-muted-foreground"
               data-testid={`backlink-${bl.lineNumber}-${i}`}
             >
-              <span className="text-foreground phosphor-glow-dim">{"*".repeat(bl.level)} {bl.title}</span>
+              <span className="text-foreground">{"*".repeat(bl.level)} {bl.title}</span>
               <span className="ml-1">§ {bl.sourceFile}</span>
             </div>
           ))}
         </div>
       )}
 
-      {childrenOpen && hasBody && (() => {
-        const bodyLines = heading.body!.split("\n").filter(l => {
-          const t = l.trim();
-          if (!t) return false;
-          if (t === ":PROPERTIES:" || t === ":END:") return false;
-          if (/^:[A-Z_]+:/.test(t)) return false;
-          if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) return false;
-          return true;
-        });
-        if (bodyLines.length === 0) return null;
-        return (
-          <div style={{ paddingLeft: `${(depth + 1) * 16 + 4}px` }}>
-            {bodyLines.map((line, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-1 py-px text-sm text-muted-foreground phosphor-glow-dim"
-                data-testid={`body-line-${heading.lineNumber}-${i}`}
-              >
-                <span className="flex-shrink-0 mt-0.5">·</span>
-                <span className="whitespace-pre-wrap">{line.trim()}</span>
-              </div>
-            ))}
-          </div>
-        );
-      })()}
+      {childrenOpen && (hasVisibleBody || filteredChildren.length > 0) && (
+        <div
+          className="border-l border-border/40"
+          style={{ marginLeft: `${guideLeft}px` }}
+        >
+          {hasVisibleBody && (
+            <div
+              onDragLeave={() => setBodyDropTarget(null)}
+            >
+              {bodyLines.map((line, i) => (
+                <BodyBullet
+                  key={i}
+                  line={line}
+                  index={i}
+                  headingLine={heading.lineNumber}
+                  depth={depth}
+                  onDragStart={handleBodyDragStart}
+                  onDragOver={handleBodyDragOver}
+                  onDrop={handleBodyDrop}
+                  dropTarget={bodyDropTarget}
+                />
+              ))}
+            </div>
+          )}
 
-      {childrenOpen && filteredChildren.length > 0 && (
-        <div>
           {filteredChildren.map((child) => (
             <OutlineItem
               key={`${child.sourceFile}:${child.lineNumber}`}
@@ -358,6 +441,7 @@ function OutlineItem({
               onDelete={onDelete}
               dragItem={dragItem}
               onDrop={onDrop}
+              onReorderBody={onReorderBody}
               backlinksMap={backlinksMap}
             />
           ))}
@@ -375,6 +459,7 @@ export default function RoamView() {
   const editTitleMutation = useEditHeadingTitle();
   const deleteMutation = useDeleteHeading();
   const moveMutation = useMoveHeading();
+  const reorderBodyMutation = useReorderBodyLine();
   const [filter, setFilter] = useState<FilterMode>("all");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const dragItem = useRef<OutlineHeading | null>(null);
@@ -401,6 +486,10 @@ export default function RoamView() {
   const handleDelete = useCallback((h: OutlineHeading) => {
     deleteMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber });
   }, [deleteMutation]);
+
+  const handleReorderBody = useCallback((h: OutlineHeading, fromIndex: number, toIndex: number) => {
+    reorderBodyMutation.mutate({ fileName: h.sourceFile, headingLine: h.lineNumber, fromIndex, toIndex });
+  }, [reorderBodyMutation]);
 
   const getSubtreeEnd = useCallback((h: OutlineHeading): number => {
     const fileHeadings = headings.filter(x => x.sourceFile === h.sourceFile);
@@ -485,7 +574,7 @@ export default function RoamView() {
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground font-mono phosphor-glow-dim">
+      <div className="flex-1 flex items-center justify-center text-muted-foreground font-mono">
         Loading outline...
       </div>
     );
@@ -495,12 +584,12 @@ export default function RoamView() {
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="roam-view">
       <div className="flex items-center border-b border-border bg-card px-2 py-1 gap-1 overflow-x-auto">
         <span className="text-foreground">{"{*}"}</span>
-        <span className="text-foreground font-bold phosphor-glow mr-2">Roam</span>
+        <span className="text-foreground font-bold mr-2">Roam</span>
         <button
           onClick={() => setFilter("all")}
           className={cn(
             "px-1.5 py-0.5 text-xs transition-colors",
-            filter === "all" ? "text-foreground phosphor-glow font-bold" : "text-muted-foreground hover:text-foreground"
+            filter === "all" ? "text-foreground font-bold" : "text-muted-foreground hover:text-foreground"
           )}
           data-testid="filter-all"
         >
@@ -510,7 +599,7 @@ export default function RoamView() {
           onClick={() => setFilter("todos")}
           className={cn(
             "px-1.5 py-0.5 text-xs transition-colors",
-            filter === "todos" ? "text-foreground phosphor-glow font-bold" : "text-muted-foreground hover:text-foreground"
+            filter === "todos" ? "text-foreground font-bold" : "text-muted-foreground hover:text-foreground"
           )}
           data-testid="filter-todos"
         >
@@ -530,11 +619,11 @@ export default function RoamView() {
 
             return (
               <div key={group.fileName} className="mb-3" data-testid={`file-group-${group.fileName}`}>
-                <div className="text-muted-foreground text-xs uppercase tracking-wider px-1 py-1 border-b border-border/50 mb-1 phosphor-glow-dim">
+                <div className="text-muted-foreground text-xs uppercase tracking-wider px-1 py-1 border-b border-border/50 mb-1">
                   § {group.fileName}
                 </div>
                 {topLevel.length === 0 ? (
-                  <div className="text-muted-foreground text-xs px-1 py-2 phosphor-glow-dim italic">
+                  <div className="text-muted-foreground text-xs px-1 py-2 italic">
                     (empty)
                   </div>
                 ) : (
@@ -553,6 +642,7 @@ export default function RoamView() {
                       onDelete={handleDelete}
                       dragItem={dragItem}
                       onDrop={handleDrop}
+                      onReorderBody={handleReorderBody}
                       backlinksMap={backlinksMap}
                     />
                   ))

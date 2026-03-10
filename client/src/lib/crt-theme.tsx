@@ -124,6 +124,47 @@ export const PHOSPHOR_PROFILES = {
       orgCode: "215 100% 75%",
     },
   },
+  devtools: {
+    label: "DevTools Dark",
+    fontColor: "#d4d4d4",
+    bright: "#3dc9ff",
+    normal: "#d4d4d4",
+    dim: "#808080",
+    faint: "#4a4a4a",
+    glow: "0, 122, 204",
+    hsl: {
+      bg: "0 0% 12%",
+      card: "0 0% 15%",
+      cardFg: "0 0% 83%",
+      popover: "0 0% 15%",
+      popoverFg: "0 0% 83%",
+      foreground: "0 0% 83%",
+      primary: "200 100% 40%",
+      primaryFg: "0 0% 100%",
+      secondary: "0 0% 83%",
+      secondaryFg: "0 0% 12%",
+      muted: "0 0% 18%",
+      mutedFg: "0 0% 50%",
+      accent: "200 100% 40%",
+      accentFg: "0 0% 100%",
+      destructive: "0 70% 55%",
+      destructiveFg: "0 0% 100%",
+      border: "0 0% 24%",
+      input: "0 0% 18%",
+      ring: "200 100% 40%",
+      orgKeyword: "304 44% 65%",
+      orgDocTitle: "210 60% 59%",
+      orgLevel1: "210 60% 59%",
+      orgLevel2: "199 95% 81%",
+      orgLevel3: "168 53% 55%",
+      orgLevel4: "95 29% 73%",
+      orgTodo: "168 53% 55%",
+      orgDone: "0 0% 50%",
+      orgLink: "200 100% 40%",
+      orgDate: "16 47% 64%",
+      orgCode: "16 47% 64%",
+    },
+  },
 } as const;
 
 export type ThemeKey = keyof typeof PHOSPHOR_PROFILES;
@@ -157,7 +198,7 @@ export function CrtThemeProvider({ children }: { children: React.ReactNode }) {
     try { localStorage.setItem("crt-theme", k); } catch {}
   }, []);
 
-  const keys: ThemeKey[] = ["amber", "green", "blue"];
+  const keys: ThemeKey[] = ["amber", "green", "blue", "devtools"];
   const cycleTheme = useCallback(() => {
     setTheme(prev => {
       const next = keys[(keys.indexOf(prev) + 1) % keys.length];
