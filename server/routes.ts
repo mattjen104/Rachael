@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrgFileSchema, insertClipboardItemSchema, insertAgendaItemSchema } from "@shared/schema";
 import { z } from "zod";
-import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading, moveHeadingWithinFile, extractHeadingBlock, changeHeadingLevel } from "./org-parser";
+import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading, moveHeadingWithinFile, extractHeadingBlock, changeHeadingLevel, appendToDaily } from "./org-parser";
 import { parseCaptureEntry, formatOrgEntry, formatNoteContent } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import {
@@ -117,6 +117,19 @@ export async function registerRoutes(
     }
 
     const updated = await storage.updateOrgFileContent(file.id, newContent);
+
+    if (fileName !== "journal.org") {
+      try {
+        const journal = await storage.getOrgFileByName("journal.org");
+        if (journal) {
+          const refTitle = template === "todo" ? `** TODO ${title}` : `** ${title}`;
+          const refEntry = `${refTitle}\n   Captured to [[file:${fileName}]]\n`;
+          const newJournalContent = appendToDaily(journal.content, new Date(), refEntry);
+          await storage.updateOrgFileContent(journal.id, newJournalContent);
+        }
+      } catch (e) {}
+    }
+
     res.status(201).json(updated);
   });
 
@@ -227,6 +240,18 @@ export async function registerRoutes(
       await storage.archiveClipboardItem(clipboardId);
     }
 
+    if (orgFileName !== "journal.org") {
+      try {
+        const journal = await storage.getOrgFileByName("journal.org");
+        if (journal) {
+          const refTitle = parsed.type === "task" ? `** TODO ${parsed.title}` : `** ${parsed.title}`;
+          const refEntry = `${refTitle}\n   Captured to [[file:${orgFileName}]]\n`;
+          const newJournalContent = appendToDaily(journal.content, new Date(), refEntry);
+          await storage.updateOrgFileContent(journal.id, newJournalContent);
+        }
+      } catch (e) {}
+    }
+
     res.status(201).json({ file: updated, parsed });
   });
 
@@ -264,7 +289,60 @@ export async function registerRoutes(
     const updated = await storage.updateOrgFileContent(orgFile.id, newContent);
     await storage.archiveClipboardItem(clipId);
 
+    if (orgFileName !== "journal.org") {
+      try {
+        const journal = await storage.getOrgFileByName("journal.org");
+        if (journal) {
+          const refTitle = parsed.type === "task" ? `** TODO ${parsed.title}` : `** ${clipItem.content}`;
+          const refEntry = `${refTitle}\n   Captured to [[file:${orgFileName}]]\n`;
+          const newJournalContent = appendToDaily(journal.content, new Date(), refEntry);
+          await storage.updateOrgFileContent(journal.id, newJournalContent);
+        }
+      } catch (e) {}
+    }
+
     res.json({ file: updated, parsed });
+  });
+
+  app.get("/api/org-query/journal-daily", async (req, res) => {
+    const dateStr = req.query.date as string;
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return res.status(400).json({ message: "date query param required (YYYY-MM-DD)" });
+    }
+
+    const journal = await storage.getOrgFileByName("journal.org");
+    if (!journal) return res.json([]);
+
+    const headings = parseOrgFile(journal.content, "journal.org");
+    const dateHeading = headings.find(h => h.level === 1 && h.title.startsWith(dateStr));
+    if (!dateHeading) return res.json([]);
+
+    const children = headings.filter(h =>
+      h.level === 2 &&
+      h.lineNumber > dateHeading.lineNumber
+    );
+
+    const nextL1 = headings.find(h => h.level === 1 && h.lineNumber > dateHeading.lineNumber);
+    const filtered = nextL1
+      ? children.filter(h => h.lineNumber < nextL1.lineNumber)
+      : children;
+
+    res.json(filtered);
+  });
+
+  app.post("/api/org-query/journal-add", async (req, res) => {
+    const { text } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: "text required" });
+    }
+
+    const journal = await storage.getOrgFileByName("journal.org");
+    if (!journal) return res.status(404).json({ message: "journal.org not found" });
+
+    const entry = `** ${text.trim()}\n`;
+    const newContent = appendToDaily(journal.content, new Date(), entry);
+    const updated = await storage.updateOrgFileContent(journal.id, newContent);
+    res.json(updated);
   });
 
   // ── Org Queries (parsed from file content) ──────────────────
@@ -364,8 +442,20 @@ export async function registerRoutes(
     const file = await storage.getOrgFileByName(fileName);
     if (!file) return res.status(404).json({ message: "File not found" });
 
-    const { newContent, newStatus } = toggleHeadingStatus(file.content, lineNumber);
+    const { newContent, newStatus, title } = toggleHeadingStatus(file.content, lineNumber);
     const updated = await storage.updateOrgFileContent(file.id, newContent);
+
+    if (newStatus === "DONE" && title && fileName !== "journal.org") {
+      try {
+        const journal = await storage.getOrgFileByName("journal.org");
+        if (journal) {
+          const entry = `** DONE ${title}\n   Referenced from [[file:${fileName}]]\n`;
+          const newJournalContent = appendToDaily(journal.content, new Date(), entry);
+          await storage.updateOrgFileContent(journal.id, newJournalContent);
+        }
+      } catch (e) {}
+    }
+
     res.json({ file: updated, newStatus });
   });
 

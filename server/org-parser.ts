@@ -170,24 +170,115 @@ function formatDateLabel(dateStr: string): string {
 export function toggleHeadingStatus(
   content: string,
   lineNumber: number
-): { newContent: string; newStatus: string } {
+): { newContent: string; newStatus: string; title: string } {
   const lines = content.split("\n");
   const idx = lineNumber - 1;
   const line = lines[idx];
 
-  if (!line) return { newContent: content, newStatus: "" };
+  if (!line) return { newContent: content, newStatus: "", title: "" };
 
   const headingMatch = line.match(/^(\*+\s+)(TODO|DONE)(\s.*)$/);
-  if (!headingMatch) return { newContent: content, newStatus: "" };
+  if (!headingMatch) return { newContent: content, newStatus: "", title: "" };
 
   const prefix = headingMatch[1];
   const currentStatus = headingMatch[2];
   const rest = headingMatch[3];
+  const title = rest.replace(/\s+:[a-zA-Z0-9_:]+:\s*$/, "").trim();
 
   const newStatus = currentStatus === "TODO" ? "DONE" : "TODO";
   lines[idx] = `${prefix}${newStatus}${rest}`;
 
-  return { newContent: lines.join("\n"), newStatus };
+  if (newStatus === "DONE") {
+    const now = new Date();
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const closedStr = `   CLOSED: [${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${days[now.getDay()]} ${pad(now.getHours())}:${pad(now.getMinutes())}]`;
+    let insertAt = idx + 1;
+    while (insertAt < lines.length) {
+      const l = lines[insertAt].trim();
+      if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(l)) {
+        if (/^CLOSED:/.test(l)) {
+          lines.splice(insertAt, 1);
+          continue;
+        }
+        insertAt++;
+      } else break;
+    }
+    lines.splice(insertAt, 0, closedStr);
+  } else {
+    let checkAt = idx + 1;
+    while (checkAt < lines.length) {
+      const l = lines[checkAt].trim();
+      if (/^CLOSED:/.test(l)) {
+        lines.splice(checkAt, 1);
+        continue;
+      }
+      if (/^(SCHEDULED|DEADLINE):/.test(l)) { checkAt++; continue; }
+      break;
+    }
+  }
+
+  return { newContent: lines.join("\n"), newStatus, title };
+}
+
+export function ensureDailyHeading(content: string, date: Date): { content: string; insertionPoint: number } {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dateStr = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const dayName = days[date.getDay()];
+  const heading = `* ${dateStr} ${dayName}`;
+
+  const lines = content.split("\n");
+  const headingRegex = new RegExp(`^\\*\\s+${dateStr.replace(/-/g, "\\-")}\\s`);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (headingRegex.test(lines[i])) {
+      let insertAt = i + 1;
+      while (insertAt < lines.length && !lines[insertAt].match(/^\*\s/)) {
+        insertAt++;
+      }
+      const byteOffset = lines.slice(0, insertAt).join("\n").length + 1;
+      return { content, insertionPoint: byteOffset };
+    }
+  }
+
+  let insertIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\*\s+(\d{4}-\d{2}-\d{2})\s/);
+    if (m && m[1] < dateStr) {
+      insertIdx = i;
+      break;
+    }
+  }
+
+  if (insertIdx === -1) {
+    let lastHeader = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].match(/^#\+/)) lastHeader = i + 1;
+    }
+    if (lastHeader === 0) {
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].match(/^\*\s/)) { lastHeader = i; break; }
+      }
+    }
+    lines.splice(lastHeader, 0, "", heading);
+    insertIdx = lastHeader + 2;
+  } else {
+    lines.splice(insertIdx, 0, "", heading);
+    insertIdx = insertIdx + 2;
+  }
+
+  const newContent = lines.join("\n");
+  const byteOffset = lines.slice(0, insertIdx).join("\n").length + 1;
+  return { content: newContent, insertionPoint: byteOffset };
+}
+
+export function appendToDaily(content: string, date: Date, entry: string): string {
+  const result = ensureDailyHeading(content, date);
+  const before = result.content.slice(0, result.insertionPoint);
+  const after = result.content.slice(result.insertionPoint);
+  return before + entry + "\n" + after;
 }
 
 export function rescheduleHeading(

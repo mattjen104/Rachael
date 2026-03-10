@@ -206,6 +206,7 @@ export function useToggleOrgStatus() {
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/journal-daily"] });
     },
   });
 }
@@ -266,6 +267,32 @@ export function useOrgCapture() {
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/journal-daily"] });
+    },
+  });
+}
+
+export function useJournalDaily(date: string) {
+  return useQuery<OrgHeading[]>({
+    queryKey: ["/api/org-query/journal-daily", date],
+    queryFn: async () => {
+      const res = await fetch(`/api/org-query/journal-daily?date=${date}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!date,
+  });
+}
+
+export function useJournalAdd() {
+  return useMutation({
+    mutationFn: async (data: { text: string }) => {
+      const res = await apiRequest("POST", "/api/org-query/journal-add", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/journal-daily"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
     },
   });
 }

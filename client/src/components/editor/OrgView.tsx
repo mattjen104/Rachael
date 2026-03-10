@@ -14,6 +14,8 @@ import {
   useOrgDone,
   useOrgCapture,
   useRescheduleHeading,
+  useJournalDaily,
+  useJournalAdd,
   type OutlineHeading,
   type OrgHeading,
   type AgendaDay,
@@ -669,6 +671,115 @@ function AgendaItemRow({ item, overdueDays, onToggle, onReschedule, onEditTitle,
   );
 }
 
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 my-3 text-muted-foreground/60 text-xs uppercase tracking-widest">
+      <span className="flex-1 border-t border-border/40" />
+      <span className="phosphor-glow-dim">{label}</span>
+      <span className="flex-1 border-t border-border/40" />
+    </div>
+  );
+}
+
+function JournalScratchpad() {
+  const [value, setValue] = useState("");
+  const journalAdd = useJournalAdd();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!value.trim()) return;
+    journalAdd.mutate(
+      { text: value.trim() },
+      { onSuccess: () => setValue("") }
+    );
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+      <div className="flex-1 flex items-center bg-card border border-border overflow-hidden focus-within:border-foreground transition-colors">
+        <span className="text-muted-foreground ml-2.5 flex-shrink-0">*</span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Add a journal note..."
+          className="flex-1 bg-transparent text-foreground p-2 outline-none phosphor-glow"
+          data-testid="journal-scratchpad-input"
+        />
+      </div>
+      {value.trim() && (
+        <button
+          type="submit"
+          disabled={journalAdd.isPending}
+          className="px-3 py-1 bg-foreground text-background font-bold hover:brightness-110 transition-all"
+          data-testid="journal-scratchpad-submit"
+        >
+          Add
+        </button>
+      )}
+    </form>
+  );
+}
+
+function JournalEntryRow({ item, onToggle, onNavigateFile, isCursored }: {
+  item: OrgHeading;
+  onToggle: (item: OrgHeading) => void;
+  onNavigateFile: (file: string) => void;
+  isCursored: boolean;
+}) {
+  const bodyLines = item.body ? item.body.split("\n").filter(l => l.trim()) : [];
+  const refMatch = bodyLines.length > 0 ? bodyLines[0].match(/(?:Referenced from|Captured to) \[\[file:(.+?)\]\]/) : null;
+  const refFile = refMatch ? refMatch[1] : null;
+  const isRef = !!refMatch;
+
+  return (
+    <div
+      className={cn(
+        "group flex items-start gap-2 py-1 px-2 transition-colors",
+        isCursored && "bg-foreground/10 border-l-2 border-foreground",
+        !isCursored && "border-l-2 border-transparent"
+      )}
+      data-testid={`journal-entry-${item.lineNumber}`}
+    >
+      {item.status ? (
+        <button
+          onClick={() => onToggle(item)}
+          className="flex-shrink-0 mt-0.5 text-foreground/80 hover:text-foreground"
+          data-testid={`journal-toggle-${item.lineNumber}`}
+        >
+          {item.status === "DONE" ? "[x]" : "[ ]"}
+        </button>
+      ) : (
+        <span className="flex-shrink-0 mt-0.5 text-muted-foreground/50">--</span>
+      )}
+      <div className="flex-1 min-w-0">
+        <span className={cn(
+          "phosphor-glow",
+          item.status === "DONE" && "line-through text-muted-foreground/60"
+        )}>
+          {item.title}
+        </span>
+        {isRef && refFile && (
+          <button
+            onClick={() => onNavigateFile(refFile)}
+            className="ml-2 text-muted-foreground/50 hover:text-foreground text-xs phosphor-glow-dim"
+            data-testid={`journal-ref-${item.lineNumber}`}
+          >
+            {"§ " + refFile.replace(".org", "")}
+          </button>
+        )}
+        {!isRef && bodyLines.length > 0 && (
+          <div className="text-muted-foreground/50 text-xs mt-0.5 phosphor-glow-dim">
+            {bodyLines[0]}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile, cursorIndex }: {
   agenda: { overdue: AgendaDay[]; today: AgendaDay; upcoming: AgendaDay[] } | undefined;
   onToggle: (item: OrgHeading) => void;
@@ -678,6 +789,9 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
   onNavigateFile: (file: string) => void;
   cursorIndex: number;
 }) {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const { data: journalEntries = [] } = useJournalDaily(todayStr);
+
   if (!agenda) return null;
 
   const overdueItems: (OrgHeading & { _overdueDays: number })[] = [];
@@ -691,40 +805,67 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
 
   const todayItems = agenda.today.items
     .map(item => ({ ...item, _overdueDays: 0 }));
-  const allItems = [...overdueItems, ...todayItems];
+  const scheduledItems = [...overdueItems, ...todayItems];
+
+  const scheduledCount = scheduledItems.length;
+  const journalCursorOffset = scheduledCount;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <QuickAdd />
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <span className="font-bold text-foreground uppercase tracking-wider phosphor-glow">
-            Today — {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          </span>
-        </div>
-        {allItems.length > 0 ? (
-          <div className="space-y-1">
-            {allItems.map((item, i) => (
-              <div key={`${item.sourceFile}-${item.lineNumber}`} data-cursor-index={i}>
-                <AgendaItemRow
-                  item={item}
-                  overdueDays={item._overdueDays}
-                  onToggle={onToggle}
-                  onReschedule={onReschedule}
-                  onEditTitle={onEditTitle}
-                  onDelete={onDelete}
-                  onNavigateFile={onNavigateFile}
-                  isCursored={cursorIndex === i}
-                />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-muted-foreground italic py-4 pl-6 phosphor-glow-dim">
-            No items scheduled for today. Type in the box above to add one.
-          </div>
-        )}
+
+      <div className="flex items-center gap-2 mb-1">
+        <span className="font-bold text-foreground uppercase tracking-wider phosphor-glow">
+          {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+        </span>
       </div>
+
+      <SectionHeader label="Scheduled" />
+      {scheduledItems.length > 0 ? (
+        <div className="space-y-1">
+          {scheduledItems.map((item, i) => (
+            <div key={`sched-${item.sourceFile}-${item.lineNumber}`} data-cursor-index={i}>
+              <AgendaItemRow
+                item={item}
+                overdueDays={item._overdueDays}
+                onToggle={onToggle}
+                onReschedule={onReschedule}
+                onEditTitle={onEditTitle}
+                onDelete={onDelete}
+                onNavigateFile={onNavigateFile}
+                isCursored={cursorIndex === i}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-muted-foreground/40 italic py-2 pl-6 phosphor-glow-dim text-xs">
+          Nothing scheduled for today.
+        </div>
+      )}
+
+      <SectionHeader label="Daily Log" />
+      {journalEntries.length > 0 ? (
+        <div className="space-y-0.5">
+          {journalEntries.map((item, i) => (
+            <div key={`jrnl-${item.lineNumber}`} data-cursor-index={journalCursorOffset + i}>
+              <JournalEntryRow
+                item={item}
+                onToggle={onToggle}
+                onNavigateFile={onNavigateFile}
+                isCursored={cursorIndex === journalCursorOffset + i}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-muted-foreground/40 italic py-2 pl-6 phosphor-glow-dim text-xs">
+          No journal entries yet. Capture items or write below.
+        </div>
+      )}
+
+      <SectionHeader label="Notes" />
+      <JournalScratchpad />
     </div>
   );
 }
@@ -928,6 +1069,8 @@ export default function OrgView() {
   const { data: agenda, isLoading: agendaLoading } = useOrgAgenda();
   const { data: allTodos = [], isLoading: todosLoading } = useOrgTodos();
   const { data: allDone = [], isLoading: doneLoading } = useOrgDone();
+  const todayDateStr = useMemo(() => new Date().toISOString().split("T")[0], []);
+  const { data: journalEntries = [] } = useJournalDaily(todayDateStr);
 
   const toggleMutation = useToggleOrgStatus();
   const editTitleMutation = useEditHeadingTitle();
@@ -1062,8 +1205,9 @@ export default function OrgView() {
     let count = 0;
     for (const day of agenda.overdue) count += day.items.length;
     count += agenda.today.items.length;
+    count += journalEntries.length;
     return count;
-  }, [agenda]);
+  }, [agenda, journalEntries]);
 
   const weekCount = useMemo(() => {
     if (!agenda) return 0;
