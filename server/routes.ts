@@ -497,37 +497,59 @@ export async function registerRoutes(
     }
 
     const rawBodyLines = lines.slice(bodyStart, bodyEnd);
-    const visibleIndices: number[] = [];
-    for (let i = 0; i < rawBodyLines.length; i++) {
-      const t = rawBodyLines[i].trim();
-      if (!t) continue;
-      if (t === ":PROPERTIES:" || t === ":END:") continue;
-      if (/^:[A-Z_]+:/.test(t)) continue;
-      if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) continue;
-      visibleIndices.push(i);
+
+    function isMetaLine(t: string): boolean {
+      if (t === ":PROPERTIES:" || t === ":END:") return true;
+      if (/^:[A-Z_]+:/.test(t)) return true;
+      if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) return true;
+      return false;
     }
 
-    if (fromIndex < 0 || fromIndex >= visibleIndices.length || toIndex < 0 || toIndex >= visibleIndices.length) {
+    const segments: { type: "meta" | "gap" | "paragraph"; lines: string[] }[] = [];
+    let currentPara: string[] = [];
+    for (const raw of rawBodyLines) {
+      const t = raw.trim();
+      if (isMetaLine(t)) {
+        if (currentPara.length > 0) {
+          segments.push({ type: "paragraph", lines: [...currentPara] });
+          currentPara = [];
+        }
+        segments.push({ type: "meta", lines: [raw] });
+      } else if (t === "") {
+        if (currentPara.length > 0) {
+          segments.push({ type: "paragraph", lines: [...currentPara] });
+          currentPara = [];
+        }
+        segments.push({ type: "gap", lines: [raw] });
+      } else {
+        currentPara.push(raw);
+      }
+    }
+    if (currentPara.length > 0) {
+      segments.push({ type: "paragraph", lines: [...currentPara] });
+    }
+
+    const paraIndices: number[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i].type === "paragraph") paraIndices.push(i);
+    }
+
+    if (fromIndex < 0 || fromIndex >= paraIndices.length || toIndex < 0 || toIndex >= paraIndices.length) {
       return res.status(400).json({ message: "Index out of range" });
     }
 
-    const fromRawIdx = visibleIndices[fromIndex];
-    const movedLine = rawBodyLines.splice(fromRawIdx, 1)[0];
-    const updatedVisibleIndices: number[] = [];
-    for (let i = 0; i < rawBodyLines.length; i++) {
-      const t = rawBodyLines[i].trim();
-      if (!t) continue;
-      if (t === ":PROPERTIES:" || t === ":END:") continue;
-      if (/^:[A-Z_]+:/.test(t)) continue;
-      if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) continue;
-      updatedVisibleIndices.push(i);
+    const movedSeg = segments.splice(paraIndices[fromIndex], 1)[0];
+    const updatedParaIndices: number[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i].type === "paragraph") updatedParaIndices.push(i);
     }
-    const toRawIdx = toIndex >= updatedVisibleIndices.length
-      ? (updatedVisibleIndices.length > 0 ? updatedVisibleIndices[updatedVisibleIndices.length - 1] + 1 : rawBodyLines.length)
-      : updatedVisibleIndices[toIndex];
-    rawBodyLines.splice(toRawIdx, 0, movedLine);
+    const insertAt = toIndex >= updatedParaIndices.length
+      ? segments.length
+      : updatedParaIndices[toIndex];
+    segments.splice(insertAt, 0, movedSeg);
 
-    const newLines = [...lines.slice(0, bodyStart), ...rawBodyLines, ...lines.slice(bodyEnd)];
+    const newBody = segments.flatMap(s => s.lines);
+    const newLines = [...lines.slice(0, bodyStart), ...newBody, ...lines.slice(bodyEnd)];
     const updated = await storage.updateOrgFileContent(file.id, newLines.join("\n"));
     res.json({ file: updated });
   });

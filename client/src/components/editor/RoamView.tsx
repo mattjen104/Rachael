@@ -46,14 +46,32 @@ function useBacklinks() {
 }
 
 function filterBodyLines(body: string): string[] {
-  return body.split("\n").filter(l => {
+  const lines = body.split("\n");
+  const filtered: string[] = [];
+  for (const l of lines) {
     const t = l.trim();
-    if (!t) return false;
-    if (t === ":PROPERTIES:" || t === ":END:") return false;
-    if (/^:[A-Z_]+:/.test(t)) return false;
-    if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) return false;
-    return true;
-  });
+    if (t === ":PROPERTIES:" || t === ":END:") continue;
+    if (/^:[A-Z_]+:/.test(t)) continue;
+    if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) continue;
+    filtered.push(l);
+  }
+
+  const paragraphs: string[] = [];
+  let current: string[] = [];
+  for (const line of filtered) {
+    if (line.trim() === "") {
+      if (current.length > 0) {
+        paragraphs.push(current.map(l => l.trim()).join(" "));
+        current = [];
+      }
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) {
+    paragraphs.push(current.map(l => l.trim()).join(" "));
+  }
+  return paragraphs;
 }
 
 interface BodyBulletProps {
