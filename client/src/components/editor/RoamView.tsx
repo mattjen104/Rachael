@@ -114,7 +114,9 @@ function OutlineItem({
   const nodeKey = `${heading.sourceFile}:${heading.lineNumber}`;
   const isExpanded = expandedKey === nodeKey;
   const backlinks = backlinksMap.get(nodeKey) || [];
+  const hasBody = !!(heading.body && heading.body.trim());
   const hasChildren = directChildren.length > 0;
+  const hasContent = hasChildren || hasBody;
   const [childrenOpen, setChildrenOpen] = useState(true);
 
   useEffect(() => {
@@ -209,7 +211,7 @@ function OutlineItem({
         onDrop={handleDrop}
         onDragEnd={handleDragEnd}
       >
-        {hasChildren ? (
+        {hasContent ? (
           <button
             onClick={() => setChildrenOpen(!childrenOpen)}
             className="text-muted-foreground w-4 flex-shrink-0 mt-0.5 hover:text-foreground"
@@ -218,7 +220,7 @@ function OutlineItem({
             {childrenOpen ? "▾" : "▸"}
           </button>
         ) : (
-          <span className="w-4 flex-shrink-0 text-muted-foreground mt-0.5">*</span>
+          <span className="w-4 flex-shrink-0 text-muted-foreground mt-0.5">·</span>
         )}
 
         {heading.status !== null && (
@@ -312,6 +314,32 @@ function OutlineItem({
           ))}
         </div>
       )}
+
+      {childrenOpen && hasBody && (() => {
+        const bodyLines = heading.body!.split("\n").filter(l => {
+          const t = l.trim();
+          if (!t) return false;
+          if (t === ":PROPERTIES:" || t === ":END:") return false;
+          if (/^:[A-Z_]+:/.test(t)) return false;
+          if (/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)) return false;
+          return true;
+        });
+        if (bodyLines.length === 0) return null;
+        return (
+          <div style={{ paddingLeft: `${(depth + 1) * 16 + 4}px` }}>
+            {bodyLines.map((line, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-1 py-px text-sm text-muted-foreground phosphor-glow-dim"
+                data-testid={`body-line-${heading.lineNumber}-${i}`}
+              >
+                <span className="flex-shrink-0 mt-0.5">·</span>
+                <span className="whitespace-pre-wrap">{line.trim()}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {childrenOpen && filteredChildren.length > 0 && (
         <div>
