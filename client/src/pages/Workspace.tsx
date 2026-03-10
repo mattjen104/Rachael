@@ -108,9 +108,9 @@ export default function Workspace() {
         return;
       }
 
-      if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
+      if (e.key === "c" && e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (window.parent === window) {
+        if (!captureOpen && window.parent === window) {
           openCapture();
         }
       }
