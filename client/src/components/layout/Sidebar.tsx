@@ -3,15 +3,15 @@ import { cn } from "@/lib/utils";
 import { useCrtTheme } from "@/lib/crt-theme";
 
 interface SidebarProps {
-  viewMode: "org" | "agenda" | "roam" | "clipboard";
-  onSwitchView: (mode: "org" | "agenda" | "roam" | "clipboard") => void;
+  viewMode: "mail" | "agenda" | "roam" | "clipboard";
+  onSwitchView: (mode: "mail" | "agenda" | "roam" | "clipboard") => void;
 }
 
-const views: { key: "org" | "agenda" | "roam" | "clipboard"; label: string; icon: string }[] = [
+const views: { key: "mail" | "agenda" | "roam" | "clipboard"; label: string; icon: string }[] = [
   { key: "clipboard", label: "Capture", icon: "⎘" },
   { key: "agenda", label: "Agenda", icon: "[#]" },
   { key: "roam", label: "Roam", icon: "{*}" },
-  { key: "org", label: "Org", icon: "*" },
+  { key: "mail", label: "Mail", icon: "✉" },
 ];
 
 export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {

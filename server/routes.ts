@@ -6,6 +6,21 @@ import { z } from "zod";
 import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading, moveHeadingWithinFile, extractHeadingBlock, changeHeadingLevel } from "./org-parser";
 import { parseCaptureEntry, formatOrgEntry, formatNoteContent } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
+import {
+  launchBrowser, closeBrowser, getBridgeStatus, checkBridgeDiagnostics,
+  startLoginSession, finishLoginSession, getAuthState, getLastLaunchError,
+} from "./browser-bridge";
+import {
+  openOutlook, openTeams, getOutlookEmails, readOutlookEmail,
+  getTeamsChats as scrapeTeamsChats, readTeamsChat, sendTeamsMessage,
+  replyOutlookEmail, sendOutlookReply,
+} from "./app-adapters";
+import {
+  setEmails, getEmails, setEmailDetail, getEmailDetail,
+  setTeamsChats, getTeamsChats as getBufferedTeamsChats,
+  setTeamsChatMessages, getTeamsChatMessages, getFullBuffer, clearBuffer,
+} from "./scrape-buffer";
+import { sanitizeText } from "./sanitize";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -479,6 +494,188 @@ export async function registerRoutes(
   });
 
   // ── Seed endpoint (creates default org files if none exist) ──
+
+  // ── Browser Bridge ────────────────────────────────────────
+
+  app.get("/api/browser/status", (_req, res) => {
+    res.json(getBridgeStatus());
+  });
+
+  app.get("/api/bridge/diagnostics", async (_req, res) => {
+    const diag = await checkBridgeDiagnostics();
+    res.json(diag);
+  });
+
+  app.post("/api/browser/launch", async (_req, res) => {
+    const success = await launchBrowser(true);
+    res.json({ success, error: success ? null : getLastLaunchError() });
+  });
+
+  app.post("/api/browser/close", async (_req, res) => {
+    await closeBrowser();
+    res.json({ success: true });
+  });
+
+  app.post("/api/browser/login", async (req, res) => {
+    const { service } = req.body;
+    const url = service === "teams"
+      ? "https://teams.microsoft.com/_#/conversations"
+      : "https://outlook.cloud.microsoft/mail/inbox";
+    const result = await startLoginSession(url);
+    res.json(result);
+  });
+
+  app.post("/api/browser/login/done", async (_req, res) => {
+    const result = await finishLoginSession();
+    res.json(result);
+  });
+
+  // ── Mail Scraping (in-memory buffer) ─────────────────────
+
+  app.get("/api/mail/scrape", async (_req, res) => {
+    try {
+      const status = getBridgeStatus();
+      if (!status.running) {
+        const launched = await launchBrowser(true);
+        if (!launched) {
+          return res.json({ emails: [], error: getLastLaunchError() });
+        }
+      }
+
+      const hasOutlook = status.pages.some(p => p.id === "outlook");
+      if (!hasOutlook) {
+        const result = await openOutlook();
+        if (!result.success) {
+          return res.json({ emails: [], error: result.error });
+        }
+      }
+
+      const emails = await getOutlookEmails();
+      const sanitized = emails.map(e => ({
+        ...e,
+        from: sanitizeText(e.from),
+        subject: sanitizeText(e.subject),
+        preview: sanitizeText(e.preview),
+      }));
+      setEmails(sanitized);
+      res.json({ emails: sanitized });
+    } catch (err: any) {
+      res.json({ emails: [], error: err.message });
+    }
+  });
+
+  app.get("/api/mail/buffer", (_req, res) => {
+    res.json({ emails: getEmails() });
+  });
+
+  app.get("/api/mail/:index", async (req, res) => {
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index)) return res.status(400).json({ error: "Invalid index" });
+
+    const cached = getEmailDetail(index);
+    if (cached) return res.json(cached);
+
+    try {
+      const detail = await readOutlookEmail(index);
+      if (detail) {
+        const sanitized = {
+          from: sanitizeText(detail.from),
+          to: sanitizeText(detail.to),
+          subject: sanitizeText(detail.subject),
+          body: sanitizeText(detail.body),
+          date: sanitizeText(detail.date),
+        };
+        setEmailDetail(index, sanitized);
+        res.json(sanitized);
+      } else {
+        res.status(404).json({ error: "Email not found" });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mail/reply", async (req, res) => {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "text required" });
+    const typed = await replyOutlookEmail(text);
+    if (typed) {
+      const sent = await sendOutlookReply();
+      res.json({ success: sent });
+    } else {
+      res.json({ success: false, error: "Could not compose reply" });
+    }
+  });
+
+  // ── Teams Scraping (in-memory buffer) ────────────────────
+
+  app.get("/api/teams/scrape", async (_req, res) => {
+    try {
+      const status = getBridgeStatus();
+      if (!status.running) {
+        const launched = await launchBrowser(true);
+        if (!launched) {
+          return res.json({ chats: [], error: getLastLaunchError() });
+        }
+      }
+
+      const hasTeams = status.pages.some(p => p.id === "teams");
+      if (!hasTeams) {
+        const result = await openTeams();
+        if (!result.success) {
+          return res.json({ chats: [], error: result.error });
+        }
+      }
+
+      const chats = await scrapeTeamsChats();
+      const sanitized = chats.map(c => ({
+        ...c,
+        name: sanitizeText(c.name),
+        lastMessage: sanitizeText(c.lastMessage),
+      }));
+      setTeamsChats(sanitized);
+      res.json({ chats: sanitized });
+    } catch (err: any) {
+      res.json({ chats: [], error: err.message });
+    }
+  });
+
+  app.get("/api/teams/buffer", (_req, res) => {
+    res.json({ chats: getBufferedTeamsChats() });
+  });
+
+  app.get("/api/teams/chat/:index", async (req, res) => {
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index)) return res.status(400).json({ error: "Invalid index" });
+
+    try {
+      const messages = await readTeamsChat(index);
+      const sanitized = messages.map(m => ({
+        sender: sanitizeText(m.sender),
+        text: sanitizeText(m.text),
+        time: sanitizeText(m.time),
+      }));
+      setTeamsChatMessages(index, sanitized);
+      res.json({ messages: sanitized });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/teams/send", async (req, res) => {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "text required" });
+    const success = await sendTeamsMessage(text);
+    res.json({ success });
+  });
+
+  // ── Scrape Buffer (for Chrome extension caching) ─────────
+
+  app.get("/api/scrape/buffer", (_req, res) => {
+    res.json(getFullBuffer());
+  });
+
+  // ── Seed ─────────────────────────────────────────────────
 
   app.post("/api/seed", async (_req, res) => {
     const existing = await storage.getOrgFiles();

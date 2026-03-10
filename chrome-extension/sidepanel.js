@@ -35,6 +35,7 @@ function loadApp(url) {
   appReady = false;
   appFrame.src = url;
   setConnected(url);
+  loadCachedScrapeData();
 }
 
 chrome.storage.sync.get(["orgcloudUrl"], (result) => {
@@ -67,6 +68,68 @@ function sendCaptureToApp(context) {
   }
 }
 
+function cacheScrapeData(data) {
+  try {
+    chrome.storage.local.set({
+      orgcloudScrapeCache: {
+        ...data,
+        cachedAt: Date.now(),
+      },
+    });
+  } catch {}
+}
+
+function loadCachedScrapeData() {
+  try {
+    chrome.storage.local.get(["orgcloudScrapeCache"], (result) => {
+      if (chrome.runtime.lastError) return;
+      const cached = result.orgcloudScrapeCache;
+      if (!cached) return;
+
+      const age = Date.now() - (cached.cachedAt || 0);
+      if (age > 24 * 60 * 60 * 1000) return;
+
+      if (appReady && appFrame.contentWindow) {
+        appFrame.contentWindow.postMessage(
+          {
+            action: "orgcloud-scrape-cache",
+            emails: cached.emails || [],
+            chats: cached.teamsChats || [],
+          },
+          apiUrl
+        );
+      } else {
+        const waitForReady = setInterval(() => {
+          if (appReady && appFrame.contentWindow) {
+            clearInterval(waitForReady);
+            appFrame.contentWindow.postMessage(
+              {
+                action: "orgcloud-scrape-cache",
+                emails: cached.emails || [],
+                chats: cached.teamsChats || [],
+              },
+              apiUrl
+            );
+          }
+        }, 500);
+        setTimeout(() => clearInterval(waitForReady), 10000);
+      }
+    });
+  } catch {}
+}
+
+function fetchAndCacheScrapeBuffer() {
+  if (!apiUrl) return;
+  fetch(apiUrl.replace(/\/$/, "") + "/api/scrape/buffer", { credentials: "include" })
+    .then((res) => res.json())
+    .then((data) => {
+      if (data && (data.emails?.length || data.teamsChats?.length)) {
+        cacheScrapeData(data);
+      }
+    })
+    .catch(() => {});
+}
+
 window.addEventListener("message", (event) => {
   if (!apiUrl) return;
   try {
@@ -78,6 +141,7 @@ window.addEventListener("message", (event) => {
 
   if (event.data?.action === "orgcloud-ready") {
     appReady = true;
+    loadCachedScrapeData();
     if (pendingCapture && appFrame.contentWindow) {
       appFrame.contentWindow.postMessage(
         { action: "capture", ...pendingCapture },
@@ -85,6 +149,10 @@ window.addEventListener("message", (event) => {
       );
       pendingCapture = null;
     }
+  }
+
+  if (event.data?.action === "orgcloud-scrape-complete") {
+    fetchAndCacheScrapeBuffer();
   }
 });
 

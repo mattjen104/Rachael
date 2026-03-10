@@ -12,7 +12,7 @@ interface MinibufferCommand {
 
 interface MinibufferProps {
   onClose: () => void;
-  onSwitchView: (view: "org" | "agenda" | "roam" | "clipboard") => void;
+  onSwitchView: (view: "mail" | "agenda" | "roam" | "clipboard") => void;
   onOpenCapture: () => void;
   onCycleTheme: () => void;
   onCommandExecuted: (label: string) => void;
@@ -52,7 +52,7 @@ export default function Minibuffer({
     { id: "switch-to-clipboard", label: "switch-to-clipboard", hint: "⎘", action: () => exec("Switched to Clipboard", () => onSwitchView("clipboard")) },
     { id: "switch-to-agenda", label: "switch-to-agenda", hint: "[#]", action: () => exec("Switched to Agenda", () => onSwitchView("agenda")) },
     { id: "switch-to-roam", label: "switch-to-roam", hint: "{*}", action: () => exec("Switched to Roam", () => onSwitchView("roam")) },
-    { id: "switch-to-org", label: "switch-to-org", hint: "*", action: () => exec("Switched to Org Buffer", () => onSwitchView("org")) },
+    { id: "switch-to-mail", label: "switch-to-mail", hint: "✉", action: () => exec("Switched to Mail", () => onSwitchView("mail")) },
     { id: "org-capture", label: "org-capture", hint: "c", action: () => exec("Org Capture", () => onOpenCapture()) },
     { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
     { id: "search-headings", label: "search-headings", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
@@ -77,7 +77,7 @@ export default function Minibuffer({
         if (onJumpToHeading) {
           exec(`Jumped to ${h.title}`, () => onJumpToHeading(h.sourceFile, h.title, h.lineNumber));
         } else {
-          exec(`Jumped to ${h.title}`, () => onSwitchView("org"));
+          exec(`Jumped to ${h.title}`, () => onSwitchView("roam"));
         }
       },
     }));

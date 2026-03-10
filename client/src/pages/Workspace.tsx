@@ -3,8 +3,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import StatusBar from "@/components/layout/StatusBar";
 import ClipboardManager from "@/components/editor/ClipboardManager";
 import AgendaView from "@/components/editor/AgendaView";
-import OrgBufferView from "@/components/editor/UnifiedView";
-import type { ScrollTarget } from "@/components/editor/UnifiedView";
+import MailView from "@/components/editor/MailView";
 import RoamView from "@/components/editor/RoamView";
 import OrgCapture from "@/components/editor/OrgCapture";
 import type { CaptureContext } from "@/components/editor/OrgCapture";
@@ -12,7 +11,7 @@ import Minibuffer from "@/components/editor/Minibuffer";
 import { useSeedData, useOrgFiles } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
 
-type ViewMode = "org" | "agenda" | "roam" | "clipboard";
+type ViewMode = "mail" | "agenda" | "roam" | "clipboard";
 
 export default function Workspace() {
   const [viewMode, setViewMode] = useState<ViewMode>("clipboard");
@@ -20,7 +19,6 @@ export default function Workspace() {
   const [capturePrefill, setCapturePrefill] = useState<CaptureContext | null>(null);
   const [minibufferOpen, setMinibufferOpen] = useState(false);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
-  const [scrollTarget, setScrollTarget] = useState<ScrollTarget | null>(null);
 
   const seedMutation = useSeedData();
   const { data: orgFiles } = useOrgFiles();
@@ -56,14 +54,8 @@ export default function Workspace() {
     }
   }, [lastCommand]);
 
-  const handleNavigateToFile = useCallback((fileName: string) => {
-    setViewMode("org");
-    setScrollTarget({ file: fileName });
-  }, []);
-
-  const handleJumpToHeading = useCallback((sourceFile: string, title: string, lineNumber: number) => {
-    setViewMode("org");
-    setScrollTarget({ file: sourceFile, heading: title, lineNumber });
+  const handleJumpToHeading = useCallback((_sourceFile: string, _title: string, _lineNumber: number) => {
+    setViewMode("roam");
   }, []);
 
   const openCapture = useCallback((prefill?: CaptureContext) => {
@@ -135,13 +127,10 @@ export default function Workspace() {
       <div className="flex flex-1 overflow-hidden relative z-0">
         <Sidebar viewMode={viewMode} onSwitchView={setViewMode} />
         <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
-          {viewMode === "org" ? (
-            <OrgBufferView
-              scrollTarget={scrollTarget}
-              onScrollComplete={() => setScrollTarget(null)}
-            />
+          {viewMode === "mail" ? (
+            <MailView />
           ) : viewMode === "agenda" ? (
-            <AgendaView onNavigateToFile={handleNavigateToFile} />
+            <AgendaView onNavigateToFile={() => setViewMode("roam")} />
           ) : viewMode === "roam" ? (
             <RoamView />
           ) : (

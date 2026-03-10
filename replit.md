@@ -11,14 +11,14 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 
 ## Key Features
 
-1. **Org Buffer View** (default) - All org files rendered as one continuous buffer. Each file becomes a `*` top-level heading with its content's headings bumped one level deeper. Looks like a real Emacs org-mode terminal buffer.
+1. **Mail View** - Live Outlook/Teams web scraping via Playwright browser automation. Replaces the old Org Buffer view. Two sub-tabs: [mail] for Outlook inbox (scrape email list, expand to read body, reply inline, file to org) and [teams] for Teams chats (scrape chat list, expand messages, send messages, file to org). Bridge status indicator shows connection state. Login flow opens visible browser for Microsoft auth, then transitions to headless. All scraped data lives in server-side memory buffer only (no database). Chrome extension caches scraped data in `chrome.storage.local` for persistence.
 2. **Agenda View** - Emacs-style org-agenda with filters: Today, Week, All TODOs, Done. Overdue items display inline in the Today view with `Sched. Nx:` indicators (N = days overdue), matching Emacs behavior. Actions on each item: toggle TODO/DONE `[ ]/[x]`, inline title editing (click to edit), reschedule `[s]` (inline date picker), delete `[d]`. Quick-add input at top.
 3. **Roam View** - Interactive outline editor (Roam Research-style). Displays all org headings as a hierarchical bullet tree grouped by file. Features: inline title editing (click to edit), drag-and-drop reordering within files, collapsible children (▸/▾), TODO/DONE status toggle, delete [d], backlinks expansion. Filter bar: "All" shows every heading, "TODOs" filters to only TODO items and their ancestors. Drag positions: drop at top third = before, middle = make child, bottom third = after. Prevents dropping onto descendants.
 4. **Clipboard/Capture View** - Full main view for smart capture. Inline editing, `t` prefix for TODO tasks, `>` nesting for heading depth, `[[` backlink autocomplete. Content type detection (URL/gif/image/code) with metadata enrichment. Always targets inbox.org.
 5. **Org Capture Modal** - Quick task creation (keyboard shortcut `c`). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section.
 6. **Inline Quick-Add** - Fast task input at top of Agenda Today view.
 7. **LilyGO T-Keyboard TUI Sim** - Simulated 160x40 terminal for ESP32 hardware device at `/tui`.
-8. **Four-View Architecture** - Workspace has exactly 4 swappable views (Org/Agenda/Roam/Capture) via a narrow icon sidebar. No file-centric navigation — everything is view-centric. All GUI icons replaced with ASCII/Unicode text characters for terminal authenticity.
+8. **Four-View Architecture** - Workspace has exactly 4 swappable views (Mail/Agenda/Roam/Capture) via a narrow icon sidebar. No file-centric navigation — everything is view-centric. All GUI icons replaced with ASCII/Unicode text characters for terminal authenticity.
 9. **Minibuffer (M-x Command Launcher)** - Emacs-authentic minibuffer at screen bottom, activated by `SPC` (Doom leader key) or `Ctrl+K`/`Cmd+K`. Also clickable via `M-x` button in StatusBar. Fuzzy-matched completion candidates expand upward from the input line. Built-in commands: view switching, org-capture, theme cycling, heading search (prefix `/`). After execution, the StatusBar echo area briefly displays the command result. Designed as the universal interaction paradigm — scales from TUI to desktop. Uses `cmdk` for fuzzy matching.
 10. **Clipboard Template Filing** - Each clipboard item has inline `[t]` (todo), `[n]` (note), `[l]` (link) buttons. One click files the item to the default org file using the selected template format. `[t]` creates a TODO with SCHEDULED date. `[n]` creates a plain heading. `[l]` creates a heading with URL, description, and image metadata as body content. After filing, the clipboard item is archived.
 11. **Rich Link Capture** - When filing a URL clipboard item as `[l]`, the org entry automatically includes enriched metadata: page title as heading, URL, og:description, og:image link, and source domain as body content.
@@ -38,6 +38,10 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `server/org-parser.ts` - Parses raw org file content to extract headings, TODO/DONE status, SCHEDULED/DEADLINE dates, tags, and properties. Also provides `buildAgenda()` for grouping items by date (overdue/today/upcoming), `toggleHeadingStatus()` for in-place status toggling, `moveHeadingWithinFile()` for drag-and-drop reordering, `extractHeadingBlock()` and `changeHeadingLevel()` for cross-file moves.
 - `server/capture-parser.ts` - Simplified capture language: single `t` prefix for TODO tasks, no prefix = plain note. Supports `>` nesting (`> t` = level 3, `>> t` = level 4). Uses `chrono-node` for NL date parsing; "due/by" → DEADLINE, other dates → SCHEDULED. Exports `parseCaptureEntry()`, `formatOrgEntry(parsed, body?)`, `formatNoteContent(text, body?)`.
 - `server/content-detector.ts` - Auto-detects clipboard content type (url/gif/image/code/text). `fetchUrlMetadata()` fetches page title, og:description, og:image, and domain from URLs.
+- `server/browser-bridge.ts` - Playwright browser manager for headless Chromium. Handles launch/close, login session flow (visible → detect auth → transition to headless), session persistence via filesystem (`~/.orgcloud/browser-data/storage-state.json`), page management, diagnostics.
+- `server/app-adapters.ts` - Outlook email scraper (`getOutlookEmails`, `readOutlookEmail`, `replyOutlookEmail`) and Teams chat scraper (`getTeamsChats`, `readTeamsChat`, `sendTeamsMessage`). Ported from MicroTerminal project.
+- `server/scrape-buffer.ts` - In-memory buffer for scraped data. Simple get/set/clear methods. No database, no timers — scrape is triggered on demand from the UI.
+- `server/sanitize.ts` - Text sanitization utility. Replaces Unicode characters (smart quotes, arrows, symbols) with ASCII equivalents, strips emoji and control characters.
 
 ## Data Model (shared/schema.ts)
 
@@ -72,6 +76,29 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `POST /api/clipboard/enrich` - Detect content type and fetch URL metadata
 - `POST /api/clipboard/smart-capture` - Parse `t` prefix with NL dates + `>` nesting, append to org file. Accepts optional `originalContent` for body embedding.
 - `POST /api/clipboard/:id/append-to-org` - Append clipboard item to org file (uses capture parser for tasks, note format for plain text)
+
+### Browser Bridge / Scraping
+- `GET /api/browser/status` - Bridge running/auth state
+- `POST /api/browser/launch` - Start headless Chromium
+- `POST /api/browser/close` - Stop browser
+- `POST /api/browser/login` - Open visible browser for Microsoft auth
+- `POST /api/browser/login/done` - Save session cookies after login
+- `GET /api/bridge/diagnostics` - Playwright/Chromium install diagnostics
+
+### Mail (Outlook, in-memory)
+- `GET /api/mail/scrape` - Trigger Outlook scrape, return emails
+- `GET /api/mail/buffer` - Return cached emails from buffer
+- `GET /api/mail/:index` - Read full email body by index
+- `POST /api/mail/reply` - Reply to email via Playwright
+
+### Teams (in-memory)
+- `GET /api/teams/scrape` - Trigger Teams scrape, return chats
+- `GET /api/teams/buffer` - Return cached chats from buffer
+- `GET /api/teams/chat/:index` - Read chat messages by index
+- `POST /api/teams/send` - Send Teams message via Playwright
+
+### Scrape Buffer
+- `GET /api/scrape/buffer` - Return entire current buffer (for Chrome extension caching)
 
 ### Other
 - `POST /api/seed` - Seed initial data

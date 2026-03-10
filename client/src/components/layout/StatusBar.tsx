@@ -1,21 +1,21 @@
 import React from "react";
 
 interface StatusBarProps {
-  viewMode: "org" | "agenda" | "roam" | "clipboard";
+  viewMode: "mail" | "agenda" | "roam" | "clipboard";
   lastCommand?: string | null;
   onOpenMinibuffer?: () => void;
 }
 
 export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: StatusBarProps) {
   const modeLabels: Record<string, string> = {
-    org: "ORG",
+    mail: "MAIL",
     agenda: "AGENDA",
     roam: "ROAM",
     clipboard: "CAPTURE",
   };
 
   const viewDescriptions: Record<string, string> = {
-    org: "All Files [Buffer]",
+    mail: "Outlook/Teams [Live]",
     agenda: "Org Agenda [View]",
     roam: "Backlinks [Graph]",
     clipboard: "Clipboard [Capture]",

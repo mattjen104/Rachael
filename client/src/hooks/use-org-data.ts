@@ -352,6 +352,67 @@ export function useMoveHeadingCross() {
   });
 }
 
+// ── Browser Bridge / Scraping Hooks ──────────────────────
+
+export function useBridgeStatus() {
+  return useQuery<{
+    running: boolean;
+    pageCount: number;
+    pages: Array<{ id: string; title: string; url: string }>;
+    loginInProgress: boolean;
+    visible: boolean;
+    authState: string;
+    lastError: string | null;
+  }>({
+    queryKey: ["/api/browser/status"],
+    refetchInterval: 10000,
+  });
+}
+
+export function useScrapeEmails() {
+  return useQuery<{
+    emails: Array<{ index: number; from: string; subject: string; preview: string; date: string; unread: boolean }>;
+    error?: string;
+  }>({
+    queryKey: ["/api/mail/scrape"],
+    enabled: false,
+  });
+}
+
+export function useScrapeTeams() {
+  return useQuery<{
+    chats: Array<{ index: number; name: string; lastMessage: string; unread: boolean }>;
+    error?: string;
+  }>({
+    queryKey: ["/api/teams/scrape"],
+    enabled: false,
+  });
+}
+
+export function useEmailDetail(index: number | null) {
+  return useQuery<{ from: string; to: string; subject: string; body: string; date: string }>({
+    queryKey: ["/api/mail", index],
+    queryFn: async () => {
+      const res = await fetch(`/api/mail/${index}`);
+      if (!res.ok) throw new Error("Failed to fetch email");
+      return res.json();
+    },
+    enabled: index !== null,
+  });
+}
+
+export function useTeamsChatMessages(index: number | null) {
+  return useQuery<{ messages: Array<{ sender: string; text: string; time: string }> }>({
+    queryKey: ["/api/teams/chat", index],
+    queryFn: async () => {
+      const res = await fetch(`/api/teams/chat/${index}`);
+      if (!res.ok) throw new Error("Failed to fetch chat");
+      return res.json();
+    },
+    enabled: index !== null,
+  });
+}
+
 export function useSeedData() {
   return useMutation({
     mutationFn: async () => {
