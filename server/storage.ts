@@ -2,6 +2,8 @@ import {
   type OrgFile, type InsertOrgFile, orgFiles,
   type ClipboardItem, type InsertClipboardItem, clipboardItems,
   type AgendaItem, type InsertAgendaItem, agendaItems,
+  type OpenclawProposal, type InsertOpenclawProposal, openclawProposals,
+  type OpenclawVersion, type InsertOpenclawVersion, openclawVersions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, lte, and, not } from "drizzle-orm";
@@ -28,6 +30,15 @@ export interface IStorage {
   createAgendaItem(item: InsertAgendaItem): Promise<AgendaItem>;
   updateAgendaItemStatus(id: number, status: string): Promise<AgendaItem | undefined>;
   carryOverIncompleteTasks(today: string): Promise<AgendaItem[]>;
+
+  createProposal(proposal: InsertOpenclawProposal): Promise<OpenclawProposal>;
+  getProposals(status?: string): Promise<OpenclawProposal[]>;
+  getProposal(id: number): Promise<OpenclawProposal | undefined>;
+  updateProposalStatus(id: number, status: string, resolvedAt: Date): Promise<OpenclawProposal | undefined>;
+
+  createVersion(orgContent: string, label: string): Promise<OpenclawVersion>;
+  getVersions(): Promise<OpenclawVersion[]>;
+  getVersion(id: number): Promise<OpenclawVersion | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -136,6 +147,42 @@ export class DatabaseStorage implements IStorage {
       carried.push(updated);
     }
     return carried;
+  }
+
+  async createProposal(proposal: InsertOpenclawProposal): Promise<OpenclawProposal> {
+    const [created] = await db.insert(openclawProposals).values(proposal).returning();
+    return created;
+  }
+
+  async getProposals(status?: string): Promise<OpenclawProposal[]> {
+    if (status) {
+      return db.select().from(openclawProposals).where(eq(openclawProposals.status, status)).orderBy(desc(openclawProposals.createdAt));
+    }
+    return db.select().from(openclawProposals).orderBy(desc(openclawProposals.createdAt));
+  }
+
+  async getProposal(id: number): Promise<OpenclawProposal | undefined> {
+    const [proposal] = await db.select().from(openclawProposals).where(eq(openclawProposals.id, id));
+    return proposal;
+  }
+
+  async updateProposalStatus(id: number, status: string, resolvedAt: Date): Promise<OpenclawProposal | undefined> {
+    const [updated] = await db.update(openclawProposals).set({ status, resolvedAt }).where(eq(openclawProposals.id, id)).returning();
+    return updated;
+  }
+
+  async createVersion(orgContent: string, label: string): Promise<OpenclawVersion> {
+    const [created] = await db.insert(openclawVersions).values({ orgContent, label }).returning();
+    return created;
+  }
+
+  async getVersions(): Promise<OpenclawVersion[]> {
+    return db.select().from(openclawVersions).orderBy(desc(openclawVersions.createdAt));
+  }
+
+  async getVersion(id: number): Promise<OpenclawVersion | undefined> {
+    const [version] = await db.select().from(openclawVersions).where(eq(openclawVersions.id, id));
+    return version;
   }
 }
 

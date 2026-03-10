@@ -43,3 +43,30 @@ export const agendaItems = pgTable("agenda_items", {
 export const insertAgendaItemSchema = createInsertSchema(agendaItems).omit({ id: true, carriedOver: true });
 export type InsertAgendaItem = z.infer<typeof insertAgendaItemSchema>;
 export type AgendaItem = typeof agendaItems.$inferSelect;
+
+export const openclawProposals = pgTable("openclaw_proposals", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  section: text("section").notNull(),
+  targetName: text("target_name"),
+  reason: text("reason").notNull(),
+  currentContent: text("current_content").notNull(),
+  proposedContent: text("proposed_content").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+});
+
+export const insertOpenclawProposalSchema = createInsertSchema(openclawProposals).omit({ id: true, status: true, createdAt: true, resolvedAt: true });
+export type InsertOpenclawProposal = z.infer<typeof insertOpenclawProposalSchema>;
+export type OpenclawProposal = typeof openclawProposals.$inferSelect;
+
+export const openclawVersions = pgTable("openclaw_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  orgContent: text("org_content").notNull(),
+  label: text("label").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertOpenclawVersionSchema = createInsertSchema(openclawVersions).omit({ id: true, createdAt: true });
+export type InsertOpenclawVersion = z.infer<typeof insertOpenclawVersionSchema>;
+export type OpenclawVersion = typeof openclawVersions.$inferSelect;

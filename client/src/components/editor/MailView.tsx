@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
-import { useBridgeStatus, useScrapeEmails, useScrapeTeams, useEmailDetail, useTeamsChatMessages, useOrgCapture } from "@/hooks/use-org-data";
+import {
+  useBridgeStatus, useScrapeEmails, useScrapeTeams, useEmailDetail, useTeamsChatMessages, useOrgCapture,
+  useOpenClawStatus, useOpenClawCompiled, useOpenClawProposals, useOpenClawVersions,
+  useAcceptProposal, useRejectProposal, useRestoreVersion, useRecompileOpenClaw,
+} from "@/hooks/use-org-data";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
 
-type MailTab = "mail" | "teams";
+type MailTab = "mail" | "teams" | "claw";
 
 interface EmailSummary {
   index: number;
@@ -179,6 +183,16 @@ export default function MailView() {
         >
           [teams]
         </button>
+        <button
+          onClick={() => setTab("claw")}
+          data-testid="tab-claw"
+          className={cn(
+            "px-2 py-0.5 text-xs font-bold transition-colors",
+            tab === "claw" ? "text-foreground phosphor-glow" : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          [claw]
+        </button>
 
         <div className="flex-1" />
 
@@ -233,7 +247,7 @@ export default function MailView() {
             onReply={handleReply}
             isFetching={emailsFetching}
           />
-        ) : (
+        ) : tab === "teams" ? (
           <TeamsList
             chats={chats}
             expandedChat={expandedChat}
@@ -246,6 +260,8 @@ export default function MailView() {
             onSend={handleSendTeams}
             isFetching={teamsFetching}
           />
+        ) : (
+          <ClawPanel />
         )}
       </div>
     </div>
@@ -377,6 +393,232 @@ function MailList({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ClawPanel() {
+  const { data: status } = useOpenClawStatus();
+  const { data: compiled } = useOpenClawCompiled(status?.exists ?? false);
+  const { data: proposals } = useOpenClawProposals();
+  const { data: versions } = useOpenClawVersions();
+  const acceptMutation = useAcceptProposal();
+  const rejectMutation = useRejectProposal();
+  const restoreMutation = useRestoreVersion();
+  const recompileMutation = useRecompileOpenClaw();
+
+  const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
+  const [expandedProgram, setExpandedProgram] = useState<string | null>(null);
+  const [expandedProposal, setExpandedProposal] = useState<number | null>(null);
+  const [showVersions, setShowVersions] = useState(false);
+
+  if (!status?.exists) {
+    return (
+      <div className="p-3 text-muted-foreground" data-testid="claw-empty">
+        <div>openclaw.org not found</div>
+        <div className="mt-1">seed the database or import your local OpenClaw config</div>
+      </div>
+    );
+  }
+
+  const pendingCount = proposals?.length || 0;
+  const syncTime = status.lastSync
+    ? new Date(status.lastSync.timestamp).toLocaleString()
+    : "never";
+
+  return (
+    <div className="p-2 space-y-3" data-testid="claw-panel">
+      <div className="flex items-center gap-2 text-muted-foreground" data-testid="claw-status-bar">
+        <span>skills:{status.skillCount || 0}</span>
+        <span>programs:{status.programCount || 0}</span>
+        <span>errors:{status.errorCount || 0}</span>
+        {pendingCount > 0 && (
+          <span className="text-org-todo font-bold">pending:{pendingCount}</span>
+        )}
+        <span className="flex-1" />
+        <span>sync:{syncTime}</span>
+        <button
+          onClick={() => recompileMutation.mutate()}
+          data-testid="button-recompile"
+          className="text-foreground hover:text-org-todo font-bold"
+        >
+          [↻]
+        </button>
+      </div>
+
+      {pendingCount > 0 && proposals && (
+        <div data-testid="claw-proposals">
+          <div className="text-foreground font-bold mb-1">PROPOSALS</div>
+          {proposals.map((p) => {
+            const isExpanded = expandedProposal === p.id;
+            return (
+              <div key={p.id} className="border-b border-border/50" data-testid={`proposal-item-${p.id}`}>
+                <button
+                  onClick={() => setExpandedProposal(isExpanded ? null : p.id)}
+                  className="w-full text-left px-1 py-1 hover:bg-muted/30"
+                  data-testid={`button-expand-proposal-${p.id}`}
+                >
+                  <span className="text-muted-foreground">{isExpanded ? "▾" : "▸"} </span>
+                  <span className="text-org-todo">[?] </span>
+                  <span className="text-foreground">{p.section}{p.targetName ? `/${p.targetName}` : ""}</span>
+                  <span className="text-muted-foreground"> — {p.reason.substring(0, 60)}{p.reason.length > 60 ? "..." : ""}</span>
+                </button>
+                {isExpanded && (
+                  <div className="px-3 py-2 bg-muted/10">
+                    <div className="text-muted-foreground mb-1">current:</div>
+                    <pre className="text-foreground whitespace-pre-wrap max-h-24 overflow-y-auto mb-2 text-[10px]">{p.currentContent.substring(0, 500)}</pre>
+                    <div className="text-muted-foreground mb-1">proposed:</div>
+                    <pre className="text-foreground whitespace-pre-wrap max-h-24 overflow-y-auto mb-2 text-[10px]">{p.proposedContent.substring(0, 500)}</pre>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => acceptMutation.mutate(p.id)}
+                        data-testid={`button-accept-${p.id}`}
+                        className="text-foreground hover:text-org-todo font-bold"
+                      >
+                        [✓]
+                      </button>
+                      <button
+                        onClick={() => rejectMutation.mutate(p.id)}
+                        data-testid={`button-reject-${p.id}`}
+                        className="text-muted-foreground hover:text-org-todo font-bold"
+                      >
+                        [×]
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {compiled && (
+        <>
+          <div data-testid="claw-soul">
+            <div className="text-foreground font-bold mb-1">SOUL</div>
+            <div className="text-muted-foreground px-1">
+              {compiled.soul ? compiled.soul.substring(0, 200) + (compiled.soul.length > 200 ? "..." : "") : "empty"}
+            </div>
+          </div>
+
+          <div data-testid="claw-skills">
+            <div className="text-foreground font-bold mb-1">SKILLS ({compiled.skills.length})</div>
+            {compiled.skills.map((skill) => {
+              const isExpanded = expandedSkill === skill.name;
+              const descMatch = skill.content.match(/description:\s*"?(.+?)(?:"|$)/im);
+              const desc = descMatch?.[1] || "";
+              return (
+                <div key={skill.name} data-testid={`skill-item-${skill.name}`}>
+                  <button
+                    onClick={() => setExpandedSkill(isExpanded ? null : skill.name)}
+                    className="w-full text-left px-1 py-0.5 hover:bg-muted/30"
+                    data-testid={`button-expand-skill-${skill.name}`}
+                  >
+                    <span className="text-muted-foreground">{isExpanded ? "▾" : "▸"} </span>
+                    <span className="text-foreground">{skill.name}</span>
+                    {desc && <span className="text-muted-foreground"> — {desc.substring(0, 50)}</span>}
+                  </button>
+                  {isExpanded && (
+                    <pre className="px-3 py-1 text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto text-[10px]">
+                      {skill.content}
+                    </pre>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div data-testid="claw-programs">
+            <div className="text-foreground font-bold mb-1">PROGRAMS ({compiled.programs.length})</div>
+            {compiled.programs.map((prog) => {
+              const isExpanded = expandedProgram === prog.name;
+              const resultLines = prog.results
+                .split("\n")
+                .filter(l => l.trim().startsWith("|") && !l.includes("---"))
+                .slice(-6);
+              return (
+                <div key={prog.name} data-testid={`program-item-${prog.name}`}>
+                  <button
+                    onClick={() => setExpandedProgram(isExpanded ? null : prog.name)}
+                    className="w-full text-left px-1 py-0.5 hover:bg-muted/30"
+                    data-testid={`button-expand-program-${prog.name}`}
+                  >
+                    <span className={prog.active ? "text-foreground" : "text-muted-foreground"}>
+                      {prog.active ? "[●]" : "[○]"}{" "}
+                    </span>
+                    <span className="text-foreground">{prog.name}</span>
+                    <span className="text-muted-foreground"> ({prog.status})</span>
+                    {prog.scheduledRaw && (
+                      <span className="text-muted-foreground"> {prog.schedule}</span>
+                    )}
+                  </button>
+                  {isExpanded && (
+                    <div className="px-3 py-1 bg-muted/10">
+                      <pre className="text-muted-foreground whitespace-pre-wrap max-h-20 overflow-y-auto text-[10px] mb-1">
+                        {prog.instructions.substring(0, 300)}
+                      </pre>
+                      {resultLines.length > 1 && (
+                        <div className="mt-1">
+                          <div className="text-muted-foreground text-[10px]">results:</div>
+                          <pre className="text-foreground whitespace-pre text-[10px]">
+                            {resultLines.join("\n")}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {compiled.config && (
+            <div data-testid="claw-config">
+              <div className="text-foreground font-bold mb-1">CONFIG</div>
+              <pre className="text-muted-foreground px-1 whitespace-pre-wrap text-[10px] max-h-20 overflow-y-auto">
+                {JSON.stringify(compiled.config, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {compiled.errors.length > 0 && (
+            <div data-testid="claw-errors">
+              <div className="text-org-todo font-bold mb-1">ERRORS</div>
+              {compiled.errors.map((err, i) => (
+                <div key={i} className="text-org-todo px-1">{err}</div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <div data-testid="claw-versions">
+        <button
+          onClick={() => setShowVersions(!showVersions)}
+          className="text-foreground font-bold hover:text-org-todo"
+          data-testid="button-toggle-versions"
+        >
+          {showVersions ? "▾" : "▸"} VERSIONS ({versions?.length || 0})
+        </button>
+        {showVersions && versions && (
+          <div className="mt-1">
+            {versions.slice(0, 10).map((v) => (
+              <div key={v.id} className="flex items-center gap-2 px-1 py-0.5" data-testid={`version-item-${v.id}`}>
+                <button
+                  onClick={() => restoreMutation.mutate(v.id)}
+                  data-testid={`button-restore-${v.id}`}
+                  className="text-muted-foreground hover:text-foreground font-bold"
+                >
+                  [↩]
+                </button>
+                <span className="text-foreground">{v.label}</span>
+                <span className="text-muted-foreground text-[10px]">{new Date(v.createdAt).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

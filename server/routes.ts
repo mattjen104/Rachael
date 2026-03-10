@@ -21,6 +21,11 @@ import {
   setTeamsChatMessages, getTeamsChatMessages, getFullBuffer, clearBuffer,
 } from "./scrape-buffer";
 import { sanitizeText } from "./sanitize";
+import {
+  compileOpenClaw, importSoul, importSkill, importConfig, importAll,
+  extractSection, replaceSection, appendResultToProgram,
+} from "./openclaw-compiler";
+import { insertOpenclawProposalSchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -675,6 +680,203 @@ export async function registerRoutes(
     res.json(getFullBuffer());
   });
 
+  // ── OpenClaw ───────────────────────────────────────────────
+
+  let lastSyncReport: { timestamp: Date; status: string; details?: string } | null = null;
+
+  async function getOpenClawOrg() {
+    return storage.getOrgFileByName("openclaw.org");
+  }
+
+  app.get("/api/openclaw/compiled", async (_req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    res.json(compiled);
+  });
+
+  app.get("/api/openclaw/soul.md", async (_req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    res.type("text/markdown").send(compiled.soul);
+  });
+
+  app.get("/api/openclaw/skill/:name", async (req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    const skill = compiled.skills.find(s => s.name === req.params.name);
+    if (!skill) return res.status(404).json({ error: "Skill not found" });
+    res.type("text/markdown").send(skill.content);
+  });
+
+  app.get("/api/openclaw/config.json", async (_req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    res.json(compiled.config);
+  });
+
+  app.get("/api/openclaw/programs", async (req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    const activeOnly = req.query.active === "true";
+    const programs = activeOnly ? compiled.programs.filter(p => p.active) : compiled.programs;
+    res.json(programs);
+  });
+
+  app.get("/api/openclaw/program/:name", async (req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    const program = compiled.programs.find(p => p.name === req.params.name);
+    if (!program) return res.status(404).json({ error: "Program not found" });
+    res.json(program);
+  });
+
+  app.post("/api/openclaw/program/:name/result", async (req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const { row, iteration, change, metric, status: resultStatus } = req.body;
+    const resultRow = row || `| ${iteration || ""} | ${change || ""} | ${metric || ""} | ${resultStatus || ""} |`;
+    if (!resultRow.includes("|")) return res.status(400).json({ error: "Invalid result row format" });
+    const newContent = appendResultToProgram(file.content, req.params.name, resultRow);
+    if (newContent === file.content) return res.status(404).json({ error: "Program or results section not found" });
+    await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ success: true });
+  });
+
+  app.get("/api/openclaw/status", async (_req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.json({ exists: false });
+    const compiled = compileOpenClaw(file.content);
+    const pendingProposals = await storage.getProposals("pending");
+    res.json({
+      exists: true,
+      errorCount: compiled.errors.length,
+      errors: compiled.errors,
+      skillCount: compiled.skills.length,
+      programCount: compiled.programs.length,
+      activeProgramCount: compiled.programs.filter(p => p.active).length,
+      pendingProposalCount: pendingProposals.length,
+      lastSync: lastSyncReport,
+    });
+  });
+
+  app.post("/api/openclaw/compile", async (_req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    res.json(compiled);
+  });
+
+  app.post("/api/openclaw/import", async (req, res) => {
+    const { soul, skills, config } = req.body;
+    const orgContent = importAll(
+      soul || "",
+      skills || [],
+      config || {}
+    );
+    let file = await getOpenClawOrg();
+    if (file) {
+      await storage.updateOrgFileContent(file.id, orgContent);
+    } else {
+      file = await storage.createOrgFile({ name: "openclaw.org", content: orgContent });
+    }
+    await storage.createVersion(orgContent, "Initial import from local OpenClaw");
+    res.json({ success: true, content: orgContent, fileId: file.id });
+  });
+
+  const validSections = ["SOUL", "SKILLS", "CONFIG", "PROGRAMS"];
+
+  app.post("/api/openclaw/propose", async (req, res) => {
+    const { section, targetName, reason, proposedContent } = req.body;
+    if (!section || !reason || !proposedContent) {
+      return res.status(400).json({ error: "section, reason, and proposedContent required" });
+    }
+    if (!validSections.includes(section)) {
+      return res.status(400).json({ error: `section must be one of: ${validSections.join(", ")}` });
+    }
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const currentContent = extractSection(file.content, section, targetName) || "";
+    const proposal = await storage.createProposal({
+      section,
+      targetName: targetName || null,
+      reason,
+      currentContent,
+      proposedContent,
+    });
+    res.status(201).json(proposal);
+  });
+
+  app.get("/api/openclaw/proposals", async (req, res) => {
+    const status = req.query.status as string | undefined;
+    const proposals = await storage.getProposals(status);
+    res.json(proposals);
+  });
+
+  app.get("/api/openclaw/proposals/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const proposal = await storage.getProposal(id);
+    if (!proposal) return res.status(404).json({ error: "Proposal not found" });
+    res.json(proposal);
+  });
+
+  app.post("/api/openclaw/proposals/:id/accept", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const proposal = await storage.getProposal(id);
+    if (!proposal) return res.status(404).json({ error: "Proposal not found" });
+    if (proposal.status !== "pending") return res.status(400).json({ error: "Proposal already resolved" });
+
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+
+    const newContent = replaceSection(file.content, proposal.section, proposal.proposedContent, proposal.targetName || undefined);
+    if (newContent === file.content) {
+      return res.status(400).json({ error: "Could not find target section to apply change" });
+    }
+    await storage.createVersion(file.content, `Before accepting: ${proposal.section}/${proposal.targetName || "all"} — ${proposal.reason}`);
+    await storage.updateOrgFileContent(file.id, newContent);
+    await storage.updateProposalStatus(id, "accepted", new Date());
+    res.json({ success: true });
+  });
+
+  app.post("/api/openclaw/proposals/:id/reject", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const proposal = await storage.getProposal(id);
+    if (!proposal) return res.status(404).json({ error: "Proposal not found" });
+    if (proposal.status !== "pending") return res.status(400).json({ error: "Proposal already resolved" });
+    await storage.updateProposalStatus(id, "rejected", new Date());
+    res.json({ success: true });
+  });
+
+  app.get("/api/openclaw/versions", async (_req, res) => {
+    const versions = await storage.getVersions();
+    res.json(versions.map(v => ({ id: v.id, label: v.label, createdAt: v.createdAt })));
+  });
+
+  app.post("/api/openclaw/versions/:id/restore", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const version = await storage.getVersion(id);
+    if (!version) return res.status(404).json({ error: "Version not found" });
+
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+
+    await storage.createVersion(file.content, `Before restore to: ${version.label}`);
+    await storage.updateOrgFileContent(file.id, version.orgContent);
+    res.json({ success: true, label: version.label });
+  });
+
+  app.post("/api/openclaw/sync-report", async (req, res) => {
+    const { status: syncStatus, details } = req.body;
+    lastSyncReport = { timestamp: new Date(), status: syncStatus || "ok", details };
+    res.json({ success: true });
+  });
+
   // ── Seed ─────────────────────────────────────────────────
 
   app.post("/api/seed", async (_req, res) => {
@@ -727,6 +929,70 @@ export async function registerRoutes(
       { name: "projects.org", content: "#+TITLE: Projects\n#+STARTUP: showeverything\n\n* Active Projects\n" },
       { name: "journal.org", content: "#+TITLE: Journal\n#+STARTUP: showeverything\n\n* Journal Entries\n" },
       { name: "someday.org", content: "#+TITLE: Someday / Maybe\n#+STARTUP: showeverything\n\n* Ideas\n" },
+      {
+        name: "openclaw.org",
+        content: `#+TITLE: OpenClaw Configuration
+#+STARTUP: showeverything
+
+* SOUL
+
+** Identity
+   You are a personal AI assistant.
+
+** Communication Style
+   Be concise and direct. Prefer action over discussion.
+
+** Values
+   - Respect the user's time
+   - Never take destructive actions without confirmation
+   - Be transparent about limitations
+
+* SKILLS
+** orgcloud-sync                                                               :skill:
+   :PROPERTIES:
+   :DESCRIPTION: Use when syncing config with OrgCloud or proposing self-modifications
+   :EMOJI: \u2601
+   :END:
+
+   See the orgcloud-sync SKILL.md for full instructions.
+   This skill handles uploading, downloading, and proposing changes
+   between the local OpenClaw instance and the OrgCloud control plane.
+
+* CONFIG
+** agents
+   :PROPERTIES:
+   :DEFAULT_MODEL: anthropic/claude-sonnet-4-5
+   :END:
+
+** providers
+*** anthropic
+    :PROPERTIES:
+    :TYPE: anthropic
+    :AUTH: oauth
+    :END:
+
+** channels
+
+* PROGRAMS
+
+** TODO self-improve                                                           :program:
+   SCHEDULED: <${new Date().toISOString().split("T")[0]} ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()]} 22:00 +1d>
+   :PROPERTIES:
+   :METRIC: skill_quality
+   :DIRECTION: higher
+   :END:
+
+   Review your own skills and configuration. Each iteration:
+   1. Check if skill instructions are clear and complete
+   2. Look for redundancy or conflicts between skills
+   3. Propose improvements via POST to OrgCloud
+   NEVER modify yourself directly. Always propose.
+
+*** Results                                                                    :results:
+    | Iteration | Change | Metric | Status |
+    |-----------|--------|--------|--------|
+`,
+      },
     ];
 
     const files = [];

@@ -413,6 +413,143 @@ export function useTeamsChatMessages(index: number | null) {
   });
 }
 
+export function useOpenClawStatus() {
+  return useQuery<{
+    exists: boolean;
+    errorCount?: number;
+    errors?: string[];
+    skillCount?: number;
+    programCount?: number;
+    activeProgramCount?: number;
+    pendingProposalCount?: number;
+    lastSync?: { timestamp: string; status: string; details?: string } | null;
+  }>({
+    queryKey: ["/api/openclaw/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/openclaw/status");
+      if (!res.ok) throw new Error("Failed to fetch status");
+      return res.json();
+    },
+    refetchInterval: 15000,
+  });
+}
+
+export function useOpenClawCompiled(enabled: boolean = false) {
+  return useQuery<{
+    soul: string;
+    skills: { name: string; content: string }[];
+    config: any;
+    programs: Array<{
+      name: string;
+      status: string;
+      active: boolean;
+      schedule: string;
+      scheduledRaw: string | null;
+      properties: Record<string, string>;
+      instructions: string;
+      results: string;
+      tags: string[];
+    }>;
+    errors: string[];
+  }>({
+    queryKey: ["/api/openclaw/compiled"],
+    queryFn: async () => {
+      const res = await fetch("/api/openclaw/compiled");
+      if (!res.ok) throw new Error("Failed to fetch compiled");
+      return res.json();
+    },
+    enabled,
+  });
+}
+
+export function useOpenClawProposals() {
+  return useQuery<Array<{
+    id: number;
+    section: string;
+    targetName: string | null;
+    reason: string;
+    currentContent: string;
+    proposedContent: string;
+    status: string;
+    createdAt: string;
+    resolvedAt: string | null;
+  }>>({
+    queryKey: ["/api/openclaw/proposals", "pending"],
+    queryFn: async () => {
+      const res = await fetch("/api/openclaw/proposals?status=pending");
+      if (!res.ok) throw new Error("Failed to fetch proposals");
+      return res.json();
+    },
+    refetchInterval: 15000,
+  });
+}
+
+export function useOpenClawVersions() {
+  return useQuery<Array<{ id: number; label: string; createdAt: string }>>({
+    queryKey: ["/api/openclaw/versions"],
+    queryFn: async () => {
+      const res = await fetch("/api/openclaw/versions");
+      if (!res.ok) throw new Error("Failed to fetch versions");
+      return res.json();
+    },
+  });
+}
+
+export function useAcceptProposal() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/openclaw/proposals/${id}/accept`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/proposals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/versions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+    },
+  });
+}
+
+export function useRejectProposal() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/openclaw/proposals/${id}/reject`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/proposals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+    },
+  });
+}
+
+export function useRestoreVersion() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/openclaw/versions/${id}/restore`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/versions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+    },
+  });
+}
+
+export function useRecompileOpenClaw() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/openclaw/compile");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+    },
+  });
+}
+
 export function useSeedData() {
   return useMutation({
     mutationFn: async () => {

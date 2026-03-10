@@ -33,6 +33,8 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 20. **Consistent StatusBar Echo Feedback** - Success messages (capture, filing) now echo through the StatusBar area instead of toast popups. Toasts reserved for errors only.
 21. **Navigable Roam Links** - `[[links]]` in the Roam view body content are clickable — clicking navigates to (expands) the target node. Backlink items are also clickable, expanding the source node and scrolling to it.
 
+22. **OpenClaw Control Plane** - Org-mode management interface for a local OpenClaw autonomous AI agent instance. The `openclaw.org` file serves as a single-document config source covering SOUL (identity/personality), SKILLS (capabilities with YAML frontmatter), CONFIG (providers, channels, agents), and PROGRAMS (autoresearch-style autonomous loops with org-native SCHEDULED timestamps). Bidirectional sync: import existing OpenClaw config into org format, or compile org back to native formats (SOUL.md, SKILL.md, openclaw.json). Proposals/approval system — OpenClaw can propose changes but the user must accept/reject. Database-backed version history with rollback. The [claw] tab in MailView shows a terminal-style dashboard with status, pending proposals, skills list, programs with results, config summary, and version history.
+
 ## Key Server Components
 
 - `server/org-parser.ts` - Parses raw org file content to extract headings, TODO/DONE status, SCHEDULED/DEADLINE dates, tags, and properties. Also provides `buildAgenda()` for grouping items by date (overdue/today/upcoming), `toggleHeadingStatus()` for in-place status toggling, `moveHeadingWithinFile()` for drag-and-drop reordering, `extractHeadingBlock()` and `changeHeadingLevel()` for cross-file moves.
@@ -42,12 +44,16 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 - `server/app-adapters.ts` - Outlook email scraper (`getOutlookEmails`, `readOutlookEmail`, `replyOutlookEmail`) and Teams chat scraper (`getTeamsChats`, `readTeamsChat`, `sendTeamsMessage`). Ported from MicroTerminal project.
 - `server/scrape-buffer.ts` - In-memory buffer for scraped data. Simple get/set/clear methods. No database, no timers — scrape is triggered on demand from the UI.
 - `server/sanitize.ts` - Text sanitization utility. Replaces Unicode characters (smart quotes, arrows, symbols) with ASCII equivalents, strips emoji and control characters.
+- `server/openclaw-compiler.ts` - Bidirectional compiler for OpenClaw config. Compile direction: parses `openclaw.org` into SOUL.md, SKILL.md files (with YAML frontmatter), openclaw.json config, and program descriptors (with org SCHEDULED → cron conversion). Import direction: converts native OpenClaw files (SOUL.md, SKILL.md, openclaw.json) into org format. Also provides `extractSection()`, `replaceSection()`, and `appendResultToProgram()` for targeted modifications.
+- `openclaw-sync/SKILL.md` - Bootstrap skill file for the user's local OpenClaw instance. Handles uploading config to OrgCloud, downloading compiled config, running autoresearch programs, and proposing self-modifications through the approval system.
 
 ## Data Model (shared/schema.ts)
 
 - `orgFiles` - Org-mode file storage (name, content)
 - `clipboardItems` - Clipboard capture history (content, type, timestamp, archived, pinned, detectedType, urlTitle, urlDescription, urlImage, urlDomain)
 - `agendaItems` - Legacy task/agenda tracking (text, status, scheduledDate, carriedOver)
+- `openclawProposals` - OpenClaw change proposals (section, targetName, reason, currentContent, proposedContent, status, createdAt, resolvedAt)
+- `openclawVersions` - OpenClaw org file version snapshots (orgContent, label, createdAt)
 
 ## API Routes (server/routes.ts)
 
@@ -100,8 +106,28 @@ A Doom Emacs-inspired web application for managing Org-mode knowledge files back
 ### Scrape Buffer
 - `GET /api/scrape/buffer` - Return entire current buffer (for Chrome extension caching)
 
+### OpenClaw Control Plane
+- `GET /api/openclaw/compiled` - Full compiled output (soul, skills, config, programs, errors)
+- `GET /api/openclaw/soul.md` - Raw SOUL.md text
+- `GET /api/openclaw/skill/:name` - Specific SKILL.md by name
+- `GET /api/openclaw/config.json` - Compiled openclaw.json
+- `GET /api/openclaw/programs` - List of program descriptors
+- `GET /api/openclaw/program/:name` - Single program instructions + properties
+- `POST /api/openclaw/program/:name/result` - Append iteration result (auto-allowed, no approval)
+- `GET /api/openclaw/status` - Compile status, error count, skill/program counts, pending proposals, last sync
+- `POST /api/openclaw/compile` - Force recompile
+- `POST /api/openclaw/import` - Import native OpenClaw files (SOUL.md, skills, config) into org format
+- `POST /api/openclaw/propose` - Create a change proposal (requires user approval)
+- `GET /api/openclaw/proposals` - List proposals (filterable by ?status=pending)
+- `GET /api/openclaw/proposals/:id` - Single proposal with diff content
+- `POST /api/openclaw/proposals/:id/accept` - Accept proposal (creates version snapshot, applies change)
+- `POST /api/openclaw/proposals/:id/reject` - Reject proposal
+- `GET /api/openclaw/versions` - List version history
+- `POST /api/openclaw/versions/:id/restore` - Restore org file to a previous version
+- `POST /api/openclaw/sync-report` - Local OpenClaw instance reports sync status
+
 ### Other
-- `POST /api/seed` - Seed initial data
+- `POST /api/seed` - Seed initial data (includes openclaw.org template)
 
 ## Pages
 
