@@ -578,6 +578,17 @@ function ClawPanel() {
           {compiled.config && (
             <div data-testid="claw-config">
               <div className="text-foreground font-bold mb-1">CONFIG</div>
+              {compiled.routing && Object.keys(compiled.routing).length > 0 && (
+                <div className="px-1 mb-1" data-testid="claw-routing">
+                  <div className="text-foreground text-[11px] mb-0.5">routing</div>
+                  {Object.entries(compiled.routing).map(([key, val]) => (
+                    <div key={key} className="flex gap-2 text-[10px]" data-testid={`routing-entry-${key}`}>
+                      <span className="text-muted-foreground">{key}:</span>
+                      <span className="text-foreground">{val}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <pre className="text-muted-foreground px-1 whitespace-pre-wrap text-[10px] max-h-20 overflow-y-auto">
                 {JSON.stringify(compiled.config, null, 2)}
               </pre>

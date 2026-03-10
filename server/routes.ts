@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrgFileSchema, insertClipboardItemSchema, insertAgendaItemSchema } from "@shared/schema";
 import { z } from "zod";
-import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading, moveHeadingWithinFile, extractHeadingBlock, changeHeadingLevel, appendToDaily } from "./org-parser";
+import { parseOrgFile, buildAgenda, toggleHeadingStatus, rescheduleHeading, editHeadingTitle, deleteHeading, moveHeadingWithinFile, extractHeadingBlock, changeHeadingLevel, appendToDaily, editTags, insertHeading, findParentSection, editProperty, deleteProperty } from "./org-parser";
 import { parseCaptureEntry, formatOrgEntry, formatNoteContent } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import {
@@ -23,7 +23,7 @@ import {
 import { sanitizeText } from "./sanitize";
 import {
   compileOpenClaw, importSoul, importSkill, importConfig, importAll,
-  extractSection, replaceSection, appendResultToProgram,
+  extractSection, replaceSection, appendResultToProgram, mergeImport,
 } from "./openclaw-compiler";
 import { insertOpenclawProposalSchema } from "@shared/schema";
 
@@ -75,17 +75,86 @@ export async function registerRoutes(
     title: z.string().min(1).transform(v => v.replace(/[\n\r]/g, " ").trim()),
     scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     tags: z.array(z.string().transform(v => v.replace(/[\s:]/g, ""))).optional(),
-    template: z.enum(["todo", "note", "link"]).optional().default("todo"),
+    template: z.enum(["todo", "note", "link", "skill", "program", "channel"]).optional().default("todo"),
     body: z.string().optional(),
+    description: z.string().optional(),
+    metric: z.string().optional(),
+    channelType: z.string().optional(),
   });
+
+  function findSectionEnd(content: string, sectionTitle: string): number {
+    const lines = content.split("\n");
+    let sectionStart = -1;
+    let sectionLevel = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(new RegExp(`^(\\*+)\\s+${sectionTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"));
+      if (m) {
+        sectionStart = i;
+        sectionLevel = m[1].length;
+        break;
+      }
+    }
+    if (sectionStart === -1) return -1;
+    for (let i = sectionStart + 1; i < lines.length; i++) {
+      const headMatch = lines[i].match(/^(\*+)\s/);
+      if (headMatch && headMatch[1].length <= sectionLevel) {
+        return lines.slice(0, i).join("\n").length;
+      }
+    }
+    return content.length;
+  }
+
+  function insertAtSectionEnd(content: string, sectionTitle: string, entry: string): string {
+    const pos = findSectionEnd(content, sectionTitle);
+    if (pos === -1) return content + entry;
+    return content.slice(0, pos) + entry + content.slice(pos);
+  }
 
   app.post("/api/org-files/capture", async (req, res) => {
     const parsed = captureSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
-    const { fileName, title, scheduledDate, tags, template, body } = parsed.data;
+    const { fileName, title, scheduledDate, tags, template, body, description, metric, channelType } = parsed.data;
     const file = await storage.getOrgFileByName(fileName);
     if (!file) return res.status(404).json({ message: "File not found" });
+
+    const isOpenClawTemplate = ["skill", "program", "channel"].includes(template);
+    const isOpenClawFile = fileName === "openclaw.org";
+
+    if (isOpenClawTemplate && isOpenClawFile) {
+      let entry: string;
+
+      if (template === "skill") {
+        const desc = description || "TODO: Add description";
+        const bodyContent = body ? body.split("\n").map(l => `   ${l}`).join("\n") : "   TODO: Add skill instructions";
+        entry = `\n** ${title} :skill:\n   :PROPERTIES:\n   :DESCRIPTION: ${desc}\n   :VERSION: 0.1.0\n   :END:\n\n${bodyContent}\n`;
+      } else if (template === "program") {
+        const date = scheduledDate || new Date().toISOString().split("T")[0];
+        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const d = new Date(date + "T00:00:00");
+        const dayName = dayNames[d.getDay()];
+        const props: string[] = [];
+        if (metric) props.push(`   :METRIC: ${metric}\n   :DIRECTION: higher`);
+        const propsBlock = props.length > 0 ? `\n   :PROPERTIES:\n${props.join("\n")}\n   :END:` : "";
+        const bodyContent = body ? body.split("\n").map(l => `   ${l}`).join("\n") : "   TODO: Add program instructions";
+        entry = `\n** TODO ${title} :program:\n   SCHEDULED: <${date} ${dayName} 06:00 +1d>${propsBlock}\n\n${bodyContent}\n\n*** Results :results:\n    | Iteration | Change | Metric | Status |\n    |-----------|--------|--------|--------|\n`;
+      } else {
+        const cType = channelType || "webhook";
+        entry = `\n*** ${title}\n   :PROPERTIES:\n   :TYPE: ${cType}\n   :END:\n`;
+      }
+
+      let newContent: string;
+      if (template === "skill") {
+        newContent = insertAtSectionEnd(file.content, "SKILLS", entry);
+      } else if (template === "program") {
+        newContent = insertAtSectionEnd(file.content, "PROGRAMS", entry);
+      } else {
+        newContent = insertAtSectionEnd(file.content, "channels", entry);
+      }
+
+      const updated = await storage.updateOrgFileContent(file.id, newContent);
+      return res.status(201).json(updated);
+    }
 
     const cleanTags = tags?.filter(Boolean);
     const tagStr = cleanTags && cleanTags.length > 0 ? ` :${cleanTags.join(":")}:` : "";
@@ -411,6 +480,7 @@ export async function registerRoutes(
       tags: h.tags,
       scheduledDate: h.scheduledDate,
       body: all ? h.body : undefined,
+      properties: Object.keys(h.properties).length > 0 ? h.properties : undefined,
     }));
 
     if (q) {
@@ -541,6 +611,50 @@ export async function registerRoutes(
     res.json({ file: updated });
   });
 
+  app.post("/api/org-query/edit-tags", async (req, res) => {
+    const { fileName, lineNumber, tags } = req.body;
+    if (!fileName || !lineNumber || !Array.isArray(tags)) {
+      return res.status(400).json({ message: "fileName, lineNumber, and tags (array) required" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const cleanTags = tags.map((t: string) => String(t).replace(/[\s:]/g, "")).filter(Boolean);
+    const { newContent } = editTags(file.content, lineNumber, cleanTags);
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated });
+  });
+
+  app.post("/api/org-query/edit-property", async (req, res) => {
+    const { fileName, lineNumber, key, value } = req.body;
+    if (!fileName || !lineNumber || !key || value === undefined) {
+      return res.status(400).json({ message: "fileName, lineNumber, key, and value required" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const cleanKey = String(key).replace(/[\s:]/g, "").toUpperCase();
+    if (!cleanKey) return res.status(400).json({ message: "Invalid property key" });
+
+    const { newContent } = editProperty(file.content, lineNumber, cleanKey, String(value));
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated });
+  });
+
+  app.post("/api/org-query/delete-property", async (req, res) => {
+    const { fileName, lineNumber, key } = req.body;
+    if (!fileName || !lineNumber || !key) {
+      return res.status(400).json({ message: "fileName, lineNumber, and key required" });
+    }
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const cleanKey = String(key).replace(/[\s:]/g, "").toUpperCase();
+    const { newContent } = deleteProperty(file.content, lineNumber, cleanKey);
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated });
+  });
+
   app.post("/api/org-query/delete-heading", async (req, res) => {
     const { fileName, lineNumber } = req.body;
     if (!fileName || !lineNumber) {
@@ -605,6 +719,46 @@ export async function registerRoutes(
       await storage.updateOrgFileContent(toFile.id, toFile.content);
       res.status(500).json({ message: "Move failed, changes rolled back" });
     }
+  });
+
+  const insertHeadingSchema = z.object({
+    fileName: z.string().min(1),
+    afterLine: z.number().int().min(1),
+    level: z.number().int().min(1).max(10),
+    title: z.string().optional().default(""),
+    tags: z.array(z.string()).optional(),
+    properties: z.record(z.string()).optional(),
+  });
+
+  app.post("/api/org-query/insert-heading", async (req, res) => {
+    const parsed = insertHeadingSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    const { fileName, afterLine, level, title, tags, properties } = parsed.data;
+    const file = await storage.getOrgFileByName(fileName);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    let finalTags = tags || [];
+    let status: string | undefined;
+
+    if (fileName === "openclaw.org" && level === 2) {
+      const parentSection = findParentSection(file.content, afterLine);
+      if (parentSection) {
+        const parentUpper = parentSection.toUpperCase();
+        if (parentUpper === "SKILLS" && !finalTags.includes("skill")) {
+          finalTags = [...finalTags, "skill"];
+        } else if (parentUpper === "PROGRAMS" && !finalTags.includes("program")) {
+          finalTags = [...finalTags, "program"];
+          status = "TODO";
+        }
+      }
+    }
+
+    const { newContent, newLineNumber } = insertHeading(
+      file.content, afterLine, level, title, finalTags.length > 0 ? finalTags : undefined, properties, status
+    );
+    const updated = await storage.updateOrgFileContent(file.id, newContent);
+    res.json({ file: updated, newLineNumber });
   });
 
   app.post("/api/org-query/reorder-body", async (req, res) => {
@@ -940,7 +1094,11 @@ export async function registerRoutes(
     const file = await getOpenClawOrg();
     if (!file) return res.status(404).json({ error: "openclaw.org not found" });
     const compiled = compileOpenClaw(file.content);
-    res.json(compiled.config);
+    const configWithRouting = {
+      ...(compiled.config as Record<string, any>),
+      routing: compiled.routing,
+    };
+    res.json(configWithRouting);
   });
 
   app.get("/api/openclaw/programs", async (req, res) => {
@@ -999,19 +1157,40 @@ export async function registerRoutes(
 
   app.post("/api/openclaw/import", async (req, res) => {
     const { soul, skills, config } = req.body;
-    const orgContent = importAll(
-      soul || "",
-      skills || [],
-      config || {}
-    );
     let file = await getOpenClawOrg();
+
     if (file) {
-      await storage.updateOrgFileContent(file.id, orgContent);
+      await storage.createVersion(file.content, "Snapshot before OpenClaw import merge");
+
+      const { mergedContent, log } = mergeImport(
+        file.content,
+        soul || undefined,
+        skills || undefined,
+        config || undefined
+      );
+
+      await storage.updateOrgFileContent(file.id, mergedContent);
+      res.json({ success: true, content: mergedContent, fileId: file.id, log });
     } else {
+      const orgContent = importAll(
+        soul || "",
+        skills || [],
+        config || {}
+      );
       file = await storage.createOrgFile({ name: "openclaw.org", content: orgContent });
+      await storage.createVersion(orgContent, "Initial import from OpenClaw");
+      res.json({
+        success: true,
+        content: orgContent,
+        fileId: file.id,
+        log: [
+          { section: "SOUL", action: "added" },
+          { section: "SKILLS", action: "added" },
+          { section: "CONFIG", action: "added" },
+          { section: "PROGRAMS", action: "added" },
+        ],
+      });
     }
-    await storage.createVersion(orgContent, "Initial import from local OpenClaw");
-    res.json({ success: true, content: orgContent, fileId: file.id });
   });
 
   const validSections = ["SOUL", "SKILLS", "CONFIG", "PROGRAMS"];

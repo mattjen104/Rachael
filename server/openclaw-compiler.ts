@@ -11,15 +11,25 @@ export interface Program {
   tags: string[];
 }
 
+export interface RoutingConfig {
+  default?: string;
+  planning?: string;
+  synthesis?: string;
+  evaluation?: string;
+  escalate_on?: string;
+  [key: string]: string | undefined;
+}
+
 export interface CompiledOpenClaw {
   soul: string;
   skills: { name: string; content: string }[];
   config: object;
+  routing: RoutingConfig;
   programs: Program[];
   errors: string[];
 }
 
-interface OrgSection {
+export interface OrgSection {
   level: number;
   status: string | null;
   title: string;
@@ -29,7 +39,7 @@ interface OrgSection {
   children: OrgSection[];
 }
 
-function parseOrgSections(content: string): OrgSection[] {
+export function parseOrgSections(content: string): OrgSection[] {
   const lines = content.split("\n");
   const root: OrgSection[] = [];
   const stack: { section: OrgSection; level: number }[] = [];
@@ -213,6 +223,19 @@ function serializeYaml(obj: any, indent: number): string {
   return result;
 }
 
+function compileRouting(configSection: OrgSection): RoutingConfig {
+  const routingChild = configSection.children.find(
+    (c) => c.title.toLowerCase() === "routing"
+  );
+  if (!routingChild) return {};
+
+  const routing: RoutingConfig = {};
+  for (const [key, rawVal] of Object.entries(routingChild.properties)) {
+    routing[key.toLowerCase()] = String(rawVal);
+  }
+  return routing;
+}
+
 function compileConfig(configSection: OrgSection): object {
   const result: Record<string, any> = {};
 
@@ -382,6 +405,7 @@ export function compileOpenClaw(orgContent: string): CompiledOpenClaw {
   let soul = "";
   let skills: { name: string; content: string }[] = [];
   let config: object = {};
+  let routing: RoutingConfig = {};
   let programs: Program[] = [];
 
   const soulSection = sections.find(
@@ -421,6 +445,11 @@ export function compileOpenClaw(orgContent: string): CompiledOpenClaw {
     } catch (e: any) {
       errors.push(`CONFIG compilation error: ${e.message}`);
     }
+    try {
+      routing = compileRouting(configSection);
+    } catch (e: any) {
+      errors.push(`ROUTING compilation error: ${e.message}`);
+    }
   }
 
   if (programsSection) {
@@ -431,7 +460,7 @@ export function compileOpenClaw(orgContent: string): CompiledOpenClaw {
     }
   }
 
-  return { soul, skills, config, programs, errors };
+  return { soul, skills, config, routing, programs, errors };
 }
 
 export function importSoul(soulMd: string): string {
@@ -526,12 +555,12 @@ function parseSimpleYaml(
   return result;
 }
 
-export function importSkill(skillMd: string): string {
+export function importSkill(skillMd: string, skillName?: string): string {
   const { frontmatter, body } = parseYamlFrontmatter(skillMd);
   const lines: string[] = [];
 
   const name =
-    frontmatter.name || body.match(/^#\s+(.+)/m)?.[1] || "unnamed-skill";
+    skillName || frontmatter.name || body.match(/^#\s+(.+)/m)?.[1] || "unnamed-skill";
 
   lines.push(`** ${name}                                             :skill:`);
   lines.push("   :PROPERTIES:");
@@ -627,7 +656,7 @@ export function importAll(
   parts.push("* SKILLS");
   if (skills && skills.length > 0) {
     for (const skill of skills) {
-      parts.push(importSkill(skill.content));
+      parts.push(importSkill(skill.content, skill.name));
       parts.push("");
     }
   }
@@ -667,7 +696,7 @@ export function extractSection(
   return rebuildSection(section);
 }
 
-function rebuildSection(section: OrgSection): string {
+export function rebuildSection(section: OrgSection): string {
   const lines: string[] = [];
   lines.push(
     "*".repeat(section.level) +
@@ -829,4 +858,116 @@ export function appendResultToProgram(
 
   lines.splice(insertAt, 0, "    " + resultRow);
   return lines.join("\n");
+}
+
+export interface MergeLog {
+  section: string;
+  action: "updated" | "unchanged" | "added" | "preserved";
+  name?: string;
+}
+
+export function mergeImport(
+  existingContent: string,
+  incomingSoul?: string,
+  incomingSkills?: { name: string; content: string }[],
+  incomingConfig?: object
+): { mergedContent: string; log: MergeLog[] } {
+  const log: MergeLog[] = [];
+  const existingSections = parseOrgSections(existingContent);
+
+  let result = existingContent;
+
+  if (incomingSoul !== undefined) {
+    const soulOrg = importSoul(incomingSoul);
+    const soulSection = parseOrgSections(`* SOUL\n${soulOrg}`);
+    const incomingSoul_ = soulSection.find(s => s.title.toUpperCase() === "SOUL");
+    const existingSoul_ = existingSections.find(s => s.title.toUpperCase() === "SOUL");
+
+    if (incomingSoul_ && existingSoul_) {
+      const incomingSoulText = rebuildSection(incomingSoul_);
+      const existingSoulText = rebuildSection(existingSoul_);
+      if (incomingSoulText.trim() !== existingSoulText.trim()) {
+        result = replaceSection(result, "SOUL", incomingSoulText);
+        log.push({ section: "SOUL", action: "updated" });
+      } else {
+        log.push({ section: "SOUL", action: "unchanged" });
+      }
+    } else if (incomingSoul_ && !existingSoul_) {
+      result = result.trimEnd() + "\n\n" + rebuildSection(incomingSoul_) + "\n";
+      log.push({ section: "SOUL", action: "added" });
+    }
+  }
+
+  if (incomingConfig !== undefined) {
+    const configOrg = importConfig(incomingConfig);
+    const configSection = parseOrgSections(`* CONFIG\n${configOrg}`);
+    const incomingConfig_ = configSection.find(s => s.title.toUpperCase() === "CONFIG");
+    const existingConfig_ = existingSections.find(s => s.title.toUpperCase() === "CONFIG");
+
+    if (incomingConfig_ && existingConfig_) {
+      const incomingConfigText = rebuildSection(incomingConfig_);
+      const existingConfigText = rebuildSection(existingConfig_);
+      if (incomingConfigText.trim() !== existingConfigText.trim()) {
+        result = replaceSection(result, "CONFIG", incomingConfigText);
+        log.push({ section: "CONFIG", action: "updated" });
+      } else {
+        log.push({ section: "CONFIG", action: "unchanged" });
+      }
+    } else if (incomingConfig_ && !existingConfig_) {
+      result = result.trimEnd() + "\n\n" + rebuildSection(incomingConfig_) + "\n";
+      log.push({ section: "CONFIG", action: "added" });
+    }
+  }
+
+  const incomingSkills_ = (incomingSkills !== undefined && incomingSkills.length > 0)
+    ? (() => {
+        const skillsOrg = incomingSkills.map(s => importSkill(s.content, s.name)).join("\n\n");
+        const parsed = parseOrgSections(`* SKILLS\n${skillsOrg}`);
+        return parsed.find(s => s.title.toUpperCase() === "SKILLS");
+      })()
+    : undefined;
+  const existingSkills_ = existingSections.find(s => s.title.toUpperCase() === "SKILLS");
+
+  if (incomingSkills_ && existingSkills_) {
+    const mergedChildren = [...existingSkills_.children];
+
+    for (const inSkill of incomingSkills_.children) {
+      const existingIdx = mergedChildren.findIndex(
+        c => c.title.toLowerCase() === inSkill.title.toLowerCase()
+      );
+      if (existingIdx !== -1) {
+        const existingText = rebuildSection(mergedChildren[existingIdx]);
+        const incomingText = rebuildSection(inSkill);
+        if (existingText.trim() !== incomingText.trim()) {
+          mergedChildren[existingIdx] = inSkill;
+          log.push({ section: "SKILLS", action: "updated", name: inSkill.title });
+        } else {
+          log.push({ section: "SKILLS", action: "unchanged", name: inSkill.title });
+        }
+      } else {
+        mergedChildren.push(inSkill);
+        log.push({ section: "SKILLS", action: "added", name: inSkill.title });
+      }
+    }
+
+    for (const existSkill of existingSkills_.children) {
+      const inImport = incomingSkills_.children.find(
+        c => c.title.toLowerCase() === existSkill.title.toLowerCase()
+      );
+      if (!inImport) {
+        log.push({ section: "SKILLS", action: "preserved", name: existSkill.title });
+      }
+    }
+
+    const mergedSkillsSection: OrgSection = {
+      ...existingSkills_,
+      children: mergedChildren,
+    };
+    result = replaceSection(result, "SKILLS", rebuildSection(mergedSkillsSection));
+  } else if (incomingSkills_ && !existingSkills_) {
+    result = result.trimEnd() + "\n\n" + rebuildSection(incomingSkills_) + "\n";
+    log.push({ section: "SKILLS", action: "added" });
+  }
+
+  return { mergedContent: result, log };
 }

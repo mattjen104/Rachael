@@ -241,6 +241,52 @@ export function useEditHeadingTitle() {
   });
 }
 
+export function useEditTags() {
+  return useMutation({
+    mutationFn: async ({ fileName, lineNumber, tags }: { fileName: string; lineNumber: number; tags: string[] }) => {
+      const res = await apiRequest("POST", "/api/org-query/edit-tags", { fileName, lineNumber, tags });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/backlinks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+    },
+  });
+}
+
+export function useEditProperty() {
+  return useMutation({
+    mutationFn: async ({ fileName, lineNumber, key, value }: { fileName: string; lineNumber: number; key: string; value: string }) => {
+      const res = await apiRequest("POST", "/api/org-query/edit-property", { fileName, lineNumber, key, value });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+    },
+  });
+}
+
+export function useDeleteProperty() {
+  return useMutation({
+    mutationFn: async ({ fileName, lineNumber, key }: { fileName: string; lineNumber: number; key: string }) => {
+      const res = await apiRequest("POST", "/api/org-query/delete-property", { fileName, lineNumber, key });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+    },
+  });
+}
+
 export function useDeleteHeading() {
   return useMutation({
     mutationFn: async ({ fileName, lineNumber }: { fileName: string; lineNumber: number }) => {
@@ -258,7 +304,7 @@ export function useDeleteHeading() {
 
 export function useOrgCapture() {
   return useMutation({
-    mutationFn: async (data: { fileName: string; title: string; scheduledDate?: string; tags?: string[]; template?: "todo" | "note" | "link"; body?: string }) => {
+    mutationFn: async (data: { fileName: string; title: string; scheduledDate?: string; tags?: string[]; template?: string; body?: string; description?: string; metric?: string; channelType?: string }) => {
       const res = await apiRequest("POST", "/api/org-files/capture", data);
       return res.json();
     },
@@ -268,6 +314,9 @@ export function useOrgCapture() {
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/done"] });
       queryClient.invalidateQueries({ queryKey: ["/api/org-query/journal-daily"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
     },
   });
 }
@@ -351,6 +400,7 @@ export interface OutlineHeading {
   tags: string[];
   scheduledDate: string | null;
   body?: string;
+  properties?: Record<string, string>;
 }
 
 export function useAllHeadings() {
@@ -360,6 +410,22 @@ export function useAllHeadings() {
       const res = await fetch("/api/org-query/headings?all=true");
       if (!res.ok) throw new Error("Failed to fetch headings");
       return res.json();
+    },
+  });
+}
+
+export function useInsertHeading() {
+  return useMutation({
+    mutationFn: async (data: { fileName: string; afterLine: number; level: number; title?: string; tags?: string[]; properties?: Record<string, string> }) => {
+      const res = await apiRequest("POST", "/api/org-query/insert-heading", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/headings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/backlinks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/org-query/todos"] });
     },
   });
 }
@@ -494,6 +560,7 @@ export function useOpenClawCompiled(enabled: boolean = false) {
     soul: string;
     skills: { name: string; content: string }[];
     config: any;
+    routing: Record<string, string>;
     programs: Array<{
       name: string;
       status: string;

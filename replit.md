@@ -25,7 +25,7 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 
 ## Key Features
 
-- **Org Capture Modal** — Quick task creation (`Alt+C`). Fields: title, target file, scheduled date, tags. Appends TODO to file's INBOX section. Also triggered by pasting outside any input field (auto-detects URL vs text, pre-fills template).
+- **Org Capture Modal** — Quick task creation (`Alt+C`). Templates: todo, note, link + OpenClaw templates (skill, program, channel — shown only when target file is `openclaw.org`). Skill template generates `:skill:` tagged heading with PROPERTIES (DESCRIPTION, VERSION). Program template generates TODO `:program:` heading with SCHEDULED repeater, METRIC/DIRECTION properties, Results sub-heading. Channel template inserts under CONFIG/channels. Also triggered by pasting outside any input field.
 - **Daily Page System** — `journal.org` auto-populates with daily headings (`* YYYY-MM-DD Day`). Captures create references under today's heading. Completing a task (TODO→DONE) adds a CLOSED timestamp and logs a reference in the daily page.
 - **DailyInput** — Smart capture input on Today tab. `t ` prefix = task, `>` = nesting, `[[` = backlink autocomplete, plain text = note. Tasks go to inbox.org + journal reference; notes go directly to journal.
 - **Minibuffer (M-x)** — Emacs-style command palette at screen bottom, activated by `SPC` or `Ctrl+K`. Commands: `switch-to-outliner`, `switch-to-agenda`, `switch-to-control`, `org-capture`, `cycle-theme`, `search-headings` (prefix `/`), `clipboard-search`, `create-file`, `toggle-hints`.

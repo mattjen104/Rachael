@@ -18,6 +18,14 @@ import {
   useJournalAdd,
   useDailyCapture,
   useHeadingsSearch,
+  useEditTags,
+  useInsertHeading,
+  useEditProperty,
+  useDeleteProperty,
+  useOpenClawStatus,
+  useOpenClawProposals,
+  useAcceptProposal,
+  useRejectProposal,
   type OutlineHeading,
   type OrgHeading,
   type AgendaDay,
@@ -123,6 +131,15 @@ function BodyBullet({ line, index, headingLine, depth, onDragStart, onDragOver, 
   );
 }
 
+interface ProposalInfo {
+  id: number;
+  section: string;
+  targetName: string | null;
+  reason: string;
+  currentContent: string;
+  proposedContent: string;
+}
+
 interface OutlineItemProps {
   heading: OutlineHeading;
   children: OutlineHeading[];
@@ -133,11 +150,19 @@ interface OutlineItemProps {
   onToggleStatus: (h: OutlineHeading) => void;
   onEditTitle: (h: OutlineHeading, newTitle: string) => void;
   onDelete: (h: OutlineHeading) => void;
+  onEditTags: (h: OutlineHeading, tags: string[]) => void;
+  onInsertHeading: (h: OutlineHeading) => void;
+  onEditProperty: (h: OutlineHeading, key: string, value: string) => void;
+  onDeleteProperty: (h: OutlineHeading, key: string) => void;
+  onAcceptProposal?: (id: number) => void;
+  onRejectProposal?: (id: number) => void;
   dragItem: React.MutableRefObject<OutlineHeading | null>;
   onDrop: (target: OutlineHeading, position: "before" | "after" | "child") => void;
   onReorderBody: (heading: OutlineHeading, fromIndex: number, toIndex: number) => void;
   backlinksMap: Map<string, BacklinkRef[]>;
+  proposals?: ProposalInfo[];
   isCursored?: boolean;
+  pendingInsertLine?: number | null;
 }
 
 function getChildren(heading: OutlineHeading, allHeadings: OutlineHeading[]): OutlineHeading[] {
@@ -166,18 +191,37 @@ function OutlineItem({
   onToggleStatus,
   onEditTitle,
   onDelete,
+  onEditTags,
+  onInsertHeading,
+  onEditProperty,
+  onDeleteProperty,
+  onAcceptProposal,
+  onRejectProposal,
   dragItem,
   onDrop,
   onReorderBody,
   backlinksMap,
+  proposals,
   isCursored,
+  pendingInsertLine,
 }: OutlineItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(heading.title);
   const [dropZone, setDropZone] = useState<"before" | "after" | "child" | null>(null);
   const [bodyDropTarget, setBodyDropTarget] = useState<number | null>(null);
   const [bodyDragSource, setBodyDragSource] = useState<number | null>(null);
+  const [addingTag, setAddingTag] = useState(false);
+  const [newTagValue, setNewTagValue] = useState("");
+  const [addingProp, setAddingProp] = useState(false);
+  const [newPropKey, setNewPropKey] = useState("");
+  const [newPropValue, setNewPropValue] = useState("");
+  const [editingPropKey, setEditingPropKey] = useState<string | null>(null);
+  const [editingPropValue, setEditingPropValue] = useState("");
+  const [showProposal, setShowProposal] = useState(false);
   const editRef = useRef<HTMLInputElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  const propKeyRef = useRef<HTMLInputElement>(null);
+  const propValueRef = useRef<HTMLInputElement>(null);
   const itemRef = useRef<HTMLDivElement>(null);
 
   const nodeKey = `${heading.sourceFile}:${heading.lineNumber}`;
@@ -189,6 +233,9 @@ function OutlineItem({
   const hasChildren = directChildren.length > 0;
   const hasContent = hasChildren || hasVisibleBody;
   const [childrenOpen, setChildrenOpen] = useState(true);
+  const propEntries = heading.properties ? Object.entries(heading.properties) : [];
+  const hasProps = propEntries.length > 0;
+  const matchedProposals = proposals || [];
 
   useEffect(() => {
     if (editing && editRef.current) {
@@ -196,6 +243,66 @@ function OutlineItem({
       editRef.current.select();
     }
   }, [editing]);
+
+  useEffect(() => {
+    if (pendingInsertLine === heading.lineNumber && !editing) {
+      setEditing(true);
+      setEditValue(heading.title);
+    }
+  }, [pendingInsertLine, heading.lineNumber, heading.title]);
+
+  useEffect(() => {
+    if (addingTag && tagInputRef.current) {
+      tagInputRef.current.focus();
+    }
+  }, [addingTag]);
+
+  useEffect(() => {
+    if (addingProp && propKeyRef.current) {
+      propKeyRef.current.focus();
+    }
+  }, [addingProp]);
+
+  useEffect(() => {
+    if (editingPropKey && propValueRef.current) {
+      propValueRef.current.focus();
+      propValueRef.current.select();
+    }
+  }, [editingPropKey]);
+
+  const handleAddProp = () => {
+    const k = newPropKey.replace(/[\s:]/g, "").toUpperCase().trim();
+    const v = newPropValue.trim();
+    if (k && v) {
+      onEditProperty(heading, k, v);
+    }
+    setNewPropKey("");
+    setNewPropValue("");
+    setAddingProp(false);
+  };
+
+  const handleEditProp = (key: string) => {
+    const v = editingPropValue.trim();
+    if (v && v !== heading.properties?.[key]) {
+      onEditProperty(heading, key, v);
+    }
+    setEditingPropKey(null);
+    setEditingPropValue("");
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    const newTags = heading.tags.filter(t => t !== tagToRemove);
+    onEditTags(heading, newTags);
+  };
+
+  const handleAddTag = () => {
+    const tag = newTagValue.replace(/[\s:]/g, "").trim();
+    if (tag && !heading.tags.includes(tag)) {
+      onEditTags(heading, [...heading.tags, tag]);
+    }
+    setNewTagValue("");
+    setAddingTag(false);
+  };
 
   const handleEditSubmit = () => {
     const trimmed = editValue.trim();
@@ -360,9 +467,45 @@ function OutlineItem({
           )}
 
           {heading.tags.length > 0 && (
-            <span className="text-muted-foreground ml-2 text-xs">
-              :{heading.tags.join(":")}:
+            <span className="text-muted-foreground ml-2 text-xs inline-flex items-center gap-0.5 flex-wrap">
+              {heading.tags.map((tag) => (
+                <button
+                  key={tag}
+                  onClick={(e) => { e.stopPropagation(); handleRemoveTag(tag); }}
+                  className="hover:text-foreground hover:line-through transition-colors cursor-pointer"
+                  title={`Remove :${tag}:`}
+                  data-testid={`tag-remove-${heading.lineNumber}-${tag}`}
+                >
+                  :{tag}:
+                </button>
+              ))}
             </span>
+          )}
+
+          {addingTag ? (
+            <input
+              ref={tagInputRef}
+              type="text"
+              value={newTagValue}
+              onChange={(e) => setNewTagValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAddTag();
+                if (e.key === "Escape") { setAddingTag(false); setNewTagValue(""); }
+              }}
+              onBlur={handleAddTag}
+              className="ml-1 w-16 bg-transparent text-foreground outline-none border-b border-foreground/30 text-xs"
+              placeholder="tag"
+              data-testid={`tag-input-${heading.lineNumber}`}
+            />
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setAddingTag(true); }}
+              className="hidden group-hover:inline text-muted-foreground hover:text-foreground text-xs ml-1 transition-colors"
+              title="Add tag"
+              data-testid={`tag-add-${heading.lineNumber}`}
+            >
+              [+tag]
+            </button>
           )}
         </div>
 
@@ -380,6 +523,14 @@ function OutlineItem({
           {heading.scheduledDate && (
             <span className="text-muted-foreground mr-1">{heading.scheduledDate}</span>
           )}
+          <button
+            onClick={() => onInsertHeading(heading)}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Insert heading below"
+            data-testid={`insert-heading-${heading.lineNumber}`}
+          >
+            [+]
+          </button>
           <button
             onClick={() => onDelete(heading)}
             className="text-muted-foreground hover:text-foreground transition-colors"
@@ -409,6 +560,177 @@ function OutlineItem({
         </div>
       )}
 
+      {childrenOpen && hasProps && (
+        <div
+          className="py-0.5"
+          style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
+          data-testid={`props-drawer-${heading.lineNumber}`}
+        >
+          {propEntries.map(([key, val]) => (
+            <div key={key} className="flex items-center gap-1 py-px text-xs group/prop">
+              <span className="text-muted-foreground/60 font-bold">:{key}:</span>
+              {editingPropKey === key ? (
+                <input
+                  ref={propValueRef}
+                  type="text"
+                  value={editingPropValue}
+                  onChange={(e) => setEditingPropValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleEditProp(key);
+                    if (e.key === "Escape") { setEditingPropKey(null); setEditingPropValue(""); }
+                  }}
+                  onBlur={() => handleEditProp(key)}
+                  className="flex-1 bg-transparent text-foreground outline-none border-b border-foreground/30 text-xs min-w-0"
+                  data-testid={`prop-edit-${heading.lineNumber}-${key}`}
+                />
+              ) : (
+                <span
+                  onClick={() => { setEditingPropKey(key); setEditingPropValue(val); }}
+                  className="text-muted-foreground cursor-text hover:text-foreground transition-colors"
+                  data-testid={`prop-value-${heading.lineNumber}-${key}`}
+                >
+                  {val}
+                </span>
+              )}
+              <button
+                onClick={() => onDeleteProperty(heading, key)}
+                className="hidden group-hover/prop:inline text-muted-foreground/40 hover:text-foreground text-xs transition-colors"
+                title={`Delete :${key}:`}
+                data-testid={`prop-delete-${heading.lineNumber}-${key}`}
+              >
+                [x]
+              </button>
+            </div>
+          ))}
+          {addingProp ? (
+            <div className="flex items-center gap-1 py-px text-xs">
+              <span className="text-muted-foreground/60">:</span>
+              <input
+                ref={propKeyRef}
+                type="text"
+                value={newPropKey}
+                onChange={(e) => setNewPropKey(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Tab" && newPropKey.trim()) { e.preventDefault(); propValueRef.current?.focus(); }
+                  if (e.key === "Escape") { setAddingProp(false); setNewPropKey(""); setNewPropValue(""); }
+                }}
+                className="w-20 bg-transparent text-foreground outline-none border-b border-foreground/30 text-xs uppercase"
+                placeholder="KEY"
+                data-testid={`prop-new-key-${heading.lineNumber}`}
+              />
+              <span className="text-muted-foreground/60">:</span>
+              <input
+                ref={propValueRef}
+                type="text"
+                value={newPropValue}
+                onChange={(e) => setNewPropValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddProp();
+                  if (e.key === "Escape") { setAddingProp(false); setNewPropKey(""); setNewPropValue(""); }
+                }}
+                className="flex-1 bg-transparent text-foreground outline-none border-b border-foreground/30 text-xs min-w-0"
+                placeholder="value"
+                data-testid={`prop-new-value-${heading.lineNumber}`}
+              />
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingProp(true)}
+              className="text-muted-foreground/40 hover:text-foreground text-xs transition-colors"
+              data-testid={`prop-add-${heading.lineNumber}`}
+            >
+              [+ prop]
+            </button>
+          )}
+        </div>
+      )}
+
+      {childrenOpen && !hasProps && (
+        <div
+          className="py-0.5 hidden group-hover:block"
+          style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
+        >
+          {addingProp ? (
+            <div className="flex items-center gap-1 py-px text-xs">
+              <span className="text-muted-foreground/60">:</span>
+              <input
+                ref={propKeyRef}
+                type="text"
+                value={newPropKey}
+                onChange={(e) => setNewPropKey(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setAddingProp(false); setNewPropKey(""); setNewPropValue(""); }
+                }}
+                className="w-20 bg-transparent text-foreground outline-none border-b border-foreground/30 text-xs uppercase"
+                placeholder="KEY"
+              />
+              <span className="text-muted-foreground/60">:</span>
+              <input
+                type="text"
+                value={newPropValue}
+                onChange={(e) => setNewPropValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddProp();
+                  if (e.key === "Escape") { setAddingProp(false); setNewPropKey(""); setNewPropValue(""); }
+                }}
+                className="flex-1 bg-transparent text-foreground outline-none border-b border-foreground/30 text-xs min-w-0"
+                placeholder="value"
+              />
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingProp(true)}
+              className="text-muted-foreground/40 hover:text-foreground text-xs transition-colors"
+            >
+              [+ prop]
+            </button>
+          )}
+        </div>
+      )}
+
+      {matchedProposals.length > 0 && (
+        <div style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}>
+          <button
+            onClick={() => setShowProposal(!showProposal)}
+            className="text-foreground text-xs font-bold phosphor-glow py-0.5"
+            data-testid={`proposal-badge-${heading.lineNumber}`}
+          >
+            [{matchedProposals.length} proposal{matchedProposals.length > 1 ? "s" : ""}]
+          </button>
+          {showProposal && matchedProposals.map((p) => (
+            <div key={p.id} className="border border-border/40 p-2 my-1 text-xs" data-testid={`proposal-${p.id}`}>
+              <div className="text-muted-foreground mb-1">{p.reason}</div>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                  <div className="text-muted-foreground/60 uppercase tracking-wider mb-0.5">Current</div>
+                  <pre className="text-muted-foreground whitespace-pre-wrap text-xs max-h-32 overflow-y-auto">{p.currentContent || "(empty)"}</pre>
+                </div>
+                <div>
+                  <div className="text-foreground/60 uppercase tracking-wider mb-0.5">Proposed</div>
+                  <pre className="text-foreground whitespace-pre-wrap text-xs max-h-32 overflow-y-auto">{p.proposedContent}</pre>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onAcceptProposal?.(p.id)}
+                  className="text-foreground font-bold hover:phosphor-glow transition-colors"
+                  data-testid={`proposal-accept-${p.id}`}
+                >
+                  [accept]
+                </button>
+                <button
+                  onClick={() => onRejectProposal?.(p.id)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  data-testid={`proposal-reject-${p.id}`}
+                >
+                  [reject]
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {childrenOpen && (hasVisibleBody || directChildren.length > 0) && (
         <div
           className="border-l border-border/40"
@@ -432,24 +754,37 @@ function OutlineItem({
             </div>
           )}
 
-          {directChildren.map((child) => (
-            <OutlineItem
-              key={`${child.sourceFile}:${child.lineNumber}`}
-              heading={child}
-              children={getChildren(child, allHeadings)}
-              allHeadings={allHeadings}
-              depth={depth + 1}
-              expandedKey={expandedKey}
-              onToggleExpand={onToggleExpand}
-              onToggleStatus={onToggleStatus}
-              onEditTitle={onEditTitle}
-              onDelete={onDelete}
-              dragItem={dragItem}
-              onDrop={onDrop}
-              onReorderBody={onReorderBody}
-              backlinksMap={backlinksMap}
-            />
-          ))}
+          {directChildren.map((child) => {
+            const childProposals = matchedProposals.length > 0
+              ? matchedProposals.filter(p => p.targetName?.toLowerCase() === child.title.toLowerCase())
+              : [];
+            return (
+              <OutlineItem
+                key={`${child.sourceFile}:${child.lineNumber}`}
+                heading={child}
+                children={getChildren(child, allHeadings)}
+                allHeadings={allHeadings}
+                depth={depth + 1}
+                expandedKey={expandedKey}
+                onToggleExpand={onToggleExpand}
+                onToggleStatus={onToggleStatus}
+                onEditTitle={onEditTitle}
+                onDelete={onDelete}
+                onEditTags={onEditTags}
+                onInsertHeading={onInsertHeading}
+                onEditProperty={onEditProperty}
+                onDeleteProperty={onDeleteProperty}
+                onAcceptProposal={onAcceptProposal}
+                onRejectProposal={onRejectProposal}
+                dragItem={dragItem}
+                onDrop={onDrop}
+                onReorderBody={onReorderBody}
+                backlinksMap={backlinksMap}
+                proposals={childProposals.length > 0 ? childProposals : undefined}
+                pendingInsertLine={pendingInsertLine}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -1157,7 +1492,7 @@ function OutlinerWhichKey({ onClose }: { onClose: () => void }) {
           </div>
           <div>
             <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Outline</div>
-            {[["j / k", "Navigate items"], ["[ / ]", "Prev / next buffer"]].map(([key, desc]) => (
+            {[["j / k", "Navigate items"], ["o", "New heading below"], ["[ / ]", "Prev / next buffer"]].map(([key, desc]) => (
               <div key={key} className="flex items-center gap-2 py-0.5 text-xs">
                 <span className="text-foreground font-bold w-16 phosphor-glow">{key}</span>
                 <span className="text-muted-foreground">{desc}</span>
@@ -1223,12 +1558,19 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
   const toggleMutation = useToggleOrgStatus();
   const editTitleMutation = useEditHeadingTitle();
   const deleteMutation = useDeleteHeading();
+  const editTagsMutation = useEditTags();
+  const insertHeadingMutation = useInsertHeading();
   const moveMutation = useMoveHeading();
   const reorderBodyMutation = useReorderBodyLine();
+  const editPropertyMutation = useEditProperty();
+  const deletePropertyMutation = useDeleteProperty();
+  const acceptProposalMutation = useAcceptProposal();
+  const rejectProposalMutation = useRejectProposal();
 
   const [selectedFile, setSelectedFile] = useState<string>(initialFile || "");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [cursorIndex, setCursorIndex] = useState(0);
+  const [pendingInsertLine, setPendingInsertLine] = useState<number | null>(null);
   const [showHints, setShowHints] = useState(() => {
     try { return localStorage.getItem("orgcloud-show-hints") !== "false"; } catch { return true; }
   });
@@ -1278,6 +1620,38 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
   const handleDelete = useCallback((h: OutlineHeading) => {
     deleteMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber });
   }, [deleteMutation]);
+
+  const handleEditTags = useCallback((h: OutlineHeading, tags: string[]) => {
+    editTagsMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber, tags });
+  }, [editTagsMutation]);
+
+  const handleInsertHeading = useCallback((h: OutlineHeading) => {
+    insertHeadingMutation.mutate(
+      { fileName: h.sourceFile, afterLine: h.lineNumber, level: h.level },
+      {
+        onSuccess: (data: { newLineNumber: number }) => {
+          setPendingInsertLine(data.newLineNumber);
+          setTimeout(() => setPendingInsertLine(null), 2000);
+        },
+      }
+    );
+  }, [insertHeadingMutation]);
+
+  const handleEditProperty = useCallback((h: OutlineHeading, key: string, value: string) => {
+    editPropertyMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber, key, value });
+  }, [editPropertyMutation]);
+
+  const handleDeleteProperty = useCallback((h: OutlineHeading, key: string) => {
+    deletePropertyMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber, key });
+  }, [deletePropertyMutation]);
+
+  const handleAcceptProposal = useCallback((id: number) => {
+    acceptProposalMutation.mutate(id);
+  }, [acceptProposalMutation]);
+
+  const handleRejectProposal = useCallback((id: number) => {
+    rejectProposalMutation.mutate(id);
+  }, [rejectProposalMutation]);
 
   const handleReorderBody = useCallback((h: OutlineHeading, fromIndex: number, toIndex: number) => {
     reorderBodyMutation.mutate({ fileName: h.sourceFile, headingLine: h.lineNumber, fromIndex, toIndex });
@@ -1345,6 +1719,22 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
     return match ? match[1].trim() : selectedFile.replace(".org", "");
   }, [orgFiles, selectedFile]);
 
+  const isOpenClaw = selectedFile === "openclaw.org";
+  const { data: clawStatus } = useOpenClawStatus();
+  const { data: proposals = [] } = useOpenClawProposals();
+
+  const topLevelProposals = useMemo(() => {
+    if (!isOpenClaw || proposals.length === 0) return [];
+    return proposals.map(p => ({
+      id: p.id,
+      section: p.section,
+      targetName: p.targetName,
+      reason: p.reason,
+      currentContent: p.currentContent,
+      proposedContent: p.proposedContent,
+    }));
+  }, [isOpenClaw, proposals]);
+
   const currentItemCount = filteredTopLevel.length;
 
   useEffect(() => {
@@ -1401,11 +1791,19 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
         setCursorIndex(prev => Math.max(prev - 1, 0));
         return;
       }
+      if (e.key === "o" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const cursoredHeading = filteredTopLevel[cursorIndex];
+        if (cursoredHeading) {
+          handleInsertHeading(cursoredHeading);
+        }
+        return;
+      }
     };
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [whichKeyOpen, selectedFile, orgFiles, currentItemCount]);
+  }, [whichKeyOpen, selectedFile, orgFiles, currentItemCount, filteredTopLevel, cursorIndex, handleInsertHeading]);
 
   return (
     <div className="flex-1 w-full h-full flex flex-col font-mono bg-background relative" data-testid="outliner-view">
@@ -1424,8 +1822,27 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
             <>
               {selectedFile && (
                 <div className="px-1 py-2 mb-2 border-b border-border/30">
-                  <span className="text-foreground font-bold phosphor-glow text-sm">{fileTitle}</span>
-                  <span className="text-muted-foreground text-xs ml-2">{selectedFile}</span>
+                  <div>
+                    <span className="text-foreground font-bold phosphor-glow text-sm">{fileTitle}</span>
+                    <span className="text-muted-foreground text-xs ml-2">{selectedFile}</span>
+                  </div>
+                  {isOpenClaw && clawStatus?.exists && (
+                    <div
+                      className={cn(
+                        "text-xs mt-1 cursor-pointer hover:underline",
+                        clawStatus.errorCount && clawStatus.errorCount > 0
+                          ? "text-foreground font-bold phosphor-glow"
+                          : "text-muted-foreground phosphor-glow-dim"
+                      )}
+                      data-testid="openclaw-status-line"
+                    >
+                      {clawStatus.errorCount && clawStatus.errorCount > 0 ? (
+                        <span>[{clawStatus.errorCount} error{clawStatus.errorCount > 1 ? "s" : ""}] {clawStatus.errors?.slice(0, 2).join(", ")}</span>
+                      ) : (
+                        <span>[ok] {clawStatus.skillCount} skill{clawStatus.skillCount !== 1 ? "s" : ""} · {clawStatus.programCount} program{clawStatus.programCount !== 1 ? "s" : ""}{clawStatus.activeProgramCount ? ` (${clawStatus.activeProgramCount} active)` : ""}{clawStatus.pendingProposalCount ? ` · ${clawStatus.pendingProposalCount} pending` : ""}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {filteredTopLevel.length === 0 ? (
@@ -1433,26 +1850,39 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
                   Empty document. Use Alt+C to capture items.
                 </div>
               ) : (
-                filteredTopLevel.map((h, i) => (
-                  <div key={`${h.sourceFile}:${h.lineNumber}`} data-cursor-index={i}>
-                    <OutlineItem
-                      heading={h}
-                      children={getChildren(h, filteredHeadings)}
-                      allHeadings={filteredHeadings}
-                      depth={0}
-                      expandedKey={expandedKey}
-                      onToggleExpand={toggleExpand}
-                      onToggleStatus={handleToggleStatus}
-                      onEditTitle={handleEditTitle}
-                      onDelete={handleDelete}
-                      dragItem={dragItem}
-                      onDrop={handleDrop}
-                      onReorderBody={handleReorderBody}
-                      backlinksMap={backlinksMap}
-                      isCursored={cursorIndex === i}
-                    />
-                  </div>
-                ))
+                filteredTopLevel.map((h, i) => {
+                  const sectionProposals = isOpenClaw
+                    ? topLevelProposals.filter(p => p.section.toUpperCase() === h.title.toUpperCase() || p.targetName?.toLowerCase() === h.title.toLowerCase())
+                    : [];
+                  return (
+                    <div key={`${h.sourceFile}:${h.lineNumber}`} data-cursor-index={i}>
+                      <OutlineItem
+                        heading={h}
+                        children={getChildren(h, filteredHeadings)}
+                        allHeadings={filteredHeadings}
+                        depth={0}
+                        expandedKey={expandedKey}
+                        onToggleExpand={toggleExpand}
+                        onToggleStatus={handleToggleStatus}
+                        onEditTitle={handleEditTitle}
+                        onDelete={handleDelete}
+                        onEditTags={handleEditTags}
+                        onInsertHeading={handleInsertHeading}
+                        onEditProperty={handleEditProperty}
+                        onDeleteProperty={handleDeleteProperty}
+                        onAcceptProposal={handleAcceptProposal}
+                        onRejectProposal={handleRejectProposal}
+                        dragItem={dragItem}
+                        onDrop={handleDrop}
+                        onReorderBody={handleReorderBody}
+                        backlinksMap={backlinksMap}
+                        proposals={sectionProposals.length > 0 ? sectionProposals : undefined}
+                        isCursored={cursorIndex === i}
+                        pendingInsertLine={pendingInsertLine}
+                      />
+                    </div>
+                  );
+                })
               )}
             </>
           )}
@@ -1462,6 +1892,7 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
       {showHints && !isLoading && (
         <div className="flex items-center justify-center gap-3 px-2 py-0.5 border-t border-border/30 text-muted-foreground/40 text-xs flex-shrink-0">
           <span>j/k navigate</span>
+          <span>o new heading</span>
           <span>Enter open</span>
           <span>[ ] buffers</span>
           <span>? help</span>

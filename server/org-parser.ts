@@ -392,6 +392,201 @@ export function changeHeadingLevel(
   });
 }
 
+export function editTags(
+  content: string,
+  lineNumber: number,
+  tags: string[]
+): { newContent: string } {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  const line = lines[idx];
+
+  if (!line) return { newContent: content };
+
+  const match = line.match(/^(\*+\s+)(TODO\s+|DONE\s+)?(.*?)(\s+:[a-zA-Z0-9_:]+:)?\s*$/);
+  if (!match) return { newContent: content };
+
+  const stars = match[1];
+  const status = match[2] || "";
+  const title = match[3].trim();
+  const cleanTags = tags.filter(t => t.length > 0);
+  const tagStr = cleanTags.length > 0 ? ` :${cleanTags.join(":")}:` : "";
+
+  lines[idx] = `${stars}${status}${title}${tagStr}`;
+  return { newContent: lines.join("\n") };
+}
+
+export function insertHeading(
+  content: string,
+  afterLine: number,
+  level: number,
+  title: string = "",
+  tags?: string[],
+  properties?: Record<string, string>,
+  status?: string
+): { newContent: string; newLineNumber: number } {
+  const lines = content.split("\n");
+  const idx = afterLine - 1;
+
+  let insertIdx = idx + 1;
+  if (idx >= 0 && idx < lines.length) {
+    const line = lines[idx];
+    const headingMatch = line.match(/^(\*+)\s/);
+    if (headingMatch) {
+      const headingLevel = headingMatch[1].length;
+      while (insertIdx < lines.length) {
+        const nextMatch = lines[insertIdx].match(/^(\*+)\s/);
+        if (nextMatch && nextMatch[1].length <= headingLevel) break;
+        insertIdx++;
+      }
+    }
+  }
+
+  const stars = "*".repeat(level);
+  const statusStr = status ? `${status} ` : "";
+  const tagStr = tags && tags.length > 0 ? ` :${tags.join(":")}:` : "";
+  let headingLine = `${stars} ${statusStr}${title}${tagStr}`;
+
+  const newLines: string[] = [headingLine];
+
+  if (properties && Object.keys(properties).length > 0) {
+    newLines.push("   :PROPERTIES:");
+    for (const [key, value] of Object.entries(properties)) {
+      newLines.push(`   :${key}: ${value}`);
+    }
+    newLines.push("   :END:");
+  }
+
+  lines.splice(insertIdx, 0, ...newLines);
+
+  const newLineNumber = insertIdx + 1;
+  return { newContent: lines.join("\n"), newLineNumber };
+}
+
+export function editProperty(
+  content: string,
+  lineNumber: number,
+  key: string,
+  value: string
+): { newContent: string } {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  if (idx < 0 || idx >= lines.length) return { newContent: content };
+
+  const headMatch = lines[idx].match(/^(\*+)\s/);
+  if (!headMatch) return { newContent: content };
+  const headLevel = headMatch[1].length;
+
+  let propsStart = -1;
+  let propsEnd = -1;
+  let existingPropIdx = -1;
+
+  for (let i = idx + 1; i < lines.length; i++) {
+    const nextHead = lines[i].match(/^(\*+)\s/);
+    if (nextHead && nextHead[1].length <= headLevel) break;
+
+    if (lines[i].trim() === ":PROPERTIES:") {
+      propsStart = i;
+      continue;
+    }
+    if (lines[i].trim() === ":END:" && propsStart !== -1) {
+      propsEnd = i;
+      break;
+    }
+    if (propsStart !== -1 && propsEnd === -1) {
+      const propMatch = lines[i].match(/^\s+:([A-Za-z0-9_]+):/);
+      if (propMatch && propMatch[1].toUpperCase() === key.toUpperCase()) {
+        existingPropIdx = i;
+      }
+    }
+  }
+
+  const propLine = `   :${key.toUpperCase()}: ${value}`;
+
+  if (existingPropIdx !== -1) {
+    lines[existingPropIdx] = propLine;
+  } else if (propsStart !== -1 && propsEnd !== -1) {
+    lines.splice(propsEnd, 0, propLine);
+  } else {
+    lines.splice(idx + 1, 0, "   :PROPERTIES:", propLine, "   :END:");
+  }
+
+  return { newContent: lines.join("\n") };
+}
+
+export function deleteProperty(
+  content: string,
+  lineNumber: number,
+  key: string
+): { newContent: string } {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  if (idx < 0 || idx >= lines.length) return { newContent: content };
+
+  const headMatch = lines[idx].match(/^(\*+)\s/);
+  if (!headMatch) return { newContent: content };
+  const headLevel = headMatch[1].length;
+
+  let propsStart = -1;
+  let propsEnd = -1;
+  let propIdx = -1;
+  let propCount = 0;
+
+  for (let i = idx + 1; i < lines.length; i++) {
+    const nextHead = lines[i].match(/^(\*+)\s/);
+    if (nextHead && nextHead[1].length <= headLevel) break;
+
+    if (lines[i].trim() === ":PROPERTIES:") {
+      propsStart = i;
+      continue;
+    }
+    if (lines[i].trim() === ":END:" && propsStart !== -1) {
+      propsEnd = i;
+      break;
+    }
+    if (propsStart !== -1 && propsEnd === -1) {
+      const propMatch = lines[i].match(/^\s+:([A-Za-z0-9_]+):/);
+      if (propMatch) {
+        propCount++;
+        if (propMatch[1].toUpperCase() === key.toUpperCase()) {
+          propIdx = i;
+        }
+      }
+    }
+  }
+
+  if (propIdx === -1) return { newContent: content };
+
+  if (propCount === 1 && propsStart !== -1 && propsEnd !== -1) {
+    lines.splice(propsStart, propsEnd - propsStart + 1);
+  } else {
+    lines.splice(propIdx, 1);
+  }
+
+  return { newContent: lines.join("\n") };
+}
+
+export function findParentSection(
+  content: string,
+  lineNumber: number
+): string | null {
+  const lines = content.split("\n");
+  const idx = lineNumber - 1;
+  if (idx < 0 || idx >= lines.length) return null;
+
+  const currentMatch = lines[idx].match(/^(\*+)\s/);
+  if (!currentMatch) return null;
+  const currentLevel = currentMatch[1].length;
+
+  for (let i = idx - 1; i >= 0; i--) {
+    const match = lines[i].match(/^(\*+)\s+(TODO\s+|DONE\s+)?(.*?)(?:\s+:[a-zA-Z0-9_:]+:)?\s*$/);
+    if (match && match[1].length < currentLevel) {
+      return match[3].trim();
+    }
+  }
+  return null;
+}
+
 export function moveHeadingWithinFile(
   content: string,
   fromLine: number,

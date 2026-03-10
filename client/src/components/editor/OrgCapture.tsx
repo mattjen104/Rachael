@@ -15,7 +15,10 @@ interface OrgCaptureProps {
   prefill?: CaptureContext | null;
 }
 
-type Template = "todo" | "note" | "link";
+type Template = "todo" | "note" | "link" | "skill" | "program" | "channel";
+
+const openclawTemplates: Template[] = ["skill", "program", "channel"];
+const baseTemplates: Template[] = ["todo", "note", "link"];
 
 export default function OrgCapture({ open, onClose, defaultFile = "dad.org", prefill }: OrgCaptureProps) {
   const [template, setTemplate] = useState<Template>("todo");
@@ -24,10 +27,16 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
   const [fileName, setFileName] = useState(defaultFile);
   const [scheduledDate, setScheduledDate] = useState(new Date().toISOString().split("T")[0]);
   const [tagsInput, setTagsInput] = useState("");
+  const [description, setDescription] = useState("");
+  const [metric, setMetric] = useState("");
+  const [channelType, setChannelType] = useState("webhook");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { data: orgFiles = [] } = useOrgFiles();
   const captureMutation = useOrgCapture();
+
+  const isOpenClaw = fileName === "openclaw.org";
+  const visibleTemplates = isOpenClaw ? [...baseTemplates, ...openclawTemplates] : baseTemplates;
 
   useEffect(() => {
     if (open && inputRef.current) {
@@ -37,6 +46,9 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
       setTagsInput("");
       setScheduledDate(new Date().toISOString().split("T")[0]);
       setFileName(defaultFile);
+      setDescription("");
+      setMetric("");
+      setChannelType("webhook");
 
       if (prefill) {
         if (prefill.url) {
@@ -61,6 +73,12 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
   }, [open, defaultFile, prefill]);
 
   useEffect(() => {
+    if (!isOpenClaw && openclawTemplates.includes(template)) {
+      setTemplate("todo");
+    }
+  }, [fileName, template, isOpenClaw]);
+
+  useEffect(() => {
     if (!open) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -77,14 +95,25 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
 
     const tags = tagsInput.split(",").map(t => t.trim()).filter(Boolean);
 
+    const extra: Record<string, any> = {};
+    if (template === "skill") {
+      extra.description = description.trim() || undefined;
+    } else if (template === "program") {
+      extra.metric = metric.trim() || undefined;
+      extra.scheduledDate = scheduledDate;
+    } else if (template === "channel") {
+      extra.channelType = channelType;
+    }
+
     captureMutation.mutate(
       {
         fileName,
         title: title.trim(),
-        template,
+        template: template as any,
         body: body.trim() || undefined,
-        scheduledDate: template === "todo" ? scheduledDate : undefined,
+        scheduledDate: (template === "todo" || template === "program") ? scheduledDate : undefined,
         tags: tags.length > 0 ? tags : undefined,
+        ...extra,
       },
       { onSuccess: () => onClose() }
     );
@@ -111,46 +140,108 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
 
         <form onSubmit={handleSubmit} className="p-3 space-y-3">
           <div className="flex flex-wrap items-center gap-1.5 mb-2">
-            {(["todo", "note", "link"] as Template[]).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTemplate(t)}
-                className={cn(
-                  "px-1.5 py-0.5 text-xs font-mono border transition-colors",
-                  template === t
-                    ? "border-foreground text-foreground phosphor-glow"
-                    : "border-border text-muted-foreground hover:text-foreground"
-                )}
-                data-testid={`capture-template-${t}`}
-              >
-                [{t === "todo" ? "t" : t === "note" ? "n" : "l"}] {t}
-              </button>
-            ))}
+            {visibleTemplates.map((t) => {
+              const labels: Record<Template, [string, string]> = {
+                todo: ["t", "todo"],
+                note: ["n", "note"],
+                link: ["l", "link"],
+                skill: ["s", "skill"],
+                program: ["p", "program"],
+                channel: ["ch", "channel"],
+              };
+              const [shortcut, label] = labels[t];
+              const isOC = openclawTemplates.includes(t);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTemplate(t)}
+                  className={cn(
+                    "px-1.5 py-0.5 text-xs font-mono border transition-colors",
+                    template === t
+                      ? "border-foreground text-foreground phosphor-glow"
+                      : isOC
+                      ? "border-border text-foreground/60 hover:text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                  data-testid={`capture-template-${t}`}
+                >
+                  [{shortcut}] {label}
+                </button>
+              );
+            })}
           </div>
 
           <div>
             <label className="text-muted-foreground uppercase tracking-wider block mb-1">
-              {template === "todo" ? "Task" : template === "link" ? "Link Title" : "Note Title"}
+              {template === "todo" ? "Task" : template === "link" ? "Link Title" : template === "skill" ? "Skill Name" : template === "program" ? "Program Name" : template === "channel" ? "Channel Name" : "Note Title"}
             </label>
             <input
               ref={inputRef}
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={template === "todo" ? "What needs to be done?" : template === "link" ? "Link description" : "Note title"}
+              placeholder={template === "todo" ? "What needs to be done?" : template === "link" ? "Link description" : template === "skill" ? "e.g. web-search" : template === "program" ? "e.g. autoresearch" : template === "channel" ? "e.g. slack-general" : "Note title"}
               className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors phosphor-glow"
               data-testid="capture-title"
             />
           </div>
 
+          {template === "skill" && (
+            <div>
+              <label className="text-muted-foreground uppercase tracking-wider block mb-1">Description</label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What does this skill do?"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
+                data-testid="capture-description"
+              />
+            </div>
+          )}
+
+          {template === "program" && (
+            <div>
+              <label className="text-muted-foreground uppercase tracking-wider block mb-1">Metric</label>
+              <input
+                type="text"
+                value={metric}
+                onChange={(e) => setMetric(e.target.value)}
+                placeholder="e.g. findings_quality"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
+                data-testid="capture-metric"
+              />
+            </div>
+          )}
+
+          {template === "channel" && (
+            <div>
+              <label className="text-muted-foreground uppercase tracking-wider block mb-1">Type</label>
+              <select
+                value={channelType}
+                onChange={(e) => setChannelType(e.target.value)}
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors text-xs"
+                data-testid="capture-channel-type"
+              >
+                <option value="webhook">webhook</option>
+                <option value="slack">slack</option>
+                <option value="email">email</option>
+                <option value="discord">discord</option>
+                <option value="custom">custom</option>
+              </select>
+            </div>
+          )}
+
           <div>
-            <label className="text-muted-foreground uppercase tracking-wider block mb-1">Body</label>
+            <label className="text-muted-foreground uppercase tracking-wider block mb-1">
+              {template === "skill" ? "Instructions" : template === "program" ? "Instructions" : "Body"}
+            </label>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="Additional content (optional)"
-              rows={3}
+              placeholder={template === "skill" ? "Skill instructions and usage..." : template === "program" ? "What should the agent do each iteration?" : "Additional content (optional)"}
+              rows={template === "skill" || template === "program" ? 5 : 3}
               className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors resize-none"
               data-testid="capture-body"
             />
@@ -170,9 +261,11 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
                 ))}
               </select>
             </div>
-            {template === "todo" && (
+            {(template === "todo" || template === "program") && (
               <div className="flex-1 min-w-[120px]">
-                <label className="text-muted-foreground uppercase tracking-wider block mb-1">Scheduled</label>
+                <label className="text-muted-foreground uppercase tracking-wider block mb-1">
+                  {template === "program" ? "Start Date" : "Scheduled"}
+                </label>
                 <input
                   type="date"
                   value={scheduledDate}
@@ -184,17 +277,19 @@ export default function OrgCapture({ open, onClose, defaultFile = "dad.org", pre
             )}
           </div>
 
-          <div>
-            <label className="text-muted-foreground uppercase tracking-wider block mb-1">Tags (comma separated)</label>
-            <input
-              type="text"
-              value={tagsInput}
-              onChange={(e) => setTagsInput(e.target.value)}
-              placeholder="e.g. work, urgent"
-              className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
-              data-testid="capture-tags"
-            />
-          </div>
+          {!openclawTemplates.includes(template) && (
+            <div>
+              <label className="text-muted-foreground uppercase tracking-wider block mb-1">Tags (comma separated)</label>
+              <input
+                type="text"
+                value={tagsInput}
+                onChange={(e) => setTagsInput(e.target.value)}
+                placeholder="e.g. work, urgent"
+                className="w-full bg-background text-foreground p-2 border border-border outline-none focus:border-foreground/50 transition-colors"
+                data-testid="capture-tags"
+              />
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-2 gap-2">
             <span className="text-muted-foreground text-xs truncate">
