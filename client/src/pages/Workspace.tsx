@@ -1,23 +1,22 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Sidebar from "@/components/layout/Sidebar";
+import type { ViewMode } from "@/components/layout/Sidebar";
 import StatusBar from "@/components/layout/StatusBar";
-import ClipboardManager from "@/components/editor/ClipboardManager";
 import MailView from "@/components/editor/MailView";
-import OrgView from "@/components/editor/OrgView";
+import { OutlinerView, AgendaView } from "@/components/editor/OrgView";
 import OrgCapture from "@/components/editor/OrgCapture";
 import type { CaptureContext } from "@/components/editor/OrgCapture";
 import Minibuffer from "@/components/editor/Minibuffer";
 import { useSeedData, useOrgFiles } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
 
-type ViewMode = "mail" | "org" | "clipboard";
-
 export default function Workspace() {
-  const [viewMode, setViewMode] = useState<ViewMode>("clipboard");
+  const [viewMode, setViewMode] = useState<ViewMode>("agenda");
   const [captureOpen, setCaptureOpen] = useState(false);
   const [capturePrefill, setCapturePrefill] = useState<CaptureContext | null>(null);
   const [minibufferOpen, setMinibufferOpen] = useState(false);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
+  const [outlinerFile, setOutlinerFile] = useState<string | undefined>(undefined);
 
   const seedMutation = useSeedData();
   const { data: orgFiles } = useOrgFiles();
@@ -42,10 +41,6 @@ export default function Workspace() {
     setLastCommand(label);
   }, []);
 
-  const echoMessage = useCallback((msg: string) => {
-    setLastCommand(msg);
-  }, []);
-
   useEffect(() => {
     if (lastCommand) {
       const timer = setTimeout(() => setLastCommand(null), 2000);
@@ -53,8 +48,14 @@ export default function Workspace() {
     }
   }, [lastCommand]);
 
-  const handleJumpToHeading = useCallback((_sourceFile: string, _title: string, _lineNumber: number) => {
-    setViewMode("org");
+  const handleNavigateToFile = useCallback((file: string) => {
+    setOutlinerFile(file);
+    setViewMode("outliner");
+  }, []);
+
+  const handleJumpToHeading = useCallback((sourceFile: string, _title: string, _lineNumber: number) => {
+    setOutlinerFile(sourceFile);
+    setViewMode("outliner");
   }, []);
 
   const openCapture = useCallback((prefill?: CaptureContext) => {
@@ -149,12 +150,12 @@ export default function Workspace() {
       <div className="flex flex-1 overflow-hidden relative z-0">
         <Sidebar viewMode={viewMode} onSwitchView={setViewMode} />
         <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
-          {viewMode === "mail" ? (
-            <MailView />
-          ) : viewMode === "org" ? (
-            <OrgView />
+          {viewMode === "outliner" ? (
+            <OutlinerView initialFile={outlinerFile} />
+          ) : viewMode === "agenda" ? (
+            <AgendaView onNavigateToFile={handleNavigateToFile} />
           ) : (
-            <ClipboardManager activeOrgFile={defaultCaptureFile} onEcho={echoMessage} />
+            <MailView />
           )}
         </main>
       </div>

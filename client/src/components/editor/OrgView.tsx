@@ -24,7 +24,7 @@ import {
 } from "@/hooks/use-org-data";
 import { useQuery } from "@tanstack/react-query";
 
-type TabMode = "outline" | "today" | "week" | "todos" | "done";
+type AgendaTabMode = "today" | "week" | "todos" | "done";
 
 interface BacklinkRef {
   title: string;
@@ -880,6 +880,7 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
 }) {
   const todayStr = new Date().toISOString().split("T")[0];
   const { data: journalEntries = [] } = useJournalDaily(todayStr);
+  const [capturedOpen, setCapturedOpen] = useState(false);
 
   if (!agenda) return null;
 
@@ -896,10 +897,21 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
     .map(item => ({ ...item, _overdueDays: 0 }));
   const scheduledItems = [...overdueItems, ...todayItems];
 
+  const capturedEntries = journalEntries.filter(e => {
+    const body = e.body || "";
+    return /(?:Referenced from|Captured to) \[\[file:/.test(body);
+  });
+  const nonCapturedEntries = journalEntries.filter(e => {
+    const body = e.body || "";
+    return !/(?:Referenced from|Captured to) \[\[file:/.test(body);
+  });
+
   const scheduledCount = scheduledItems.length;
   const journalCursorOffset = scheduledCount;
+  const visibleJournalCount = nonCapturedEntries.length + (capturedOpen ? capturedEntries.length : 0);
   const hasScheduled = scheduledItems.length > 0;
-  const hasJournal = journalEntries.length > 0;
+  const hasJournal = nonCapturedEntries.length > 0;
+  const hasCaptured = capturedEntries.length > 0;
 
   return (
     <div className="space-y-1">
@@ -930,13 +942,13 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
         </div>
       )}
 
-      {hasScheduled && hasJournal && (
+      {hasScheduled && (hasJournal || hasCaptured) && (
         <div className="my-2 border-t border-border/20" />
       )}
 
       {hasJournal && (
         <div className="space-y-0.5">
-          {journalEntries.map((item, i) => (
+          {nonCapturedEntries.map((item, i) => (
             <div key={`jrnl-${item.lineNumber}`} data-cursor-index={journalCursorOffset + i}>
               <JournalEntryRow
                 item={item}
@@ -949,7 +961,38 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
         </div>
       )}
 
-      {!hasScheduled && !hasJournal && (
+      {hasCaptured && (
+        <div className="mt-2">
+          <button
+            onClick={() => setCapturedOpen(prev => !prev)}
+            className="flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground transition-colors px-2 py-1"
+            data-testid="toggle-captured-section"
+          >
+            <span>{capturedOpen ? "▾" : "▸"}</span>
+            <span className="uppercase tracking-wider font-bold">captured</span>
+            <span className="opacity-60">({capturedEntries.length})</span>
+          </button>
+          {capturedOpen && (
+            <div className="space-y-0.5 mt-1">
+              {capturedEntries.map((item, i) => {
+                const idx = journalCursorOffset + nonCapturedEntries.length + i;
+                return (
+                  <div key={`cap-${item.lineNumber}`} data-cursor-index={idx}>
+                    <JournalEntryRow
+                      item={item}
+                      onToggle={onToggle}
+                      onNavigateFile={onNavigateFile}
+                      isCursored={cursorIndex === idx}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!hasScheduled && !hasJournal && !hasCaptured && (
         <div className="text-muted-foreground/40 italic py-4 pl-6 phosphor-glow-dim text-xs">
           Empty day. Use the input above to capture tasks or notes.
         </div>
@@ -1088,25 +1131,7 @@ function BufferTabBar({ orgFiles, selectedFile, onSelect, showHints }: {
   );
 }
 
-function WhichKeyOverlay({ tab, onClose }: { tab: TabMode; onClose: () => void }) {
-  const globalBindings = [
-    ["1-5", "Switch tabs"],
-    ["SPC", "Command palette"],
-    ["Alt+C", "Org capture"],
-    ["?", "Toggle this help"],
-  ];
-
-  const outlineBindings = [
-    ["j / k", "Navigate items"],
-    ["[ / ]", "Prev / next buffer"],
-  ];
-
-  const agendaBindings = [
-    ["j / k", "Navigate items"],
-  ];
-
-  const bindings = tab === "outline" ? outlineBindings : agendaBindings;
-
+function OutlinerWhichKey({ onClose }: { onClose: () => void }) {
   return (
     <div
       className="absolute inset-0 z-40 flex items-center justify-center bg-background/80 backdrop-blur-sm"
@@ -1118,12 +1143,12 @@ function WhichKeyOverlay({ tab, onClose }: { tab: TabMode; onClose: () => void }
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-foreground font-bold mb-3 phosphor-glow text-sm uppercase tracking-wider">
-          Keybindings — {tab === "outline" ? "Outline" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+          Keybindings — Outliner
         </div>
         <div className="grid grid-cols-2 gap-x-8 gap-y-0">
           <div>
             <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Global</div>
-            {globalBindings.map(([key, desc]) => (
+            {[["SPC", "Command palette"], ["Alt+C", "Org capture"], ["?", "Toggle this help"]].map(([key, desc]) => (
               <div key={key} className="flex items-center gap-2 py-0.5 text-xs">
                 <span className="text-foreground font-bold w-16 phosphor-glow">{key}</span>
                 <span className="text-muted-foreground">{desc}</span>
@@ -1131,10 +1156,8 @@ function WhichKeyOverlay({ tab, onClose }: { tab: TabMode; onClose: () => void }
             ))}
           </div>
           <div>
-            <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">
-              {tab === "outline" ? "Outline" : "Agenda"}
-            </div>
-            {bindings.map(([key, desc]) => (
+            <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Outline</div>
+            {[["j / k", "Navigate items"], ["[ / ]", "Prev / next buffer"]].map(([key, desc]) => (
               <div key={key} className="flex items-center gap-2 py-0.5 text-xs">
                 <span className="text-foreground font-bold w-16 phosphor-glow">{key}</span>
                 <span className="text-muted-foreground">{desc}</span>
@@ -1150,25 +1173,60 @@ function WhichKeyOverlay({ tab, onClose }: { tab: TabMode; onClose: () => void }
   );
 }
 
-export default function OrgView() {
-  const { data: headings = [], isLoading: headingsLoading } = useAllHeadings();
+function AgendaWhichKey({ tab, onClose }: { tab: string; onClose: () => void }) {
+  return (
+    <div
+      className="absolute inset-0 z-40 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+      onClick={onClose}
+      data-testid="which-key-overlay"
+    >
+      <div
+        className="bg-card border border-border p-4 max-w-md w-full font-mono"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-foreground font-bold mb-3 phosphor-glow text-sm uppercase tracking-wider">
+          Keybindings — {tab.charAt(0).toUpperCase() + tab.slice(1)}
+        </div>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-0">
+          <div>
+            <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Global</div>
+            {[["1-4", "Switch tabs"], ["SPC", "Command palette"], ["Alt+C", "Org capture"], ["?", "Toggle this help"]].map(([key, desc]) => (
+              <div key={key} className="flex items-center gap-2 py-0.5 text-xs">
+                <span className="text-foreground font-bold w-16 phosphor-glow">{key}</span>
+                <span className="text-muted-foreground">{desc}</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Agenda</div>
+            {[["j / k", "Navigate items"]].map(([key, desc]) => (
+              <div key={key} className="flex items-center gap-2 py-0.5 text-xs">
+                <span className="text-foreground font-bold w-16 phosphor-glow">{key}</span>
+                <span className="text-muted-foreground">{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="text-muted-foreground text-xs mt-3 text-center phosphor-glow-dim">
+          Press ? or Esc to close
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function OutlinerView({ initialFile }: { initialFile?: string }) {
+  const { data: headings = [], isLoading } = useAllHeadings();
   const { data: orgFiles = [] } = useOrgFiles();
   const { data: backlinksData = [] } = useBacklinks();
-  const { data: agenda, isLoading: agendaLoading } = useOrgAgenda();
-  const { data: allTodos = [], isLoading: todosLoading } = useOrgTodos();
-  const { data: allDone = [], isLoading: doneLoading } = useOrgDone();
-  const todayDateStr = useMemo(() => new Date().toISOString().split("T")[0], []);
-  const { data: journalEntries = [] } = useJournalDaily(todayDateStr);
 
   const toggleMutation = useToggleOrgStatus();
   const editTitleMutation = useEditHeadingTitle();
   const deleteMutation = useDeleteHeading();
   const moveMutation = useMoveHeading();
   const reorderBodyMutation = useReorderBodyLine();
-  const rescheduleMutation = useRescheduleHeading();
 
-  const [tab, setTab] = useState<TabMode>("outline");
-  const [selectedFile, setSelectedFile] = useState<string>("");
+  const [selectedFile, setSelectedFile] = useState<string>(initialFile || "");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [cursorIndex, setCursorIndex] = useState(0);
   const [showHints, setShowHints] = useState(() => {
@@ -1177,6 +1235,10 @@ export default function OrgView() {
   const [whichKeyOpen, setWhichKeyOpen] = useState(false);
   const dragItem = useRef<OutlineHeading | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (initialFile) setSelectedFile(initialFile);
+  }, [initialFile]);
 
   useEffect(() => {
     if (orgFiles.length > 0 && !selectedFile) {
@@ -1205,21 +1267,17 @@ export default function OrgView() {
     return map;
   }, [backlinksData]);
 
-  const handleToggleStatus = useCallback((h: OutlineHeading | OrgHeading) => {
+  const handleToggleStatus = useCallback((h: OutlineHeading) => {
     toggleMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber });
   }, [toggleMutation]);
 
-  const handleEditTitle = useCallback((h: OutlineHeading | OrgHeading, newTitle: string) => {
+  const handleEditTitle = useCallback((h: OutlineHeading, newTitle: string) => {
     editTitleMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber, newTitle });
   }, [editTitleMutation]);
 
-  const handleDelete = useCallback((h: OutlineHeading | OrgHeading) => {
+  const handleDelete = useCallback((h: OutlineHeading) => {
     deleteMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber });
   }, [deleteMutation]);
-
-  const handleReschedule = useCallback((h: OrgHeading, newDate: string) => {
-    rescheduleMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber, newDate });
-  }, [rescheduleMutation]);
 
   const handleReorderBody = useCallback((h: OutlineHeading, fromIndex: number, toIndex: number) => {
     reorderBodyMutation.mutate({ fileName: h.sourceFile, headingLine: h.lineNumber, fromIndex, toIndex });
@@ -1272,12 +1330,6 @@ export default function OrgView() {
     setExpandedKey(prev => prev === key ? null : key);
   }, []);
 
-  const handleNavigateFile = useCallback((file: string) => {
-    setSelectedFile(file);
-    setTab("outline");
-    setCursorIndex(0);
-  }, []);
-
   const filteredTopLevel = useMemo(() => {
     return headings.filter(h => h.level === 1 && h.sourceFile === selectedFile);
   }, [headings, selectedFile]);
@@ -1286,53 +1338,18 @@ export default function OrgView() {
     return headings.filter(h => h.sourceFile === selectedFile);
   }, [headings, selectedFile]);
 
-  const todoCount = allTodos.length;
-
-  const todayCount = useMemo(() => {
-    if (!agenda) return 0;
-    let count = 0;
-    for (const day of agenda.overdue) count += day.items.length;
-    count += agenda.today.items.length;
-    count += journalEntries.length;
-    return count;
-  }, [agenda, journalEntries]);
-
-  const weekCount = useMemo(() => {
-    if (!agenda) return 0;
-    return agenda.today.items.length + agenda.upcoming.reduce((s, d) => s + d.items.length, 0);
-  }, [agenda]);
-
-  const doneCount = allDone.length;
-
   const fileTitle = useMemo(() => {
     const file = orgFiles.find(f => f.name === selectedFile);
     if (!file) return selectedFile;
-    const match = file.content.match(/^#\+TITLE:\s*(.+)$/m);
+    const match = (file as any).content?.match(/^#\+TITLE:\s*(.+)$/m);
     return match ? match[1].trim() : selectedFile.replace(".org", "");
   }, [orgFiles, selectedFile]);
 
-  const currentItemCount = useMemo(() => {
-    if (tab === "outline") return filteredTopLevel.length;
-    if (tab === "today") return todayCount;
-    if (tab === "week") return weekCount;
-    if (tab === "todos") return todoCount;
-    if (tab === "done") return doneCount;
-    return 0;
-  }, [tab, filteredTopLevel.length, todayCount, weekCount, todoCount, doneCount]);
-
-  const isLoading = headingsLoading || agendaLoading || todosLoading || doneLoading;
-
-  const tabs: { key: TabMode; label: string; count: number; hint: string }[] = [
-    { key: "outline", label: "Outline", count: 0, hint: "1" },
-    { key: "today", label: "Today", count: todayCount, hint: "2" },
-    { key: "week", label: "Week", count: weekCount, hint: "3" },
-    { key: "todos", label: "TODOs", count: todoCount, hint: "4" },
-    { key: "done", label: "Done", count: doneCount, hint: "5" },
-  ];
+  const currentItemCount = filteredTopLevel.length;
 
   useEffect(() => {
     setCursorIndex(0);
-  }, [tab, selectedFile]);
+  }, [selectedFile]);
 
   useEffect(() => {
     const el = scrollRef.current?.querySelector(`[data-cursor-index="${cursorIndex}"]`);
@@ -1359,21 +1376,14 @@ export default function OrgView() {
         return;
       }
 
-      const tabKeys: Record<string, TabMode> = { "1": "outline", "2": "today", "3": "week", "4": "todos", "5": "done" };
-      if (tabKeys[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        setTab(tabKeys[e.key]);
-        return;
-      }
-
-      if (e.key === "[" && !e.ctrlKey && !e.metaKey && !e.altKey && tab === "outline") {
+      if (e.key === "[" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         const idx = orgFiles.findIndex(f => f.name === selectedFile);
         if (idx > 0) setSelectedFile(orgFiles[idx - 1].name);
         else if (orgFiles.length > 0) setSelectedFile(orgFiles[orgFiles.length - 1].name);
         return;
       }
-      if (e.key === "]" && !e.ctrlKey && !e.metaKey && !e.altKey && tab === "outline") {
+      if (e.key === "]" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         const idx = orgFiles.findIndex(f => f.name === selectedFile);
         if (idx < orgFiles.length - 1) setSelectedFile(orgFiles[idx + 1].name);
@@ -1395,43 +1405,22 @@ export default function OrgView() {
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [whichKeyOpen, tab, selectedFile, orgFiles, currentItemCount]);
+  }, [whichKeyOpen, selectedFile, orgFiles, currentItemCount]);
 
   return (
-    <div className="flex-1 w-full h-full flex flex-col font-mono bg-background relative" data-testid="org-view">
+    <div className="flex-1 w-full h-full flex flex-col font-mono bg-background relative" data-testid="outliner-view">
       <div className="flex items-center border-b border-border bg-card px-2 py-1 gap-1 overflow-x-auto flex-shrink-0">
         <span className="text-foreground">{"{*}"}</span>
-        <span className="text-foreground font-bold mr-2 phosphor-glow">Org</span>
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              "px-1.5 py-0.5 text-xs transition-colors",
-              tab === t.key
-                ? "text-foreground font-bold phosphor-glow"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            data-testid={`tab-${t.key}`}
-          >
-            {showHints && <span className="text-muted-foreground/40 mr-0.5">{t.hint}</span>}
-            {t.label}
-            {t.count > 0 && (
-              <span className="ml-1 opacity-70">({t.count})</span>
-            )}
-          </button>
-        ))}
+        <span className="text-foreground font-bold mr-2 phosphor-glow">Outliner</span>
       </div>
 
-      {tab === "outline" && (
-        <BufferTabBar orgFiles={orgFiles} selectedFile={selectedFile} onSelect={(f) => { setSelectedFile(f); setCursorIndex(0); }} showHints={showHints} />
-      )}
+      <BufferTabBar orgFiles={orgFiles} selectedFile={selectedFile} onSelect={(f) => { setSelectedFile(f); setCursorIndex(0); }} showHints={showHints} />
 
       <ScrollArea className="flex-1">
         <div ref={scrollRef} className="w-full p-1 sm:p-2 pb-32">
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 phosphor-glow-dim">Loading...</div>
-          ) : tab === "outline" ? (
+          ) : (
             <>
               {selectedFile && (
                 <div className="px-1 py-2 mb-2 border-b border-border/30">
@@ -1466,6 +1455,191 @@ export default function OrgView() {
                 ))
               )}
             </>
+          )}
+        </div>
+      </ScrollArea>
+
+      {showHints && !isLoading && (
+        <div className="flex items-center justify-center gap-3 px-2 py-0.5 border-t border-border/30 text-muted-foreground/40 text-xs flex-shrink-0">
+          <span>j/k navigate</span>
+          <span>Enter open</span>
+          <span>[ ] buffers</span>
+          <span>? help</span>
+        </div>
+      )}
+
+      {whichKeyOpen && <OutlinerWhichKey onClose={() => setWhichKeyOpen(false)} />}
+    </div>
+  );
+}
+
+export function AgendaView({ onNavigateToFile }: { onNavigateToFile?: (file: string) => void }) {
+  const { data: agenda, isLoading: agendaLoading } = useOrgAgenda();
+  const { data: allTodos = [], isLoading: todosLoading } = useOrgTodos();
+  const { data: allDone = [], isLoading: doneLoading } = useOrgDone();
+  const todayDateStr = useMemo(() => new Date().toISOString().split("T")[0], []);
+  const { data: journalEntries = [] } = useJournalDaily(todayDateStr);
+
+  const toggleMutation = useToggleOrgStatus();
+  const editTitleMutation = useEditHeadingTitle();
+  const deleteMutation = useDeleteHeading();
+  const rescheduleMutation = useRescheduleHeading();
+
+  const [tab, setTab] = useState<AgendaTabMode>("today");
+  const [cursorIndex, setCursorIndex] = useState(0);
+  const [showHints, setShowHints] = useState(() => {
+    try { return localStorage.getItem("orgcloud-show-hints") !== "false"; } catch { return true; }
+  });
+  const [whichKeyOpen, setWhichKeyOpen] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem("orgcloud-show-hints", String(showHints)); } catch {}
+  }, [showHints]);
+
+  useEffect(() => {
+    const handler = () => setShowHints(prev => !prev);
+    window.addEventListener("toggle-hints", handler);
+    return () => window.removeEventListener("toggle-hints", handler);
+  }, []);
+
+  const handleToggleStatus = useCallback((h: OrgHeading) => {
+    toggleMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber });
+  }, [toggleMutation]);
+
+  const handleEditTitle = useCallback((h: OrgHeading, newTitle: string) => {
+    editTitleMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber, newTitle });
+  }, [editTitleMutation]);
+
+  const handleDelete = useCallback((h: OrgHeading) => {
+    deleteMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber });
+  }, [deleteMutation]);
+
+  const handleReschedule = useCallback((h: OrgHeading, newDate: string) => {
+    rescheduleMutation.mutate({ fileName: h.sourceFile, lineNumber: h.lineNumber, newDate });
+  }, [rescheduleMutation]);
+
+  const handleNavigateFile = useCallback((file: string) => {
+    if (onNavigateToFile) onNavigateToFile(file);
+  }, [onNavigateToFile]);
+
+  const todoCount = allTodos.length;
+
+  const todayCount = useMemo(() => {
+    if (!agenda) return 0;
+    let count = 0;
+    for (const day of agenda.overdue) count += day.items.length;
+    count += agenda.today.items.length;
+    count += journalEntries.length;
+    return count;
+  }, [agenda, journalEntries]);
+
+  const weekCount = useMemo(() => {
+    if (!agenda) return 0;
+    return agenda.today.items.length + agenda.upcoming.reduce((s, d) => s + d.items.length, 0);
+  }, [agenda]);
+
+  const doneCount = allDone.length;
+
+  const currentItemCount = useMemo(() => {
+    if (tab === "today") return todayCount;
+    if (tab === "week") return weekCount;
+    if (tab === "todos") return todoCount;
+    if (tab === "done") return doneCount;
+    return 0;
+  }, [tab, todayCount, weekCount, todoCount, doneCount]);
+
+  const isLoading = agendaLoading || todosLoading || doneLoading;
+
+  const tabs: { key: AgendaTabMode; label: string; count: number; hint: string }[] = [
+    { key: "today", label: "Today", count: todayCount, hint: "1" },
+    { key: "week", label: "Week", count: weekCount, hint: "2" },
+    { key: "todos", label: "TODOs", count: todoCount, hint: "3" },
+    { key: "done", label: "Done", count: doneCount, hint: "4" },
+  ];
+
+  useEffect(() => {
+    setCursorIndex(0);
+  }, [tab]);
+
+  useEffect(() => {
+    const el = scrollRef.current?.querySelector(`[data-cursor-index="${cursorIndex}"]`);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [cursorIndex]);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (isInput) return;
+
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setWhichKeyOpen(prev => !prev);
+        return;
+      }
+
+      if (whichKeyOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setWhichKeyOpen(false);
+        }
+        return;
+      }
+
+      const tabKeys: Record<string, AgendaTabMode> = { "1": "today", "2": "week", "3": "todos", "4": "done" };
+      if (tabKeys[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setTab(tabKeys[e.key]);
+        return;
+      }
+
+      if (e.key === "j" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setCursorIndex(prev => currentItemCount > 0 ? Math.min(prev + 1, currentItemCount - 1) : 0);
+        return;
+      }
+      if (e.key === "k" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setCursorIndex(prev => Math.max(prev - 1, 0));
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [whichKeyOpen, tab, currentItemCount]);
+
+  return (
+    <div className="flex-1 w-full h-full flex flex-col font-mono bg-background relative" data-testid="agenda-view">
+      <div className="flex items-center border-b border-border bg-card px-2 py-1 gap-1 overflow-x-auto flex-shrink-0">
+        <span className="text-foreground">☰</span>
+        <span className="text-foreground font-bold mr-2 phosphor-glow">Agenda</span>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              "px-1.5 py-0.5 text-xs transition-colors",
+              tab === t.key
+                ? "text-foreground font-bold phosphor-glow"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            data-testid={`tab-${t.key}`}
+          >
+            {showHints && <span className="text-muted-foreground/40 mr-0.5">{t.hint}</span>}
+            {t.label}
+            {t.count > 0 && (
+              <span className="ml-1 opacity-70">({t.count})</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div ref={scrollRef} className="w-full p-1 sm:p-2 pb-32">
+          {isLoading ? (
+            <div className="text-center text-muted-foreground py-8 phosphor-glow-dim">Loading...</div>
           ) : tab === "today" ? (
             <TodayTab agenda={agenda} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} cursorIndex={cursorIndex} />
           ) : tab === "week" ? (
@@ -1481,13 +1655,13 @@ export default function OrgView() {
       {showHints && !isLoading && (
         <div className="flex items-center justify-center gap-3 px-2 py-0.5 border-t border-border/30 text-muted-foreground/40 text-xs flex-shrink-0">
           <span>j/k navigate</span>
-          <span>Enter open</span>
-          {tab === "outline" && <span>[ ] buffers</span>}
           <span>? help</span>
         </div>
       )}
 
-      {whichKeyOpen && <WhichKeyOverlay tab={tab} onClose={() => setWhichKeyOpen(false)} />}
+      {whichKeyOpen && <AgendaWhichKey tab={tab} onClose={() => setWhichKeyOpen(false)} />}
     </div>
   );
 }
+
+export default AgendaView;

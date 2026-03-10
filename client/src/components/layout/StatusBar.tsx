@@ -1,22 +1,23 @@
 import React from "react";
+import type { ViewMode } from "./Sidebar";
 
 interface StatusBarProps {
-  viewMode: "mail" | "org" | "clipboard";
+  viewMode: ViewMode;
   lastCommand?: string | null;
   onOpenMinibuffer?: () => void;
 }
 
 export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: StatusBarProps) {
-  const modeLabels: Record<string, string> = {
-    mail: "MAIL",
-    org: "ORG",
-    clipboard: "CAPTURE",
+  const modeLabels: Record<ViewMode, string> = {
+    outliner: "OUTLINER",
+    agenda: "AGENDA",
+    control: "CONTROL",
   };
 
-  const viewDescriptions: Record<string, string> = {
-    mail: "Outlook/Teams [Live]",
-    org: "Org Mode [View]",
-    clipboard: "Clipboard [Capture]",
+  const viewDescriptions: Record<ViewMode, string> = {
+    outliner: "Org Outliner [View]",
+    agenda: "Agenda [View]",
+    control: "Control [Bridge]",
   };
 
   return (

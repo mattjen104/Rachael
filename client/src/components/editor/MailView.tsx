@@ -163,6 +163,8 @@ export default function MailView() {
   return (
     <div className="flex flex-col h-full overflow-hidden" data-testid="mail-view">
       <div className="flex items-center gap-0 border-b border-border px-2 py-1 bg-card shrink-0">
+        <span className="text-foreground mr-1">⌘</span>
+        <span className="text-foreground font-bold mr-2 phosphor-glow text-xs">Control</span>
         <button
           onClick={() => setTab("mail")}
           data-testid="tab-mail"

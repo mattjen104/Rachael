@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { cn } from "@/lib/utils";
 import { useHeadingsSearch, useClipboardItems, useClipboardHistory } from "@/hooks/use-org-data";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { ViewMode } from "@/components/layout/Sidebar";
 
 interface MinibufferCommand {
   id: string;
@@ -12,7 +13,7 @@ interface MinibufferCommand {
 
 interface MinibufferProps {
   onClose: () => void;
-  onSwitchView: (view: "mail" | "org" | "clipboard") => void;
+  onSwitchView: (view: ViewMode) => void;
   onOpenCapture: () => void;
   onCycleTheme: () => void;
   onCommandExecuted: (label: string) => void;
@@ -49,9 +50,9 @@ export default function Minibuffer({
   }, [onCommandExecuted, onClose]);
 
   const commands: MinibufferCommand[] = useMemo(() => [
-    { id: "switch-to-clipboard", label: "switch-to-clipboard", hint: "⎘", action: () => exec("Switched to Clipboard", () => onSwitchView("clipboard")) },
-    { id: "switch-to-org", label: "switch-to-org", hint: "{*}", action: () => exec("Switched to Org", () => onSwitchView("org")) },
-    { id: "switch-to-mail", label: "switch-to-mail", hint: "✉", action: () => exec("Switched to Mail", () => onSwitchView("mail")) },
+    { id: "switch-to-agenda", label: "switch-to-agenda", hint: "☰", action: () => exec("Switched to Agenda", () => onSwitchView("agenda")) },
+    { id: "switch-to-outliner", label: "switch-to-outliner", hint: "{*}", action: () => exec("Switched to Outliner", () => onSwitchView("outliner")) },
+    { id: "switch-to-control", label: "switch-to-control", hint: "⌘", action: () => exec("Switched to Control", () => onSwitchView("control")) },
     { id: "org-capture", label: "org-capture", hint: "c", action: () => exec("Org Capture", () => onOpenCapture()) },
     { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
     { id: "search-headings", label: "search-headings", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
@@ -77,7 +78,7 @@ export default function Minibuffer({
         if (onJumpToHeading) {
           exec(`Jumped to ${h.title}`, () => onJumpToHeading(h.sourceFile, h.title, h.lineNumber));
         } else {
-          exec(`Jumped to ${h.title}`, () => onSwitchView("org"));
+          exec(`Jumped to ${h.title}`, () => onSwitchView("outliner"));
         }
       },
     }));

@@ -2,15 +2,17 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import { useCrtTheme } from "@/lib/crt-theme";
 
+export type ViewMode = "outliner" | "agenda" | "control";
+
 interface SidebarProps {
-  viewMode: "mail" | "org" | "clipboard";
-  onSwitchView: (mode: "mail" | "org" | "clipboard") => void;
+  viewMode: ViewMode;
+  onSwitchView: (mode: ViewMode) => void;
 }
 
-const views: { key: "mail" | "org" | "clipboard"; label: string; icon: string }[] = [
-  { key: "clipboard", label: "Capture", icon: "⎘" },
-  { key: "org", label: "Org", icon: "{*}" },
-  { key: "mail", label: "Mail", icon: "✉" },
+const views: { key: ViewMode; label: string; icon: string }[] = [
+  { key: "agenda", label: "Agenda", icon: "☰" },
+  { key: "outliner", label: "Outliner", icon: "{*}" },
+  { key: "control", label: "Control", icon: "⌘" },
 ];
 
 export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
