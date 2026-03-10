@@ -133,6 +133,7 @@ interface OutlineItemProps {
   onDrop: (target: OutlineHeading, position: "before" | "after" | "child") => void;
   onReorderBody: (heading: OutlineHeading, fromIndex: number, toIndex: number) => void;
   backlinksMap: Map<string, BacklinkRef[]>;
+  isCursored?: boolean;
 }
 
 function getChildren(heading: OutlineHeading, allHeadings: OutlineHeading[]): OutlineHeading[] {
@@ -165,6 +166,7 @@ function OutlineItem({
   onDrop,
   onReorderBody,
   backlinksMap,
+  isCursored,
 }: OutlineItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(heading.title);
@@ -288,7 +290,8 @@ function OutlineItem({
           dropZone === "before" && "border-t-2 border-foreground",
           dropZone === "after" && "border-b-2 border-foreground",
           dropZone === "child" && "bg-muted/30 border border-foreground/30",
-          !dropZone && "hover:bg-muted/10"
+          isCursored && "bg-muted/20 ring-1 ring-foreground/20",
+          !dropZone && !isCursored && "hover:bg-muted/10"
         )}
         style={{ paddingLeft: `${depth * 16 + 4}px` }}
         draggable={!editing}
@@ -502,7 +505,7 @@ function daysOverdue(scheduledDate: string): number {
   return Math.max(0, diff);
 }
 
-function AgendaItemRow({ item, overdueDays, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile }: {
+function AgendaItemRow({ item, overdueDays, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile, isCursored }: {
   item: OrgHeading;
   overdueDays: number;
   onToggle: (item: OrgHeading) => void;
@@ -510,6 +513,7 @@ function AgendaItemRow({ item, overdueDays, onToggle, onReschedule, onEditTitle,
   onEditTitle: (item: OrgHeading, newTitle: string) => void;
   onDelete: (item: OrgHeading) => void;
   onNavigateFile?: (file: string) => void;
+  isCursored?: boolean;
 }) {
   const isDone = item.status === "DONE";
   const [editing, setEditing] = useState(false);
@@ -548,7 +552,7 @@ function AgendaItemRow({ item, overdueDays, onToggle, onReschedule, onEditTitle,
   };
 
   return (
-    <div className="group flex items-start gap-2 py-1 px-2 hover:bg-muted/20 transition-colors" data-testid={`agenda-item-${item.lineNumber}`}>
+    <div className={cn("group flex items-start gap-2 py-1 px-2 transition-colors", isCursored ? "bg-muted/20 ring-1 ring-foreground/20" : "hover:bg-muted/20")} data-testid={`agenda-item-${item.lineNumber}`}>
       <button
         onClick={() => onToggle(item)}
         className="mt-0.5 flex-shrink-0 font-mono"
@@ -665,21 +669,20 @@ function AgendaItemRow({ item, overdueDays, onToggle, onReschedule, onEditTitle,
   );
 }
 
-function TodayTab({ agenda, activeFiles, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile }: {
+function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile, cursorIndex }: {
   agenda: { overdue: AgendaDay[]; today: AgendaDay; upcoming: AgendaDay[] } | undefined;
-  activeFiles: Set<string>;
   onToggle: (item: OrgHeading) => void;
   onReschedule: (item: OrgHeading, newDate: string) => void;
   onEditTitle: (item: OrgHeading, newTitle: string) => void;
   onDelete: (item: OrgHeading) => void;
   onNavigateFile: (file: string) => void;
+  cursorIndex: number;
 }) {
   if (!agenda) return null;
 
   const overdueItems: (OrgHeading & { _overdueDays: number })[] = [];
   for (const day of agenda.overdue) {
     for (const item of day.items) {
-      if (!activeFiles.has(item.sourceFile)) continue;
       const days = item.scheduledDate ? daysOverdue(item.scheduledDate) : 1;
       overdueItems.push({ ...item, _overdueDays: days });
     }
@@ -687,7 +690,6 @@ function TodayTab({ agenda, activeFiles, onToggle, onReschedule, onEditTitle, on
   overdueItems.sort((a, b) => b._overdueDays - a._overdueDays);
 
   const todayItems = agenda.today.items
-    .filter(item => activeFiles.has(item.sourceFile))
     .map(item => ({ ...item, _overdueDays: 0 }));
   const allItems = [...overdueItems, ...todayItems];
 
@@ -702,17 +704,19 @@ function TodayTab({ agenda, activeFiles, onToggle, onReschedule, onEditTitle, on
         </div>
         {allItems.length > 0 ? (
           <div className="space-y-1">
-            {allItems.map((item) => (
-              <AgendaItemRow
-                key={`${item.sourceFile}-${item.lineNumber}`}
-                item={item}
-                overdueDays={item._overdueDays}
-                onToggle={onToggle}
-                onReschedule={onReschedule}
-                onEditTitle={onEditTitle}
-                onDelete={onDelete}
-                onNavigateFile={onNavigateFile}
-              />
+            {allItems.map((item, i) => (
+              <div key={`${item.sourceFile}-${item.lineNumber}`} data-cursor-index={i}>
+                <AgendaItemRow
+                  item={item}
+                  overdueDays={item._overdueDays}
+                  onToggle={onToggle}
+                  onReschedule={onReschedule}
+                  onEditTitle={onEditTitle}
+                  onDelete={onDelete}
+                  onNavigateFile={onNavigateFile}
+                  isCursored={cursorIndex === i}
+                />
+              </div>
             ))}
           </div>
         ) : (
@@ -725,32 +729,37 @@ function TodayTab({ agenda, activeFiles, onToggle, onReschedule, onEditTitle, on
   );
 }
 
-function WeekTab({ agenda, activeFiles, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile }: {
+function WeekTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile, cursorIndex }: {
   agenda: { overdue: AgendaDay[]; today: AgendaDay; upcoming: AgendaDay[] } | undefined;
-  activeFiles: Set<string>;
   onToggle: (item: OrgHeading) => void;
   onReschedule: (item: OrgHeading, newDate: string) => void;
   onEditTitle: (item: OrgHeading, newTitle: string) => void;
   onDelete: (item: OrgHeading) => void;
   onNavigateFile: (file: string) => void;
+  cursorIndex: number;
 }) {
   if (!agenda) return null;
 
-  const filterDay = (day: AgendaDay): AgendaDay => ({
-    ...day,
-    items: day.items.filter(item => activeFiles.has(item.sourceFile)),
-  });
+  const today = agenda.today;
+  const upcoming = agenda.upcoming.filter(d => d.items.length > 0);
 
-  const today = filterDay(agenda.today);
-  const upcoming = agenda.upcoming.map(filterDay).filter(d => d.items.length > 0);
+  const dayStartIndices = useMemo(() => {
+    const indices: number[] = [];
+    let idx = today.items.length > 0 ? today.items.length : 0;
+    for (const day of upcoming) {
+      indices.push(idx);
+      idx += day.items.length;
+    }
+    return indices;
+  }, [today, upcoming]);
 
   return (
     <div className="space-y-4">
       {today.items.length > 0 && (
-        <DaySection day={today} variant="today" onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} />
+        <DaySection day={today} variant="today" onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} cursorIndex={cursorIndex} startIndex={0} />
       )}
-      {upcoming.map((day) => (
-        <DaySection key={day.date} day={day} variant="upcoming" onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} />
+      {upcoming.map((day, di) => (
+        <DaySection key={day.date} day={day} variant="upcoming" onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} cursorIndex={cursorIndex} startIndex={dayStartIndices[di]} />
       ))}
       {upcoming.length === 0 && today.items.length === 0 && (
         <div className="text-center py-8 text-muted-foreground phosphor-glow-dim">
@@ -761,7 +770,7 @@ function WeekTab({ agenda, activeFiles, onToggle, onReschedule, onEditTitle, onD
   );
 }
 
-function DaySection({ day, variant, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile }: {
+function DaySection({ day, variant, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile, cursorIndex, startIndex }: {
   day: AgendaDay;
   variant: "overdue" | "today" | "upcoming";
   onToggle: (item: OrgHeading) => void;
@@ -769,6 +778,8 @@ function DaySection({ day, variant, onToggle, onReschedule, onEditTitle, onDelet
   onEditTitle: (item: OrgHeading, newTitle: string) => void;
   onDelete: (item: OrgHeading) => void;
   onNavigateFile: (file: string) => void;
+  cursorIndex: number;
+  startIndex: number;
 }) {
   if (day.items.length === 0) return null;
 
@@ -781,63 +792,131 @@ function DaySection({ day, variant, onToggle, onReschedule, onEditTitle, onDelet
         {day.label} <span className="opacity-50 ml-1">{day.date}</span>
       </div>
       <div className="space-y-1">
-        {day.items.map((item) => (
-          <AgendaItemRow key={`${item.sourceFile}-${item.lineNumber}`} item={item} overdueDays={0} onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} />
+        {day.items.map((item, i) => (
+          <div key={`${item.sourceFile}-${item.lineNumber}`} data-cursor-index={startIndex + i}>
+            <AgendaItemRow item={item} overdueDays={0} onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} isCursored={cursorIndex === startIndex + i} />
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function FlatItemList({ items, activeFiles, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile }: {
+function FlatItemList({ items, onToggle, onReschedule, onEditTitle, onDelete, onNavigateFile, cursorIndex }: {
   items: OrgHeading[];
-  activeFiles: Set<string>;
   onToggle: (item: OrgHeading) => void;
   onReschedule: (item: OrgHeading, newDate: string) => void;
   onEditTitle: (item: OrgHeading, newTitle: string) => void;
   onDelete: (item: OrgHeading) => void;
   onNavigateFile: (file: string) => void;
+  cursorIndex: number;
 }) {
-  const filtered = items.filter(item => activeFiles.has(item.sourceFile));
-
-  if (filtered.length === 0) {
+  if (items.length === 0) {
     return <div className="text-center py-8 text-muted-foreground phosphor-glow-dim">No items found.</div>;
   }
 
   return (
     <div className="space-y-1">
-      {filtered.map((item) => (
-        <AgendaItemRow key={`${item.sourceFile}-${item.lineNumber}`} item={item} overdueDays={0} onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} />
+      {items.map((item, i) => (
+        <div key={`${item.sourceFile}-${item.lineNumber}`} data-cursor-index={i}>
+          <AgendaItemRow item={item} overdueDays={0} onToggle={onToggle} onReschedule={onReschedule} onEditTitle={onEditTitle} onDelete={onDelete} onNavigateFile={onNavigateFile} isCursored={cursorIndex === i} />
+        </div>
       ))}
     </div>
   );
 }
 
-function FileFilterBar({ orgFiles, activeFiles, onToggle }: {
+function BufferTabBar({ orgFiles, selectedFile, onSelect, showHints }: {
   orgFiles: { id: number; name: string }[];
-  activeFiles: Set<string>;
-  onToggle: (name: string) => void;
+  selectedFile: string;
+  onSelect: (name: string) => void;
+  showHints: boolean;
 }) {
-  if (orgFiles.length <= 1) return null;
+  if (orgFiles.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1 border-b border-border/50 overflow-x-auto flex-shrink-0">
-      <span className="text-muted-foreground text-xs mr-1 flex-shrink-0">§</span>
-      {orgFiles.map((f) => (
-        <button
-          key={f.name}
-          onClick={() => onToggle(f.name)}
-          className={cn(
-            "px-1.5 py-0.5 text-xs transition-colors flex-shrink-0",
-            activeFiles.has(f.name)
-              ? "text-foreground font-bold"
-              : "text-muted-foreground/40 hover:text-muted-foreground"
-          )}
-          data-testid={`file-filter-${f.name}`}
-        >
-          {f.name.replace(".org", "")}
-        </button>
+    <div className="flex items-center gap-0 px-2 py-0.5 border-b border-border/50 overflow-x-auto flex-shrink-0">
+      {showHints && <span className="text-muted-foreground/40 text-xs mr-1 flex-shrink-0">[</span>}
+      {orgFiles.map((f, i) => (
+        <React.Fragment key={f.name}>
+          {i > 0 && <span className="text-border mx-0.5">|</span>}
+          <button
+            onClick={() => onSelect(f.name)}
+            className={cn(
+              "px-1.5 py-0.5 text-xs transition-colors flex-shrink-0",
+              selectedFile === f.name
+                ? "text-foreground font-bold phosphor-glow"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            data-testid={`buffer-tab-${f.name}`}
+          >
+            {f.name.replace(".org", "")}
+          </button>
+        </React.Fragment>
       ))}
+      {showHints && <span className="text-muted-foreground/40 text-xs ml-1 flex-shrink-0">]</span>}
+    </div>
+  );
+}
+
+function WhichKeyOverlay({ tab, onClose }: { tab: TabMode; onClose: () => void }) {
+  const globalBindings = [
+    ["1-5", "Switch tabs"],
+    ["SPC", "Command palette"],
+    ["Alt+C", "Org capture"],
+    ["?", "Toggle this help"],
+  ];
+
+  const outlineBindings = [
+    ["j / k", "Navigate items"],
+    ["[ / ]", "Prev / next buffer"],
+  ];
+
+  const agendaBindings = [
+    ["j / k", "Navigate items"],
+  ];
+
+  const bindings = tab === "outline" ? outlineBindings : agendaBindings;
+
+  return (
+    <div
+      className="absolute inset-0 z-40 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+      onClick={onClose}
+      data-testid="which-key-overlay"
+    >
+      <div
+        className="bg-card border border-border p-4 max-w-md w-full font-mono"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-foreground font-bold mb-3 phosphor-glow text-sm uppercase tracking-wider">
+          Keybindings — {tab === "outline" ? "Outline" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+        </div>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-0">
+          <div>
+            <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Global</div>
+            {globalBindings.map(([key, desc]) => (
+              <div key={key} className="flex items-center gap-2 py-0.5 text-xs">
+                <span className="text-foreground font-bold w-16 phosphor-glow">{key}</span>
+                <span className="text-muted-foreground">{desc}</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">
+              {tab === "outline" ? "Outline" : "Agenda"}
+            </div>
+            {bindings.map(([key, desc]) => (
+              <div key={key} className="flex items-center gap-2 py-0.5 text-xs">
+                <span className="text-foreground font-bold w-16 phosphor-glow">{key}</span>
+                <span className="text-muted-foreground">{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="text-muted-foreground text-xs mt-3 text-center phosphor-glow-dim">
+          Press ? or Esc to close
+        </div>
+      </div>
     </div>
   );
 }
@@ -858,26 +937,30 @@ export default function OrgView() {
   const rescheduleMutation = useRescheduleHeading();
 
   const [tab, setTab] = useState<TabMode>("outline");
-  const [activeFiles, setActiveFiles] = useState<Set<string>>(new Set());
+  const [selectedFile, setSelectedFile] = useState<string>("");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [cursorIndex, setCursorIndex] = useState(0);
+  const [showHints, setShowHints] = useState(() => {
+    try { return localStorage.getItem("orgcloud-show-hints") !== "false"; } catch { return true; }
+  });
+  const [whichKeyOpen, setWhichKeyOpen] = useState(false);
   const dragItem = useRef<OutlineHeading | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (orgFiles.length > 0 && activeFiles.size === 0) {
-      setActiveFiles(new Set(orgFiles.map(f => f.name)));
+    if (orgFiles.length > 0 && !selectedFile) {
+      setSelectedFile(orgFiles[0].name);
     }
-  }, [orgFiles]);
+  }, [orgFiles, selectedFile]);
 
-  const toggleFileFilter = useCallback((name: string) => {
-    setActiveFiles(prev => {
-      const next = new Set(prev);
-      if (next.has(name)) {
-        if (next.size > 1) next.delete(name);
-      } else {
-        next.add(name);
-      }
-      return next;
-    });
+  useEffect(() => {
+    try { localStorage.setItem("orgcloud-show-hints", String(showHints)); } catch {}
+  }, [showHints]);
+
+  useEffect(() => {
+    const handler = () => setShowHints(prev => !prev);
+    window.addEventListener("toggle-hints", handler);
+    return () => window.removeEventListener("toggle-hints", handler);
   }, []);
 
   const backlinksMap = useMemo(() => {
@@ -959,57 +1042,131 @@ export default function OrgView() {
   }, []);
 
   const handleNavigateFile = useCallback((file: string) => {
-    setActiveFiles(prev => {
-      const next = new Set(prev);
-      next.add(file);
-      return next;
-    });
+    setSelectedFile(file);
     setTab("outline");
+    setCursorIndex(0);
   }, []);
 
   const filteredTopLevel = useMemo(() => {
-    return headings.filter(h => h.level === 1 && activeFiles.has(h.sourceFile));
-  }, [headings, activeFiles]);
+    return headings.filter(h => h.level === 1 && h.sourceFile === selectedFile);
+  }, [headings, selectedFile]);
 
   const filteredHeadings = useMemo(() => {
-    return headings.filter(h => activeFiles.has(h.sourceFile));
-  }, [headings, activeFiles]);
+    return headings.filter(h => h.sourceFile === selectedFile);
+  }, [headings, selectedFile]);
 
-  const todoCount = useMemo(() => {
-    return allTodos.filter(h => activeFiles.has(h.sourceFile)).length;
-  }, [allTodos, activeFiles]);
+  const todoCount = allTodos.length;
 
   const todayCount = useMemo(() => {
     if (!agenda) return 0;
     let count = 0;
-    for (const day of agenda.overdue) {
-      count += day.items.filter(i => activeFiles.has(i.sourceFile)).length;
-    }
-    count += agenda.today.items.filter(i => activeFiles.has(i.sourceFile)).length;
+    for (const day of agenda.overdue) count += day.items.length;
+    count += agenda.today.items.length;
     return count;
-  }, [agenda, activeFiles]);
+  }, [agenda]);
 
   const weekCount = useMemo(() => {
     if (!agenda) return 0;
-    return agenda.upcoming.reduce((s, d) => s + d.items.filter(i => activeFiles.has(i.sourceFile)).length, 0);
-  }, [agenda, activeFiles]);
+    return agenda.today.items.length + agenda.upcoming.reduce((s, d) => s + d.items.length, 0);
+  }, [agenda]);
 
-  const doneCount = useMemo(() => {
-    return allDone.filter(h => activeFiles.has(h.sourceFile)).length;
-  }, [allDone, activeFiles]);
+  const doneCount = allDone.length;
+
+  const fileTitle = useMemo(() => {
+    const file = orgFiles.find(f => f.name === selectedFile);
+    if (!file) return selectedFile;
+    const match = file.content.match(/^#\+TITLE:\s*(.+)$/m);
+    return match ? match[1].trim() : selectedFile.replace(".org", "");
+  }, [orgFiles, selectedFile]);
+
+  const currentItemCount = useMemo(() => {
+    if (tab === "outline") return filteredTopLevel.length;
+    if (tab === "today") return todayCount;
+    if (tab === "week") return weekCount;
+    if (tab === "todos") return todoCount;
+    if (tab === "done") return doneCount;
+    return 0;
+  }, [tab, filteredTopLevel.length, todayCount, weekCount, todoCount, doneCount]);
 
   const isLoading = headingsLoading || agendaLoading || todosLoading || doneLoading;
 
-  const tabs: { key: TabMode; label: string; count: number }[] = [
-    { key: "outline", label: "Outline", count: filteredTopLevel.length },
-    { key: "today", label: "Today", count: todayCount },
-    { key: "week", label: "Week", count: weekCount },
-    { key: "todos", label: "TODOs", count: todoCount },
-    { key: "done", label: "Done", count: doneCount },
+  const tabs: { key: TabMode; label: string; count: number; hint: string }[] = [
+    { key: "outline", label: "Outline", count: 0, hint: "1" },
+    { key: "today", label: "Today", count: todayCount, hint: "2" },
+    { key: "week", label: "Week", count: weekCount, hint: "3" },
+    { key: "todos", label: "TODOs", count: todoCount, hint: "4" },
+    { key: "done", label: "Done", count: doneCount, hint: "5" },
   ];
 
+  useEffect(() => {
+    setCursorIndex(0);
+  }, [tab, selectedFile]);
+
+  useEffect(() => {
+    const el = scrollRef.current?.querySelector(`[data-cursor-index="${cursorIndex}"]`);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [cursorIndex]);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (isInput) return;
+
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setWhichKeyOpen(prev => !prev);
+        return;
+      }
+
+      if (whichKeyOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setWhichKeyOpen(false);
+        }
+        return;
+      }
+
+      const tabKeys: Record<string, TabMode> = { "1": "outline", "2": "today", "3": "week", "4": "todos", "5": "done" };
+      if (tabKeys[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setTab(tabKeys[e.key]);
+        return;
+      }
+
+      if (e.key === "[" && !e.ctrlKey && !e.metaKey && !e.altKey && tab === "outline") {
+        e.preventDefault();
+        const idx = orgFiles.findIndex(f => f.name === selectedFile);
+        if (idx > 0) setSelectedFile(orgFiles[idx - 1].name);
+        else if (orgFiles.length > 0) setSelectedFile(orgFiles[orgFiles.length - 1].name);
+        return;
+      }
+      if (e.key === "]" && !e.ctrlKey && !e.metaKey && !e.altKey && tab === "outline") {
+        e.preventDefault();
+        const idx = orgFiles.findIndex(f => f.name === selectedFile);
+        if (idx < orgFiles.length - 1) setSelectedFile(orgFiles[idx + 1].name);
+        else if (orgFiles.length > 0) setSelectedFile(orgFiles[0].name);
+        return;
+      }
+
+      if (e.key === "j" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setCursorIndex(prev => currentItemCount > 0 ? Math.min(prev + 1, currentItemCount - 1) : 0);
+        return;
+      }
+      if (e.key === "k" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setCursorIndex(prev => Math.max(prev - 1, 0));
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [whichKeyOpen, tab, selectedFile, orgFiles, currentItemCount]);
+
   return (
-    <div className="flex-1 w-full h-full flex flex-col font-mono bg-background" data-testid="org-view">
+    <div className="flex-1 w-full h-full flex flex-col font-mono bg-background relative" data-testid="org-view">
       <div className="flex items-center border-b border-border bg-card px-2 py-1 gap-1 overflow-x-auto flex-shrink-0">
         <span className="text-foreground">{"{*}"}</span>
         <span className="text-foreground font-bold mr-2 phosphor-glow">Org</span>
@@ -1025,6 +1182,7 @@ export default function OrgView() {
             )}
             data-testid={`tab-${t.key}`}
           >
+            {showHints && <span className="text-muted-foreground/40 mr-0.5">{t.hint}</span>}
             {t.label}
             {t.count > 0 && (
               <span className="ml-1 opacity-70">({t.count})</span>
@@ -1033,48 +1191,71 @@ export default function OrgView() {
         ))}
       </div>
 
-      <FileFilterBar orgFiles={orgFiles} activeFiles={activeFiles} onToggle={toggleFileFilter} />
+      {tab === "outline" && (
+        <BufferTabBar orgFiles={orgFiles} selectedFile={selectedFile} onSelect={(f) => { setSelectedFile(f); setCursorIndex(0); }} showHints={showHints} />
+      )}
 
       <ScrollArea className="flex-1">
-        <div className="w-full p-1 sm:p-2 pb-32">
+        <div ref={scrollRef} className="w-full p-1 sm:p-2 pb-32">
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 phosphor-glow-dim">Loading...</div>
           ) : tab === "outline" ? (
-            filteredTopLevel.length === 0 ? (
-              <div className="text-muted-foreground text-xs px-1 py-4 italic text-center">
-                No headings in selected files.
-              </div>
-            ) : (
-              filteredTopLevel.map((h) => (
-                <OutlineItem
-                  key={`${h.sourceFile}:${h.lineNumber}`}
-                  heading={h}
-                  children={getChildren(h, filteredHeadings)}
-                  allHeadings={filteredHeadings}
-                  depth={0}
-                  expandedKey={expandedKey}
-                  onToggleExpand={toggleExpand}
-                  onToggleStatus={handleToggleStatus}
-                  onEditTitle={handleEditTitle}
-                  onDelete={handleDelete}
-                  dragItem={dragItem}
-                  onDrop={handleDrop}
-                  onReorderBody={handleReorderBody}
-                  backlinksMap={backlinksMap}
-                />
-              ))
-            )
+            <>
+              {selectedFile && (
+                <div className="px-1 py-2 mb-2 border-b border-border/30">
+                  <span className="text-foreground font-bold phosphor-glow text-sm">{fileTitle}</span>
+                  <span className="text-muted-foreground text-xs ml-2">{selectedFile}</span>
+                </div>
+              )}
+              {filteredTopLevel.length === 0 ? (
+                <div className="text-muted-foreground text-xs px-1 py-8 italic text-center">
+                  Empty document. Use Alt+C to capture items.
+                </div>
+              ) : (
+                filteredTopLevel.map((h, i) => (
+                  <div key={`${h.sourceFile}:${h.lineNumber}`} data-cursor-index={i}>
+                    <OutlineItem
+                      heading={h}
+                      children={getChildren(h, filteredHeadings)}
+                      allHeadings={filteredHeadings}
+                      depth={0}
+                      expandedKey={expandedKey}
+                      onToggleExpand={toggleExpand}
+                      onToggleStatus={handleToggleStatus}
+                      onEditTitle={handleEditTitle}
+                      onDelete={handleDelete}
+                      dragItem={dragItem}
+                      onDrop={handleDrop}
+                      onReorderBody={handleReorderBody}
+                      backlinksMap={backlinksMap}
+                      isCursored={cursorIndex === i}
+                    />
+                  </div>
+                ))
+              )}
+            </>
           ) : tab === "today" ? (
-            <TodayTab agenda={agenda} activeFiles={activeFiles} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} />
+            <TodayTab agenda={agenda} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} cursorIndex={cursorIndex} />
           ) : tab === "week" ? (
-            <WeekTab agenda={agenda} activeFiles={activeFiles} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} />
+            <WeekTab agenda={agenda} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} cursorIndex={cursorIndex} />
           ) : tab === "todos" ? (
-            <FlatItemList items={allTodos} activeFiles={activeFiles} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} />
+            <FlatItemList items={allTodos} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} cursorIndex={cursorIndex} />
           ) : (
-            <FlatItemList items={allDone} activeFiles={activeFiles} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} />
+            <FlatItemList items={allDone} onToggle={handleToggleStatus} onReschedule={handleReschedule} onEditTitle={handleEditTitle} onDelete={handleDelete} onNavigateFile={handleNavigateFile} cursorIndex={cursorIndex} />
           )}
         </div>
       </ScrollArea>
+
+      {showHints && !isLoading && (
+        <div className="flex items-center justify-center gap-3 px-2 py-0.5 border-t border-border/30 text-muted-foreground/40 text-xs flex-shrink-0">
+          <span>j/k navigate</span>
+          <span>Enter open</span>
+          {tab === "outline" && <span>[ ] buffers</span>}
+          <span>? help</span>
+        </div>
+      )}
+
+      {whichKeyOpen && <WhichKeyOverlay tab={tab} onClose={() => setWhichKeyOpen(false)} />}
     </div>
   );
 }

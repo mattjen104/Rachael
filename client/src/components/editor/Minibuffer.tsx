@@ -57,6 +57,7 @@ export default function Minibuffer({
     { id: "search-headings", label: "search-headings", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
     { id: "clipboard-search", label: "clipboard-search", hint: "⎘", action: () => { setMode("clipboard"); setQuery(""); setSelectedIdx(0); } },
     { id: "create-file", label: "create-file", hint: "+", action: () => { setMode("create-file"); setQuery(""); setSelectedIdx(0); } },
+    { id: "toggle-hints", label: "toggle-hints", hint: "?", action: () => exec("Hints toggled", () => window.dispatchEvent(new Event("toggle-hints"))) },
   ], [exec, onSwitchView, onOpenCapture, onCycleTheme]);
 
   const filteredCommands = useMemo(() => {
