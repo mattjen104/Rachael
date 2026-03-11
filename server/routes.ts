@@ -1561,7 +1561,7 @@ export async function registerRoutes(
    :GEMINI: google/gemini-3.1-pro-preview
    :GEMINI_FLASH: google/gemini-3-flash-preview
    :FREE_LLAMA: openrouter/meta-llama/llama-3.1-8b-instruct:free
-   :FREE_GEMMA: openrouter/google/gemma-2-9b-it:free
+   :FREE_GEMMA: openrouter/google/gemma-3-4b-it:free
    :FREE_MISTRAL: openrouter/mistralai/mistral-7b-instruct:free
    :FREE_QWEN_CODER: openrouter/qwen/qwen-2.5-coder-7b-instruct:free
    :FREE_ZEPHYR: openrouter/huggingfaceh4/zephyr-7b-beta:free
@@ -1589,13 +1589,13 @@ export async function registerRoutes(
     :END:
 *** reasoning
     :PROPERTIES:
-    :PRIMARY: openrouter/google/gemma-2-9b-it:free
+    :PRIMARY: openrouter/google/gemma-3-4b-it:free
     :FALLBACK: openrouter/openchat/openchat-7b:free
     :END:
 *** general
     :PROPERTIES:
     :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
-    :FALLBACK: openrouter/google/gemma-2-9b-it:free
+    :FALLBACK: openrouter/mistralai/mistral-7b-instruct:free
     :END:
 
 ** channels
