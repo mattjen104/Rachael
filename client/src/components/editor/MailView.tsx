@@ -5,7 +5,7 @@ import {
   useBridgeStatus, useScrapeEmails, useScrapeTeams, useEmailDetail, useTeamsChatMessages, useOrgCapture,
   useOpenClawStatus, useOpenClawCompiled, useOpenClawProposals, useOpenClawVersions,
   useAcceptProposal, useRejectProposal, useRestoreVersion, useRecompileOpenClaw,
-  useRuntimeState, useToggleRuntime, useTriggerProgram, useHardenCandidates, useHardenProgram,
+  useRuntimeState, useToggleRuntime, useTriggerProgram, useResearchProgram, useHardenCandidates, useHardenProgram,
   useCommitProposal, useCommitHarden, useLLMStatus,
 } from "@/hooks/use-org-data";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -423,6 +423,7 @@ function ClawPanel() {
   const recompileMutation = useRecompileOpenClaw();
   const toggleMutation = useToggleRuntime();
   const triggerMutation = useTriggerProgram();
+  const researchMutation = useResearchProgram();
   const hardenMutation = useHardenProgram();
 
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
@@ -588,13 +589,20 @@ function ClawPanel() {
                       {state.lastOutput.substring(0, 500)}
                     </pre>
                   )}
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <button
                       onClick={(e) => { e.stopPropagation(); triggerMutation.mutate(name); }}
                       data-testid={`button-trigger-${name}`}
                       className="text-foreground hover:text-org-todo font-bold text-[11px]"
                     >
                       {"[>> run]"}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); researchMutation.mutate(name); }}
+                      data-testid={`button-research-${name}`}
+                      className="text-muted-foreground hover:text-org-todo font-bold text-[11px]"
+                    >
+                      {"[>> research]"}
                     </button>
                     {candidate && (
                       <button

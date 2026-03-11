@@ -727,6 +727,19 @@ export function useTriggerProgram() {
   });
 }
 
+export function useResearchProgram() {
+  return useMutation({
+    mutationFn: async (programName: string) => {
+      const res = await apiRequest("POST", `/api/openclaw/runtime/research/${encodeURIComponent(programName)}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+    },
+  });
+}
+
 export function useHardenCandidates() {
   return useQuery({
     queryKey: ["/api/openclaw/runtime/harden-candidates"],

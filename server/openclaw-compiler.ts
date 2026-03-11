@@ -7,6 +7,8 @@ export interface Program {
   deadlineRaw: string | null;
   properties: Record<string, string>;
   instructions: string;
+  codeBlock: string | null;
+  codeLang: string | null;
   results: string;
   tags: string[];
 }
@@ -374,10 +376,16 @@ function compilePrograms(programsSection: OrgSection): Program[] {
 
     const bodyLines = child.body.split("\n");
     const instructionLines: string[] = [];
+    let codeBlock: string | null = null;
+    let codeLang: string | null = null;
+    let inCodeBlock = false;
+    const codeLines: string[] = [];
 
     for (const line of bodyLines) {
       const schedMatch = line.match(/^\s*SCHEDULED:\s*(<[^>]+>)/);
       const deadMatch = line.match(/^\s*DEADLINE:\s*(<[^>]+>)/);
+      const beginSrc = line.match(/^\s*#\+BEGIN_SRC\s+(\w+)/i);
+      const endSrc = /^\s*#\+END_SRC/i.test(line);
 
       if (schedMatch) {
         scheduledRaw = schedMatch[1];
@@ -385,6 +393,14 @@ function compilePrograms(programsSection: OrgSection): Program[] {
       } else if (deadMatch) {
         deadlineRaw = deadMatch[1];
         deadlineParsed = parseOrgTimestamp(deadMatch[1]);
+      } else if (beginSrc && !inCodeBlock) {
+        inCodeBlock = true;
+        codeLang = beginSrc[1].toLowerCase();
+      } else if (endSrc && inCodeBlock) {
+        inCodeBlock = false;
+        codeBlock = codeLines.join("\n");
+      } else if (inCodeBlock) {
+        codeLines.push(line);
       } else {
         instructionLines.push(line);
       }
@@ -416,6 +432,8 @@ function compilePrograms(programsSection: OrgSection): Program[] {
       deadlineRaw,
       properties: child.properties,
       instructions: instructionLines.join("\n").trim(),
+      codeBlock,
+      codeLang,
       results,
       tags: child.tags.filter((t) => t !== "program"),
     });

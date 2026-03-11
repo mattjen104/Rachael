@@ -8,6 +8,8 @@ import {
   type TaskType, type CostTier,
 } from "./model-router";
 import { sanitizeResultRow } from "./output-sanitizer";
+import { writeFile, unlink, mkdir } from "fs/promises";
+import { join } from "path";
 
 export type ProgramStatus = "idle" | "queued" | "running" | "completed" | "error";
 
@@ -40,6 +42,7 @@ const TICK_INTERVAL_MS = 60_000;
 const programRuns = new Map<string, Array<{ model: string; tokens: number; timestamp: number }>>();
 const programMeta = new Map<string, { tokenBudget: number; costTier: string }>();
 const proposalCounts = new Map<string, number>();
+const programCodeCache = new Map<string, boolean>();
 const MAX_PROPOSALS_PER_ITERATION = 2;
 
 function shortModelName(model: string): string {
@@ -134,10 +137,10 @@ async function executeLLMWithCascade(
 export function getRuntimeState(): {
   active: boolean;
   lastTick: string | null;
-  programs: Record<string, Omit<ProgramState, "name"> & { lastModel?: string; tokensBurned?: number; tokenBudget?: number; costTier?: string }>;
+  programs: Record<string, Omit<ProgramState, "name"> & { lastModel?: string; tokensBurned?: number; tokenBudget?: number; costTier?: string; hasCode?: boolean }>;
   tokenBudget: { total: number; byModel: Record<string, number> };
 } {
-  const programs: Record<string, Omit<ProgramState, "name"> & { lastModel?: string; tokensBurned?: number; tokenBudget?: number; costTier?: string }> = {};
+  const programs: Record<string, Omit<ProgramState, "name"> & { lastModel?: string; tokensBurned?: number; tokenBudget?: number; costTier?: string; hasCode?: boolean }> = {};
 
   Array.from(runtime.programs.entries()).forEach(([name, state]) => {
     const { name: _n, ...rest } = state;
@@ -150,6 +153,7 @@ export function getRuntimeState(): {
       tokensBurned: runs?.reduce((s, r) => s + r.tokens, 0) || 0,
       tokenBudget: meta?.tokenBudget ?? 4096,
       costTier: meta?.costTier ?? "free",
+      hasCode: programCodeCache.get(name) ?? false,
     };
   });
   return {
@@ -197,6 +201,26 @@ export async function manualTrigger(programName: string): Promise<ProgramState |
 
   ps.status = "queued";
   await executeProgram(programName);
+  return runtime.programs.get(programName)!;
+}
+
+export async function manualResearch(programName: string): Promise<ProgramState | null> {
+  const state = runtime.programs.get(programName);
+  if (!state) {
+    const file = await storage.getOrgFileByName("openclaw.org");
+    if (!file) return null;
+    const compiled = compileOpenClaw(file.content);
+    const prog = compiled.programs.find(p => p.name === programName);
+    if (!prog) return null;
+    const newState = makeProgramState(prog);
+    runtime.programs.set(programName, newState);
+  }
+
+  const ps = runtime.programs.get(programName)!;
+  if (ps.status === "running") return ps;
+
+  ps.status = "queued";
+  await executeProgramResearch(programName);
   return runtime.programs.get(programName)!;
 }
 
@@ -316,6 +340,79 @@ async function bumpSchedule(programName: string, scheduledRaw: string): Promise<
   }
 }
 
+const INLINE_SCRIPTS_DIR = join(process.cwd(), ".inline-scripts");
+
+async function executeInlineCode(
+  code: string,
+  lang: string,
+  context: { orgContent: string; programName: string; lastResults: string; iteration: number }
+): Promise<{ summary: string; metric?: string }> {
+  await mkdir(INLINE_SCRIPTS_DIR, { recursive: true });
+
+  const ext = lang === "typescript" || lang === "ts" ? "ts" : "js";
+  const filename = `${context.programName.replace(/[^a-zA-Z0-9_-]/g, "_")}_${Date.now()}.${ext}`;
+  const filepath = join(INLINE_SCRIPTS_DIR, filename);
+
+  const cleanedCode = code
+    .replace(/export\s+default\s+/g, "")
+    .replace(/export\s+(?=async\s+function|function)/g, "");
+
+  const wrappedCode = `
+${cleanedCode}
+
+const __ctx = JSON.parse(process.env.__INLINE_CTX || '{}');
+
+async function __run() {
+  if (typeof execute === 'function') return execute(__ctx);
+  if (typeof run === 'function') return run(__ctx);
+  return { summary: "No execute/run function found in code block" };
+}
+
+__run().then((r) => {
+  process.stdout.write(JSON.stringify(r));
+}).catch((e) => {
+  process.stderr.write(e.message || String(e));
+  process.exit(1);
+});
+`;
+
+  try {
+    await writeFile(filepath, wrappedCode, "utf-8");
+
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    const safeEnv: Record<string, string> = {
+      PATH: process.env.PATH || "",
+      HOME: process.env.HOME || "",
+      NODE_ENV: process.env.NODE_ENV || "production",
+      __INLINE_CTX: JSON.stringify(context),
+    };
+
+    const { stdout, stderr } = await execFileAsync(
+      "npx", ["tsx", filepath],
+      { env: safeEnv, timeout: 60_000, maxBuffer: 1024 * 1024 }
+    );
+
+    if (stderr && !stdout) {
+      return { summary: `Script error: ${stderr.slice(0, 500)}` };
+    }
+
+    try {
+      const parsed = JSON.parse(stdout.trim());
+      return {
+        summary: parsed.summary || String(parsed),
+        metric: parsed.metric,
+      };
+    } catch {
+      return { summary: stdout.trim().slice(0, 2000) || "Script completed with no output" };
+    }
+  } finally {
+    try { await unlink(filepath); } catch {}
+  }
+}
+
 async function executeProgram(programName: string): Promise<void> {
   const ps = runtime.programs.get(programName);
   if (!ps) return;
@@ -340,8 +437,19 @@ async function executeProgram(programName: string): Promise<void> {
 
     let output: string;
 
+    const hasInlineCode = !!prog.codeBlock;
+    programCodeCache.set(programName, hasInlineCode);
     const isHardened = prog.tags.includes("hardened") && prog.properties.SCRIPT;
-    if (isHardened) {
+
+    if (hasInlineCode) {
+      const result = await executeInlineCode(
+        prog.codeBlock!,
+        prog.codeLang || "typescript",
+        { orgContent: file.content, programName, lastResults: prog.results, iteration: ps.iteration }
+      );
+      output = result.summary;
+      if (result.metric) output += ` | metric: ${result.metric}`;
+    } else if (isHardened) {
       const result = await runHardenedSkill(prog.properties.SCRIPT, {
         orgContent: file.content,
         programName,
@@ -530,6 +638,106 @@ async function executeProgram(programName: string): Promise<void> {
   }
 }
 
+async function executeProgramResearch(programName: string): Promise<void> {
+  const ps = runtime.programs.get(programName);
+  if (!ps) return;
+
+  ps.status = "running";
+  ps.error = null;
+
+  try {
+    ps.iteration += 1;
+
+    const file = await storage.getOrgFileByName("openclaw.org");
+    if (!file) throw new Error("openclaw.org not found");
+
+    const compiled = compileOpenClaw(file.content);
+    const prog = compiled.programs.find(p => p.name === programName);
+    if (!prog) throw new Error(`Program "${programName}" not found in compiled output`);
+
+    if (!hasLLMKeys()) {
+      ps.lastOutput = `[Research] No LLM API keys configured.`;
+      ps.status = "error";
+      ps.error = "No LLM keys";
+      ps.lastRun = new Date();
+      return;
+    }
+
+    const researchPrompt = prog.codeBlock
+      ? `You are improving this program's code. Current code:\n\`\`\`${prog.codeLang || "typescript"}\n${prog.codeBlock}\n\`\`\`\n\nInstructions: ${prog.instructions}\n\nPrevious results:\n${prog.results}\n\nAnalyze the current code and suggest improvements. Use PROPOSE: to suggest new code that should replace the current code block.`
+      : prog.instructions;
+
+    const skillBodies = compiled.skills
+      .filter(s => prog.instructions.toLowerCase().includes(s.name.toLowerCase()))
+      .map(s => `### Skill: ${s.name}\n${s.content}`);
+
+    const messages = buildProgramPrompt(
+      compiled.soul,
+      skillBodies,
+      researchPrompt,
+      ps.iteration,
+      prog.results,
+      compiled.memory
+    );
+
+    const taskType = detectTaskType(prog.instructions, prog.properties.TASK_TYPE);
+    const costTier = parseCostTier(prog.properties.COST_TIER);
+    const modelOverride = prog.properties.MODEL || undefined;
+
+    const llmResult = await executeLLMWithCascade(messages, taskType, costTier, modelOverride, compiled);
+    const output = llmResult.content;
+    const modelUsed = llmResult.model;
+    const tokensUsed = llmResult.tokensUsed || 0;
+    trackTokenUsage(modelUsed, tokensUsed);
+
+    const pr = programRuns.get(programName) || [];
+    pr.push({ model: modelUsed, tokens: tokensUsed, timestamp: Date.now() });
+    programRuns.set(programName, pr);
+
+    if (output.includes("PROPOSE:")) {
+      const proposeMatch = output.match(/PROPOSE:\s*([\s\S]*?)(?:\n\n|$)/);
+      if (proposeMatch) {
+        const proposedText = proposeMatch[1].trim();
+        try {
+          await storage.createProposal({
+            section: "PROGRAMS",
+            targetName: programName,
+            reason: `[Research] Auto-improvement for "${programName}" at iteration ${ps.iteration}`,
+            currentContent: prog.codeBlock || prog.instructions,
+            proposedContent: proposedText,
+            source: "agent",
+            proposalType: "change",
+          });
+          console.log(`[RESEARCH] proposal created for program=${programName}`);
+        } catch (e) {
+          console.error("[agent-runtime] Failed to create research proposal:", e);
+        }
+      }
+    }
+
+    proposalCounts.delete(programName);
+    ps.lastOutput = `[Research] ${output.split("\n")[0].slice(0, 200)}`;
+    ps.status = "completed";
+    ps.lastRun = new Date();
+
+    const summaryLine = sanitizeResultRow(`[research] ${output.split("\n")[0].slice(0, 180)}`);
+    const lastModel = modelUsed;
+    const resultRow = `| ${ps.iteration} | ${summaryLine} | ${shortModelName(lastModel)} | ${tokensUsed} | research |`;
+
+    const freshFile = await storage.getOrgFileByName("openclaw.org");
+    if (freshFile) {
+      const updatedContent = appendResultToProgram(freshFile.content, programName, resultRow);
+      if (updatedContent !== freshFile.content) {
+        await storage.updateOrgFileContent(freshFile.id, updatedContent);
+      }
+    }
+  } catch (err: any) {
+    ps.status = "error";
+    ps.error = err.message || String(err);
+    ps.lastRun = new Date();
+  }
+}
+
 async function tick(): Promise<void> {
   if (!runtime.active) return;
 
@@ -557,6 +765,7 @@ async function tick(): Promise<void> {
         tokenBudget: prog.properties.TOKEN_BUDGET ? parseInt(prog.properties.TOKEN_BUDGET, 10) : 4096,
         costTier: prog.properties.COST_TIER || "free",
       });
+      programCodeCache.set(prog.name, !!prog.codeBlock);
 
       let ps = runtime.programs.get(prog.name);
       if (!ps) {

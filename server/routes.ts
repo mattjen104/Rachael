@@ -25,7 +25,7 @@ import {
   compileOpenClaw, importSoul, importSkill, importConfig, importAll,
   extractSection, replaceSection, appendResultToProgram, appendToMemorySection, mergeImport,
 } from "./openclaw-compiler";
-import { getRuntimeState, toggleRuntime, manualTrigger, getHardenCandidates } from "./agent-runtime";
+import { getRuntimeState, toggleRuntime, manualTrigger, manualResearch, getHardenCandidates } from "./agent-runtime";
 import { hardenProgram, saveHardenedSkill } from "./skill-committer";
 import { analyzeCodeSafety } from "./output-sanitizer";
 import { insertOpenclawProposalSchema } from "@shared/schema";
@@ -1611,11 +1611,51 @@ export async function registerRoutes(
    :DIRECTION: higher
    :END:
 
-   Research estate sales and auctions for interesting car listings.
-   Each iteration:
-   1. Analyze recent estate sale listings for vehicles
-   2. Track prices, conditions, and notable finds
-   3. Summarize findings and trends
+   Search estate sales and auctions for vehicles. Scrapes multiple sources,
+   deduplicates, and returns structured listings with links.
+
+   #+BEGIN_SRC typescript
+   const KEYWORDS = ["car","truck","vehicle","suv","van","motorcycle","sedan","coupe",
+     "convertible","pickup","ford","chevy","toyota","honda","dodge","bmw","mercedes",
+     "porsche","corvette","mustang","camaro","engine","transmission","4x4","vin"];
+
+   function hasVehicle(t: string) { const l = t.toLowerCase(); return KEYWORDS.some(k => l.includes(k)); }
+
+   interface Listing { title: string; price: string; url: string; source: string; }
+
+   async function scrape(url: string, pattern: RegExp, base: string, src: string): Promise<Listing[]> {
+     try {
+       const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" } });
+       if (!r.ok) return [];
+       const html = await r.text();
+       const out: Listing[] = [];
+       let m;
+       while ((m = pattern.exec(html)) !== null) {
+         if (hasVehicle(m[2])) out.push({ title: m[2].trim(), price: "See listing", url: base + m[1], source: src });
+       }
+       return out;
+     } catch { return []; }
+   }
+
+   export default async function execute() {
+     const t0 = Date.now();
+     const [a, b, c] = await Promise.all([
+       scrape("https://www.estatesales.net/estate-sales/search?q=car+truck+vehicle&type=sale",
+         /<a[^>]*href="(\\/estate-sales\\/[^"]+)"[^>]*>([^<]+)<\\/a>/gi, "https://www.estatesales.net", "estatesales.net"),
+       scrape("https://www.hibid.com/search?q=estate+car&type=lots",
+         /<a[^>]*href="(\\/lots\\/[^"]+)"[^>]*>\\s*<[^>]*>([^<]*)<\\/[^>]*>/gi, "https://www.hibid.com", "hibid.com"),
+       scrape("https://www.auctionzip.com/cgi-bin/auctionsearch.cgi?kwd=estate+car+truck&category=150",
+         /<a[^>]*href="(\\/auction-catalog\\/[^"]+)"[^>]*>([^<]+)<\\/a>/gi, "https://www.auctionzip.com", "auctionzip.com"),
+     ]);
+     const seen = new Set<string>();
+     const all = [...a,...b,...c].filter(l => { const k = l.title.toLowerCase()+l.source; if (seen.has(k)) return false; seen.add(k); return true; });
+     const elapsed = ((Date.now()-t0)/1000).toFixed(1);
+     let summary = "Scraped 3 sources in " + elapsed + "s. Found " + all.length + " vehicle listings.";
+     if (all.length > 0) { summary += "\\n\\nTop finds:"; for (const l of all.slice(0,15)) summary += "\\n- " + l.title + " | " + l.source + " | " + l.url; }
+     else summary += "\\n\\nNo listings found. Sites may have changed layouts.";
+     return { summary, metric: String(all.length) };
+   }
+   #+END_SRC
 
 *** Results                                                                    :results:
     | Iteration | Summary | Model | Tokens | Status |
@@ -1688,6 +1728,15 @@ export async function registerRoutes(
   app.post("/api/openclaw/runtime/run/:programName", async (req, res) => {
     const { programName } = req.params;
     const state = await manualTrigger(decodeURIComponent(programName));
+    if (!state) {
+      return res.status(404).json({ message: `Program "${programName}" not found` });
+    }
+    res.json(state);
+  });
+
+  app.post("/api/openclaw/runtime/research/:programName", async (req, res) => {
+    const { programName } = req.params;
+    const state = await manualResearch(decodeURIComponent(programName));
     if (!state) {
       return res.status(404).json({ message: `Program "${programName}" not found` });
     }
