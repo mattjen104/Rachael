@@ -387,6 +387,10 @@ __run().then((r) => {
       PATH: process.env.PATH || "",
       HOME: process.env.HOME || "",
       NODE_ENV: process.env.NODE_ENV || "production",
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || `${process.env.HOME || "/tmp"}/.config`,
+      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || `${process.env.HOME || "/tmp"}/.cache`,
+      XDG_DATA_HOME: process.env.XDG_DATA_HOME || `${process.env.HOME || "/tmp"}/.local/share`,
+      TMPDIR: process.env.TMPDIR || "/tmp",
       __INLINE_CTX: JSON.stringify(context),
     };
 
