@@ -104,9 +104,9 @@ export function pickCascadeModels(
       return bMatch - aMatch;
     });
 
-    if (tierModels.length > 0) {
-      result.push(tierModels[0]);
-      used.add(tierModels[0].id);
+    for (const model of tierModels) {
+      result.push(model);
+      used.add(model.id);
     }
   }
 
