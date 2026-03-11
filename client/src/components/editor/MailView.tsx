@@ -4,7 +4,8 @@ import {
   useBridgeStatus, useScrapeEmails, useScrapeTeams, useEmailDetail, useTeamsChatMessages, useOrgCapture,
   useOpenClawStatus, useOpenClawCompiled, useOpenClawProposals, useOpenClawVersions,
   useAcceptProposal, useRejectProposal, useRestoreVersion, useRecompileOpenClaw,
-  useRuntimeState, useToggleRuntime, useTriggerProgram, useHardenCandidates, useHardenProgram, useLLMStatus,
+  useRuntimeState, useToggleRuntime, useTriggerProgram, useHardenCandidates, useHardenProgram,
+  useCommitProposal, useCommitHarden, useLLMStatus,
 } from "@/hooks/use-org-data";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
@@ -416,6 +417,8 @@ function ClawPanel() {
   const { data: llmStatus } = useLLMStatus();
   const acceptMutation = useAcceptProposal();
   const rejectMutation = useRejectProposal();
+  const commitMutation = useCommitProposal();
+  const commitHardenMutation = useCommitHarden();
   const restoreMutation = useRestoreVersion();
   const recompileMutation = useRecompileOpenClaw();
   const toggleMutation = useToggleRuntime();
@@ -427,6 +430,7 @@ function ClawPanel() {
   const [expandedProposal, setExpandedProposal] = useState<number | null>(null);
   const [expandedRuntime, setExpandedRuntime] = useState<string | null>(null);
   const [showVersions, setShowVersions] = useState(false);
+  const [diffView, setDiffView] = useState<Record<number, any>>({});
 
   if (!status?.exists) {
     return (
@@ -494,6 +498,24 @@ function ClawPanel() {
             </span>
           )}
         </div>
+        {compiled?.memory && (
+          <div className="flex items-center gap-2 px-1 mb-1 text-[10px]" data-testid="memory-status">
+            <span className="text-muted-foreground">
+              memory: <span className="text-foreground">
+                {compiled.memory.persistentContext?.trim() 
+                  ? `${compiled.memory.persistentContext.split("\n").filter((l: string) => l.trim()).length} items` 
+                  : "empty"}
+              </span>
+            </span>
+            <span className="text-muted-foreground">
+              profile: <span className="text-foreground">
+                {compiled.memory.userProfile?.trim() && !compiled.memory.userProfile.includes("(your human") 
+                  ? "configured" 
+                  : "empty"}
+              </span>
+            </span>
+          </div>
+        )}
         {runtimeState?.programs && Object.entries(runtimeState.programs).map(([name, state]: [string, any]) => {
           const isExpanded = expandedRuntime === name;
           const candidate = hardenCandidates?.find((c: any) => c.programName === name);
@@ -561,7 +583,7 @@ function ClawPanel() {
                         data-testid={`button-harden-${name}`}
                         className="text-org-todo hover:text-foreground font-bold text-[11px]"
                       >
-                        [* harden]
+                        [* propose]
                       </button>
                     )}
                   </div>
@@ -586,8 +608,14 @@ function ClawPanel() {
       {pendingCount > 0 && proposals && (
         <div data-testid="claw-proposals">
           <div className="text-foreground font-bold mb-1">PROPOSALS</div>
-          {proposals.map((p) => {
+          {proposals.map((p: any) => {
             const isExpanded = expandedProposal === p.id;
+            const isAgent = p.source === "agent";
+            const isHarden = p.proposalType === "harden";
+            const isMemory = p.proposalType === "memory";
+            const isApproved = p.status === "approved";
+            const diff = diffView[p.id];
+            const warnings: string[] = p.warnings ? (typeof p.warnings === "string" ? JSON.parse(p.warnings) : p.warnings) : [];
             return (
               <div key={p.id} className="border-b border-border/50" data-testid={`proposal-item-${p.id}`}>
                 <button
@@ -596,32 +624,111 @@ function ClawPanel() {
                   data-testid={`button-expand-proposal-${p.id}`}
                 >
                   <span className="text-muted-foreground">{isExpanded ? "▾" : "▸"} </span>
-                  <span className="text-org-todo">[?] </span>
+                  <span className="text-org-todo">{isApproved ? "[>>]" : "[?]"} </span>
+                  {isMemory && <span className="text-foreground font-bold">[+memory] </span>}
+                  {isHarden && <span className="text-org-todo font-bold">[harden] </span>}
                   <span className="text-foreground">{p.section}{p.targetName ? `/${p.targetName}` : ""}</span>
-                  <span className="text-muted-foreground"> — {p.reason.substring(0, 60)}{p.reason.length > 60 ? "..." : ""}</span>
+                  <span className="text-muted-foreground"> — {p.reason.substring(0, 50)}{p.reason.length > 50 ? "..." : ""}</span>
+                  {isAgent && <span className="text-muted-foreground text-[10px]"> (agent)</span>}
                 </button>
                 {isExpanded && (
-                  <div className="px-3 py-2 bg-muted/10">
-                    <div className="text-muted-foreground mb-1">current:</div>
-                    <pre className="text-foreground whitespace-pre-wrap max-h-24 overflow-y-auto mb-2 text-[10px]">{p.currentContent.substring(0, 500)}</pre>
-                    <div className="text-muted-foreground mb-1">proposed:</div>
-                    <pre className="text-foreground whitespace-pre-wrap max-h-24 overflow-y-auto mb-2 text-[10px]">{p.proposedContent.substring(0, 500)}</pre>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => acceptMutation.mutate(p.id)}
-                        data-testid={`button-accept-${p.id}`}
-                        className="text-foreground hover:text-org-todo font-bold"
-                      >
-                        [✓]
-                      </button>
-                      <button
-                        onClick={() => rejectMutation.mutate(p.id)}
-                        data-testid={`button-reject-${p.id}`}
-                        className="text-muted-foreground hover:text-org-todo font-bold"
-                      >
-                        [×]
-                      </button>
-                    </div>
+                  <div className="px-3 py-2 bg-muted/10 space-y-2">
+                    {isAgent && (
+                      <div className="text-org-todo text-[10px]">agent-proposed — review before committing</div>
+                    )}
+                    {warnings.length > 0 && (
+                      <div className="space-y-0.5" data-testid={`proposal-warnings-${p.id}`}>
+                        {warnings.map((w: string, i: number) => (
+                          <div key={i} className="text-org-todo text-[10px] font-bold">[!] {w}</div>
+                        ))}
+                      </div>
+                    )}
+                    {diff ? (
+                      <div data-testid={`proposal-diff-${p.id}`}>
+                        <div className="text-muted-foreground mb-1 text-[10px]">--- current</div>
+                        <pre className="whitespace-pre-wrap max-h-20 overflow-y-auto mb-1 text-[10px] px-1 border-l-2 border-org-todo/30">
+                          {(diff.diff?.current || "(empty)").substring(0, 500)}
+                        </pre>
+                        <div className="text-muted-foreground mb-1 text-[10px]">+++ proposed</div>
+                        <pre className="whitespace-pre-wrap max-h-20 overflow-y-auto mb-1 text-[10px] px-1 border-l-2 border-foreground/30">
+                          {(diff.diff?.proposed || diff.snippet || "").substring(0, 500)}
+                        </pre>
+                        {diff.warnings && diff.warnings.length > 0 && (
+                          <div className="space-y-0.5 mt-1">
+                            {diff.warnings.map((w: string, i: number) => (
+                              <div key={i} className="text-org-todo text-[10px] font-bold">[!] {w}</div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(diff.snippet || p.proposedContent);
+                            }}
+                            data-testid={`button-copy-${p.id}`}
+                            className="text-muted-foreground hover:text-foreground font-bold text-[11px]"
+                          >
+                            [copy]
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (isHarden) {
+                                commitHardenMutation.mutate(p.id);
+                              } else {
+                                commitMutation.mutate(p.id);
+                              }
+                              setDiffView(prev => { const next = {...prev}; delete next[p.id]; return next; });
+                            }}
+                            data-testid={`button-commit-${p.id}`}
+                            className="text-foreground hover:text-org-todo font-bold text-[11px]"
+                          >
+                            {"[>> commit]"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              rejectMutation.mutate(p.id);
+                              setDiffView(prev => { const next = {...prev}; delete next[p.id]; return next; });
+                            }}
+                            data-testid={`button-reject-${p.id}`}
+                            className="text-muted-foreground hover:text-org-todo font-bold text-[11px]"
+                          >
+                            [x reject]
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-muted-foreground mb-1 text-[10px]">current:</div>
+                        <pre className="text-foreground whitespace-pre-wrap max-h-20 overflow-y-auto mb-2 text-[10px]">{(p.currentContent || "(empty)").substring(0, 500)}</pre>
+                        <div className="text-muted-foreground mb-1 text-[10px]">proposed:</div>
+                        <pre className="text-foreground whitespace-pre-wrap max-h-20 overflow-y-auto mb-2 text-[10px]">{p.proposedContent.substring(0, 500)}</pre>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              if (isAgent) {
+                                const result = await acceptMutation.mutateAsync(p.id);
+                                if (result.action === "pending_human_review") {
+                                  setDiffView(prev => ({...prev, [p.id]: result}));
+                                }
+                              } else {
+                                acceptMutation.mutate(p.id);
+                              }
+                            }}
+                            data-testid={`button-accept-${p.id}`}
+                            className="text-foreground hover:text-org-todo font-bold"
+                          >
+                            {isAgent ? "[>> review]" : "[✓]"}
+                          </button>
+                          <button
+                            onClick={() => rejectMutation.mutate(p.id)}
+                            data-testid={`button-reject-${p.id}`}
+                            className="text-muted-foreground hover:text-org-todo font-bold"
+                          >
+                            [x]
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

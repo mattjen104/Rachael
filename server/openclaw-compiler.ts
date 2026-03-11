@@ -20,8 +20,15 @@ export interface RoutingConfig {
   [key: string]: string | undefined;
 }
 
+export interface MemoryState {
+  userProfile: string;
+  persistentContext: string;
+  sessionLog: string;
+}
+
 export interface CompiledOpenClaw {
   soul: string;
+  memory: MemoryState;
   skills: { name: string; content: string }[];
   config: object;
   routing: RoutingConfig;
@@ -149,6 +156,25 @@ function compileSoulSection(section: OrgSection, mdLevel: number): string {
   }
 
   return parts.join("\n\n");
+}
+
+function compileMemory(memorySection: OrgSection): MemoryState {
+  const memory: MemoryState = { userProfile: "", persistentContext: "", sessionLog: "" };
+
+  for (const child of memorySection.children) {
+    const title = child.title.toLowerCase().replace(/\s+/g, " ").trim();
+    const content = child.body.trim();
+
+    if (title === "user profile") {
+      memory.userProfile = content;
+    } else if (title === "persistent context") {
+      memory.persistentContext = content;
+    } else if (title === "session log") {
+      memory.sessionLog = content;
+    }
+  }
+
+  return memory;
 }
 
 function compileSkills(
@@ -403,6 +429,7 @@ export function compileOpenClaw(orgContent: string): CompiledOpenClaw {
   const sections = parseOrgSections(orgContent);
 
   let soul = "";
+  let memory: MemoryState = { userProfile: "", persistentContext: "", sessionLog: "" };
   let skills: { name: string; content: string }[] = [];
   let config: object = {};
   let routing: RoutingConfig = {};
@@ -410,6 +437,9 @@ export function compileOpenClaw(orgContent: string): CompiledOpenClaw {
 
   const soulSection = sections.find(
     (s) => s.title.toUpperCase() === "SOUL"
+  );
+  const memorySection = sections.find(
+    (s) => s.title.toUpperCase() === "MEMORY"
   );
   const skillsSection = sections.find(
     (s) => s.title.toUpperCase() === "SKILLS"
@@ -429,6 +459,14 @@ export function compileOpenClaw(orgContent: string): CompiledOpenClaw {
     }
   } else {
     errors.push("Missing * SOUL section");
+  }
+
+  if (memorySection) {
+    try {
+      memory = compileMemory(memorySection);
+    } catch (e: any) {
+      errors.push(`MEMORY compilation error: ${e.message}`);
+    }
   }
 
   if (skillsSection) {
@@ -460,7 +498,7 @@ export function compileOpenClaw(orgContent: string): CompiledOpenClaw {
     }
   }
 
-  return { soul, skills, config, routing, programs, errors };
+  return { soul, memory, skills, config, routing, programs, errors };
 }
 
 export function importSoul(soulMd: string): string {
@@ -970,4 +1008,52 @@ export function mergeImport(
   }
 
   return { mergedContent: result, log };
+}
+
+export function appendToMemorySection(
+  orgContent: string,
+  subSection: "Persistent Context" | "Session Log",
+  newEntry: string
+): string {
+  const lines = orgContent.split("\n");
+
+  let memoryStart = -1;
+  let memoryLevel = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(\*+)\s+MEMORY\s*$/i);
+    if (m) {
+      memoryStart = i;
+      memoryLevel = m[1].length;
+      break;
+    }
+  }
+  if (memoryStart === -1) return orgContent;
+
+  let subStart = -1;
+  let subLevel = 0;
+  for (let i = memoryStart + 1; i < lines.length; i++) {
+    const headMatch = lines[i].match(/^(\*+)\s/);
+    if (headMatch && headMatch[1].length <= memoryLevel) break;
+
+    const subMatch = lines[i].match(
+      new RegExp(`^(\\*+)\\s+${escapeRegex(subSection)}\\s*$`, "i")
+    );
+    if (subMatch) {
+      subStart = i;
+      subLevel = subMatch[1].length;
+      break;
+    }
+  }
+  if (subStart === -1) return orgContent;
+
+  let insertAt = subStart + 1;
+  while (insertAt < lines.length) {
+    const nextHead = lines[insertAt].match(/^(\*+)\s/);
+    if (nextHead && nextHead[1].length <= subLevel) break;
+    insertAt++;
+  }
+
+  const indentedEntry = newEntry.split("\n").map(l => "   " + l).join("\n");
+  lines.splice(insertAt, 0, indentedEntry);
+  return lines.join("\n");
 }

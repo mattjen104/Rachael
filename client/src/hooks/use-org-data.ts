@@ -572,6 +572,11 @@ export function useOpenClawCompiled(enabled: boolean = false) {
       results: string;
       tags: string[];
     }>;
+    memory: {
+      userProfile: string;
+      persistentContext: string;
+      sessionLog: string;
+    };
     errors: string[];
   }>({
     queryKey: ["/api/openclaw/compiled"],
@@ -593,14 +598,19 @@ export function useOpenClawProposals() {
     currentContent: string;
     proposedContent: string;
     status: string;
+    source: string;
+    warnings: string | null;
+    proposalType: string;
     createdAt: string;
     resolvedAt: string | null;
   }>>({
-    queryKey: ["/api/openclaw/proposals", "pending"],
+    queryKey: ["/api/openclaw/proposals", "actionable"],
     queryFn: async () => {
-      const res = await fetch("/api/openclaw/proposals?status=pending");
-      if (!res.ok) throw new Error("Failed to fetch proposals");
-      return res.json();
+      const [pending, approved] = await Promise.all([
+        fetch("/api/openclaw/proposals?status=pending").then(r => r.json()),
+        fetch("/api/openclaw/proposals?status=approved").then(r => r.json()),
+      ]);
+      return [...pending, ...approved];
     },
     refetchInterval: 15000,
   });
@@ -728,6 +738,39 @@ export function useHardenProgram() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime"] });
       queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime/harden-candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/proposals"] });
+    },
+  });
+}
+
+export function useCommitProposal() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/openclaw/proposals/${id}/commit`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/proposals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/versions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+    },
+  });
+}
+
+export function useCommitHarden() {
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/openclaw/proposals/${id}/commit-harden`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/proposals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/versions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime"] });
       queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime/harden-candidates"] });
     },
   });

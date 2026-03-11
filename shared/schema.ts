@@ -52,6 +52,9 @@ export const openclawProposals = pgTable("openclaw_proposals", {
   currentContent: text("current_content").notNull(),
   proposedContent: text("proposed_content").notNull(),
   status: text("status").notNull().default("pending"),
+  source: text("source").notNull().default("agent"),
+  warnings: text("warnings"),
+  proposalType: text("proposal_type").notNull().default("change"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at"),
 });

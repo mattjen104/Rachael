@@ -193,26 +193,52 @@ export async function executeLLM(
   }
 }
 
+export interface MemoryContext {
+  userProfile: string;
+  persistentContext: string;
+  sessionLog: string;
+}
+
 export function buildProgramPrompt(
   soul: string,
   skillBodies: string[],
   programInstructions: string,
   iteration: number,
-  lastResults: string
+  lastResults: string,
+  memory?: MemoryContext
 ): LLMMessage[] {
   const messages: LLMMessage[] = [];
 
   let systemContent = soul;
+
+  if (memory) {
+    if (memory.userProfile) {
+      systemContent += "\n\n---\n\n## User Profile\n\n" + memory.userProfile;
+    }
+    if (memory.persistentContext) {
+      systemContent += "\n\n---\n\n## Persistent Context\n\nFacts you've learned:\n" + memory.persistentContext;
+    }
+  }
+
   if (skillBodies.length > 0) {
     systemContent += "\n\n---\n\n## Relevant Skills\n\n" + skillBodies.join("\n\n---\n\n");
   }
 
-  systemContent += `\n\n---\n\nYou are executing an autonomous program. Follow the instructions precisely. If your work produces reusable code that could run without AI, include it in a \`\`\`typescript code block with a \`// HARDENABLE\` comment on the first line. If you want to propose a change to your own configuration, prefix the suggestion with \`PROPOSE:\` on its own line.`;
+  systemContent += `\n\n---\n\nYou are executing an autonomous program. Follow the instructions precisely. If your work produces reusable code that could run without AI, include it in a \`\`\`typescript code block with a \`// HARDENABLE\` comment on the first line. If you want to propose a change to your own configuration, prefix the suggestion with \`PROPOSE:\` on its own line. If you learn a durable fact worth remembering across sessions, prefix it with \`REMEMBER:\` on its own line.`;
 
   messages.push({ role: "system", content: systemContent });
 
   let userContent = programInstructions;
   userContent += `\n\nThis is iteration ${iteration}.`;
+
+  if (memory?.sessionLog) {
+    const logEntries = memory.sessionLog.split("\n").filter(l => l.trim());
+    const recentEntries = logEntries.slice(0, 5);
+    if (recentEntries.length > 0) {
+      userContent += `\n\nRecent session history:\n${recentEntries.join("\n")}`;
+    }
+  }
+
   if (lastResults && lastResults.trim()) {
     userContent += `\n\nPrevious results:\n${lastResults}`;
   }

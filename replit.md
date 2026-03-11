@@ -47,7 +47,9 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `server/agent-runtime.ts` - Voyager-style autonomous agent scheduler. 60s tick loop, per-program state machine (idle/queued/running/completed/error), repeater parsing, SCHEDULED bumping, hardened skill detection.
 - `server/llm-client.ts` - LLM execution client. Supports Anthropic Messages API, OpenAI Chat Completions, and OpenRouter (OpenAI-compatible). Model resolution via CONFIG aliases. Default model: free Llama 3.1 8B via OpenRouter.
 - `server/model-router.ts` - Smart model routing with free-first strategy. Task-type detection (research/code/extraction/reasoning/general), cost tier system (free→cheap→standard→premium), cascade execution (try free models first, fall back on failure), A/B model comparison mode, daily token budget tracking.
-- `server/skill-runner.ts` - Hardened skill execution engine. Saves TypeScript scripts to `skills/` directory, runs them via dynamic import with context injection, handles graduation from program to hardened skill.
+- `server/skill-runner.ts` - READ-ONLY hardened skill execution engine. Runs existing TypeScript skills via dynamic import with context injection. No filesystem write capability.
+- `server/skill-committer.ts` - WRITE-CAPABLE skill committer. Contains `saveHardenedSkill()` and `hardenProgram()` — only imported by human-triggered commit routes, never by agent-runtime.
+- `server/output-sanitizer.ts` - Output sanitization and code safety analysis. `sanitizeResultRow()` strips org syntax/code blocks/pipes, caps at 300 chars. `analyzeCodeSafety()` detects dangerous patterns (fs.writeFile, exec, spawn, eval, etc.).
 - `server/rate-limit.ts` - In-memory sliding window rate limiter. 120 req/min reads, 30/min writes per IP.
 - `client/src/components/AuthGate.tsx` - Bearer token auth gate. Checks `/api/auth/check`, prompts for key if needed, stores in localStorage.
 
@@ -56,7 +58,7 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `orgFiles` - Org-mode file storage (name, content)
 - `clipboardItems` - Clipboard capture history (content, type, timestamp, archived, pinned, detectedType, urlTitle, urlDescription, urlImage, urlDomain)
 - `agendaItems` - Legacy task/agenda tracking (text, status, scheduledDate, carriedOver)
-- `openclawProposals` - OpenClaw change proposals (section, targetName, reason, currentContent, proposedContent, status, createdAt, resolvedAt)
+- `openclawProposals` - OpenClaw change proposals (section, targetName, reason, currentContent, proposedContent, status, source, warnings, proposalType, createdAt, resolvedAt). Source: "agent" or "human". ProposalType: "change", "harden", or "memory". Agent proposals require two-step commit (accept → review diff → commit).
 - `openclawVersions` - OpenClaw org file version snapshots (orgContent, label, createdAt)
 
 ## API Routes (server/routes.ts)
@@ -123,8 +125,10 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `POST /api/openclaw/import` - Import native OpenClaw files into org
 - `POST /api/openclaw/propose` - Create a change proposal
 - `GET /api/openclaw/proposals` - List proposals
-- `POST /api/openclaw/proposals/:id/accept` - Accept proposal
-- `POST /api/openclaw/proposals/:id/reject` - Reject proposal
+- `POST /api/openclaw/proposals/:id/accept` - Accept proposal (human proposals: direct apply; agent proposals: returns diff for review, status → "approved")
+- `POST /api/openclaw/proposals/:id/commit` - Commit an approved agent proposal (applies changes to openclaw.org)
+- `POST /api/openclaw/proposals/:id/commit-harden` - Commit a harden proposal (saves .ts file + updates org)
+- `POST /api/openclaw/proposals/:id/reject` - Reject proposal (works on pending or approved)
 - `GET /api/openclaw/versions` - Version history
 - `POST /api/openclaw/versions/:id/restore` - Restore to previous version
 
@@ -133,7 +137,7 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `POST /api/openclaw/runtime/toggle` - Start/pause scheduler
 - `POST /api/openclaw/runtime/run/:programName` - Manual trigger
 - `GET /api/openclaw/runtime/harden-candidates` - Programs with hardenable code
-- `POST /api/openclaw/runtime/harden/:programName` - Accept & save hardened script
+- `POST /api/openclaw/runtime/harden/:programName` - Create harden proposal (propose-only, no direct disk write)
 - `GET /api/openclaw/llm-status` - LLM provider configuration status (includes OpenRouter)
 - `GET /api/openclaw/model-roster` - Available model roster with tiers and strengths
 - `GET /api/openclaw/sync-check` - Content hash for external polling
@@ -192,3 +196,44 @@ The `chrome-extension/` directory contains a Manifest V3 Chrome extension that e
 - Vim-style status bar with mode indicators
 - Org-mode syntax highlighting uses brightness variations within the single phosphor hue
 - Icon rule: NO Lucide SVG icons. ASCII/Unicode only.
+
+## Sandbox Architecture (Prompt Injection Defense)
+
+The agent runtime is "propose-only" — it cannot write to disk or modify its own configuration without human commit approval.
+
+### Code-Level Isolation
+- `server/skill-runner.ts` is READ-ONLY: no `fs.writeFile`, `fs.mkdir`, or any write operations
+- `server/skill-committer.ts` is WRITE-CAPABLE: only imported by human-triggered commit routes
+- `agent-runtime.ts` imports only from `skill-runner.ts` (read-only)
+
+### Proposal System
+- All agent proposals tagged `source: "agent"`, human proposals tagged `source: "human"`
+- Agent proposals: accept → diff review → explicit commit (two-step)
+- Human proposals: accept → direct apply (one-step, as before)
+- Rate limiting: max 2 proposals per program per iteration
+- SOUL section protection: any proposal targeting SOUL is blocked and logged
+- Audit logging: all sandbox events prefixed with `[SANDBOX]`
+
+### Harden Flow (Propose-Only)
+- `POST /runtime/harden/:programName` no longer writes to disk
+- Creates a proposal with static analysis warnings from `analyzeCodeSafety()`
+- Commit requires explicit human action via `POST /proposals/:id/commit-harden`
+
+### Output Sanitization
+- Result rows sanitized before storage: org headings stripped, pipes escaped, code blocks removed, 300 char cap
+- `analyzeCodeSafety()` flags: `fs.writeFile`, `fs.unlink`, `exec`, `spawn`, `eval`, `Function(`, `child_process`, `process.env`, external `fetch`
+
+## Memory System (3-Tier)
+
+Located in `* MEMORY` section of `openclaw.org`, between SOUL and SKILLS.
+
+### Structure
+- `** User Profile` — Human's name, timezone, preferences, current focus. Read by agent every run.
+- `** Persistent Context` — Durable facts the agent has learned. Agent proposes additions via `REMEMBER:` prefix in LLM output, creating `proposalType: "memory"` proposals.
+- `** Session Log` — Auto-managed summaries from program runs.
+
+### How It Works
+- Compiler (`openclaw-compiler.ts`) parses MEMORY → `compiled.memory: { userProfile, persistentContext, sessionLog }`
+- `buildProgramPrompt()` injects user profile and persistent context into system prompt, last 5 session log entries into user message
+- `REMEMBER:` prefix in LLM output creates memory proposals (same sandbox flow — agent cannot write memory directly)
+- `appendToMemorySection()` handles committing approved memory proposals

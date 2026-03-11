@@ -23,10 +23,11 @@ import {
 import { sanitizeText } from "./sanitize";
 import {
   compileOpenClaw, importSoul, importSkill, importConfig, importAll,
-  extractSection, replaceSection, appendResultToProgram, mergeImport,
+  extractSection, replaceSection, appendResultToProgram, appendToMemorySection, mergeImport,
 } from "./openclaw-compiler";
 import { getRuntimeState, toggleRuntime, manualTrigger, getHardenCandidates } from "./agent-runtime";
-import { hardenProgram } from "./skill-runner";
+import { hardenProgram, saveHardenedSkill } from "./skill-committer";
+import { analyzeCodeSafety } from "./output-sanitizer";
 import { insertOpenclawProposalSchema } from "@shared/schema";
 
 export async function registerRoutes(
@@ -1195,7 +1196,7 @@ export async function registerRoutes(
     }
   });
 
-  const validSections = ["SOUL", "SKILLS", "CONFIG", "PROGRAMS"];
+  const validSections = ["SOUL", "MEMORY", "SKILLS", "CONFIG", "PROGRAMS"];
 
   app.post("/api/openclaw/propose", async (req, res) => {
     const { section, targetName, reason, proposedContent } = req.body;
@@ -1214,6 +1215,7 @@ export async function registerRoutes(
       reason,
       currentContent,
       proposedContent,
+      source: "human",
     });
     res.status(201).json(proposal);
   });
@@ -1235,7 +1237,46 @@ export async function registerRoutes(
     const id = parseInt(req.params.id, 10);
     const proposal = await storage.getProposal(id);
     if (!proposal) return res.status(404).json({ error: "Proposal not found" });
+    if (proposal.status === "approved" && proposal.source === "agent") {
+      const file = await getOpenClawOrg();
+      const currentSection = file
+        ? extractSection(file.content, proposal.section, proposal.targetName || undefined)
+        : "";
+      return res.json({
+        action: "pending_human_review",
+        proposalId: id,
+        diff: {
+          current: currentSection,
+          proposed: proposal.proposedContent,
+        },
+        snippet: proposal.proposedContent,
+        instructions: proposal.reason,
+        warnings: proposal.warnings ? JSON.parse(proposal.warnings) : [],
+        proposalType: proposal.proposalType,
+      });
+    }
+
     if (proposal.status !== "pending") return res.status(400).json({ error: "Proposal already resolved" });
+
+    if (proposal.source === "agent") {
+      const file = await getOpenClawOrg();
+      const currentSection = file
+        ? extractSection(file.content, proposal.section, proposal.targetName || undefined)
+        : "";
+      await storage.updateProposalStatus(id, "approved", new Date());
+      return res.json({
+        action: "pending_human_review",
+        proposalId: id,
+        diff: {
+          current: currentSection,
+          proposed: proposal.proposedContent,
+        },
+        snippet: proposal.proposedContent,
+        instructions: proposal.reason,
+        warnings: proposal.warnings ? JSON.parse(proposal.warnings) : [],
+        proposalType: proposal.proposalType,
+      });
+    }
 
     const file = await getOpenClawOrg();
     if (!file) return res.status(404).json({ error: "openclaw.org not found" });
@@ -1250,11 +1291,43 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  app.post("/api/openclaw/proposals/:id/commit", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const proposal = await storage.getProposal(id);
+    if (!proposal) return res.status(404).json({ error: "Proposal not found" });
+    if (proposal.status !== "approved") return res.status(400).json({ error: "Proposal must be approved before committing" });
+
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+
+    await storage.createVersion(file.content, `Before commit: ${proposal.section}/${proposal.targetName || "all"} — ${proposal.reason}`);
+
+    let newContent: string;
+    if (proposal.proposalType === "memory") {
+      newContent = appendToMemorySection(
+        file.content,
+        (proposal.targetName as "Persistent Context" | "Session Log") || "Persistent Context",
+        proposal.proposedContent
+      );
+    } else {
+      newContent = replaceSection(file.content, proposal.section, proposal.proposedContent, proposal.targetName || undefined);
+    }
+
+    if (newContent === file.content && proposal.proposalType !== "memory") {
+      return res.status(400).json({ error: "Could not apply proposal to target section" });
+    }
+
+    await storage.updateOrgFileContent(file.id, newContent);
+    await storage.updateProposalStatus(id, "committed", new Date());
+    console.log(`[SANDBOX] human committed proposal #${id}`);
+    res.json({ success: true });
+  });
+
   app.post("/api/openclaw/proposals/:id/reject", async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const proposal = await storage.getProposal(id);
     if (!proposal) return res.status(404).json({ error: "Proposal not found" });
-    if (proposal.status !== "pending") return res.status(400).json({ error: "Proposal already resolved" });
+    if (proposal.status !== "pending" && proposal.status !== "approved") return res.status(400).json({ error: "Proposal already resolved" });
     await storage.updateProposalStatus(id, "rejected", new Date());
     res.json({ success: true });
   });
@@ -1424,6 +1497,34 @@ export async function registerRoutes(
    - Vibe: (sharp? warm? chaotic? calm?)
    - Emoji: (your signature — pick one that feels right)
 
+** Safety Model
+   - You cannot modify your own configuration directly.
+   - All changes require human commit through the proposal system.
+   - No executable code is written to disk without human review.
+   - You cannot modify the SOUL section.
+   - Proposals are rate-limited to 2 per iteration.
+   - Use REMEMBER: to propose adding facts to persistent memory.
+
+** How Memory Works
+   - Your memory lives in the MEMORY section of openclaw.org.
+   - User Profile contains your human's preferences — read it every run.
+   - Persistent Context contains facts you've learned — propose additions via REMEMBER:
+   - Session Log contains recent run summaries — it's auto-managed.
+
+* MEMORY
+
+** User Profile
+   - Name: (your human's name)
+   - Timezone: (e.g. America/Chicago)
+   - Preferences: (communication style, interests, priorities)
+   - Current Focus: (what they're working on right now)
+
+** Persistent Context
+   (Facts you've learned across sessions. Propose additions via REMEMBER:)
+
+** Session Log
+   (Auto-managed summaries from program runs. Most recent first.)
+
 * SKILLS
 ** orgcloud-sync                                                               :skill:
    :PROPERTIES:
@@ -1588,18 +1689,62 @@ export async function registerRoutes(
 
   app.post("/api/openclaw/runtime/harden/:programName", async (req, res) => {
     const { programName } = req.params;
+    const decodedName = decodeURIComponent(programName);
     const candidates = getHardenCandidates();
-    const candidate = candidates.find(c => c.programName === decodeURIComponent(programName));
+    const candidate = candidates.find(c => c.programName === decodedName);
     if (!candidate) {
-      return res.status(404).json({ message: `No harden candidate found for "${programName}"` });
+      return res.status(404).json({ message: `No harden candidate found for "${decodedName}"` });
     }
 
     try {
-      const { skillPath, updatedContent } = await hardenProgram(candidate.programName, candidate.code);
+      const warnings = analyzeCodeSafety(candidate.code);
+
+      const file = await storage.getOrgFileByName("openclaw.org");
+      if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+
+      const compiled = compileOpenClaw(file.content);
+      const prog = compiled.programs.find(p => p.name === decodedName);
+      const currentInstructions = prog?.instructions || "";
+
+      const proposal = await storage.createProposal({
+        section: "PROGRAMS",
+        targetName: decodedName,
+        reason: `Harden program "${decodedName}" — convert to deterministic TypeScript skill`,
+        currentContent: currentInstructions,
+        proposedContent: candidate.code,
+        source: "agent",
+        proposalType: "harden",
+        warnings: warnings.length > 0 ? JSON.stringify(warnings) : null,
+      });
+
+      console.log(`[SANDBOX] harden proposal created for program "${decodedName}" with ${warnings.length} warnings`);
+      res.json({
+        success: true,
+        action: "proposal_created",
+        proposalId: proposal.id,
+        warnings,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/openclaw/proposals/:id/commit-harden", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const proposal = await storage.getProposal(id);
+    if (!proposal) return res.status(404).json({ error: "Proposal not found" });
+    if (proposal.proposalType !== "harden") return res.status(400).json({ error: "Not a harden proposal" });
+    if (proposal.status !== "approved") return res.status(400).json({ error: "Proposal must be approved before committing" });
+
+    try {
+      const { skillPath, updatedContent } = await hardenProgram(proposal.targetName!, proposal.proposedContent);
       const file = await storage.getOrgFileByName("openclaw.org");
       if (file) {
+        await storage.createVersion(file.content, `Before harden commit: ${proposal.targetName}`);
         await storage.updateOrgFileContent(file.id, updatedContent);
       }
+      await storage.updateProposalStatus(id, "committed", new Date());
+      console.log(`[SANDBOX] human committed harden for program: ${proposal.targetName}`);
       res.json({ success: true, skillPath });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
