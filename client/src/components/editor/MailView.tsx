@@ -6,7 +6,7 @@ import {
   useOpenClawStatus, useOpenClawCompiled, useOpenClawProposals, useOpenClawVersions,
   useAcceptProposal, useRejectProposal, useRestoreVersion, useRecompileOpenClaw,
   useRuntimeState, useToggleRuntime, useTriggerProgram, useResearchProgram, useHardenCandidates, useHardenProgram,
-  useCommitProposal, useCommitHarden, useLLMStatus,
+  useCommitProposal, useCommitHarden, useLLMStatus, useEditSection,
 } from "@/hooks/use-org-data";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -407,6 +407,66 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function SectionEditor({ section, name, initialContent, onClose }: {
+  section: string;
+  name?: string;
+  initialContent: string;
+  onClose: () => void;
+}) {
+  const [body, setBody] = useState(initialContent);
+  const [loading, setLoading] = useState(!initialContent);
+  const editMutation = useEditSection();
+
+  useEffect(() => {
+    if (initialContent) return;
+    const params = new URLSearchParams({ section });
+    if (name) params.set("name", name);
+    apiRequest("GET", `/api/openclaw/raw-section?${params}`)
+      .then(r => r.json())
+      .then(d => { setBody(d.body || ""); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [section, name, initialContent]);
+
+  return (
+    <div className="space-y-1" data-testid={`section-editor-${section}${name ? "-" + name : ""}`}>
+      {loading ? (
+        <div className="text-muted-foreground text-[10px]">loading...</div>
+      ) : (
+        <textarea
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          className="w-full bg-background text-foreground border border-border/50 p-1.5 font-mono text-[10px] min-h-[80px] max-h-[300px] resize-y focus:outline-none focus:border-org-link"
+          data-testid={`textarea-${section}${name ? "-" + name : ""}`}
+          spellCheck={false}
+          rows={Math.min(20, Math.max(4, body.split("\n").length + 1))}
+        />
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={() => {
+            editMutation.mutate(
+              { section, name, body },
+              { onSuccess: () => onClose() }
+            );
+          }}
+          disabled={editMutation.isPending || loading}
+          className="text-foreground hover:text-org-todo font-bold text-[11px]"
+          data-testid={`button-save-${section}${name ? "-" + name : ""}`}
+        >
+          {editMutation.isPending ? "[...saving]" : "[>> save]"}
+        </button>
+        <button
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground font-bold text-[11px]"
+          data-testid={`button-cancel-${section}${name ? "-" + name : ""}`}
+        >
+          [x cancel]
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ClawPanel() {
   const { data: status } = useOpenClawStatus();
   const { data: compiled } = useOpenClawCompiled(status?.exists ?? false);
@@ -432,6 +492,7 @@ function ClawPanel() {
   const [expandedRuntime, setExpandedRuntime] = useState<string | null>(null);
   const [showVersions, setShowVersions] = useState(false);
   const [diffView, setDiffView] = useState<Record<number, any>>({});
+  const [editing, setEditing] = useState<{ section: string; name?: string } | null>(null);
 
   const seedMutation = useMutation({
     mutationFn: async () => {
@@ -771,16 +832,32 @@ function ClawPanel() {
       {compiled && (
         <>
           <div data-testid="claw-soul">
-            <div className="text-foreground font-bold mb-1">SOUL</div>
-            <div className="text-muted-foreground px-1">
-              {compiled.soul ? compiled.soul.substring(0, 200) + (compiled.soul.length > 200 ? "..." : "") : "empty"}
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-foreground font-bold">SOUL</span>
+              {editing?.section !== "SOUL" && (
+                <button
+                  onClick={() => setEditing({ section: "SOUL" })}
+                  className="text-muted-foreground hover:text-foreground font-bold text-[10px]"
+                  data-testid="button-edit-soul"
+                >
+                  [edit]
+                </button>
+              )}
             </div>
+            {editing?.section === "SOUL" && !editing.name ? (
+              <SectionEditor section="SOUL" initialContent="" onClose={() => setEditing(null)} />
+            ) : (
+              <div className="text-muted-foreground px-1">
+                {compiled.soul ? compiled.soul.substring(0, 200) + (compiled.soul.length > 200 ? "..." : "") : "empty"}
+              </div>
+            )}
           </div>
 
           <div data-testid="claw-skills">
             <div className="text-foreground font-bold mb-1">SKILLS ({compiled.skills.length})</div>
             {compiled.skills.map((skill) => {
               const isExpanded = expandedSkill === skill.name;
+              const isEditing = editing?.section === "SKILLS" && editing.name === skill.name;
               const descMatch = skill.content.match(/description:\s*"?(.+?)(?:"|$)/im);
               const desc = descMatch?.[1] || "";
               return (
@@ -795,9 +872,26 @@ function ClawPanel() {
                     {desc && <span className="text-muted-foreground"> — {desc.substring(0, 50)}</span>}
                   </button>
                   {isExpanded && (
-                    <pre className="px-3 py-1 text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto text-[10px]">
-                      {skill.content}
-                    </pre>
+                    <div className="px-3 py-1">
+                      {isEditing ? (
+                        <SectionEditor section="SKILLS" name={skill.name} initialContent="" onClose={() => setEditing(null)} />
+                      ) : (
+                        <>
+                          <div className="flex justify-end mb-1">
+                            <button
+                              onClick={() => setEditing({ section: "SKILLS", name: skill.name })}
+                              className="text-muted-foreground hover:text-foreground font-bold text-[10px]"
+                              data-testid={`button-edit-skill-${skill.name}`}
+                            >
+                              [edit]
+                            </button>
+                          </div>
+                          <pre className="text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto text-[10px]">
+                            {skill.content}
+                          </pre>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               );
@@ -808,6 +902,7 @@ function ClawPanel() {
             <div className="text-foreground font-bold mb-1">PROGRAMS ({compiled.programs.length})</div>
             {compiled.programs.map((prog) => {
               const isExpanded = expandedProgram === prog.name;
+              const isEditing = editing?.section === "PROGRAMS" && editing.name === prog.name;
               const resultLines = prog.results
                 .split("\n")
                 .filter(l => l.trim().startsWith("|") && !l.includes("---"))
@@ -830,16 +925,41 @@ function ClawPanel() {
                   </button>
                   {isExpanded && (
                     <div className="px-3 py-1 bg-muted/10">
-                      <pre className="text-muted-foreground whitespace-pre-wrap max-h-20 overflow-y-auto text-[10px] mb-1">
-                        {prog.instructions.substring(0, 300)}
-                      </pre>
-                      {resultLines.length > 1 && (
-                        <div className="mt-1">
-                          <div className="text-muted-foreground text-[10px]">results:</div>
-                          <pre className="text-foreground whitespace-pre text-[10px]">
-                            {resultLines.join("\n")}
+                      {isEditing ? (
+                        <SectionEditor section="PROGRAMS" name={prog.name} initialContent="" onClose={() => setEditing(null)} />
+                      ) : (
+                        <>
+                          <div className="flex justify-end mb-1">
+                            <button
+                              onClick={() => setEditing({ section: "PROGRAMS", name: prog.name })}
+                              className="text-muted-foreground hover:text-foreground font-bold text-[10px]"
+                              data-testid={`button-edit-program-${prog.name}`}
+                            >
+                              [edit]
+                            </button>
+                          </div>
+                          {prog.properties && Object.keys(prog.properties).length > 0 && (
+                            <div className="mb-1">
+                              {Object.entries(prog.properties).map(([k, v]) => (
+                                <div key={k} className="text-[10px]" data-testid={`prop-${prog.name}-${k}`}>
+                                  <span className="text-muted-foreground">:{k}:</span>{" "}
+                                  <span className="text-foreground">{v}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <pre className="text-muted-foreground whitespace-pre-wrap max-h-20 overflow-y-auto text-[10px] mb-1">
+                            {prog.instructions.substring(0, 300)}
                           </pre>
-                        </div>
+                          {resultLines.length > 1 && (
+                            <div className="mt-1">
+                              <div className="text-muted-foreground text-[10px]">results:</div>
+                              <pre className="text-foreground whitespace-pre text-[10px]">
+                                {resultLines.join("\n")}
+                              </pre>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   )}
@@ -848,23 +968,79 @@ function ClawPanel() {
             })}
           </div>
 
-          {compiled.config && (
-            <div data-testid="claw-config">
-              <div className="text-foreground font-bold mb-1">CONFIG</div>
-              {compiled.routing && Object.keys(compiled.routing).length > 0 && (
-                <div className="px-1 mb-1" data-testid="claw-routing">
-                  <div className="text-foreground text-[11px] mb-0.5">routing</div>
-                  {Object.entries(compiled.routing).map(([key, val]) => (
-                    <div key={key} className="flex gap-2 text-[10px]" data-testid={`routing-entry-${key}`}>
-                      <span className="text-muted-foreground">{key}:</span>
-                      <span className="text-foreground">{val}</span>
-                    </div>
-                  ))}
+          {compiled.memory && (
+            <div data-testid="claw-memory">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-foreground font-bold">MEMORY</span>
+                {editing?.section !== "MEMORY" && (
+                  <button
+                    onClick={() => setEditing({ section: "MEMORY" })}
+                    className="text-muted-foreground hover:text-foreground font-bold text-[10px]"
+                    data-testid="button-edit-memory"
+                  >
+                    [edit]
+                  </button>
+                )}
+              </div>
+              {editing?.section === "MEMORY" && !editing.name ? (
+                <SectionEditor section="MEMORY" initialContent="" onClose={() => setEditing(null)} />
+              ) : (
+                <div className="px-1 text-[10px] space-y-0.5">
+                  <div data-testid="memory-profile">
+                    <span className="text-muted-foreground">profile: </span>
+                    <span className="text-foreground">
+                      {compiled.memory.userProfile?.trim() && !compiled.memory.userProfile.includes("(your human")
+                        ? compiled.memory.userProfile.substring(0, 100)
+                        : "empty"}
+                    </span>
+                  </div>
+                  <div data-testid="memory-context">
+                    <span className="text-muted-foreground">context: </span>
+                    <span className="text-foreground">
+                      {compiled.memory.persistentContext?.trim()
+                        ? `${compiled.memory.persistentContext.split("\n").filter((l: string) => l.trim()).length} items`
+                        : "empty"}
+                    </span>
+                  </div>
                 </div>
               )}
-              <pre className="text-muted-foreground px-1 whitespace-pre-wrap text-[10px] max-h-20 overflow-y-auto">
-                {JSON.stringify(compiled.config, null, 2)}
-              </pre>
+            </div>
+          )}
+
+          {compiled.config && (
+            <div data-testid="claw-config">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-foreground font-bold">CONFIG</span>
+                {editing?.section !== "CONFIG" && (
+                  <button
+                    onClick={() => setEditing({ section: "CONFIG" })}
+                    className="text-muted-foreground hover:text-foreground font-bold text-[10px]"
+                    data-testid="button-edit-config"
+                  >
+                    [edit]
+                  </button>
+                )}
+              </div>
+              {editing?.section === "CONFIG" && !editing.name ? (
+                <SectionEditor section="CONFIG" initialContent="" onClose={() => setEditing(null)} />
+              ) : (
+                <>
+                  {compiled.routing && Object.keys(compiled.routing).length > 0 && (
+                    <div className="px-1 mb-1" data-testid="claw-routing">
+                      <div className="text-foreground text-[11px] mb-0.5">routing</div>
+                      {Object.entries(compiled.routing).map(([key, val]) => (
+                        <div key={key} className="flex gap-2 text-[10px]" data-testid={`routing-entry-${key}`}>
+                          <span className="text-muted-foreground">{key}:</span>
+                          <span className="text-foreground">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <pre className="text-muted-foreground px-1 whitespace-pre-wrap text-[10px] max-h-20 overflow-y-auto">
+                    {JSON.stringify(compiled.config, null, 2)}
+                  </pre>
+                </>
+              )}
             </div>
           )}
 

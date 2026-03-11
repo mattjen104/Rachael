@@ -85,6 +85,107 @@ export async function registerRoutes(
     channelType: z.string().optional(),
   });
 
+  function findSectionRange(content: string, sectionTitle: string, parentTitle: string | null): { headingEnd: number; bodyEnd: number } | null {
+    const lines = content.split("\n");
+    let parentLevel = 0;
+    let inParent = parentTitle === null;
+    let sectionStart = -1;
+    let sectionLevel = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const headMatch = lines[i].match(/^(\*+)\s+(TODO|DONE)?\s*(.*?)(?:\s+:[a-zA-Z0-9_@-]+(?::[a-zA-Z0-9_@-]+)*:)?\s*$/);
+      if (!headMatch) continue;
+      const level = headMatch[1].length;
+      const title = headMatch[3].trim();
+
+      if (!inParent && parentTitle) {
+        if (title.toLowerCase() === parentTitle.toLowerCase()) {
+          inParent = true;
+          parentLevel = level;
+        }
+        continue;
+      }
+
+      if (parentTitle && level <= parentLevel && sectionStart === -1) {
+        return null;
+      }
+
+      if (sectionStart === -1) {
+        if (title.toLowerCase() === sectionTitle.toLowerCase()) {
+          sectionStart = i;
+          sectionLevel = level;
+          continue;
+        }
+      } else {
+        if (level <= sectionLevel) {
+          let headingEnd = 0;
+          for (let j = sectionStart + 1; j < lines.length; j++) {
+            const l = lines[j];
+            if (l.match(/^\s*:PROPERTIES:/)) {
+              while (j < lines.length && !lines[j].match(/^\s*:END:/)) j++;
+              headingEnd = j + 1;
+              continue;
+            }
+            if (l.match(/^\s*SCHEDULED:|^\s*DEADLINE:/)) {
+              headingEnd = j + 1;
+              continue;
+            }
+            break;
+          }
+          if (headingEnd === 0) headingEnd = sectionStart + 1;
+          const bodyEndPos = lines.slice(0, i).join("\n").length;
+          const headingEndPos = lines.slice(0, headingEnd).join("\n").length + 1;
+          return { headingEnd: headingEndPos, bodyEnd: bodyEndPos };
+        }
+      }
+    }
+
+    if (sectionStart !== -1) {
+      let headingEnd = sectionStart + 1;
+      for (let j = sectionStart + 1; j < lines.length; j++) {
+        const l = lines[j];
+        if (l.match(/^\s*:PROPERTIES:/)) {
+          while (j < lines.length && !lines[j].match(/^\s*:END:/)) j++;
+          headingEnd = j + 1;
+          continue;
+        }
+        if (l.match(/^\s*SCHEDULED:|^\s*DEADLINE:/)) {
+          headingEnd = j + 1;
+          continue;
+        }
+        break;
+      }
+      const headingEndPos = lines.slice(0, headingEnd).join("\n").length + 1;
+      return { headingEnd: headingEndPos, bodyEnd: content.length };
+    }
+
+    return null;
+  }
+
+  function extractSectionBody(content: string, section: string, name: string | null): string | null {
+    const parentTitle = name ? section : null;
+    const targetTitle = name || section;
+    const range = findSectionRange(content, targetTitle, parentTitle);
+    if (!range) return null;
+    return content.slice(range.headingEnd, range.bodyEnd).trim();
+  }
+
+  function replaceSectionBody(content: string, section: string, name: string | null, newBody: string): string | null {
+    const parentTitle = name ? section : null;
+    const targetTitle = name || section;
+    const range = findSectionRange(content, targetTitle, parentTitle);
+    if (!range) return null;
+    const trimmedBody = newBody.trimEnd();
+    const before = content.slice(0, range.headingEnd);
+    const after = content.slice(range.bodyEnd);
+    if (!trimmedBody) {
+      return before + after;
+    }
+    const needsLeadingNewline = before.length > 0 && before[before.length - 1] !== "\n";
+    const needsTrailingNewline = after.length > 0 && after[0] !== "\n";
+    return before + (needsLeadingNewline ? "\n" : "") + trimmedBody + (needsTrailingNewline ? "\n" : "") + after;
+  }
+
   function findSectionEnd(content: string, sectionTitle: string): number {
     const lines = content.split("\n");
     let sectionStart = -1;
@@ -1132,6 +1233,36 @@ export async function registerRoutes(
     if (newContent === file.content) return res.status(404).json({ error: "Program or results section not found" });
     await storage.updateOrgFileContent(file.id, newContent);
     res.json({ success: true });
+  });
+
+  app.patch("/api/openclaw/section", async (req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const { section, name, body } = req.body;
+    if (typeof section !== "string" || !section || typeof body !== "string") {
+      return res.status(400).json({ error: "section (string) and body (string) are required" });
+    }
+    if (name !== undefined && typeof name !== "string") {
+      return res.status(400).json({ error: "name must be a string if provided" });
+    }
+    const newContent = replaceSectionBody(file.content, section, name || null, body);
+    if (newContent === null) {
+      return res.status(404).json({ error: `Section ${section}${name ? "/" + name : ""} not found` });
+    }
+    await storage.updateOrgFileContent(file.id, newContent);
+    await storage.createVersion(newContent, `edit ${section}${name ? "/" + name : ""}`);
+    const compiled = compileOpenClaw(newContent);
+    res.json({ success: true, compiled });
+  });
+
+  app.get("/api/openclaw/raw-section", async (req, res) => {
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const { section, name } = req.query as { section: string; name?: string };
+    if (!section) return res.status(400).json({ error: "section query param required" });
+    const raw = extractSectionBody(file.content, section, name || null);
+    if (raw === null) return res.status(404).json({ error: "Section not found" });
+    res.json({ body: raw });
   });
 
   app.get("/api/openclaw/status", async (_req, res) => {

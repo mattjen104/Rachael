@@ -691,6 +691,34 @@ export function useRecompileOpenClaw() {
   });
 }
 
+export function useRawSection(section: string, name?: string) {
+  return useQuery({
+    queryKey: ["/api/openclaw/raw-section", section, name],
+    queryFn: async () => {
+      const params = new URLSearchParams({ section });
+      if (name) params.set("name", name);
+      const res = await apiRequest("GET", `/api/openclaw/raw-section?${params}`);
+      return res.json();
+    },
+    enabled: false,
+  });
+}
+
+export function useEditSection() {
+  return useMutation({
+    mutationFn: async ({ section, name, body }: { section: string; name?: string; body: string }) => {
+      const res = await apiRequest("PATCH", "/api/openclaw/section", { section, name, body });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/raw-section"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/versions"] });
+    },
+  });
+}
+
 export function useRuntimeState() {
   return useQuery({
     queryKey: ["/api/openclaw/runtime"],
