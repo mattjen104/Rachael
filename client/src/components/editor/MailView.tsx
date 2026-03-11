@@ -432,11 +432,30 @@ function ClawPanel() {
   const [showVersions, setShowVersions] = useState(false);
   const [diffView, setDiffView] = useState<Record<number, any>>({});
 
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/seed");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+    },
+  });
+
   if (!status?.exists) {
     return (
       <div className="p-3 text-muted-foreground" data-testid="claw-empty">
         <div>openclaw.org not found</div>
-        <div className="mt-1">seed the database or import your local OpenClaw config</div>
+        <div className="mt-2">
+          <button
+            onClick={() => seedMutation.mutate()}
+            disabled={seedMutation.isPending}
+            data-testid="button-seed"
+            className="text-foreground hover:text-org-todo font-bold"
+          >
+            {seedMutation.isPending ? "[...seeding]" : "[>> seed database]"}
+          </button>
+        </div>
       </div>
     );
   }
