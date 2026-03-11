@@ -44,6 +44,11 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `server/scrape-buffer.ts` - In-memory buffer for scraped data. No database — scrape is triggered on demand from the UI.
 - `server/sanitize.ts` - Text sanitization utility. Replaces Unicode characters with ASCII equivalents.
 - `server/openclaw-compiler.ts` - Bidirectional compiler for OpenClaw config. Compile: org → SOUL.md, SKILL.md, openclaw.json, programs. Import: native files → org format.
+- `server/agent-runtime.ts` - Voyager-style autonomous agent scheduler. 60s tick loop, per-program state machine (idle/queued/running/completed/error), repeater parsing, SCHEDULED bumping, hardened skill detection.
+- `server/llm-client.ts` - LLM execution client. Supports Anthropic Messages API and OpenAI Chat Completions. Model resolution via CONFIG aliases. Builds org-native prompts (SOUL + skills + program instructions + iteration context).
+- `server/skill-runner.ts` - Hardened skill execution engine. Saves TypeScript scripts to `skills/` directory, runs them via dynamic import with context injection, handles graduation from program to hardened skill.
+- `server/rate-limit.ts` - In-memory sliding window rate limiter. 120 req/min reads, 30/min writes per IP.
+- `client/src/components/AuthGate.tsx` - Bearer token auth gate. Checks `/api/auth/check`, prompts for key if needed, stores in localStorage.
 
 ## Data Model (shared/schema.ts)
 
@@ -121,6 +126,22 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `POST /api/openclaw/proposals/:id/reject` - Reject proposal
 - `GET /api/openclaw/versions` - Version history
 - `POST /api/openclaw/versions/:id/restore` - Restore to previous version
+
+### Agent Runtime (Voyager-style)
+- `GET /api/openclaw/runtime` - Runtime state (active flag, all program states)
+- `POST /api/openclaw/runtime/toggle` - Start/pause scheduler
+- `POST /api/openclaw/runtime/run/:programName` - Manual trigger
+- `GET /api/openclaw/runtime/harden-candidates` - Programs with hardenable code
+- `POST /api/openclaw/runtime/harden/:programName` - Accept & save hardened script
+- `GET /api/openclaw/llm-status` - LLM provider configuration status
+- `GET /api/openclaw/sync-check` - Content hash for external polling
+- `GET /api/openclaw/export-bundle` - Full compiled output + org content
+- `GET /api/openclaw/sync-status` - Sync polling status
+
+### Auth & Rate Limiting
+- `GET /api/auth/check` - Check if auth is required (always public)
+- Bearer token auth via `OPENCLAW_API_KEY` env var (skipped if not set)
+- Rate limiting: 120 req/min reads, 30/min writes per IP
 
 ### Other
 - `POST /api/seed` - Seed initial data

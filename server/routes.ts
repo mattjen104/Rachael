@@ -25,6 +25,8 @@ import {
   compileOpenClaw, importSoul, importSkill, importConfig, importAll,
   extractSection, replaceSection, appendResultToProgram, mergeImport,
 } from "./openclaw-compiler";
+import { getRuntimeState, toggleRuntime, manualTrigger, getHardenCandidates } from "./agent-runtime";
+import { hardenProgram } from "./skill-runner";
 import { insertOpenclawProposalSchema } from "@shared/schema";
 
 export async function registerRoutes(
@@ -1281,6 +1283,41 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  let lastSyncCheckTime: Date | null = null;
+
+  app.get("/api/openclaw/sync-check", async (_req, res) => {
+    lastSyncCheckTime = new Date();
+    const file = await getOpenClawOrg();
+    if (!file) return res.json({ lastModified: 0, hash: "" });
+    const { createHash } = await import("crypto");
+    const hash = createHash("sha256").update(file.content).digest("hex").slice(0, 16);
+    res.json({ lastModified: hash, hash });
+  });
+
+  app.get("/api/openclaw/export-bundle", async (_req, res) => {
+    lastSyncCheckTime = new Date();
+    const file = await getOpenClawOrg();
+    if (!file) return res.status(404).json({ error: "openclaw.org not found" });
+    const compiled = compileOpenClaw(file.content);
+    const { createHash } = await import("crypto");
+    const hash = createHash("sha256").update(file.content).digest("hex").slice(0, 16);
+    res.json({
+      soul: compiled.soul,
+      skills: compiled.skills,
+      config: compiled.config,
+      programs: compiled.programs,
+      orgContent: file.content,
+      hash,
+    });
+  });
+
+  app.get("/api/openclaw/sync-status", async (_req, res) => {
+    res.json({
+      lastPoll: lastSyncCheckTime ? lastSyncCheckTime.toISOString() : null,
+      connected: lastSyncCheckTime ? (Date.now() - lastSyncCheckTime.getTime()) < 60000 : false,
+    });
+  });
+
   // ── Seed ─────────────────────────────────────────────────
 
   app.post("/api/seed", async (_req, res) => {
@@ -1463,6 +1500,60 @@ export async function registerRoutes(
     await storage.createClipboardItem({ content: "Remember to pick up groceries after work", type: "text" });
 
     res.status(201).json({ message: "Seeded", files });
+  });
+
+  app.get("/api/openclaw/runtime", async (_req, res) => {
+    res.json(getRuntimeState());
+  });
+
+  app.post("/api/openclaw/runtime/toggle", async (_req, res) => {
+    const active = toggleRuntime();
+    res.json({ active });
+  });
+
+  app.post("/api/openclaw/runtime/run/:programName", async (req, res) => {
+    const { programName } = req.params;
+    const state = await manualTrigger(decodeURIComponent(programName));
+    if (!state) {
+      return res.status(404).json({ message: `Program "${programName}" not found` });
+    }
+    res.json(state);
+  });
+
+  app.get("/api/openclaw/runtime/harden-candidates", async (_req, res) => {
+    res.json(getHardenCandidates());
+  });
+
+  app.post("/api/openclaw/runtime/harden/:programName", async (req, res) => {
+    const { programName } = req.params;
+    const candidates = getHardenCandidates();
+    const candidate = candidates.find(c => c.programName === decodeURIComponent(programName));
+    if (!candidate) {
+      return res.status(404).json({ message: `No harden candidate found for "${programName}"` });
+    }
+
+    try {
+      const { skillPath, updatedContent } = await hardenProgram(candidate.programName, candidate.code);
+      const file = await storage.getOrgFileByName("openclaw.org");
+      if (file) {
+        await storage.updateOrgFileContent(file.id, updatedContent);
+      }
+      res.json({ success: true, skillPath });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/openclaw/llm-status", async (_req, res) => {
+    const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+    const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    res.json({
+      configured: hasAnthropic || hasOpenAI,
+      providers: {
+        anthropic: hasAnthropic,
+        openai: hasOpenAI,
+      },
+    });
   });
 
   return httpServer;

@@ -4,6 +4,7 @@ import {
   useBridgeStatus, useScrapeEmails, useScrapeTeams, useEmailDetail, useTeamsChatMessages, useOrgCapture,
   useOpenClawStatus, useOpenClawCompiled, useOpenClawProposals, useOpenClawVersions,
   useAcceptProposal, useRejectProposal, useRestoreVersion, useRecompileOpenClaw,
+  useRuntimeState, useToggleRuntime, useTriggerProgram, useHardenCandidates, useHardenProgram, useLLMStatus,
 } from "@/hooks/use-org-data";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
@@ -404,14 +405,21 @@ function ClawPanel() {
   const { data: compiled } = useOpenClawCompiled(status?.exists ?? false);
   const { data: proposals } = useOpenClawProposals();
   const { data: versions } = useOpenClawVersions();
+  const { data: runtimeState } = useRuntimeState();
+  const { data: hardenCandidates } = useHardenCandidates();
+  const { data: llmStatus } = useLLMStatus();
   const acceptMutation = useAcceptProposal();
   const rejectMutation = useRejectProposal();
   const restoreMutation = useRestoreVersion();
   const recompileMutation = useRecompileOpenClaw();
+  const toggleMutation = useToggleRuntime();
+  const triggerMutation = useTriggerProgram();
+  const hardenMutation = useHardenProgram();
 
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [expandedProgram, setExpandedProgram] = useState<string | null>(null);
   const [expandedProposal, setExpandedProposal] = useState<number | null>(null);
+  const [expandedRuntime, setExpandedRuntime] = useState<string | null>(null);
   const [showVersions, setShowVersions] = useState(false);
 
   if (!status?.exists) {
@@ -446,6 +454,102 @@ function ClawPanel() {
         >
           [↻]
         </button>
+      </div>
+
+      <div data-testid="claw-runtime">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-foreground font-bold">RUNTIME</span>
+          <button
+            onClick={() => toggleMutation.mutate()}
+            data-testid="button-toggle-runtime"
+            className="text-foreground hover:text-org-todo font-bold"
+          >
+            {runtimeState?.active ? "[|| pause]" : "[>> start]"}
+          </button>
+          <span className="text-muted-foreground">
+            {runtimeState?.active ? "active" : "paused"}
+          </span>
+          {!llmStatus?.configured && (
+            <span className="text-org-todo text-[10px]">no LLM keys</span>
+          )}
+        </div>
+        {runtimeState?.programs && Object.entries(runtimeState.programs).map(([name, state]: [string, any]) => {
+          const isExpanded = expandedRuntime === name;
+          const candidate = hardenCandidates?.find((c: any) => c.programName === name);
+          const statusIcon = state.status === "running" ? "[>> running]"
+            : state.status === "error" ? "[x error]"
+            : state.status === "completed" ? "[= done]"
+            : "[. idle]";
+          const statusClass = state.status === "running" ? "text-foreground"
+            : state.status === "error" ? "text-org-todo"
+            : "text-muted-foreground";
+
+          const timeAgo = (d: string | null) => {
+            if (!d) return "never";
+            const diff = Date.now() - new Date(d).getTime();
+            if (diff < 60000) return `${Math.floor(diff / 1000)}s ago`;
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            return `${Math.floor(diff / 3600000)}h ago`;
+          };
+
+          return (
+            <div key={name} data-testid={`runtime-program-${name}`}>
+              <button
+                onClick={() => setExpandedRuntime(isExpanded ? null : name)}
+                className="w-full text-left px-1 py-0.5 hover:bg-muted/30 flex items-center gap-1"
+                data-testid={`button-expand-runtime-${name}`}
+              >
+                <span className={statusClass}>{statusIcon}</span>
+                <span className="text-foreground">{name}</span>
+                <span className="text-muted-foreground text-[10px]">
+                  last:{timeAgo(state.lastRun)} i:{state.iteration}
+                </span>
+                {candidate && <span className="text-org-todo text-[10px]">[code ready]</span>}
+              </button>
+              {isExpanded && (
+                <div className="px-3 py-1 bg-muted/10 space-y-1">
+                  {state.error && (
+                    <div className="text-org-todo text-[10px]">{state.error}</div>
+                  )}
+                  {state.lastOutput && (
+                    <pre className="text-muted-foreground whitespace-pre-wrap text-[10px] max-h-20 overflow-y-auto">
+                      {state.lastOutput.substring(0, 500)}
+                    </pre>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); triggerMutation.mutate(name); }}
+                      data-testid={`button-trigger-${name}`}
+                      className="text-foreground hover:text-org-todo font-bold text-[11px]"
+                    >
+                      {"[>> run]"}
+                    </button>
+                    {candidate && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); hardenMutation.mutate(name); }}
+                        data-testid={`button-harden-${name}`}
+                        className="text-org-todo hover:text-foreground font-bold text-[11px]"
+                      >
+                        [* harden]
+                      </button>
+                    )}
+                  </div>
+                  {candidate && (
+                    <details className="mt-1">
+                      <summary className="text-muted-foreground text-[10px] cursor-pointer">hardenable code</summary>
+                      <pre className="text-foreground whitespace-pre-wrap text-[9px] max-h-32 overflow-y-auto mt-1 p-1 border border-border/30">
+                        {candidate.code.substring(0, 800)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {(!runtimeState?.programs || Object.keys(runtimeState.programs).length === 0) && (
+          <div className="text-muted-foreground text-[10px] px-1">no programs tracked yet</div>
+        )}
       </div>
 
       {pendingCount > 0 && proposals && (

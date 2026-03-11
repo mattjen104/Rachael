@@ -672,6 +672,77 @@ export function useRecompileOpenClaw() {
   });
 }
 
+export function useRuntimeState() {
+  return useQuery({
+    queryKey: ["/api/openclaw/runtime"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/openclaw/runtime");
+      return res.json();
+    },
+    refetchInterval: 10_000,
+  });
+}
+
+export function useToggleRuntime() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/openclaw/runtime/toggle");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime"] });
+    },
+  });
+}
+
+export function useTriggerProgram() {
+  return useMutation({
+    mutationFn: async (programName: string) => {
+      const res = await apiRequest("POST", `/api/openclaw/runtime/run/${encodeURIComponent(programName)}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+    },
+  });
+}
+
+export function useHardenCandidates() {
+  return useQuery({
+    queryKey: ["/api/openclaw/runtime/harden-candidates"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/openclaw/runtime/harden-candidates");
+      return res.json();
+    },
+    refetchInterval: 30_000,
+  });
+}
+
+export function useHardenProgram() {
+  return useMutation({
+    mutationFn: async (programName: string) => {
+      const res = await apiRequest("POST", `/api/openclaw/runtime/harden/${encodeURIComponent(programName)}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/compiled"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/openclaw/runtime/harden-candidates"] });
+    },
+  });
+}
+
+export function useLLMStatus() {
+  return useQuery({
+    queryKey: ["/api/openclaw/llm-status"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/openclaw/llm-status");
+      return res.json();
+    },
+  });
+}
+
 export function useSeedData() {
   return useMutation({
     mutationFn: async () => {

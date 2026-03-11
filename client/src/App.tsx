@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CrtThemeProvider } from "@/lib/crt-theme";
+import AuthGate from "@/components/AuthGate";
 import NotFound from "@/pages/not-found";
 import Workspace from "@/pages/Workspace";
 import TUI from "@/pages/TUI";
@@ -22,10 +23,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <CrtThemeProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
+        <AuthGate>
+          <TooltipProvider>
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </AuthGate>
       </CrtThemeProvider>
     </QueryClientProvider>
   );

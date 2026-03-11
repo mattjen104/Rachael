@@ -3,7 +3,7 @@ import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-
+import { rateLimitMiddleware } from "./rate-limit";
 const app = express();
 const httpServer = createServer(app);
 
@@ -27,6 +27,24 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+app.use(rateLimitMiddleware);
+
+const API_KEY = process.env.OPENCLAW_API_KEY;
+app.get("/api/auth/check", (_req: Request, res: Response) => {
+  res.json({ requiresAuth: !!API_KEY });
+});
+
+if (API_KEY) {
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (!req.path.startsWith("/api") || req.path === "/api/auth/check") return next();
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.slice(7) !== API_KEY) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    next();
+  });
+}
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

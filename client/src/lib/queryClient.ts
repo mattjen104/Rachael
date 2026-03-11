@@ -1,5 +1,27 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+const AUTH_KEY_STORAGE = "orgcloud_api_key";
+
+export function getStoredApiKey(): string | null {
+  return localStorage.getItem(AUTH_KEY_STORAGE);
+}
+
+export function setStoredApiKey(key: string) {
+  localStorage.setItem(AUTH_KEY_STORAGE, key);
+}
+
+export function clearStoredApiKey() {
+  localStorage.removeItem(AUTH_KEY_STORAGE);
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const key = getStoredApiKey();
+  if (key) {
+    return { Authorization: `Bearer ${key}` };
+  }
+  return {};
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -12,9 +34,14 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const headers: Record<string, string> = {
+    ...getAuthHeaders(),
+    ...(data ? { "Content-Type": "application/json" } : {}),
+  };
+
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
@@ -31,6 +58,7 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const res = await fetch(queryKey.join("/") as string, {
       credentials: "include",
+      headers: getAuthHeaders(),
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

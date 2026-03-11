@@ -26,6 +26,7 @@ import {
   useOpenClawProposals,
   useAcceptProposal,
   useRejectProposal,
+  useRuntimeState,
   type OutlineHeading,
   type OrgHeading,
   type AgendaDay,
@@ -1722,6 +1723,7 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
   const isOpenClaw = selectedFile === "openclaw.org";
   const { data: clawStatus } = useOpenClawStatus();
   const { data: proposals = [] } = useOpenClawProposals();
+  const { data: runtimeData } = useRuntimeState();
 
   const topLevelProposals = useMemo(() => {
     if (!isOpenClaw || proposals.length === 0) return [];
@@ -1841,6 +1843,27 @@ export function OutlinerView({ initialFile }: { initialFile?: string }) {
                       ) : (
                         <span>[ok] {clawStatus.skillCount} skill{clawStatus.skillCount !== 1 ? "s" : ""} · {clawStatus.programCount} program{clawStatus.programCount !== 1 ? "s" : ""}{clawStatus.activeProgramCount ? ` (${clawStatus.activeProgramCount} active)` : ""}{clawStatus.pendingProposalCount ? ` · ${clawStatus.pendingProposalCount} pending` : ""}</span>
                       )}
+                    </div>
+                  )}
+                  {isOpenClaw && runtimeData && (
+                    <div className="text-xs mt-0.5 text-muted-foreground" data-testid="runtime-status-line">
+                      {(() => {
+                        const progs = runtimeData.programs ? Object.entries(runtimeData.programs) : [];
+                        const progCount = progs.length;
+                        const running = progs.filter(([, s]: [string, any]) => s.status === "running").length;
+                        if (!runtimeData.active) return <span>[runtime: paused]</span>;
+                        let nextMs = Infinity;
+                        progs.forEach(([, s]: [string, any]) => {
+                          if (s.nextRun) {
+                            const ms = new Date(s.nextRun).getTime() - Date.now();
+                            if (ms > 0 && ms < nextMs) nextMs = ms;
+                          }
+                        });
+                        const nextStr = nextMs < Infinity
+                          ? nextMs < 60000 ? `${Math.floor(nextMs / 1000)}s` : `${Math.floor(nextMs / 60000)}m`
+                          : "?";
+                        return <span>[runtime: active · {progCount} program{progCount !== 1 ? "s" : ""}{running > 0 ? ` · ${running} running` : ""} · next {nextStr}]</span>;
+                      })()}
                     </div>
                   )}
                 </div>
