@@ -585,8 +585,12 @@ function ClawPanel() {
                     <div className="text-org-todo text-[10px]">{state.error}</div>
                   )}
                   {state.lastOutput && (
-                    <pre className="text-muted-foreground whitespace-pre-wrap text-[10px] max-h-20 overflow-y-auto">
-                      {state.lastOutput.substring(0, 500)}
+                    <pre className="text-muted-foreground whitespace-pre-wrap text-[10px] max-h-48 overflow-y-auto">
+                      {state.lastOutput.substring(0, 2000).split(/(https?:\/\/[^\s]+)/g).map((part, i) =>
+                        part.match(/^https?:\/\//) ? (
+                          <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-org-link underline hover:text-foreground" data-testid={`link-result-${i}`}>{part}</a>
+                        ) : part
+                      )}
                     </pre>
                   )}
                   <div className="flex gap-2 flex-wrap">
