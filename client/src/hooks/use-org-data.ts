@@ -1,6 +1,15 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getStoredApiKey } from "@/lib/queryClient";
 import type { OrgFile, ClipboardItem, AgendaItem } from "@shared/schema";
+
+function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const key = getStoredApiKey();
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> || {}),
+    ...(key ? { Authorization: `Bearer ${key}` } : {}),
+  };
+  return fetch(url, { ...init, headers });
+}
 
 export function useOrgFiles() {
   return useQuery<OrgFile[]>({
@@ -143,7 +152,7 @@ export function useHeadingsSearch(query: string) {
   return useQuery<{ title: string; sourceFile: string; lineNumber: number; level: number; status: string | null; tags: string[] }[]>({
     queryKey: ["/api/org-query/headings", query],
     queryFn: async () => {
-      const res = await fetch(`/api/org-query/headings?q=${encodeURIComponent(query)}`);
+      const res = await authFetch(`/api/org-query/headings?q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error("Failed to fetch headings");
       return res.json();
     },
@@ -325,7 +334,7 @@ export function useJournalDaily(date: string) {
   return useQuery<OrgHeading[]>({
     queryKey: ["/api/org-query/journal-daily", date],
     queryFn: async () => {
-      const res = await fetch(`/api/org-query/journal-daily?date=${date}`);
+      const res = await authFetch(`/api/org-query/journal-daily?date=${date}`);
       if (!res.ok) return [];
       return res.json();
     },
@@ -407,7 +416,7 @@ export function useAllHeadings() {
   return useQuery<OutlineHeading[]>({
     queryKey: ["/api/org-query/headings", "all"],
     queryFn: async () => {
-      const res = await fetch("/api/org-query/headings?all=true");
+      const res = await authFetch("/api/org-query/headings?all=true");
       if (!res.ok) throw new Error("Failed to fetch headings");
       return res.json();
     },
@@ -514,7 +523,7 @@ export function useEmailDetail(index: number | null) {
   return useQuery<{ from: string; to: string; subject: string; body: string; date: string }>({
     queryKey: ["/api/mail", index],
     queryFn: async () => {
-      const res = await fetch(`/api/mail/${index}`);
+      const res = await authFetch(`/api/mail/${index}`);
       if (!res.ok) throw new Error("Failed to fetch email");
       return res.json();
     },
@@ -526,7 +535,7 @@ export function useTeamsChatMessages(index: number | null) {
   return useQuery<{ messages: Array<{ sender: string; text: string; time: string }> }>({
     queryKey: ["/api/teams/chat", index],
     queryFn: async () => {
-      const res = await fetch(`/api/teams/chat/${index}`);
+      const res = await authFetch(`/api/teams/chat/${index}`);
       if (!res.ok) throw new Error("Failed to fetch chat");
       return res.json();
     },
@@ -547,7 +556,7 @@ export function useOpenClawStatus() {
   }>({
     queryKey: ["/api/openclaw/status"],
     queryFn: async () => {
-      const res = await fetch("/api/openclaw/status");
+      const res = await authFetch("/api/openclaw/status");
       if (!res.ok) throw new Error("Failed to fetch status");
       return res.json();
     },
@@ -581,7 +590,7 @@ export function useOpenClawCompiled(enabled: boolean = false) {
   }>({
     queryKey: ["/api/openclaw/compiled"],
     queryFn: async () => {
-      const res = await fetch("/api/openclaw/compiled");
+      const res = await authFetch("/api/openclaw/compiled");
       if (!res.ok) throw new Error("Failed to fetch compiled");
       return res.json();
     },
@@ -607,8 +616,8 @@ export function useOpenClawProposals() {
     queryKey: ["/api/openclaw/proposals", "actionable"],
     queryFn: async () => {
       const [pending, approved] = await Promise.all([
-        fetch("/api/openclaw/proposals?status=pending").then(r => r.json()),
-        fetch("/api/openclaw/proposals?status=approved").then(r => r.json()),
+        authFetch("/api/openclaw/proposals?status=pending").then(r => r.json()),
+        authFetch("/api/openclaw/proposals?status=approved").then(r => r.json()),
       ]);
       return [...pending, ...approved];
     },
@@ -620,7 +629,7 @@ export function useOpenClawVersions() {
   return useQuery<Array<{ id: number; label: string; createdAt: string }>>({
     queryKey: ["/api/openclaw/versions"],
     queryFn: async () => {
-      const res = await fetch("/api/openclaw/versions");
+      const res = await authFetch("/api/openclaw/versions");
       if (!res.ok) throw new Error("Failed to fetch versions");
       return res.json();
     },
