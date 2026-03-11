@@ -358,9 +358,9 @@ async function executeInlineCode(
     .replace(/export\s+(?=async\s+function|function)/g, "");
 
   const wrappedCode = `
-${cleanedCode}
-
 const __ctx = JSON.parse(process.env.__INLINE_CTX || '{}');
+
+${cleanedCode}
 
 async function __run() {
   if (typeof execute === 'function') return execute(__ctx);
