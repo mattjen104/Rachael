@@ -400,6 +400,12 @@ function MailList({
   );
 }
 
+function formatTokenCount(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
 function ClawPanel() {
   const { data: status } = useOpenClawStatus();
   const { data: compiled } = useOpenClawCompiled(status?.exists ?? false);
@@ -473,6 +479,21 @@ function ClawPanel() {
             <span className="text-org-todo text-[10px]">no LLM keys</span>
           )}
         </div>
+        <div className="flex items-center gap-2 px-1 mb-1 text-[10px]" data-testid="llm-provider-status">
+          {llmStatus?.configured ? (
+            <span className="text-muted-foreground">
+              {llmStatus.primaryProvider}: <span className="text-foreground">ok</span>
+              {llmStatus.providers?.openrouter && " (free tier)"}
+            </span>
+          ) : (
+            <span className="text-org-todo">llm: not configured</span>
+          )}
+          {runtimeState?.tokenBudget && (
+            <span className="text-muted-foreground" data-testid="daily-token-total">
+              daily tokens: <span className="text-foreground">{formatTokenCount(runtimeState.tokenBudget.total)}</span>
+            </span>
+          )}
+        </div>
         {runtimeState?.programs && Object.entries(runtimeState.programs).map(([name, state]: [string, any]) => {
           const isExpanded = expandedRuntime === name;
           const candidate = hardenCandidates?.find((c: any) => c.programName === name);
@@ -504,6 +525,16 @@ function ClawPanel() {
                 <span className="text-muted-foreground text-[10px]">
                   last:{timeAgo(state.lastRun)} i:{state.iteration}
                 </span>
+                {state.lastModel && (
+                  <span className="text-muted-foreground text-[10px]" data-testid={`runtime-model-${name}`}>
+                    [model: {state.lastModel}]
+                  </span>
+                )}
+                {state.tokensBurned > 0 && (
+                  <span className="text-muted-foreground text-[10px]" data-testid={`runtime-tokens-${name}`}>
+                    [tokens: {formatTokenCount(state.tokensBurned)}/{formatTokenCount(Number(state.tokenBudget) || 4096)} {state.costTier || "free"}]
+                  </span>
+                )}
                 {candidate && <span className="text-org-todo text-[10px]">[code ready]</span>}
               </button>
               {isExpanded && (

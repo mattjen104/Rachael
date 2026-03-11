@@ -45,7 +45,8 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `server/sanitize.ts` - Text sanitization utility. Replaces Unicode characters with ASCII equivalents.
 - `server/openclaw-compiler.ts` - Bidirectional compiler for OpenClaw config. Compile: org → SOUL.md, SKILL.md, openclaw.json, programs. Import: native files → org format.
 - `server/agent-runtime.ts` - Voyager-style autonomous agent scheduler. 60s tick loop, per-program state machine (idle/queued/running/completed/error), repeater parsing, SCHEDULED bumping, hardened skill detection.
-- `server/llm-client.ts` - LLM execution client. Supports Anthropic Messages API and OpenAI Chat Completions. Model resolution via CONFIG aliases. Builds org-native prompts (SOUL + skills + program instructions + iteration context).
+- `server/llm-client.ts` - LLM execution client. Supports Anthropic Messages API, OpenAI Chat Completions, and OpenRouter (OpenAI-compatible). Model resolution via CONFIG aliases. Default model: free Llama 3.1 8B via OpenRouter.
+- `server/model-router.ts` - Smart model routing with free-first strategy. Task-type detection (research/code/extraction/reasoning/general), cost tier system (free→cheap→standard→premium), cascade execution (try free models first, fall back on failure), A/B model comparison mode, daily token budget tracking.
 - `server/skill-runner.ts` - Hardened skill execution engine. Saves TypeScript scripts to `skills/` directory, runs them via dynamic import with context injection, handles graduation from program to hardened skill.
 - `server/rate-limit.ts` - In-memory sliding window rate limiter. 120 req/min reads, 30/min writes per IP.
 - `client/src/components/AuthGate.tsx` - Bearer token auth gate. Checks `/api/auth/check`, prompts for key if needed, stores in localStorage.
@@ -133,7 +134,8 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
 - `POST /api/openclaw/runtime/run/:programName` - Manual trigger
 - `GET /api/openclaw/runtime/harden-candidates` - Programs with hardenable code
 - `POST /api/openclaw/runtime/harden/:programName` - Accept & save hardened script
-- `GET /api/openclaw/llm-status` - LLM provider configuration status
+- `GET /api/openclaw/llm-status` - LLM provider configuration status (includes OpenRouter)
+- `GET /api/openclaw/model-roster` - Available model roster with tiers and strengths
 - `GET /api/openclaw/sync-check` - Content hash for external polling
 - `GET /api/openclaw/export-bundle` - Full compiled output + org content
 - `GET /api/openclaw/sync-status` - Sync polling status

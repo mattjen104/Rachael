@@ -9,10 +9,14 @@ export interface LLMResponse {
   content: string;
   model: string;
   tokensUsed?: number;
+  provider?: string;
+  cost?: number;
 }
 
+export type ProviderType = "anthropic" | "openai" | "openrouter";
+
 interface ModelConfig {
-  provider: "anthropic" | "openai";
+  provider: ProviderType;
   modelId: string;
 }
 
@@ -22,7 +26,7 @@ function resolveModel(
   routing: Record<string, string | undefined>
 ): ModelConfig {
   const aliases: Record<string, string> = (config as any)?.model_aliases || {};
-  const defaultModel = (config as any)?.agents?.DEFAULT_MODEL || routing?.default || "anthropic/claude-sonnet-4-6";
+  const defaultModel = (config as any)?.agents?.DEFAULT_MODEL || routing?.default || "openrouter/meta-llama/llama-3.1-8b-instruct:free";
 
   let fullId = modelRef || defaultModel;
 
@@ -31,15 +35,24 @@ function resolveModel(
   }
 
   const parts = fullId.split("/");
-  let provider: "anthropic" | "openai" = "anthropic";
+  let provider: ProviderType = "openrouter";
   let modelId = fullId;
 
   if (parts.length >= 2) {
     const providerName = parts[0].toLowerCase();
-    if (providerName === "openai") provider = "openai";
-    else if (providerName === "anthropic") provider = "anthropic";
-    else if (providerName === "google") provider = "openai";
-    modelId = parts.slice(1).join("/");
+    if (providerName === "openai") {
+      provider = "openai";
+      modelId = parts.slice(1).join("/");
+    } else if (providerName === "anthropic") {
+      provider = "anthropic";
+      modelId = parts.slice(1).join("/");
+    } else if (providerName === "openrouter") {
+      provider = "openrouter";
+      modelId = parts.slice(1).join("/");
+    } else {
+      provider = "openrouter";
+      modelId = fullId;
+    }
   }
 
   return { provider, modelId };
@@ -81,19 +94,26 @@ async function callAnthropic(messages: LLMMessage[], modelId: string, signal?: A
   return {
     content,
     model: modelId,
+    provider: "anthropic",
     tokensUsed: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
   };
 }
 
-async function callOpenAI(messages: LLMMessage[], modelId: string, signal?: AbortSignal): Promise<LLMResponse> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY not set");
-
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+async function callOpenAICompat(
+  messages: LLMMessage[],
+  modelId: string,
+  baseUrl: string,
+  apiKey: string,
+  providerName: ProviderType,
+  extraHeaders: Record<string, string> = {},
+  signal?: AbortSignal
+): Promise<LLMResponse> {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
+      ...extraHeaders,
     },
     body: JSON.stringify({
       model: modelId,
@@ -105,15 +125,17 @@ async function callOpenAI(messages: LLMMessage[], modelId: string, signal?: Abor
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`OpenAI API error ${res.status}: ${errText}`);
+    throw new Error(`${providerName} API error ${res.status}: ${errText}`);
   }
 
   const data = await res.json() as any;
   const content = data.choices?.[0]?.message?.content || "";
   return {
     content,
-    model: modelId,
+    model: data.model || modelId,
+    provider: providerName,
     tokensUsed: data.usage?.total_tokens,
+    cost: data.usage?.cost,
   };
 }
 
@@ -131,8 +153,35 @@ export async function executeLLM(
   try {
     if (provider === "anthropic") {
       return await callAnthropic(messages, modelId, controller.signal);
+    } else if (provider === "openrouter") {
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
+      return await callOpenAICompat(
+        messages,
+        modelId,
+        "https://openrouter.ai/api/v1",
+        apiKey,
+        "openrouter",
+        {
+          "HTTP-Referer": process.env.REPLIT_DOMAINS
+            ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
+            : "https://orgcloud.replit.app",
+          "X-Title": "OrgCloud Space",
+        },
+        controller.signal
+      );
     } else {
-      return await callOpenAI(messages, modelId, controller.signal);
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error("OPENAI_API_KEY not set");
+      return await callOpenAICompat(
+        messages,
+        modelId,
+        "https://api.openai.com/v1",
+        apiKey,
+        "openai",
+        {},
+        controller.signal
+      );
     }
   } catch (err: any) {
     if (err.name === "AbortError") {
@@ -175,5 +224,5 @@ export function buildProgramPrompt(
 }
 
 export function hasLLMKeys(): boolean {
-  return !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY);
+  return !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY);
 }

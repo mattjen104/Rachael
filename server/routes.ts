@@ -139,7 +139,7 @@ export async function registerRoutes(
         if (metric) props.push(`   :METRIC: ${metric}\n   :DIRECTION: higher`);
         const propsBlock = props.length > 0 ? `\n   :PROPERTIES:\n${props.join("\n")}\n   :END:` : "";
         const bodyContent = body ? body.split("\n").map(l => `   ${l}`).join("\n") : "   TODO: Add program instructions";
-        entry = `\n** TODO ${title} :program:\n   SCHEDULED: <${date} ${dayName} 06:00 +1d>${propsBlock}\n\n${bodyContent}\n\n*** Results :results:\n    | Iteration | Change | Metric | Status |\n    |-----------|--------|--------|--------|\n`;
+        entry = `\n** TODO ${title} :program:\n   SCHEDULED: <${date} ${dayName} 06:00 +1d>${propsBlock}\n\n${bodyContent}\n\n*** Results :results:\n    | Iteration | Summary | Model | Tokens | Status |\n    |-----------|---------|-------|--------|--------|\n`;
       } else {
         const cType = channelType || "webhook";
         entry = `\n*** ${title}\n   :PROPERTIES:\n   :TYPE: ${cType}\n   :END:\n`;
@@ -1438,7 +1438,7 @@ export async function registerRoutes(
 * CONFIG
 ** agents
    :PROPERTIES:
-   :DEFAULT_MODEL: anthropic/claude-sonnet-4-6
+   :DEFAULT_MODEL: openrouter/meta-llama/llama-3.1-8b-instruct:free
    :MAX_CONCURRENT: 5
    :END:
 
@@ -1447,6 +1447,11 @@ export async function registerRoutes(
     :PROPERTIES:
     :TYPE: anthropic
     :AUTH: oauth
+    :END:
+*** openrouter
+    :PROPERTIES:
+    :TYPE: openrouter
+    :AUTH: api_key
     :END:
 
 ** model_aliases
@@ -1457,15 +1462,72 @@ export async function registerRoutes(
    :GPT_MINI: openai/gpt-5-mini
    :GEMINI: google/gemini-3.1-pro-preview
    :GEMINI_FLASH: google/gemini-3-flash-preview
+   :FREE_LLAMA: openrouter/meta-llama/llama-3.1-8b-instruct:free
+   :FREE_GEMMA: openrouter/google/gemma-2-9b-it:free
+   :FREE_MISTRAL: openrouter/mistralai/mistral-7b-instruct:free
+   :FREE_QWEN_CODER: openrouter/qwen/qwen-2.5-coder-7b-instruct:free
+   :FREE_ZEPHYR: openrouter/huggingfaceh4/zephyr-7b-beta:free
+   :FREE_OPENCHAT: openrouter/openchat/openchat-7b:free
    :END:
+
+** model_routing
+   :PROPERTIES:
+   :DEFAULT_TIER: free
+   :END:
+*** research
+    :PROPERTIES:
+    :PRIMARY: openrouter/huggingfaceh4/zephyr-7b-beta:free
+    :FALLBACK: openrouter/meta-llama/llama-3.1-8b-instruct:free
+    :END:
+*** code
+    :PROPERTIES:
+    :PRIMARY: openrouter/qwen/qwen-2.5-coder-7b-instruct:free
+    :FALLBACK: openrouter/mistralai/mistral-7b-instruct:free
+    :END:
+*** extraction
+    :PROPERTIES:
+    :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
+    :FALLBACK: openrouter/mistralai/mistral-7b-instruct:free
+    :END:
+*** reasoning
+    :PROPERTIES:
+    :PRIMARY: openrouter/google/gemma-2-9b-it:free
+    :FALLBACK: openrouter/openchat/openchat-7b:free
+    :END:
+*** general
+    :PROPERTIES:
+    :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
+    :FALLBACK: openrouter/google/gemma-2-9b-it:free
+    :END:
 
 ** channels
 
 * PROGRAMS
 
+** TODO estate-sale-cars                                                       :program:
+   SCHEDULED: <${new Date().toISOString().split("T")[0]} ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()]} 08:00 +1d>
+   :PROPERTIES:
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :METRIC: listings_found
+   :DIRECTION: higher
+   :END:
+
+   Research estate sales and auctions for interesting car listings.
+   Each iteration:
+   1. Analyze recent estate sale listings for vehicles
+   2. Track prices, conditions, and notable finds
+   3. Summarize findings and trends
+
+*** Results                                                                    :results:
+    | Iteration | Summary | Model | Tokens | Status |
+    |-----------|---------|-------|--------|--------|
+
 ** TODO self-improve                                                           :program:
    SCHEDULED: <${new Date().toISOString().split("T")[0]} ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()]} 22:00 +1d>
    :PROPERTIES:
+   :TASK_TYPE: reasoning
+   :COST_TIER: free
    :METRIC: skill_quality
    :DIRECTION: higher
    :END:
@@ -1477,8 +1539,8 @@ export async function registerRoutes(
    NEVER modify yourself directly. Always propose.
 
 *** Results                                                                    :results:
-    | Iteration | Change | Metric | Status |
-    |-----------|--------|--------|--------|
+    | Iteration | Summary | Model | Tokens | Status |
+    |-----------|---------|-------|--------|--------|
 `,
       },
     ];
@@ -1544,15 +1606,23 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/openclaw/model-roster", async (_req, res) => {
+    const { getModelRoster } = await import("./model-router");
+    res.json({ models: getModelRoster() });
+  });
+
   app.get("/api/openclaw/llm-status", async (_req, res) => {
     const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
     const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
     res.json({
-      configured: hasAnthropic || hasOpenAI,
+      configured: hasAnthropic || hasOpenAI || hasOpenRouter,
       providers: {
         anthropic: hasAnthropic,
         openai: hasOpenAI,
+        openrouter: hasOpenRouter,
       },
+      primaryProvider: hasOpenRouter ? "openrouter" : hasAnthropic ? "anthropic" : hasOpenAI ? "openai" : null,
     });
   });
 

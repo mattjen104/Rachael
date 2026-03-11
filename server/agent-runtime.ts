@@ -2,6 +2,11 @@ import { storage } from "./storage";
 import { compileOpenClaw, appendResultToProgram, type Program } from "./openclaw-compiler";
 import { executeLLM, buildProgramPrompt, hasLLMKeys, type LLMResponse } from "./llm-client";
 import { runHardenedSkill, getHardenCandidatesFromRuntime } from "./skill-runner";
+import {
+  detectTaskType, pickModel, pickCascadeModels, pickComparisonModels,
+  trackTokenUsage, getDailyTokenUsage, parseCostTier,
+  type TaskType, type CostTier,
+} from "./model-router";
 
 export type ProgramStatus = "idle" | "queued" | "running" | "completed" | "error";
 
@@ -31,20 +36,101 @@ let tickInterval: ReturnType<typeof setInterval> | null = null;
 
 const TICK_INTERVAL_MS = 60_000;
 
+const programRuns = new Map<string, Array<{ model: string; tokens: number; timestamp: number }>>();
+const programMeta = new Map<string, { tokenBudget: number; costTier: string }>();
+
+function shortModelName(model: string): string {
+  const last = model.split("/").pop() || model;
+  return last.replace(/:free$/, "").replace(/-instruct$/, "");
+}
+
+function resolveProviderPrefix(modelId: string): string {
+  if (process.env.OPENROUTER_API_KEY) {
+    return `openrouter/${modelId}`;
+  }
+  if (modelId.startsWith("anthropic/") && process.env.ANTHROPIC_API_KEY) {
+    return modelId;
+  }
+  if (modelId.startsWith("openai/") && process.env.OPENAI_API_KEY) {
+    return modelId;
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    return `anthropic/claude-sonnet-4-6`;
+  }
+  if (process.env.OPENAI_API_KEY) {
+    return `openai/gpt-4o-mini`;
+  }
+  return `openrouter/${modelId}`;
+}
+
+async function executeLLMWithCascade(
+  messages: import("./llm-client").LLMMessage[],
+  taskType: TaskType,
+  costTier: CostTier,
+  modelOverride: string | undefined,
+  compiled: ReturnType<typeof compileOpenClaw>
+): Promise<LLMResponse> {
+  if (modelOverride) {
+    return executeLLM(messages, modelOverride, compiled.config, compiled.routing as Record<string, string | undefined>);
+  }
+
+  if (!process.env.OPENROUTER_API_KEY) {
+    return executeLLM(messages, undefined, compiled.config, compiled.routing as Record<string, string | undefined>);
+  }
+
+  const cascade = pickCascadeModels(taskType, costTier);
+  if (cascade.length === 0) {
+    return executeLLM(messages, undefined, compiled.config, compiled.routing as Record<string, string | undefined>);
+  }
+
+  let lastError: Error | null = null;
+  for (const model of cascade) {
+    try {
+      const result = await executeLLM(
+        messages,
+        resolveProviderPrefix(model.id),
+        compiled.config,
+        compiled.routing as Record<string, string | undefined>
+      );
+      if (result.content && result.content.trim().length > 0) {
+        return result;
+      }
+      lastError = new Error(`Empty response from ${model.label}`);
+    } catch (err: any) {
+      console.warn(`[agent-runtime] Model ${model.label} failed, cascading: ${err.message}`);
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error("All cascade models failed");
+}
+
 export function getRuntimeState(): {
   active: boolean;
   lastTick: string | null;
-  programs: Record<string, Omit<ProgramState, "name">>;
+  programs: Record<string, Omit<ProgramState, "name"> & { lastModel?: string; tokensBurned?: number; tokenBudget?: number; costTier?: string }>;
+  tokenBudget: { total: number; byModel: Record<string, number> };
 } {
-  const programs: Record<string, Omit<ProgramState, "name">> = {};
+  const programs: Record<string, Omit<ProgramState, "name"> & { lastModel?: string; tokensBurned?: number; tokenBudget?: number; costTier?: string }> = {};
+
   Array.from(runtime.programs.entries()).forEach(([name, state]) => {
     const { name: _n, ...rest } = state;
-    programs[name] = rest;
+    const runs = programRuns.get(name);
+    const lastRun = runs?.length ? runs[runs.length - 1] : null;
+    const meta = programMeta.get(name);
+    programs[name] = {
+      ...rest,
+      lastModel: lastRun ? shortModelName(lastRun.model) : undefined,
+      tokensBurned: runs?.reduce((s, r) => s + r.tokens, 0) || 0,
+      tokenBudget: meta?.tokenBudget ?? 4096,
+      costTier: meta?.costTier ?? "free",
+    };
   });
   return {
     active: runtime.active,
     lastTick: runtime.lastTick?.toISOString() ?? null,
     programs,
+    tokenBudget: getDailyTokenUsage(),
   };
 }
 
@@ -221,6 +307,11 @@ async function executeProgram(programName: string): Promise<void> {
     const prog = compiled.programs.find(p => p.name === programName);
     if (!prog) throw new Error(`Program "${programName}" not found in compiled output`);
 
+    programMeta.set(programName, {
+      tokenBudget: prog.properties.TOKEN_BUDGET ? parseInt(prog.properties.TOKEN_BUDGET, 10) : 4096,
+      costTier: prog.properties.COST_TIER || "free",
+    });
+
     let output: string;
 
     const isHardened = prog.tags.includes("hardened") && prog.properties.SCRIPT;
@@ -248,7 +339,7 @@ async function executeProgram(programName: string): Promise<void> {
         }
       }
     } else if (!hasLLMKeys()) {
-      output = `[Iteration ${ps.iteration}] No LLM API keys configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY to enable execution.`;
+      output = `[Iteration ${ps.iteration}] No LLM API keys configured. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to enable execution.`;
     } else {
       const skillBodies = compiled.skills
         .filter(s => prog.instructions.toLowerCase().includes(s.name.toLowerCase()))
@@ -262,15 +353,56 @@ async function executeProgram(programName: string): Promise<void> {
         prog.results
       );
 
+      const taskType = detectTaskType(prog.instructions, prog.properties.TASK_TYPE);
+      const costTier = parseCostTier(prog.properties.COST_TIER);
+      const compareMode = prog.properties.COMPARE_MODELS === "true";
       const modelOverride = prog.properties.MODEL || undefined;
-      const llmResult: LLMResponse = await executeLLM(
-        messages,
-        modelOverride,
-        compiled.config,
-        compiled.routing as Record<string, string | undefined>
-      );
 
-      output = llmResult.content;
+      let llmResult: LLMResponse;
+      let modelUsed = "unknown";
+      let tokensUsed = 0;
+
+      if (compareMode && !modelOverride) {
+        const pair = pickComparisonModels(taskType, costTier);
+        if (pair) {
+          const [modelA, modelB] = pair;
+          const [resA, resB] = await Promise.allSettled([
+            executeLLM(messages, resolveProviderPrefix(modelA.id), compiled.config, compiled.routing as Record<string, string | undefined>),
+            executeLLM(messages, resolveProviderPrefix(modelB.id), compiled.config, compiled.routing as Record<string, string | undefined>),
+          ]);
+
+          const outA = resA.status === "fulfilled" ? resA.value.content : `[error: ${(resA as PromiseRejectedResult).reason?.message || "failed"}]`;
+          const outB = resB.status === "fulfilled" ? resB.value.content : `[error: ${(resB as PromiseRejectedResult).reason?.message || "failed"}]`;
+          const tokA = resA.status === "fulfilled" ? (resA.value.tokensUsed || 0) : 0;
+          const tokB = resB.status === "fulfilled" ? (resB.value.tokensUsed || 0) : 0;
+
+          trackTokenUsage(modelA.id, tokA);
+          trackTokenUsage(modelB.id, tokB);
+          tokensUsed = tokA + tokB;
+          modelUsed = `${modelA.label} vs ${modelB.label}`;
+
+          const summaryA = outA.split("\n")[0].slice(0, 120);
+          const summaryB = outB.split("\n")[0].slice(0, 120);
+          output = `[COMPARE] ${modelA.label}: ${summaryA}\n[COMPARE] ${modelB.label}: ${summaryB}`;
+          llmResult = { content: output, model: modelUsed, tokensUsed };
+        } else {
+          llmResult = await executeLLMWithCascade(messages, taskType, costTier, modelOverride, compiled);
+          output = llmResult.content;
+          modelUsed = llmResult.model;
+          tokensUsed = llmResult.tokensUsed || 0;
+          trackTokenUsage(modelUsed, tokensUsed);
+        }
+      } else {
+        llmResult = await executeLLMWithCascade(messages, taskType, costTier, modelOverride, compiled);
+        output = llmResult.content;
+        modelUsed = llmResult.model;
+        tokensUsed = llmResult.tokensUsed || 0;
+        trackTokenUsage(modelUsed, tokensUsed);
+      }
+
+      const pr = programRuns.get(programName) || [];
+      pr.push({ model: modelUsed, tokens: tokensUsed, timestamp: Date.now() });
+      programRuns.set(programName, pr);
 
       if (output.includes("PROPOSE:")) {
         const proposeMatch = output.match(/PROPOSE:\s*([\s\S]*?)(?:\n\n|$)/);
@@ -296,7 +428,10 @@ async function executeProgram(programName: string): Promise<void> {
     ps.lastRun = new Date();
 
     const summaryLine = output.split("\n")[0].slice(0, 200);
-    const resultRow = `| ${ps.iteration} | ${summaryLine} | - | ok |`;
+    const lastRun = programRuns.get(programName);
+    const lastModel = lastRun?.length ? lastRun[lastRun.length - 1].model : "-";
+    const lastTokens = lastRun?.length ? lastRun[lastRun.length - 1].tokens : 0;
+    const resultRow = `| ${ps.iteration} | ${summaryLine} | ${shortModelName(lastModel)} | ${lastTokens} | ok |`;
 
     const freshFile = await storage.getOrgFileByName("openclaw.org");
     if (freshFile) {
@@ -338,6 +473,11 @@ async function tick(): Promise<void> {
     for (const prog of compiled.programs) {
       if (prog.status !== "TODO") continue;
       if (!prog.tags.every(() => true)) continue;
+
+      programMeta.set(prog.name, {
+        tokenBudget: prog.properties.TOKEN_BUDGET ? parseInt(prog.properties.TOKEN_BUDGET, 10) : 4096,
+        costTier: prog.properties.COST_TIER || "free",
+      });
 
       let ps = runtime.programs.get(prog.name);
       if (!ps) {
