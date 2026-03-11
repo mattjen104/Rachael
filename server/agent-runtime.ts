@@ -87,8 +87,13 @@ async function executeLLMWithCascade(
   }
 
   let lastError: Error | null = null;
+  let rateLimited = false;
   for (const model of cascade) {
     try {
+      if (rateLimited) {
+        await new Promise(r => setTimeout(r, 5000));
+        rateLimited = false;
+      }
       const result = await executeLLM(
         messages,
         resolveProviderPrefix(model.id),
@@ -101,6 +106,24 @@ async function executeLLMWithCascade(
       lastError = new Error(`Empty response from ${model.label}`);
     } catch (err: any) {
       console.warn(`[agent-runtime] Model ${model.label} failed, cascading: ${err.message}`);
+      lastError = err;
+      if (err.message?.includes("429")) {
+        rateLimited = true;
+      }
+    }
+  }
+
+  if (rateLimited && cascade.length > 0) {
+    console.log("[agent-runtime] All models rate-limited, retrying first model after delay...");
+    await new Promise(r => setTimeout(r, 10000));
+    try {
+      return await executeLLM(
+        messages,
+        resolveProviderPrefix(cascade[0].id),
+        compiled.config,
+        compiled.routing as Record<string, string | undefined>
+      );
+    } catch (err: any) {
       lastError = err;
     }
   }
