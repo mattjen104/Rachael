@@ -1395,9 +1395,6 @@ export async function registerRoutes(
 
   app.post("/api/seed", async (_req, res) => {
     const existing = await storage.getOrgFiles();
-    if (existing.length > 0) {
-      return res.json({ message: "Already seeded", files: existing });
-    }
 
     const defaults = [
       {
@@ -1645,6 +1642,20 @@ export async function registerRoutes(
 `,
       },
     ];
+
+    if (existing.length > 0) {
+      const missing = defaults.filter(d => !existing.some(e => e.name === d.name));
+      if (missing.length === 0) {
+        return res.json({ message: "Already seeded", files: existing });
+      }
+      const added = [];
+      for (const f of missing) {
+        const created = await storage.createOrgFile(f);
+        added.push(created);
+      }
+      const updated = await storage.getOrgFiles();
+      return res.json({ message: `Added missing files: ${missing.map(m => m.name).join(", ")}`, files: updated });
+    }
 
     const files = [];
     for (const f of defaults) {
