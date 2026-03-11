@@ -1536,7 +1536,7 @@ export async function registerRoutes(
 * CONFIG
 ** agents
    :PROPERTIES:
-   :DEFAULT_MODEL: openrouter/meta-llama/llama-3.1-8b-instruct:free
+   :DEFAULT_MODEL: openrouter/google/gemma-3-4b-it:free
    :MAX_CONCURRENT: 5
    :END:
 
@@ -1560,12 +1560,11 @@ export async function registerRoutes(
    :GPT_MINI: openai/gpt-5-mini
    :GEMINI: google/gemini-3.1-pro-preview
    :GEMINI_FLASH: google/gemini-3-flash-preview
-   :FREE_LLAMA: openrouter/meta-llama/llama-3.1-8b-instruct:free
    :FREE_GEMMA: openrouter/google/gemma-3-4b-it:free
+   :FREE_GEMMA_12B: openrouter/google/gemma-3-12b-it:free
    :FREE_MISTRAL: openrouter/mistralai/mistral-small-3.1-24b-instruct:free
-   :FREE_QWEN_CODER: openrouter/qwen/qwen-2.5-coder-7b-instruct:free
    :FREE_QWEN: openrouter/qwen/qwen3-4b:free
-   :FREE_DEEPSEEK: openrouter/deepseek/deepseek-r1-0528:free
+   :FREE_LLAMA: openrouter/meta-llama/llama-3.2-3b-instruct:free
    :END:
 
 ** model_routing
@@ -1574,18 +1573,18 @@ export async function registerRoutes(
    :END:
 *** research
     :PROPERTIES:
-    :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
-    :FALLBACK: openrouter/google/gemma-3-4b-it:free
+    :PRIMARY: openrouter/google/gemma-3-12b-it:free
+    :FALLBACK: openrouter/mistralai/mistral-small-3.1-24b-instruct:free
     :END:
 *** code
     :PROPERTIES:
-    :PRIMARY: openrouter/qwen/qwen-2.5-coder-7b-instruct:free
-    :FALLBACK: openrouter/meta-llama/llama-3.1-8b-instruct:free
+    :PRIMARY: openrouter/qwen/qwen3-4b:free
+    :FALLBACK: openrouter/google/gemma-3-4b-it:free
     :END:
 *** extraction
     :PROPERTIES:
-    :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
-    :FALLBACK: openrouter/mistralai/mistral-small-3.1-24b-instruct:free
+    :PRIMARY: openrouter/mistralai/mistral-small-3.1-24b-instruct:free
+    :FALLBACK: openrouter/google/gemma-3-4b-it:free
     :END:
 *** reasoning
     :PROPERTIES:
@@ -1594,8 +1593,8 @@ export async function registerRoutes(
     :END:
 *** general
     :PROPERTIES:
-    :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
-    :FALLBACK: openrouter/google/gemma-3-4b-it:free
+    :PRIMARY: openrouter/google/gemma-3-4b-it:free
+    :FALLBACK: openrouter/meta-llama/llama-3.2-3b-instruct:free
     :END:
 
 ** channels
@@ -1603,56 +1602,74 @@ export async function registerRoutes(
 * PROGRAMS
 
 ** TODO estate-sale-cars                                                       :program:
-   SCHEDULED: <${new Date().toISOString().split("T")[0]} ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()]} 08:00 +1d>
+   SCHEDULED: <\${new Date().toISOString().split("T")[0]} \${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()]} 08:00 +1d>
    :PROPERTIES:
    :TASK_TYPE: research
    :COST_TIER: free
    :METRIC: listings_found
    :DIRECTION: higher
+   :ZIP_CODE: 92373
+   :RADIUS: 75
+   :CL_REGION: inlandempire
    :END:
 
-   Search estate sales and auctions for vehicles. Scrapes multiple sources,
-   deduplicates, and returns structured listings with links.
+   Search estate sales, auctions, and classifieds for vehicles near your area.
+   Edit ZIP_CODE, RADIUS, and CL_REGION in :PROPERTIES: to change the search.
+   CL_REGION maps to Craigslist subdomain (e.g. inlandempire, losangeles, sfbay).
 
    #+BEGIN_SRC typescript
-   const KEYWORDS = ["car","truck","vehicle","suv","van","motorcycle","sedan","coupe",
-     "convertible","pickup","ford","chevy","toyota","honda","dodge","bmw","mercedes",
-     "porsche","corvette","mustang","camaro","engine","transmission","4x4","vin"];
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const ZIP = props.ZIP_CODE || "92373";
+   const RADIUS = props.RADIUS || "75";
+   const CL_REGION = props.CL_REGION || "inlandempire";
 
-   function hasVehicle(t: string) { const l = t.toLowerCase(); return KEYWORDS.some(k => l.includes(k)); }
+   interface Listing { title: string; price: string; location: string; url: string; source: string; }
 
-   interface Listing { title: string; price: string; url: string; source: string; }
-
-   async function scrape(url: string, pattern: RegExp, base: string, src: string): Promise<Listing[]> {
-     try {
-       const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" } });
-       if (!r.ok) return [];
-       const html = await r.text();
-       const out: Listing[] = [];
-       let m;
-       while ((m = pattern.exec(html)) !== null) {
-         if (hasVehicle(m[2])) out.push({ title: m[2].trim(), price: "See listing", url: base + m[1], source: src });
-       }
-       return out;
-     } catch { return []; }
+   async function fetchHTML(url: string): Promise<string> {
+     const r = await fetch(url, {
+       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", Accept: "text/html" },
+     });
+     if (!r.ok) throw new Error("HTTP " + r.status);
+     return r.text();
    }
 
-   export default async function execute() {
+   async function searchCraigslist(): Promise<Listing[]> {
+     const out: Listing[] = [];
+     try {
+       const html = await fetchHTML("https://" + CL_REGION + ".craigslist.org/search/cta");
+       const re = new RegExp('href="(https://[^"]*craigslist[^"]*/ct[od]/d/[^"]+)"[^>]*>([\\\\s\\\\S]*?)</a>', 'gi');
+       let m: RegExpExecArray | null;
+       while ((m = re.exec(html)) !== null) {
+         const inner = m[2];
+         const titleM = inner.match(/class="title">([^<]+)/);
+         const priceM = inner.match(/class="price">([^<]+)/);
+         const locM = inner.match(/class="location">\\\\s*([^<]+)/);
+         if (titleM) out.push({ title: titleM[1].trim(), price: priceM ? priceM[1].trim() : "N/A", location: locM ? locM[1].trim() : "", url: m[1], source: "craigslist" });
+       }
+     } catch {}
+     return out;
+   }
+
+   async function searchPublicSurplus(): Promise<Listing[]> {
+     const out: Listing[] = [];
+     try {
+       const html = await fetchHTML("https://www.publicsurplus.com/sms/browse/cataucs?catid=1");
+       const re = new RegExp('href="(/sms/auction/view[^"]+)"[^>]*>\\\\s*([^<]{5,}?)\\\\s*<', 'gi');
+       let m: RegExpExecArray | null;
+       while ((m = re.exec(html)) !== null) out.push({ title: m[2].trim(), price: "Auction", location: "US", url: "https://www.publicsurplus.com" + m[1], source: "publicsurplus.com" });
+     } catch {}
+     return out;
+   }
+
+   async function execute() {
      const t0 = Date.now();
-     const [a, b, c] = await Promise.all([
-       scrape("https://www.estatesales.net/estate-sales/search?q=car+truck+vehicle&type=sale",
-         /<a[^>]*href="(\\/estate-sales\\/[^"]+)"[^>]*>([^<]+)<\\/a>/gi, "https://www.estatesales.net", "estatesales.net"),
-       scrape("https://www.hibid.com/search?q=estate+car&type=lots",
-         /<a[^>]*href="(\\/lots\\/[^"]+)"[^>]*>\\s*<[^>]*>([^<]*)<\\/[^>]*>/gi, "https://www.hibid.com", "hibid.com"),
-       scrape("https://www.auctionzip.com/cgi-bin/auctionsearch.cgi?kwd=estate+car+truck&category=150",
-         /<a[^>]*href="(\\/auction-catalog\\/[^"]+)"[^>]*>([^<]+)<\\/a>/gi, "https://www.auctionzip.com", "auctionzip.com"),
-     ]);
+     const [cars, surplus] = await Promise.all([searchCraigslist(), searchPublicSurplus()]);
      const seen = new Set<string>();
-     const all = [...a,...b,...c].filter(l => { const k = l.title.toLowerCase()+l.source; if (seen.has(k)) return false; seen.add(k); return true; });
-     const elapsed = ((Date.now()-t0)/1000).toFixed(1);
-     let summary = "Scraped 3 sources in " + elapsed + "s. Found " + all.length + " vehicle listings.";
-     if (all.length > 0) { summary += "\\n\\nTop finds:"; for (const l of all.slice(0,15)) summary += "\\n- " + l.title + " | " + l.source + " | " + l.url; }
-     else summary += "\\n\\nNo listings found. Sites may have changed layouts.";
+     const all = [...cars, ...surplus].filter(l => { const k = l.title.toLowerCase().slice(0, 50) + l.source; if (seen.has(k)) return false; seen.add(k); return true; });
+     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+     let summary = "Searched 2 sources near " + ZIP + " (" + CL_REGION + ") in " + elapsed + "s. Found " + all.length + " listings [craigslist:" + cars.length + ", publicsurplus:" + surplus.length + "]";
+     if (all.length > 0) { summary += "\\nTop finds:"; for (const l of all.slice(0, 25)) summary += "\\n- " + l.price + " | " + l.title + (l.location ? " (" + l.location + ")" : "") + " [" + l.source + "] " + l.url; }
+     else summary += "\\nNo listings found this run.";
      return { summary, metric: String(all.length) };
    }
    #+END_SRC

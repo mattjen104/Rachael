@@ -9,12 +9,11 @@ export interface ModelEntry {
 }
 
 export const MODEL_ROSTER: ModelEntry[] = [
-  { id: "meta-llama/llama-3.1-8b-instruct:free", tier: "free", strengths: ["general", "extraction"], label: "Llama 3.1 8B" },
   { id: "google/gemma-3-4b-it:free", tier: "free", strengths: ["general", "reasoning"], label: "Gemma 3 4B" },
   { id: "mistralai/mistral-small-3.1-24b-instruct:free", tier: "free", strengths: ["general", "extraction", "research"], label: "Mistral Small 3.1" },
-  { id: "qwen/qwen-2.5-coder-7b-instruct:free", tier: "free", strengths: ["code", "extraction"], label: "Qwen 2.5 Coder" },
   { id: "qwen/qwen3-4b:free", tier: "free", strengths: ["general", "reasoning"], label: "Qwen3 4B" },
-  { id: "deepseek/deepseek-r1-0528:free", tier: "free", strengths: ["reasoning", "code", "research"], label: "DeepSeek R1" },
+  { id: "meta-llama/llama-3.2-3b-instruct:free", tier: "free", strengths: ["general", "extraction"], label: "Llama 3.2 3B" },
+  { id: "google/gemma-3-12b-it:free", tier: "free", strengths: ["reasoning", "research", "general"], label: "Gemma 3 12B" },
 
   { id: "meta-llama/llama-3.1-70b-instruct", tier: "cheap", strengths: ["research", "reasoning", "general"], label: "Llama 3.1 70B" },
   { id: "mistralai/mixtral-8x7b-instruct", tier: "cheap", strengths: ["code", "reasoning", "general"], label: "Mixtral 8x7B" },

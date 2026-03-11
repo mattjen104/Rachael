@@ -345,7 +345,7 @@ const INLINE_SCRIPTS_DIR = join(process.cwd(), ".inline-scripts");
 async function executeInlineCode(
   code: string,
   lang: string,
-  context: { orgContent: string; programName: string; lastResults: string; iteration: number }
+  context: { orgContent: string; programName: string; lastResults: string; iteration: number; properties?: Record<string, string> }
 ): Promise<{ summary: string; metric?: string }> {
   await mkdir(INLINE_SCRIPTS_DIR, { recursive: true });
 
@@ -424,6 +424,8 @@ async function executeProgram(programName: string): Promise<void> {
   ps.status = "running";
   ps.error = null;
 
+  let prog: ReturnType<typeof compileOpenClaw>["programs"][number] | undefined;
+
   try {
     ps.iteration += 1;
 
@@ -431,7 +433,7 @@ async function executeProgram(programName: string): Promise<void> {
     if (!file) throw new Error("openclaw.org not found");
 
     const compiled = compileOpenClaw(file.content);
-    const prog = compiled.programs.find(p => p.name === programName);
+    prog = compiled.programs.find(p => p.name === programName);
     if (!prog) throw new Error(`Program "${programName}" not found in compiled output`);
 
     programMeta.set(programName, {
@@ -449,7 +451,7 @@ async function executeProgram(programName: string): Promise<void> {
       const result = await executeInlineCode(
         prog.codeBlock!,
         prog.codeLang || "typescript",
-        { orgContent: file.content, programName, lastResults: prog.results, iteration: ps.iteration }
+        { orgContent: file.content, programName, lastResults: prog.results, iteration: ps.iteration, properties: prog.properties }
       );
       output = result.summary;
       if (result.metric) output += ` | metric: ${result.metric}`;
@@ -639,6 +641,10 @@ async function executeProgram(programName: string): Promise<void> {
     ps.status = "error";
     ps.error = err.message || String(err);
     ps.lastRun = new Date();
+
+    if (prog?.scheduledRaw) {
+      await bumpSchedule(programName, prog.scheduledRaw);
+    }
   }
 }
 
