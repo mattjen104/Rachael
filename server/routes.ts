@@ -1562,10 +1562,10 @@ export async function registerRoutes(
    :GEMINI_FLASH: google/gemini-3-flash-preview
    :FREE_LLAMA: openrouter/meta-llama/llama-3.1-8b-instruct:free
    :FREE_GEMMA: openrouter/google/gemma-3-4b-it:free
-   :FREE_MISTRAL: openrouter/mistralai/mistral-7b-instruct:free
+   :FREE_MISTRAL: openrouter/mistralai/mistral-small-3.1-24b-instruct:free
    :FREE_QWEN_CODER: openrouter/qwen/qwen-2.5-coder-7b-instruct:free
-   :FREE_ZEPHYR: openrouter/huggingfaceh4/zephyr-7b-beta:free
-   :FREE_OPENCHAT: openrouter/openchat/openchat-7b:free
+   :FREE_QWEN: openrouter/qwen/qwen3-4b:free
+   :FREE_DEEPSEEK: openrouter/deepseek/deepseek-r1-0528:free
    :END:
 
 ** model_routing
@@ -1574,28 +1574,28 @@ export async function registerRoutes(
    :END:
 *** research
     :PROPERTIES:
-    :PRIMARY: openrouter/huggingfaceh4/zephyr-7b-beta:free
-    :FALLBACK: openrouter/meta-llama/llama-3.1-8b-instruct:free
+    :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
+    :FALLBACK: openrouter/google/gemma-3-4b-it:free
     :END:
 *** code
     :PROPERTIES:
     :PRIMARY: openrouter/qwen/qwen-2.5-coder-7b-instruct:free
-    :FALLBACK: openrouter/mistralai/mistral-7b-instruct:free
+    :FALLBACK: openrouter/meta-llama/llama-3.1-8b-instruct:free
     :END:
 *** extraction
     :PROPERTIES:
     :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
-    :FALLBACK: openrouter/mistralai/mistral-7b-instruct:free
+    :FALLBACK: openrouter/mistralai/mistral-small-3.1-24b-instruct:free
     :END:
 *** reasoning
     :PROPERTIES:
     :PRIMARY: openrouter/google/gemma-3-4b-it:free
-    :FALLBACK: openrouter/openchat/openchat-7b:free
+    :FALLBACK: openrouter/qwen/qwen3-4b:free
     :END:
 *** general
     :PROPERTIES:
     :PRIMARY: openrouter/meta-llama/llama-3.1-8b-instruct:free
-    :FALLBACK: openrouter/mistralai/mistral-7b-instruct:free
+    :FALLBACK: openrouter/google/gemma-3-4b-it:free
     :END:
 
 ** channels
