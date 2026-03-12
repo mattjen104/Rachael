@@ -35,6 +35,37 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  // ── Seed/sync org files from bundled seed (for production deployments) ──
+  try {
+    const fs = await import("fs");
+    const path = await import("path");
+    const dir = typeof __dirname !== "undefined" ? __dirname : import.meta.dirname;
+    const seedPath = path.default.join(dir, "seed-org-files.json");
+    if (fs.default.existsSync(seedPath)) {
+      const seedData = JSON.parse(fs.default.readFileSync(seedPath, "utf-8"));
+      const existingFiles = await storage.getOrgFiles();
+      if (existingFiles.length === 0) {
+        for (const f of seedData.files) {
+          await storage.createOrgFile({ name: f.name, content: f.content });
+        }
+        console.log(`[seed] Seeded ${seedData.files.length} org files into empty database`);
+      } else {
+        for (const seedFile of seedData.files) {
+          const existing = existingFiles.find(e => e.name === seedFile.name);
+          if (!existing) {
+            await storage.createOrgFile({ name: seedFile.name, content: seedFile.content });
+            console.log(`[seed] Created missing org file: ${seedFile.name}`);
+          } else if (existing.content !== seedFile.content) {
+            await storage.updateOrgFileContent(existing.id, seedFile.content);
+            console.log(`[seed] Updated org file: ${seedFile.name} (${existing.content.length} -> ${seedFile.content.length} bytes)`);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[seed] Failed to seed org files:", e);
+  }
+
   // ── Org Files ──────────────────────────────────────────────
 
   app.get("/api/org-files", async (_req, res) => {

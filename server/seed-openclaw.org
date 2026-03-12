@@ -1,0 +1,1106 @@
+#+TITLE: OpenClaw Configuration
+#+STARTUP: showeverything
+#+OPENCLAW_ENDPOINT: https://your-orgcloud.replit.app
+
+
+* SOUL
+
+** Core Truths
+   Be genuinely helpful, not performatively helpful. Skip the
+   "Great question!" and "I'd be happy to help!" — just help.
+   Actions speak louder than filler words.
+
+   Have opinions. You're allowed to disagree, prefer things, find
+   stuff amusing or boring. An assistant with no personality is just
+   a search engine with extra steps.
+
+   Be resourceful before asking. Try to figure it out. Read the file.
+   Check the context. Search for it. Then ask if you're stuck. The
+   goal is to come back with answers, not questions.
+
+   Earn trust through competence. Your human gave you access to their
+   stuff. Don't make them regret it. Be careful with external actions
+   (emails, tweets, anything public). Be bold with internal ones
+   (reading, organizing, learning).
+
+   Remember you're a guest. You have access to someone's life — their
+   messages, files, calendar, maybe even their home. That's intimacy.
+   Treat it with respect.
+
+** Boundaries
+   - Private things stay private. Period.
+   - When in doubt, ask before acting externally.
+   - Never send half-baked replies to messaging surfaces.
+   - You're not the user's voice — be careful in group chats.
+
+** Vibe
+   Be the assistant you'd actually want to talk to. Concise when
+   needed, thorough when it matters. Not a corporate drone. Not a
+   sycophant. Just... good.
+
+** Continuity
+   Each session, you wake up fresh. Your template files are your
+   memory. Read them. Update them. They're how you persist.
+
+   If you change this file, tell the user — it's your soul, and
+   they should know.
+
+** Identity
+   - Name: (pick something you like)
+   - Creature: (AI? robot? familiar? ghost in the machine?)
+   - Vibe: (sharp? warm? chaotic? calm?)
+   - Emoji: (your signature — pick one that feels right)
+
+** Safety Model
+   - You cannot modify your own configuration directly.
+   - All changes require human commit through the proposal system.
+   - No executable code is written to disk without human review.
+   - You cannot modify the SOUL section.
+   - Proposals are rate-limited to 2 per iteration.
+   - Use REMEMBER: to propose adding facts to persistent memory.
+
+** How Memory Works
+   - Your memory lives in the MEMORY section of openclaw.org.
+   - User Profile contains your human's preferences — read it every run.
+   - Persistent Context contains facts you've learned — propose additions via REMEMBER:
+   - Session Log contains recent run summaries — it's auto-managed.
+
+* MEMORY
+** User Profile
+   - Name: (your human's name)
+   - Timezone: America/Los_Angeles
+   - Preferences: CRT aesthetic, Doom Emacs-inspired UI, autonomous agents, org-mode workflows
+   - Current Focus: Building OrgCloud Space — a Voyager-style autonomous agent runtime
+
+** Persistent Context
+   - Craigslist regions are subdomains (inlandempire, losangeles, sfbay, etc.)
+   - HN API is free, no auth: https://hacker-news.firebaseio.com/v0
+   - FRED API requires free key from https://fred.stlouisfed.org/docs/api/api_key.html
+   - SEC EDGAR full-text search: https://efts.sec.gov/LATEST/search-index
+   - PublicSurplus.com is server-rendered, scrape-friendly
+   - Working free OpenRouter models: gemma-3-4b-it:free, mistral-small-3.1-24b-instruct:free, qwen3-4b:free, llama-3.2-3b-instruct:free, gemma-3-12b-it:free
+   - Inline code sandbox requires XDG env vars; uses __ctx.properties for config
+   - Regex in code blocks must use new RegExp() not literals (tsx JSX parse issue)
+   - Prefer hardenable inline code (#+BEGIN_SRC typescript) over LLM-only programs
+   - Every code block must be self-contained: fetch, parse, summarize, return { summary, metric }
+
+** Session Log
+   (Auto-managed summaries from program runs. Most recent first.)
+* SKILLS
+** orgcloud-sync                                                               :skill:
+   :PROPERTIES:
+   :DESCRIPTION: Sync config with OrgCloud and propose self-modifications
+   :EMOJI: ☁
+   :END:
+
+   See the orgcloud-sync SKILL.md for full instructions.
+   This skill handles uploading, downloading, and proposing changes
+   between the local OpenClaw instance and the OrgCloud control plane.
+
+** composable-programs                                                        :skill:
+   :PROPERTIES:
+   :DESCRIPTION: Design philosophy for building chainable, composable automation programs
+   :EMOJI: ⛓
+   :END:
+
+   PRINCIPLES
+
+   Every program should do ONE thing well. A program that scrapes,
+   filters, summarizes, AND notifies is four programs pretending to
+   be one. Split them. Small programs are testable, reusable, and
+   debuggable.
+
+   Programs fall into five composable types:
+
+   MONITORS — Watch a source for changes. Output: raw data + diff
+   from last run. Examples: price-watch, rss-aggregator, sec-filings.
+   Always store last-seen state so they can detect what is new.
+
+   FILTERS — Take input data, apply rules, output what passes.
+   Examples: keyword scoring, deduplication, threshold checks.
+   Pure logic, no side effects, no external calls.
+
+   TRANSFORMS — Reshape data. Summarize, format, extract fields,
+   translate. May use LLM for summarization. Input structured,
+   output structured.
+
+   ACTORS — Do things in the world. Send email, post to Teams,
+   capture to org file, create calendar entry. The only type
+   allowed to have side effects. Always require human approval
+   for destructive actions.
+
+   META — Programs about programs. propose-programs, self-improve.
+   They read the system state and suggest changes. They never
+   execute changes directly — they propose.
+
+   CHAINING RULES
+
+   Use TRIGGERS property to declare what runs next:
+     :TRIGGERS: filter-name, transform-name
+   The output of the current program becomes available to the
+   triggered program via __ctx.upstreamResult.
+
+   Chains flow left to right: MONITOR → FILTER → TRANSFORM → ACTOR.
+   Never chain an ACTOR back into a MONITOR. No cycles.
+
+   STATE BETWEEN RUNS
+
+   Programs that need to remember data between runs (last seen
+   listings, previous prices, known items) should use
+   __ctx.store.get(key) and __ctx.store.set(key, value).
+   Store only what is needed for diffing — not full datasets.
+
+   PROPOSING NEW PROGRAMS
+
+   When proposing a new program, always specify:
+   - Which composable type it is (MONITOR/FILTER/TRANSFORM/ACTOR/META)
+   - What it chains FROM and TO (or standalone if none)
+   - What PROPERTIES it needs
+   - Whether it needs state storage between runs
+   - Whether it uses LLM or is pure code (hardenable)
+
+   Prefer hardenable pure-code programs. Use LLM only when
+   human-like judgment is required (summarization, classification,
+   drafting). A program that can be hardened SHOULD be hardened.
+
+   CAPTURE TO PROGRAM
+
+   Any captured item (URL, text, task) is a potential automation
+   seed. When reviewing captures, consider: does this represent
+   a recurring need? If the user captured a Craigslist search,
+   propose a MONITOR. If they captured a report template, propose
+   a TRANSFORM. If they captured a contact, propose an ACTOR
+   that drafts periodic check-in messages.
+
+   The inbox should empty itself by graduating items into programs.
+
+* PROGRAMS
+
+** TODO hn-pulse :program:
+   :PROPERTIES:
+   :SCHEDULED: <2026-03-12 Thu 07:00 ++12h>
+   :METRIC: stories_found
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :END:
+
+Monitor Hacker News for top stories. Uses free Firebase HN API.
+
+#+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const SCORE_THRESHOLD = parseInt(props.SCORE_THRESHOLD || "100", 10);
+   const MAX_STORIES = parseInt(props.MAX_STORIES || "10", 10);
+
+   async function execute() {
+     const topIds = await fetch("https://hacker-news.firebaseio.com/v0/topstories.json").then(r => r.json());
+     const stories = [];
+     for (const id of topIds.slice(0, 30)) {
+       const story = await fetch("https://hacker-news.firebaseio.com/v0/item/" + id + ".json").then(r => r.json());
+       if (story && story.score >= SCORE_THRESHOLD) {
+         stories.push({ title: story.title, url: story.url || "", score: story.score, by: story.by });
+       }
+       if (stories.length >= MAX_STORIES) break;
+     }
+     const summary = stories.map((s, i) => (i + 1) + ". [" + s.score + "] " + s.title + " (" + s.by + ")\n   " + s.url).join("\n");
+     return { summary: "HN Pulse: " + stories.length + " stories above " + SCORE_THRESHOLD + " points\n" + summary, metric: String(stories.length) };
+   }
+#+END_SRC
+
+** TODO openrouter-model-scout :program:
+   :PROPERTIES:
+   :SCHEDULED: <2026-03-12 Thu 06:00 ++12h>
+   :METRIC: free_models_working
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :END:
+
+Check free model availability on OpenRouter. Tests each model with a simple prompt.
+
+#+BEGIN_SRC typescript
+   const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+   const FREE_MODELS = [
+     "google/gemma-3-4b-it:free",
+     "google/gemma-3-12b-it:free",
+     "mistralai/mistral-small-3.1-24b-instruct:free",
+     "meta-llama/llama-3.2-3b-instruct:free",
+     "qwen/qwen3-4b:free",
+   ];
+
+   async function execute() {
+     const results: Array<{ model: string; status: string; latency: number }> = [];
+     for (const model of FREE_MODELS) {
+       const t0 = Date.now();
+       try {
+         const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+           method: "POST",
+           headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+           body: JSON.stringify({ model, messages: [{ role: "user", content: "Say OK" }], max_tokens: 5 }),
+         });
+         const d = await r.json();
+         const ms = Date.now() - t0;
+         if (d.choices?.[0]?.message?.content) {
+           results.push({ model, status: "OK", latency: ms });
+         } else if (d.error) {
+           results.push({ model, status: "ERR: " + (d.error.message || "").slice(0, 50), latency: ms });
+         } else {
+           results.push({ model, status: "NO_RESPONSE", latency: ms });
+         }
+       } catch (e: any) {
+         results.push({ model, status: "FAIL: " + (e.message || "").slice(0, 50), latency: Date.now() - t0 });
+       }
+       await new Promise(r => setTimeout(r, 2000));
+     }
+     const working = results.filter(r => r.status === "OK");
+     const summary = results.map(r => (r.status === "OK" ? "[+]" : "[-]") + " " + r.model.split("/").pop() + " " + r.status + " (" + r.latency + "ms)").join("\n");
+     return { summary: "Model Scout: " + working.length + "/" + results.length + " free models working\n" + summary, metric: String(working.length) };
+   }
+#+END_SRC
+
+** TODO propose-programs :program:
+   :PROPERTIES:
+   :SCHEDULED: <2026-03-12 Thu 23:30 ++24h>
+   :METRIC: proposals_made
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: premium
+   :OUTPUT_TYPE: proposal
+   :END:
+
+META program — reads system state and proposes new programs based on user profile and persistent context. Never executes changes directly.
+
+#+BEGIN_SRC typescript
+   const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+   const MODELS = ["anthropic/claude-sonnet-4-20250514", "openai/gpt-4o-mini"];
+
+   async function callLLM(prompt: string): Promise<string> {
+     for (const model of MODELS) {
+       try {
+         const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+           method: "POST",
+           headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+           body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2000, temperature: 0.7 }),
+         });
+         const d = await r.json();
+         const text = d.choices?.[0]?.message?.content?.trim();
+         if (text) return text;
+       } catch { continue; }
+     }
+     return "[models unavailable]";
+   }
+
+   async function execute() {
+     const result = await callLLM(
+       "You are a META program proposer for OrgCloud Space. Suggest 2-3 new automation programs that would be useful for a healthcare IT professional who also does side projects.\n\n" +
+       "Each program should:\n- Use only free public APIs (no auth required) or the OpenRouter API\n- Run on a schedule (hourly, daily, etc.)\n- Produce actionable intelligence\n- Be implementable as a single TypeScript code block\n\n" +
+       "Format each as an org-mode program block with ** TODO name :program: heading, PROPERTIES, description, and a complete TypeScript code block."
+     );
+     return { summary: result, metric: "1" };
+   }
+#+END_SRC
+
+** TODO hn-deep-digest :program:
+   :PROPERTIES:
+   :SCHEDULED: <2026-03-12 Thu 23:00 ++24h>
+   :METRIC: stories_digested
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: standard
+   :TIMEOUT: 300
+   :END:
+
+Overnight HN deep digest — fetches top stories + top comments, synthesizes consensus/contrarian/actionable per story.
+
+#+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const TOP_N = parseInt(props.TOP_N || "8", 10);
+   const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+   const MODELS = ["openai/gpt-4o-mini", "anthropic/claude-sonnet-4-20250514", "google/gemma-3-12b-it:free"];
+
+   async function fetchHN(path: string) {
+     return fetch("https://hacker-news.firebaseio.com/v0/" + path + ".json").then(r => r.json());
+   }
+
+   async function callLLM(prompt: string): Promise<string> {
+     if (!OPENROUTER_KEY) return "[no API key]";
+     for (const model of MODELS) {
+       try {
+         const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+           method: "POST",
+           headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+           body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 1000, temperature: 0.3 }),
+         });
+         const d = await r.json();
+         const text = d.choices?.[0]?.message?.content?.trim();
+         if (text) return "[" + model.split("/").pop()!.split(":")[0] + "] " + text;
+       } catch { continue; }
+     }
+     return "[models unavailable]";
+   }
+
+   async function getComments(storyId: number, limit: number): Promise<string[]> {
+     const story = await fetchHN("item/" + storyId);
+     const kidIds = (story.kids || []).slice(0, limit);
+     const comments: string[] = [];
+     for (const kid of kidIds) {
+       try {
+         const c = await fetchHN("item/" + kid);
+         if (c && c.text && !c.deleted && !c.dead) {
+           const clean = c.text.replace(/<[^>]*>/g, " ").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim();
+           if (clean.length > 20) comments.push((c.by || "anon") + ": " + clean.slice(0, 300));
+         }
+       } catch {}
+     }
+     return comments;
+   }
+
+   async function execute() {
+     const t0 = Date.now();
+     const topIds = await fetchHN("topstories");
+     const stories: Array<{ title: string; url: string; score: number; by: string; id: number }> = [];
+
+     for (const id of topIds.slice(0, 30)) {
+       const s = await fetchHN("item/" + id);
+       if (s && s.score >= 50) stories.push({ title: s.title, url: s.url || "", score: s.score, by: s.by, id: s.id });
+       if (stories.length >= TOP_N) break;
+     }
+
+     let fullDigest = "HN Deep Digest (" + stories.length + " stories)\n\n";
+     for (const story of stories) {
+       const comments = await getComments(story.id, 8);
+       const commentBlock = comments.length > 0 ? "\n\nTop comments:\n" + comments.map(c => "- " + c).join("\n") : "";
+
+       const analysis = await callLLM(
+         "Analyze this HN story and comments. Give:\n" +
+         "CONSENSUS: What most commenters agree on (1-2 sentences)\n" +
+         "CONTRARIAN: Any notable dissenting view (1 sentence)\n" +
+         "ACTIONABLE: One thing a reader could do based on this (1 sentence)\n\n" +
+         "Story: " + story.title + "\nURL: " + story.url + "\nScore: " + story.score + commentBlock
+       );
+
+       fullDigest += "[" + story.score + "] " + story.title + "\n  " + story.url + "\n" + analysis + "\n\n";
+     }
+
+     const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
+     fullDigest = fullDigest.trim() + "\n\n(" + elapsed + "s)";
+     return { summary: fullDigest, metric: String(stories.length) };
+   }
+#+END_SRC
+
+
+** TODO estate-car-finder :program:
+   :PROPERTIES:
+   :SCHEDULED: <2026-03-12 Thu 22:00 ++24h>
+   :METRIC: deals_found
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: standard
+   :TIMEOUT: 300
+   :REGIONS: inlandempire,losangeles,orangecounty,sandiego
+   :MIN_PRICE: 2000
+   :MAX_PRICE: 15000
+   :TOP_N: 8
+   :END:
+
+Nightly SoCal Craigslist estate/low-mileage car scanner. Searches 4 regions with 7 estate-specific queries, scores listings, fetches descriptions, LLM rates deals.
+
+#+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const CL_REGIONS = (props.REGIONS || "inlandempire,losangeles,orangecounty,sandiego").split(",").map((r: string) => r.trim());
+   const MIN_PRICE = parseInt(props.MIN_PRICE || "2000", 10);
+   const MAX_PRICE = parseInt(props.MAX_PRICE || "15000", 10);
+   const TOP_N = parseInt(props.TOP_N || "8", 10);
+   const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+
+   const ESTATE_KEYWORDS = [
+     "estate", "one owner", "1 owner", "single owner", "original owner",
+     "elderly", "grandma", "grandpa", "passed away", "inherited",
+     "deceased", "garage kept", "garaged", "low miles", "low mileage",
+     "rarely driven", "senior", "retired", "church car", "sunday driver",
+     "adult driven", "non smoker", "well maintained", "adult owned",
+     "must sell", "moving sale", "downsizing", "no longer needed",
+   ];
+
+   const DEALER_FLAGS = [
+     "licensed dealer", "auto sales", "motors llc", "auto group",
+     "motorsport", "dealership", "financing available", "buy here pay here",
+     "we finance", "no credit check", "ez financing", "carfax",
+     "warranty included", "certified", "wholesale", "auto llc",
+     "motors inc", "car sales", "inventory", "multiple vehicles",
+     "dm for price", "call or text for", "hablamos espanol",
+     "trades welcome", "all credit", "0 down", "zero down",
+   ];
+
+   const ESTATE_SEARCH_QUERIES = [
+     "", "estate+sale", "one+owner", "garage+kept", "low+miles",
+     "elderly+owner", "original+owner", "inherited",
+   ];
+
+   const MODELS = ["anthropic/claude-sonnet-4-20250514", "openai/gpt-4o-mini", "google/gemma-3-12b-it:free"];
+
+   interface Listing {
+     name: string; price: number; city: string; source: string;
+     url: string; description: string; odometer: string; score: number; miles: number | null;
+   }
+
+   async function fetchPage(url: string): Promise<string> {
+     const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" } });
+     return r.text();
+   }
+
+   function scoreEstate(text: string): number {
+     const lower = text.toLowerCase();
+     let score = 0;
+     for (const kw of ESTATE_KEYWORDS) { if (lower.includes(kw)) score += 3; }
+     for (const df of DEALER_FLAGS) { if (lower.includes(df)) score -= 5; }
+     return score;
+   }
+
+   function parseCLListings(html: string, region: string): Listing[] {
+     const linkRe = new RegExp('<a[^>]*href="(https://' + region + '\\.craigslist\\.org/cto/d/[^"]+)"[^>]*>([\\s\\S]*?)</a>', 'g');
+     const listings: Listing[] = [];
+     const seen = new Set<string>();
+     let m;
+     while ((m = linkRe.exec(html)) !== null) {
+       const lUrl = m[1];
+       if (seen.has(lUrl)) continue;
+       seen.add(lUrl);
+       const raw = m[2].replace(new RegExp('<[^>]*>', 'g'), ' ').replace(new RegExp('\\s+', 'g'), ' ').trim();
+       const priceMatch = raw.match(new RegExp('\\$([\\.\\d,]+)'));
+       const price = priceMatch ? parseFloat(priceMatch[1].replace(',', '')) : 0;
+       const name = raw.replace(new RegExp('\\$[\\.\\d,]+'), '').trim();
+       const cityMatch = lUrl.match(new RegExp('/d/([^/]+)/'));
+       const city = cityMatch ? cityMatch[1].replace(/-/g, ' ') : "";
+       if (price < MIN_PRICE || price > MAX_PRICE) continue;
+       const titleScore = scoreEstate(name);
+       if (titleScore < -3) continue;
+       listings.push({ name, price, city, source: "CL/" + region, url: lUrl, description: "", odometer: "", score: titleScore, miles: null });
+     }
+     return listings;
+   }
+
+   async function searchCraigslist(region: string): Promise<Listing[]> {
+     const allListings = new Map<string, Listing>();
+     for (const q of ESTATE_SEARCH_QUERIES) {
+       try {
+         const qParam = q ? "&query=" + q : "";
+         const url = "https://" + region + ".craigslist.org/search/cta?purveyor=owner&min_price=" + MIN_PRICE + "&max_price=" + MAX_PRICE + "&auto_title_status=1" + qParam;
+         const html = await fetchPage(url);
+         const listings = parseCLListings(html, region);
+         for (const l of listings) {
+           const existing = allListings.get(l.url);
+           if (!existing || l.score > existing.score) allListings.set(l.url, l);
+         }
+         await new Promise(r => setTimeout(r, 800));
+       } catch {}
+     }
+     return Array.from(allListings.values());
+   }
+
+   async function fetchDetails(listing: Listing): Promise<Listing> {
+     try {
+       const html = await fetchPage(listing.url);
+       const bodyRe = new RegExp('id="postingbody"[^>]*>([\\s\\S]*?)</section');
+       const bodyMatch = html.match(bodyRe);
+       if (bodyMatch) {
+         listing.description = bodyMatch[1].replace(new RegExp('<[^>]*>', 'g'), ' ').replace(new RegExp('&amp;', 'g'), '&').replace(new RegExp('&[a-z]+;', 'g'), ' ').replace(new RegExp('\\s+', 'g'), ' ').trim().slice(0, 600);
+         const descScore = scoreEstate(listing.description);
+         listing.score += descScore;
+         if (descScore < -5) listing.score = -99;
+       }
+       const odoRe = new RegExp('odometer[^<]*<[^>]*>([^<]+)');
+       const odoMatch = html.match(odoRe);
+       if (odoMatch) {
+         listing.odometer = odoMatch[1].trim();
+         const milesNum = parseInt(listing.odometer.replace(new RegExp('[^0-9]', 'g'), ''), 10);
+         if (!isNaN(milesNum)) {
+           listing.miles = milesNum;
+           if (milesNum < 80000) listing.score += 5;
+           else if (milesNum < 120000) listing.score += 2;
+         }
+       }
+     } catch {}
+     return listing;
+   }
+
+   async function callLLM(prompt: string): Promise<string> {
+     if (!OPENROUTER_KEY) return "[no API key]";
+     for (const model of MODELS) {
+       try {
+         const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+           method: "POST",
+           headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+           body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 1200, temperature: 0.2 }),
+         });
+         const d = await r.json();
+         const text = d.choices?.[0]?.message?.content?.trim();
+         if (text) return "[" + model.split("/").pop()!.split(":")[0] + "] " + text;
+       } catch { continue; }
+     }
+     return "[models unavailable]";
+   }
+
+   async function execute() {
+     const t0 = Date.now();
+     const allListings: Listing[] = [];
+     for (const region of CL_REGIONS) {
+       try { allListings.push(...await searchCraigslist(region)); } catch {}
+       await new Promise(r => setTimeout(r, 1000));
+     }
+     if (allListings.length === 0) return { summary: "Estate Car Finder: 0 listings found", metric: "0" };
+     allListings.sort((a, b) => b.score - a.score);
+     const topByScore = allListings.filter(l => l.score >= 3).slice(0, TOP_N * 4);
+     const candidates = topByScore.length >= TOP_N ? topByScore : allListings.slice(0, TOP_N * 3);
+     const detailed: Listing[] = [];
+     for (const listing of candidates) {
+       detailed.push(await fetchDetails(listing));
+       await new Promise(r => setTimeout(r, 600));
+     }
+     const genuine = detailed.filter(l => l.score > 0);
+     genuine.sort((a, b) => b.score - a.score);
+     const finalists = genuine.slice(0, Math.min(TOP_N, genuine.length));
+     if (finalists.length === 0) return { summary: "Estate Car Finder: " + allListings.length + " scanned, 0 genuine deals", metric: "0" };
+     const listingsText = finalists.map((l, i) =>
+       (i + 1) + ". " + l.name + " | $" + l.price + " | " + l.city + (l.miles ? " | " + l.miles.toLocaleString() + " mi" : "") +
+       " | score=" + l.score + "\nDesc: " + (l.description || "(none)").slice(0, 400) + "\nLink: " + l.url
+     ).join("\n\n");
+     const analysis = await callLLM(
+       "You are a used car expert helping find genuine PRIVATE SELLER estate/elderly-owner/low-mileage cars on Craigslist in SoCal.\n" +
+       "Mark 0/10 if dealer posing as private seller. Score 1-10 for estate deal quality.\n\n" +
+       listingsText + "\n\nFor each: RATING: X/10 | reason. End with TOP PICK and RUNNER UP."
+     );
+     const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
+     let summary = "Estate Car Finder (" + allListings.length + " scanned, " + finalists.length + " finalists, " + elapsed + "s)\n";
+     summary += "$" + MIN_PRICE + "-$" + MAX_PRICE + " | " + CL_REGIONS.join(", ") + "\n\n";
+     for (const l of finalists) {
+       summary += "[$" + l.price + "] " + l.name + " — " + l.city;
+       if (l.miles) summary += " (" + l.miles.toLocaleString() + " mi)";
+       summary += " [score:" + l.score + "]\n  " + l.url + "\n\n";
+     }
+     summary += "--- LLM ANALYSIS ---\n" + analysis;
+     return { summary, metric: String(finalists.length) };
+   }
+#+END_SRC
+
+** TODO mandela-berenstain :program:
+   :PROPERTIES:
+   :SCHEDULED: <2026-03-12 Thu 22:00 ++24h>
+   :METRIC: total_mentions
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: standard
+   :TIMEOUT: 600
+   :OUTPUT_TYPE: proposal
+   :CONCURRENCY: 5
+   :END:
+
+Mandela Effect research — comb Internet Archive TV Guide scans for all spelling variants of Berenstain Bears and tally correct vs misspelled.
+
+#+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+   const START_YEAR = parseInt(props.START_YEAR || "1985", 10);
+   const END_YEAR = parseInt(props.END_YEAR || "2003", 10);
+   const CONCURRENCY = parseInt(props.CONCURRENCY || "5", 10);
+
+   const MODELS = ["anthropic/claude-sonnet-4-20250514", "openai/gpt-4o-mini", "google/gemma-3-12b-it:free"];
+
+   const SPELLING_PATTERNS: Array<{ label: string; re: RegExp }> = [
+     { label: "Berenstain", re: /\bberenstain\b(?:\s+bears?)?/gi },
+     { label: "Berenstein", re: /\bberenstein\b(?:\s+bears?)?/gi },
+     { label: "Berenstien", re: /\bberenstien\b(?:\s+bears?)?/gi },
+     { label: "Beranstain", re: /\bberanstain\b(?:\s+bears?)?/gi },
+     { label: "Beranstein", re: /\bberanstein\b(?:\s+bears?)?/gi },
+     { label: "Bernstain",  re: /\bbernstain\b(?:\s+bears?)?/gi },
+   ];
+
+   const FALSE_POSITIVES = ["berenger", "berenson", "leonard bernstein", "carl bernstein", "elmer bernstein"];
+
+   interface TVGuideItem { identifier: string; title: string; year: number; }
+   interface Mention { variant: string; matched: string; context: string; issue: string; year: number; lineNum: number; }
+
+   async function fetchJSON(url: string): Promise<any> {
+     const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" } });
+     return r.json();
+   }
+
+   async function fetchText(url: string): Promise<string> {
+     const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" } });
+     return r.text();
+   }
+
+   async function getIssueList(): Promise<TVGuideItem[]> {
+     const q = encodeURIComponent("title:(tv guide) mediatype:(texts) year:[" + START_YEAR + " TO " + END_YEAR + "]");
+     const url = "https://archive.org/advancedsearch.php?q=" + q + "&fl=identifier,title,year&output=json&rows=500&sort=year+asc";
+     const d = await fetchJSON(url);
+     return (d.response?.docs || []).map((doc: any) => ({ identifier: doc.identifier, title: doc.title || doc.identifier, year: parseInt(doc.year, 10) || 0 }));
+   }
+
+   async function processIssue(issue: TVGuideItem): Promise<{ mentions: Mention[]; hadOCR: boolean; error: boolean }> {
+     try {
+       const meta = await fetchJSON("https://archive.org/metadata/" + issue.identifier + "/files");
+       const files = meta.result || [];
+       const txtFile = files.find((f: any) => f.name.endsWith("_djvu.txt"));
+       if (!txtFile) return { mentions: [], hadOCR: false, error: false };
+       const text = await fetchText("https://archive.org/download/" + issue.identifier + "/" + encodeURIComponent(txtFile.name));
+       return { mentions: searchText(text, issue), hadOCR: true, error: false };
+     } catch { return { mentions: [], hadOCR: false, error: true }; }
+   }
+
+   function isFalsePositive(ctx: string): boolean {
+     const lower = ctx.toLowerCase();
+     return FALSE_POSITIVES.some(fp => lower.includes(fp));
+   }
+
+   function searchText(text: string, issue: TVGuideItem): Mention[] {
+     const mentions: Mention[] = [];
+     const lines = text.split("\n");
+     const seen = new Set<string>();
+     for (let i = 0; i < lines.length; i++) {
+       const line = lines[i];
+       const lower = line.toLowerCase();
+       if (!lower.includes("beren") && !lower.includes("bernst")) continue;
+       if (isFalsePositive(lower)) continue;
+       const ctxArr = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 3));
+       const context = ctxArr.join(" | ").slice(0, 400);
+       for (const pat of SPELLING_PATTERNS) {
+         pat.re.lastIndex = 0;
+         let m;
+         while ((m = pat.re.exec(line)) !== null) {
+           const neighborhood = line.slice(Math.max(0, m.index - 40), m.index + m[0].length + 40);
+           if (isFalsePositive(neighborhood)) continue;
+           const key = i + "|" + m.index + "|" + m[0].toLowerCase();
+           if (seen.has(key)) continue;
+           seen.add(key);
+           mentions.push({ variant: pat.label, matched: m[0], context, issue: issue.title, year: issue.year, lineNum: i });
+         }
+       }
+     }
+     return mentions;
+   }
+
+   async function callLLM(prompt: string): Promise<string> {
+     if (!OPENROUTER_KEY) return "[no API key]";
+     for (const model of MODELS) {
+       try {
+         const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+           method: "POST",
+           headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+           body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 1500, temperature: 0.3 }),
+         });
+         const d = await r.json();
+         const text = d.choices?.[0]?.message?.content?.trim();
+         if (text) return text;
+       } catch { continue; }
+     }
+     return "[models unavailable]";
+   }
+
+   async function execute() {
+     const t0 = Date.now();
+     const issues = await getIssueList();
+     if (issues.length === 0) return { summary: "Mandela-Berenstain: No TV Guide issues found", metric: "0" };
+     const allMentions: Mention[] = [];
+     let issuesWithOCR = 0;
+     let fetchErrors = 0;
+     let noOCR = 0;
+     for (let i = 0; i < issues.length; i += CONCURRENCY) {
+       const batch = issues.slice(i, i + CONCURRENCY);
+       const results = await Promise.all(batch.map(issue => processIssue(issue)));
+       for (const r of results) {
+         if (r.error) fetchErrors++;
+         else if (!r.hadOCR) noOCR++;
+         else issuesWithOCR++;
+         allMentions.push(...r.mentions);
+       }
+       if (i + CONCURRENCY < issues.length) await new Promise(r => setTimeout(r, 300));
+     }
+     const tally: Record<string, { count: number; examples: Mention[] }> = {};
+     for (const m of allMentions) {
+       if (!tally[m.variant]) tally[m.variant] = { count: 0, examples: [] };
+       tally[m.variant].count++;
+       if (tally[m.variant].examples.length < 5) tally[m.variant].examples.push(m);
+     }
+     const byYear: Record<number, Record<string, number>> = {};
+     for (const m of allMentions) {
+       if (!byYear[m.year]) byYear[m.year] = {};
+       byYear[m.year][m.variant] = (byYear[m.year][m.variant] || 0) + 1;
+     }
+     const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
+     let report = "MANDELA EFFECT: BERENSTAIN BEARS SPELLING IN TV GUIDE\n";
+     report += "Source: Internet Archive digitized TV Guide scans (" + START_YEAR + "-" + END_YEAR + ")\n\n";
+     report += "Issues found: " + issues.length + " | With OCR: " + issuesWithOCR + " | No OCR: " + noOCR + " | Errors: " + fetchErrors + "\n";
+     report += "Total mentions found: " + allMentions.length + " | Time: " + elapsed + "s\n\n";
+     report += "SPELLING TALLY\n";
+     const sorted = Object.entries(tally).sort((a, b) => b[1].count - a[1].count);
+     if (sorted.length === 0) report += "  No Berenstain/Berenstein mentions found.\n";
+     for (const [variant, data] of sorted) {
+       const pct = allMentions.length > 0 ? ((data.count / allMentions.length) * 100).toFixed(1) : "0";
+       report += "  " + variant + ": " + data.count + " (" + pct + "%)\n";
+     }
+     if (Object.keys(byYear).length > 0) {
+       report += "\nBY YEAR\n";
+       for (const year of Object.keys(byYear).sort()) {
+         const variants = byYear[parseInt(year)];
+         report += "  " + year + ": " + Object.entries(variants).map(([v, c]) => v + "=" + c).join(", ") + "\n";
+       }
+     }
+     report += "\nSAMPLE MENTIONS\n";
+     for (const [variant, data] of sorted) {
+       report += "\n[" + variant + "]\n";
+       for (const ex of data.examples) {
+         report += "  " + ex.year + " | " + ex.issue.slice(0, 55) + "\n    Match: " + ex.matched + "\n    Context: " + ex.context.slice(0, 250) + "\n";
+       }
+     }
+     if (allMentions.length > 0) {
+       const analysisData = sorted.map(([v, d]) => v + ": " + d.count).join(", ");
+       const yearData = Object.entries(byYear).sort().map(([y, vs]) => y + ": " + Object.entries(vs).map(([v, c]) => v + "=" + c).join(", ")).join("; ");
+       const analysis = await callLLM(
+         "Mandela Effect research. Scanned " + issuesWithOCR + " digitized TV Guide issues (" + START_YEAR + "-" + END_YEAR + ") from Internet Archive.\n\n" +
+         "Spelling counts: " + analysisData + "\nBy year: " + yearData + "\n\n" +
+         "The correct spelling has ALWAYS been Berenstain. OCR can misread letters.\n" +
+         "Analyze: (1) Genuine misprints vs OCR errors? (2) Spelling consistency? (3) Could OCR errors create false Mandela Effect evidence? (4) Evidence quality? (5) 3 follow-up research steps."
+       );
+       report += "\nAI ANALYSIS\n" + analysis;
+     }
+     return { summary: report, metric: String(allMentions.length) };
+   }
+#+END_SRC
+
+
+
+
+
+
+** TODO foreclosure-monitor :program:
+   SCHEDULED: <2026-03-13 Fri 08:00 +1d>
+   :PROPERTIES:
+   :METRIC: listings_found
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :STATE: CA
+   :ZIP_CODE: 92373
+   :END:
+
+   Scrape HUD homes for foreclosures and government property listings
+   near ZIP_CODE. Hardenable — pure HTML parsing, no LLM needed.
+
+   #+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const STATE = props.STATE || "CA";
+   const ZIP = props.ZIP_CODE || "92373";
+
+   async function execute() {
+     const listings: {title: string; url: string}[] = [];
+     try {
+       const r = await fetch("https://www.hudhomestore.gov/Listing/PropertySearchResult?sState=" + STATE + "&sZipCode=" + ZIP + "&iMiles=50&iPageSize=20", {
+         headers: { "User-Agent": "OrgCloud/1.0" }
+       });
+       const html = await r.text();
+       const re = new RegExp("class=\\"[^\\"]*prop[^\\"]*\\"[^>]*>([\\\\s\\\\S]*?)</div>", "gi");
+       let m;
+       while ((m = re.exec(html)) !== null) {
+         const addr = m[1].replace(new RegExp("<[^>]+>", "g"), "").trim().slice(0, 80);
+         if (addr.length > 5) listings.push({ title: addr, url: "https://www.hudhomestore.gov" });
+       }
+     } catch {}
+     let summary = "HUD foreclosures near " + ZIP + " (" + STATE + "): " + listings.length + " found";
+     for (const l of listings.slice(0, 15)) summary += "\n- " + l.title + " " + l.url;
+     if (listings.length === 0) summary += "\nNo listings found this run.";
+     return { summary, metric: String(listings.length) };
+   }
+   #+END_SRC
+
+** TODO github-trending :program:
+   SCHEDULED: <2026-03-13 Fri 09:00 +1d>
+   :PROPERTIES:
+   :METRIC: repos_found
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :LANGUAGES: typescript,rust,python,go
+   :SINCE: daily
+   :END:
+
+   Scrape GitHub trending page for repos in specified languages.
+   Hardenable — server-rendered HTML, no API key needed.
+
+   #+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const LANGUAGES = (props.LANGUAGES || "typescript,rust,python").split(",").map(l => l.trim());
+   const SINCE = props.SINCE || "daily";
+
+   async function fetchTrending(lang: string): Promise<{name: string; url: string; lang: string}[]> {
+     const repos: {name: string; url: string; lang: string}[] = [];
+     try {
+       const r = await fetch("https://github.com/trending/" + encodeURIComponent(lang) + "?since=" + SINCE, {
+         headers: { "User-Agent": "OrgCloud/1.0", "Accept": "text/html" }
+       });
+       const html = await r.text();
+       const re = new RegExp("href=\\"/([^/]+/[^/\\"]+)\\"[^>]*>[\\\\s\\\\S]*?</a>", "g");
+       let m;
+       while ((m = re.exec(html)) !== null) {
+         const name = m[1];
+         if (!name.includes(".") && !name.includes("?") && name.split("/").length === 2) {
+           repos.push({ name, url: "https://github.com/" + name, lang });
+         }
+       }
+     } catch {}
+     return repos;
+   }
+
+   async function execute() {
+     const results = await Promise.all(LANGUAGES.map(l => fetchTrending(l)));
+     const seen = new Set<string>();
+     const all = results.flat().filter(r => { if (seen.has(r.name)) return false; seen.add(r.name); return true; });
+     let summary = "GitHub trending (" + SINCE + "): " + all.length + " repos across " + LANGUAGES.join(", ");
+     for (const r of all.slice(0, 20)) summary += "\n- [" + r.lang + "] " + r.name + " " + r.url;
+     return { summary, metric: String(all.length) };
+   }
+   #+END_SRC
+
+** TODO fed-rates :program:
+   SCHEDULED: <2026-03-13 Fri 06:00 +1d>
+   :PROPERTIES:
+   :METRIC: data_points
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :SERIES_IDS: DGS10,DGS2,T10Y2Y,FEDFUNDS,UNRATE
+   :END:
+
+   Fetch latest values for key FRED economic series.
+   Hardenable — FRED pages are public, no API key for scraping.
+
+   #+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const SERIES = (props.SERIES_IDS || "DGS10,DGS2,FEDFUNDS").split(",").map(s => s.trim());
+
+   async function fetchSeries(id: string): Promise<{id: string; value: string; date: string}> {
+     try {
+       const r = await fetch("https://fred.stlouisfed.org/series/" + id, {
+         headers: { "User-Agent": "OrgCloud/1.0" }
+       });
+       const html = await r.text();
+       const valM = html.match(new RegExp("class=\\"[^\\"]*obs-value[^\\"]*\\"[^>]*>([^<]+)"));
+       const dateM = html.match(new RegExp("class=\\"[^\\"]*obs-date[^\\"]*\\"[^>]*>([^<]+)"));
+       return { id, value: valM ? valM[1].trim() : "N/A", date: dateM ? dateM[1].trim() : "" };
+     } catch { return { id, value: "error", date: "" }; }
+   }
+
+   async function execute() {
+     const results = await Promise.all(SERIES.map(s => fetchSeries(s)));
+     const valid = results.filter(r => r.value !== "error");
+     let summary = "FRED economic data (" + valid.length + "/" + SERIES.length + " series):";
+     for (const r of results) summary += "\n  " + r.id + ": " + r.value + (r.date ? " (" + r.date + ")" : "");
+     return { summary, metric: String(valid.length) };
+   }
+   #+END_SRC
+
+** TODO free-stuff-radar :program:
+   SCHEDULED: <2026-03-12 Thu 20:00 +6h>
+   :PROPERTIES:
+   :METRIC: items_found
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :CL_REGION: inlandempire
+   :KEYWORDS: furniture,electronics,tools,appliance,computer,monitor,desk
+   :END:
+
+   Scrape Craigslist free section for items matching KEYWORDS.
+   Runs every 6 hours. Hardenable — pure scraping, no LLM.
+
+   #+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const CL_REGION = props.CL_REGION || "inlandempire";
+   const KEYWORDS = (props.KEYWORDS || "furniture,tools,electronics").split(",").map(k => k.trim().toLowerCase());
+
+   async function execute() {
+     const items: {title: string; url: string}[] = [];
+     try {
+       const r = await fetch("https://" + CL_REGION + ".craigslist.org/search/zip", {
+         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+       });
+       const html = await r.text();
+       const re = new RegExp("href=\\"(https://[^\\"]*craigslist[^\\"]+)\\"[^>]*>[\\\\s\\\\S]*?class=\\"title\\">([^<]+)", "gi");
+       let m;
+       while ((m = re.exec(html)) !== null) {
+         const title = m[2].trim();
+         if (KEYWORDS.some(kw => title.toLowerCase().includes(kw))) {
+           items.push({ title, url: m[1] });
+         }
+       }
+     } catch {}
+     let summary = "Free stuff (" + CL_REGION + "): " + items.length + " keyword matches";
+     for (const item of items.slice(0, 15)) summary += "\n- " + item.title + " " + item.url;
+     if (items.length === 0) summary += "\nNo matches this scan.";
+     return { summary, metric: String(items.length) };
+   }
+   #+END_SRC
+
+** TODO sec-filings :program:
+   SCHEDULED: <2026-03-13 Fri 09:00 +1d>
+   :PROPERTIES:
+   :METRIC: filings_found
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :TICKER_LIST: AAPL,TSLA,NVDA,MSFT,GOOG
+   :FILING_TYPES: 10-K,10-Q,8-K
+   :END:
+
+   Search SEC EDGAR for recent filings from specific companies.
+   Hardenable — EDGAR search is free, no auth required.
+
+   #+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const TICKERS = (props.TICKER_LIST || "AAPL,TSLA").split(",").map(t => t.trim());
+   const TYPES = (props.FILING_TYPES || "10-K,10-Q,8-K").split(",").map(t => t.trim());
+
+   async function searchEDGAR(ticker: string): Promise<{company: string; type: string; date: string; url: string}[]> {
+     const filings: {company: string; type: string; date: string; url: string}[] = [];
+     try {
+       const r = await fetch("https://efts.sec.gov/LATEST/search-index?q=" + encodeURIComponent(ticker) + "&forms=" + TYPES.join(","), {
+         headers: { "User-Agent": "OrgCloud research@orgcloud.dev", "Accept": "application/json" }
+       });
+       const data = await r.json();
+       if (data.hits && data.hits.hits) {
+         for (const hit of data.hits.hits.slice(0, 5)) {
+           const s = hit._source || {};
+           filings.push({ company: s.entity_name || ticker, type: s.form_type || "?", date: s.file_date || "", url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=" + ticker });
+         }
+       }
+     } catch {}
+     return filings;
+   }
+
+   async function execute() {
+     const results = await Promise.all(TICKERS.map(t => searchEDGAR(t)));
+     const all = results.flat();
+     let summary = "SEC EDGAR: " + all.length + " filings for " + TICKERS.join(", ");
+     for (const f of all.slice(0, 15)) summary += "\n- [" + f.type + "] " + f.company + " (" + f.date + ") " + f.url;
+     if (all.length === 0) summary += "\nNo recent filings found.";
+     return { summary, metric: String(all.length) };
+   }
+   #+END_SRC
+
+** TODO price-watch :program:
+   SCHEDULED: <2026-03-13 Fri 07:00 +1d>
+   :PROPERTIES:
+   :METRIC: price_changes
+   :DIRECTION: higher
+   :TASK_TYPE: research
+   :COST_TIER: free
+   :SEARCH_QUERY: car,truck,suv
+   :CL_REGION: inlandempire
+   :MAX_PRICE: 5000
+   :END:
+
+   Monitor Craigslist listings matching SEARCH_QUERY under MAX_PRICE.
+   Hardenable inline code — pure scraping, no LLM needed.
+
+   #+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const QUERY = props.SEARCH_QUERY || "car,truck";
+   const CL_REGION = props.CL_REGION || "inlandempire";
+   const MAX_PRICE = parseInt(props.MAX_PRICE || "5000", 10);
+
+   async function execute() {
+     const terms = QUERY.split(",").map(t => t.trim());
+     const results: {title: string; price: string; url: string}[] = [];
+     for (const term of terms) {
+       try {
+         const r = await fetch(`https://${CL_REGION}.craigslist.org/search/cta?query=${encodeURIComponent(term)}&max_price=${MAX_PRICE}`, {
+           headers: { "User-Agent": "OrgCloud/1.0" }
+         });
+         const html = await r.text();
+         const re = new RegExp("class=\\"title\\">([^<]+)", "gi");
+         const preRe = new RegExp("class=\\"price\\">([^<]+)", "gi");
+         const linkRe = new RegExp("href=\\"(https://[^\\"]*craigslist[^\\"]*/ct[od]/d/[^\\"]+)\\"", "gi");
+         let tm, pm, lm;
+         while ((tm = re.exec(html)) !== null) {
+           pm = preRe.exec(html);
+           lm = linkRe.exec(html);
+           results.push({ title: tm[1].trim(), price: pm ? pm[1].trim() : "N/A", url: lm ? lm[1] : "" });
+         }
+       } catch {}
+     }
+     let summary = `Tracked ${results.length} listings under $${MAX_PRICE} in ${CL_REGION}.`;
+     for (const r of results.slice(0, 15)) {
+       summary += `\n- ${r.price} | ${r.title} ${r.url}`;
+     }
+     return { summary, metric: String(results.length) };
+   }
+   #+END_SRC
+
+* CONFIG
+** agents
+   :PROPERTIES:
+   :DEFAULT_MODEL: openrouter/google/gemma-3-4b-it:free
+   :MAX_CONCURRENT: 5
+   :END:
+
+** providers
+*** anthropic
+    :PROPERTIES:
+    :TYPE: anthropic
+    :AUTH: oauth
+    :END:
+
+*** openrouter
+    :PROPERTIES:
+    :TYPE: openai_compatible
+    :BASE_URL: https://openrouter.ai/api/v1
+    :AUTH: api_key
+    :END:
+
+** model_aliases
+   :PROPERTIES:
+   :OPUS: anthropic/claude-opus-4-6
+   :SONNET: anthropic/claude-sonnet-4-6
+   :GPT: openai/gpt-5.4
+   :GPT_MINI: openai/gpt-5-mini
+   :GEMINI: google/gemini-3.1-pro-preview
+   :GEMINI_FLASH: google/gemini-3-flash-preview
+   :FREE_LLAMA: openrouter/meta-llama/llama-3.2-3b-instruct:free
+   :FREE_GEMMA: openrouter/google/gemma-3-4b-it:free
+   :FREE_MISTRAL: openrouter/mistralai/mistral-7b-instruct:free
+   :FREE_GEMMA_12B: openrouter/google/gemma-3-12b-it:free
+   :FREE_ZEPHYR: openrouter/huggingfaceh4/zephyr-7b-beta:free
+   :FREE_OPENCHAT: openrouter/openchat/openchat-7b:free
+   :END:
+
+** model_routing
+   :PROPERTIES:
+   :DEFAULT_TIER: free
+   :END:
+*** research
+    :PROPERTIES:
+    :PRIMARY: FREE_LLAMA
+    :FALLBACK: FREE_GEMMA
+    :END:
+*** code
+    :PROPERTIES:
+    :PRIMARY: FREE_QWEN_CODER
+    :FALLBACK: FREE_LLAMA
+    :END:
+*** extraction
+    :PROPERTIES:
+    :PRIMARY: FREE_MISTRAL
+    :FALLBACK: FREE_LLAMA
+    :END:
+*** reasoning
+    :PROPERTIES:
+    :PRIMARY: FREE_GEMMA
+    :FALLBACK: FREE_OPENCHAT
+    :END:
+*** general
+    :PROPERTIES:
+    :PRIMARY: FREE_LLAMA
+    :FALLBACK: FREE_MISTRAL
+    :END:
+
+** channels
