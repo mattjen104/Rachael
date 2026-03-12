@@ -1,4 +1,4 @@
-import { rfetch, rfetchText, throttledBatch, sleep } from "./resilient-fetch";
+import { rfetch, rfetchText, throttledBatch, sleep, humanDelay, warmDomain, setDomainGap } from "./resilient-fetch";
 
 export interface CListing {
   id: string;
@@ -18,6 +18,7 @@ export interface CSearchOpts {
   params?: Record<string, string>;
   maxPages?: number;
   delayMs?: number;
+  warmUp?: boolean;
 }
 
 const RESULTS_PER_PAGE = 120;
@@ -85,7 +86,16 @@ function parseSearchResultsHtml(html: string, region: string): CListing[] {
 }
 
 export async function searchCraigslist(opts: CSearchOpts): Promise<CListing[]> {
-  const { region, category = "sss", query, params = {}, maxPages = 3, delayMs = 800 } = opts;
+  const { region, category = "sss", query, params = {}, maxPages = 3, delayMs = 800, warmUp = true } = opts;
+  const domain = `${region}.craigslist.org`;
+
+  setDomainGap(domain, 1200);
+
+  if (warmUp) {
+    await warmDomain(domain);
+    await sleep(humanDelay(600));
+  }
+
   const all: CListing[] = [];
   const seen = new Set<string>();
 
@@ -93,13 +103,15 @@ export async function searchCraigslist(opts: CSearchOpts): Promise<CListing[]> {
     const offset = page * RESULTS_PER_PAGE;
     const qs = new URLSearchParams({ ...params, s: String(offset) });
     if (query) qs.set("query", query);
-    const url = `https://${region}.craigslist.org/search/${category}?${qs}`;
+    const url = `https://${domain}/search/${category}?${qs}`;
 
     try {
       const html = await rfetchText(url, {
-        referer: `https://${region}.craigslist.org/`,
+        referer: page === 0 ? `https://${domain}/` : `https://${domain}/search/${category}?${new URLSearchParams({ ...params, s: String((page - 1) * RESULTS_PER_PAGE) })}`,
         maxRetries: 2,
         timeoutMs: 20000,
+        stickySession: true,
+        cacheTtlMs: false,
       });
 
       const listings = parseSearchResultsHtml(html, region);
@@ -110,7 +122,7 @@ export async function searchCraigslist(opts: CSearchOpts): Promise<CListing[]> {
       }
 
       if (listings.length < RESULTS_PER_PAGE) break;
-      if (page < maxPages - 1) await sleep(delayMs + Math.floor(Math.random() * 400));
+      if (page < maxPages - 1) await sleep(humanDelay(delayMs));
     } catch {
       break;
     }
@@ -121,7 +133,11 @@ export async function searchCraigslist(opts: CSearchOpts): Promise<CListing[]> {
 
 export async function enrichListing(listing: CListing): Promise<CListing> {
   try {
-    const html = await rfetchText(listing.url, { maxRetries: 2, timeoutMs: 15000 });
+    const html = await rfetchText(listing.url, {
+      maxRetries: 2,
+      timeoutMs: 15000,
+      stickySession: true,
+    });
     const ldArr = extractJsonLd(html);
     if (ldArr.length > 0) {
       const parsed = parseListingFromJsonLd(ldArr[0]);
@@ -143,7 +159,7 @@ export async function searchAndEnrich(opts: CSearchOpts & { enrichConcurrency?: 
   await throttledBatch({
     items: toEnrich,
     concurrency: enrichConcurrency,
-    delayMs: 500,
+    delayMs: 600,
     fn: async (l) => { await enrichListing(l); },
   });
   return listings;

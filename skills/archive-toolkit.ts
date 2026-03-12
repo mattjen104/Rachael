@@ -1,4 +1,4 @@
-import { rfetchJSON, rfetchText, throttledBatch } from "./resilient-fetch";
+import { rfetchJSON, rfetchText, throttledBatch, setDomainGap } from "./resilient-fetch";
 import { fuzzyMatchLines, type LineFuzzyHit } from "./fuzzy-match";
 
 export interface ArchiveItem {
@@ -19,6 +19,8 @@ export interface ArchiveSearchOpts {
   sort?: string;
 }
 
+setDomainGap("archive.org", 400);
+
 export async function searchArchive(opts: ArchiveSearchOpts): Promise<ArchiveItem[]> {
   const { query, mediatype, yearRange, collection, maxRows = 500, fields = ["identifier", "title", "year"], sort = "year asc" } = opts;
   let q = query;
@@ -27,7 +29,7 @@ export async function searchArchive(opts: ArchiveSearchOpts): Promise<ArchiveIte
   if (collection) q += ` collection:(${collection})`;
 
   const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(q)}&fl=${fields.join(",")}&output=json&rows=${maxRows}&sort=${encodeURIComponent(sort)}`;
-  const d = await rfetchJSON(url, { maxRetries: 3, timeoutMs: 30000 });
+  const d = await rfetchJSON(url, { maxRetries: 3, timeoutMs: 30000, stickySession: true });
   return (d.response?.docs || []).map((doc: any) => ({
     identifier: doc.identifier,
     title: doc.title || doc.identifier,
@@ -38,7 +40,11 @@ export async function searchArchive(opts: ArchiveSearchOpts): Promise<ArchiveIte
 }
 
 export async function getItemFiles(identifier: string): Promise<ArchiveFile[]> {
-  const meta = await rfetchJSON(`https://archive.org/metadata/${identifier}/files`, { maxRetries: 2 });
+  const meta = await rfetchJSON(`https://archive.org/metadata/${identifier}/files`, {
+    maxRetries: 2,
+    stickySession: true,
+    cacheTtlMs: 60000,
+  });
   return (meta.result || []).map((f: any) => ({
     name: f.name,
     format: f.format || "",
@@ -64,7 +70,7 @@ export async function getOCRText(identifier: string, filename?: string): Promise
   if (!txtFile) return null;
   return rfetchText(
     `https://archive.org/download/${identifier}/${encodeURIComponent(txtFile.name)}`,
-    { maxRetries: 2, timeoutMs: 30000 }
+    { maxRetries: 2, timeoutMs: 30000, stickySession: true, cacheTtlMs: 120000 }
   );
 }
 
