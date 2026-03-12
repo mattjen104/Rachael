@@ -1,0 +1,227 @@
+#+BEGIN_SRC typescript
+   const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+   const CL_REGIONS = (props.REGIONS || "inlandempire,losangeles,orangecounty,sandiego").split(",").map((r: string) => r.trim());
+   const MIN_PRICE = parseInt(props.MIN_PRICE || "2000", 10);
+   const MAX_PRICE = parseInt(props.MAX_PRICE || "15000", 10);
+   const TOP_N = parseInt(props.TOP_N || "8", 10);
+   const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+
+   const ESTATE_KEYWORDS = [
+     "estate", "one owner", "1 owner", "single owner", "original owner",
+     "elderly", "grandma", "grandpa", "passed away", "inherited",
+     "deceased", "garage kept", "garaged", "low miles", "low mileage",
+     "rarely driven", "senior", "retired", "church car", "sunday driver",
+     "adult driven", "non smoker", "well maintained", "adult owned",
+     "must sell", "moving sale", "downsizing", "no longer needed",
+   ];
+
+   const DEALER_FLAGS = [
+     "licensed dealer", "auto sales", "motors llc", "auto group",
+     "motorsport", "dealership", "financing available", "buy here pay here",
+     "we finance", "no credit check", "ez financing", "carfax",
+     "warranty included", "certified", "wholesale", "auto llc",
+     "motors inc", "car sales", "inventory", "multiple vehicles",
+     "dm for price", "call or text for", "hablamos espanol",
+     "trades welcome", "all credit", "0 down", "zero down",
+   ];
+
+   const ESTATE_SEARCH_QUERIES = [
+     "",
+     "estate+sale", "one+owner", "garage+kept", "low+miles",
+     "elderly+owner", "original+owner", "inherited",
+   ];
+
+   const MODELS = [
+     "anthropic/claude-sonnet-4-20250514",
+     "openai/gpt-4o-mini",
+     "google/gemma-3-12b-it:free",
+   ];
+
+   interface Listing {
+     name: string; price: number; city: string; source: string;
+     url: string; description: string; odometer: string; score: number;
+     miles: number | null;
+   }
+
+   async function fetchPage(url: string): Promise<string> {
+     const r = await fetch(url, {
+       headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" },
+     });
+     return r.text();
+   }
+
+   function scoreEstate(text: string): number {
+     const lower = text.toLowerCase();
+     let score = 0;
+     for (const kw of ESTATE_KEYWORDS) { if (lower.includes(kw)) score += 3; }
+     for (const df of DEALER_FLAGS) { if (lower.includes(df)) score -= 5; }
+     return score;
+   }
+
+   function parseCLListings(html: string, region: string): Listing[] {
+     const linkRe = new RegExp('<a[^>]*href="(https://' + region + '\\.craigslist\\.org/cto/d/[^"]+)"[^>]*>([\\s\\S]*?)</a>', 'g');
+     const listings: Listing[] = [];
+     const seen = new Set<string>();
+     let m;
+     while ((m = linkRe.exec(html)) !== null) {
+       const lUrl = m[1];
+       if (seen.has(lUrl)) continue;
+       seen.add(lUrl);
+       const raw = m[2].replace(new RegExp('<[^>]*>', 'g'), ' ').replace(new RegExp('\\s+', 'g'), ' ').trim();
+       const priceMatch = raw.match(new RegExp('\\$([\\.\\d,]+)'));
+       const price = priceMatch ? parseFloat(priceMatch[1].replace(',', '')) : 0;
+       const name = raw.replace(new RegExp('\\$[\\.\\d,]+'), '').trim();
+       const cityMatch = lUrl.match(new RegExp('/d/([^/]+)/'));
+       const city = cityMatch ? cityMatch[1].replace(/-/g, ' ') : "";
+       if (price < MIN_PRICE || price > MAX_PRICE) continue;
+       const titleScore = scoreEstate(name);
+       if (titleScore < -3) continue;
+       listings.push({ name, price, city, source: "CL/" + region, url: lUrl, description: "", odometer: "", score: titleScore, miles: null });
+     }
+     return listings;
+   }
+
+   async function searchCraigslist(region: string): Promise<Listing[]> {
+     const allListings = new Map<string, Listing>();
+     for (const q of ESTATE_SEARCH_QUERIES) {
+       try {
+         const qParam = q ? "&query=" + q : "";
+         const url = "https://" + region + ".craigslist.org/search/cta?purveyor=owner&min_price=" + MIN_PRICE + "&max_price=" + MAX_PRICE + "&auto_title_status=1" + qParam;
+         const html = await fetchPage(url);
+         const listings = parseCLListings(html, region);
+         for (const l of listings) {
+           const existing = allListings.get(l.url);
+           if (!existing || l.score > existing.score) allListings.set(l.url, l);
+         }
+         await new Promise(r => setTimeout(r, 800));
+       } catch {}
+     }
+     return Array.from(allListings.values());
+   }
+
+   async function fetchDetails(listing: Listing): Promise<Listing> {
+     try {
+       const html = await fetchPage(listing.url);
+       const bodyRe = new RegExp('id="postingbody"[^>]*>([\\s\\S]*?)</section');
+       const bodyMatch = html.match(bodyRe);
+       if (bodyMatch) {
+         listing.description = bodyMatch[1]
+           .replace(new RegExp('<[^>]*>', 'g'), ' ')
+           .replace(new RegExp('&amp;', 'g'), '&')
+           .replace(new RegExp('&[a-z]+;', 'g'), ' ')
+           .replace(new RegExp('\\s+', 'g'), ' ')
+           .trim().slice(0, 600);
+         const descScore = scoreEstate(listing.description);
+         listing.score += descScore;
+         if (descScore < -5) listing.score = -99;
+       }
+       const odoRe = new RegExp('odometer[^<]*<[^>]*>([^<]+)');
+       const odoMatch = html.match(odoRe);
+       if (odoMatch) {
+         listing.odometer = odoMatch[1].trim();
+         const milesNum = parseInt(listing.odometer.replace(new RegExp('[^0-9]', 'g'), ''), 10);
+         if (!isNaN(milesNum)) {
+           listing.miles = milesNum;
+           if (milesNum < 80000) listing.score += 5;
+           else if (milesNum < 120000) listing.score += 2;
+         }
+       }
+     } catch {}
+     return listing;
+   }
+
+   async function callLLM(prompt: string): Promise<string> {
+     if (!OPENROUTER_KEY) return "[no API key]";
+     for (const model of MODELS) {
+       try {
+         const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+           method: "POST",
+           headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+           body: JSON.stringify({
+             model, messages: [{ role: "user", content: prompt }],
+             max_tokens: 1200, temperature: 0.2,
+           }),
+         });
+         const d = await r.json();
+         const text = d.choices?.[0]?.message?.content?.trim();
+         if (text) return "[" + model.split("/").pop()!.split(":")[0] + "] " + text;
+         if (d.error) continue;
+       } catch { continue; }
+     }
+     return "[models unavailable]";
+   }
+
+   async function execute() {
+     const t0 = Date.now();
+     const allListings: Listing[] = [];
+
+     for (const region of CL_REGIONS) {
+       try {
+         const regionListings = await searchCraigslist(region);
+         allListings.push(...regionListings);
+       } catch {}
+       await new Promise(r => setTimeout(r, 1000));
+     }
+
+     if (allListings.length === 0) {
+       return { summary: "Estate Car Finder: 0 listings found", metric: "0" };
+     }
+
+     allListings.sort((a, b) => b.score - a.score);
+     const topByScore = allListings.filter(l => l.score >= 3).slice(0, TOP_N * 4);
+     const candidates = topByScore.length >= TOP_N ? topByScore : allListings.slice(0, TOP_N * 3);
+
+     const detailed: Listing[] = [];
+     for (const listing of candidates) {
+       detailed.push(await fetchDetails(listing));
+       await new Promise(r => setTimeout(r, 600));
+     }
+
+     const genuine = detailed.filter(l => l.score > 0);
+     genuine.sort((a, b) => b.score - a.score);
+     const finalists = genuine.slice(0, Math.min(TOP_N, genuine.length));
+
+     if (finalists.length === 0) {
+       return { summary: "Estate Car Finder: " + allListings.length + " scanned, 0 scored as genuine private-party estate/low-mile deals", metric: "0" };
+     }
+
+     const listingsText = finalists.map((l, i) =>
+       (i + 1) + ". " + l.name + " | $" + l.price + " | " + l.city +
+       (l.miles ? " | " + l.miles.toLocaleString() + " mi" : "") +
+       " | estate-score=" + l.score +
+       "\nDesc: " + (l.description || "(none)").slice(0, 400) +
+       "\nLink: " + l.url
+     ).join("\n\n");
+
+     const analysis = await callLLM(
+       "You are a used car expert helping a buyer in SoCal find genuine PRIVATE SELLER estate sale, elderly-owner, inherited, or low-mileage garage-kept cars on Craigslist.\n\n" +
+       "CRITICAL FILTERS — mark as 0/10 if ANY apply:\n" +
+       "- Dealer posing as private seller (lot photos, multiple vehicles, financing language, LLC/Inc name)\n" +
+       "- Salvage/rebuilt title (unless explicitly clean title)\n" +
+       "- Suspiciously low price + no explanation\n\n" +
+       "Score each 1-10 for ESTATE DEAL quality:\n" +
+       "- 8-10: Clear estate/inherited/elderly-owner signals, personal tone, specific car history\n" +
+       "- 5-7: Likely genuine private seller, low miles or well-maintained, but no estate signals\n" +
+       "- 1-4: Generic listing, possible dealer, high miles\n\n" +
+       listingsText + "\n\n" +
+       "For each listing: RATING: X/10 | reason (1 sentence)\n" +
+       "End with: TOP PICK: (number) — why in 2 sentences. Then RUNNER UP: (number) — why."
+     );
+
+     const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
+     let summary = "Estate Car Finder (" + allListings.length + " CL listings scanned across " + CL_REGIONS.length + " regions, " + finalists.length + " finalists, " + elapsed + "s)\n";
+     summary += "$" + MIN_PRICE + "-$" + MAX_PRICE + " | Craigslist owner-only + clean title | " + CL_REGIONS.join(", ") + "\n";
+     summary += "Targeted searches: general + " + (ESTATE_SEARCH_QUERIES.length - 1) + " estate-specific queries per region\n\n";
+
+     for (const l of finalists) {
+       summary += "[$" + l.price + "] " + l.name + " — " + l.city;
+       if (l.miles) summary += " (" + l.miles.toLocaleString() + " mi)";
+       summary += " [score:" + l.score + "]\n  " + l.url + "\n";
+       if (l.description) summary += "  " + l.description.slice(0, 150) + "...\n";
+       summary += "\n";
+     }
+
+     summary += "--- LLM ANALYSIS ---\n" + analysis;
+     return { summary, metric: String(finalists.length) };
+   }
+   #+END_SRC
