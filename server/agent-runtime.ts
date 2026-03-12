@@ -117,17 +117,20 @@ async function executeLLMWithCascade(
   }
 
   if (rateLimited && cascade.length > 0) {
-    console.log("[agent-runtime] All models rate-limited, retrying first model after delay...");
-    await new Promise(r => setTimeout(r, 10000));
-    try {
-      return await executeLLM(
-        messages,
-        resolveProviderPrefix(cascade[0].id),
-        compiled.config,
-        compiled.routing as Record<string, string | undefined>
-      );
-    } catch (err: any) {
-      lastError = err;
+    console.log("[agent-runtime] All models rate-limited, retrying cascade after delay...");
+    await new Promise(r => setTimeout(r, 15000));
+    for (const model of cascade) {
+      try {
+        return await executeLLM(
+          messages,
+          resolveProviderPrefix(model.id),
+          compiled.config,
+          compiled.routing as Record<string, string | undefined>
+        );
+      } catch (err: any) {
+        console.warn(`[agent-runtime] Retry: ${model.label} still failing: ${err.message?.slice(0, 100)}`);
+        lastError = err;
+      }
     }
   }
 

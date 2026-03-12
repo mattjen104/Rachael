@@ -118,7 +118,19 @@ async function callOpenAICompat(
     body: JSON.stringify({
       model: modelId,
       max_tokens: 4096,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: (() => {
+        const mapped = messages.map(m => ({ role: m.role, content: m.content }));
+        if (providerName === "openrouter" && modelId.startsWith("google/")) {
+          const systemMsgs = mapped.filter(m => m.role === "system");
+          const otherMsgs = mapped.filter(m => m.role !== "system");
+          if (systemMsgs.length > 0 && otherMsgs.length > 0) {
+            const systemText = systemMsgs.map(m => m.content).join("\n\n");
+            otherMsgs[0].content = systemText + "\n\n---\n\n" + otherMsgs[0].content;
+          }
+          return otherMsgs;
+        }
+        return mapped;
+      })(),
     }),
     signal,
   });
