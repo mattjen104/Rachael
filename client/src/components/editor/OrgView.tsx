@@ -976,6 +976,259 @@ function DailyInput() {
   );
 }
 
+const BRIEFINGS_SEEN_KEY = "orgcloud-briefings-seen";
+const BRIEFINGS_DISMISSED_KEY = "orgcloud-briefings-dismissed";
+
+function getBriefingsSeen(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(BRIEFINGS_SEEN_KEY) || "{}"); } catch { return {}; }
+}
+function setBriefingsSeen(seen: Record<string, number>) {
+  localStorage.setItem(BRIEFINGS_SEEN_KEY, JSON.stringify(seen));
+}
+function getDismissed(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(BRIEFINGS_DISMISSED_KEY) || "{}"); } catch { return {}; }
+}
+function setDismissed(d: Record<string, number>) {
+  localStorage.setItem(BRIEFINGS_DISMISSED_KEY, JSON.stringify(d));
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + "m ago";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + "h ago";
+  const days = Math.floor(hrs / 24);
+  return days + "d ago";
+}
+
+function statusGlyph(status: string): string {
+  if (status === "running") return ">>";
+  if (status === "completed") return "=";
+  if (status === "error") return "x";
+  return ".";
+}
+
+function extractFirstLine(output: string): string {
+  const lines = output.trim().split("\n").filter(l => l.trim());
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length > 5 && !trimmed.startsWith("---") && !trimmed.startsWith("===")) return trimmed;
+  }
+  return lines[0]?.trim() || "";
+}
+
+function extractMetricLine(output: string, metric?: string): string {
+  if (metric) return metric;
+  const m = output.match(/(?:found|matches|results|hits|stories|alerts?|new)[\s:]*(\d+)/i);
+  return m ? m[1] + " found" : "";
+}
+
+interface BriefingProgram {
+  name: string;
+  status: string;
+  lastRun: string | null;
+  lastOutput: string | null;
+  error: string | null;
+  metric?: string;
+  iteration: number;
+}
+
+function BriefingsSection() {
+  const { data: runtimeData } = useRuntimeState();
+  const dailyCapture = useDailyCapture();
+  const journalAdd = useJournalAdd();
+  const [expandedProgram, setExpandedProgram] = useState<string | null>(null);
+  const [dismissed, setDismissedState] = useState<Record<string, number>>(getDismissed);
+  const [seen, setSeenState] = useState<Record<string, number>>(getBriefingsSeen);
+  const [briefingsOpen, setBriefingsOpen] = useState(true);
+
+  const programs: BriefingProgram[] = useMemo(() => {
+    if (!runtimeData?.programs) return [];
+    const now = Date.now();
+    const cutoff = now - 48 * 60 * 60 * 1000;
+    return Object.entries(runtimeData.programs as Record<string, any>)
+      .filter(([_, p]) => {
+        if (!p.lastRun) return false;
+        if (new Date(p.lastRun).getTime() < cutoff) return false;
+        if (!p.lastOutput && !p.error) return false;
+        return true;
+      })
+      .map(([name, p]) => ({
+        name,
+        status: p.status,
+        lastRun: p.lastRun,
+        lastOutput: p.lastOutput,
+        error: p.error,
+        metric: p.metric,
+        iteration: p.iteration || 0,
+      }))
+      .sort((a, b) => {
+        const ta = a.lastRun ? new Date(a.lastRun).getTime() : 0;
+        const tb = b.lastRun ? new Date(b.lastRun).getTime() : 0;
+        return tb - ta;
+      });
+  }, [runtimeData]);
+
+  const visiblePrograms = useMemo(() => {
+    return programs.filter(p => {
+      const dismissedAt = dismissed[p.name];
+      if (!dismissedAt || !p.lastRun) return true;
+      return new Date(p.lastRun).getTime() > dismissedAt;
+    });
+  }, [programs, dismissed]);
+
+  const newCount = useMemo(() => {
+    return visiblePrograms.filter(p => {
+      const seenAt = seen[p.name];
+      if (!seenAt || !p.lastRun) return !!p.lastRun;
+      return new Date(p.lastRun).getTime() > seenAt;
+    }).length;
+  }, [visiblePrograms, seen]);
+
+  useEffect(() => {
+    if (briefingsOpen && visiblePrograms.length > 0) {
+      const updated = { ...seen };
+      for (const p of visiblePrograms) {
+        if (p.lastRun) {
+          const runTime = new Date(p.lastRun).getTime();
+          if (!updated[p.name] || updated[p.name] < runTime) {
+            updated[p.name] = runTime;
+          }
+        }
+      }
+      setSeenState(updated);
+      setBriefingsSeen(updated);
+    }
+  }, [briefingsOpen, visiblePrograms]);
+
+  const handleDismiss = (name: string) => {
+    const updated = { ...dismissed, [name]: Date.now() };
+    setDismissedState(updated);
+    setDismissed(updated);
+    if (expandedProgram === name) setExpandedProgram(null);
+  };
+
+  const handleCaptureTask = (p: BriefingProgram) => {
+    const firstLine = extractFirstLine(p.lastOutput || p.error || "");
+    const taskText = "t " + p.name + ": " + firstLine.slice(0, 120);
+    dailyCapture.mutate({ content: taskText });
+  };
+
+  const handleCaptureNote = (p: BriefingProgram) => {
+    const output = (p.lastOutput || p.error || "").slice(0, 500);
+    journalAdd.mutate({ text: "[" + p.name + "] " + output });
+  };
+
+  if (visiblePrograms.length === 0) return null;
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setBriefingsOpen(prev => !prev)}
+        className="flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground transition-colors px-2 py-1 w-full"
+        data-testid="toggle-briefings-section"
+      >
+        <span>{briefingsOpen ? "▾" : "▸"}</span>
+        <span className="uppercase tracking-wider font-bold">briefings</span>
+        {newCount > 0 && (
+          <span className="text-foreground font-bold">({newCount} new)</span>
+        )}
+        {newCount === 0 && (
+          <span className="opacity-60">({visiblePrograms.length})</span>
+        )}
+      </button>
+
+      {briefingsOpen && (
+        <div className="space-y-0.5 mt-1">
+          {visiblePrograms.map(p => {
+            const isNew = !seen[p.name] || (p.lastRun && new Date(p.lastRun).getTime() > (seen[p.name] || 0));
+            const isExpanded = expandedProgram === p.name;
+            const isError = p.status === "error";
+            const isRunning = p.status === "running";
+            const metricText = p.lastOutput ? extractMetricLine(p.lastOutput, p.metric) : "";
+
+            return (
+              <div key={p.name} className="group" data-testid={`briefing-program-${p.name}`}>
+                <div
+                  className={cn(
+                    "flex items-center gap-2 px-2 py-1 text-xs cursor-pointer hover:bg-foreground/5 transition-colors",
+                    isNew && "border-l-2 border-foreground/40",
+                    !isNew && "border-l-2 border-transparent",
+                  )}
+                  onClick={() => setExpandedProgram(isExpanded ? null : p.name)}
+                >
+                  <span className={cn(
+                    "font-mono w-5 text-center flex-shrink-0",
+                    isError && "text-red-400",
+                    isRunning && "text-yellow-400",
+                    !isError && !isRunning && "text-muted-foreground",
+                  )}>
+                    [{statusGlyph(p.status)}]
+                  </span>
+                  <span className={cn(
+                    "font-bold truncate",
+                    isNew ? "text-foreground phosphor-glow" : "text-muted-foreground"
+                  )}>
+                    {p.name}
+                  </span>
+                  <span className="text-muted-foreground/60 flex-shrink-0">
+                    {p.lastRun ? relativeTime(p.lastRun) : ""}
+                  </span>
+                  {metricText && (
+                    <span className="text-foreground/70 flex-shrink-0 ml-auto font-mono">
+                      {metricText}
+                    </span>
+                  )}
+                </div>
+
+                {isExpanded && (
+                  <div className="ml-7 mr-2 mt-1 mb-2">
+                    <div className="flex gap-1 mb-1.5">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCaptureTask(p); }}
+                        className="text-xs px-1.5 py-0.5 border border-border hover:bg-foreground/10 hover:text-foreground text-muted-foreground transition-colors font-mono"
+                        title="Capture as task"
+                        data-testid={`briefing-capture-task-${p.name}`}
+                      >
+                        [t]
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCaptureNote(p); }}
+                        className="text-xs px-1.5 py-0.5 border border-border hover:bg-foreground/10 hover:text-foreground text-muted-foreground transition-colors font-mono"
+                        title="Save as journal note"
+                        data-testid={`briefing-capture-note-${p.name}`}
+                      >
+                        [n]
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDismiss(p.name); }}
+                        className="text-xs px-1.5 py-0.5 border border-border hover:bg-foreground/10 hover:text-muted-foreground/40 text-muted-foreground transition-colors font-mono"
+                        title="Dismiss until next run"
+                        data-testid={`briefing-dismiss-${p.name}`}
+                      >
+                        [x]
+                      </button>
+                    </div>
+                    <pre className={cn(
+                      "text-xs whitespace-pre-wrap break-words leading-relaxed max-h-64 overflow-y-auto",
+                      "font-mono",
+                      isError ? "text-red-400/80" : "text-foreground/70 phosphor-glow-dim"
+                    )}>
+                      {(isError ? p.error : p.lastOutput)?.slice(0, 2000) || "(no output)"}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function daysOverdue(scheduledDate: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -1258,6 +1511,8 @@ function TodayTab({ agenda, onToggle, onReschedule, onEditTitle, onDelete, onNav
       </div>
 
       <DailyInput />
+
+      <BriefingsSection />
 
       {hasScheduled && (
         <div className="space-y-1">
