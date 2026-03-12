@@ -556,60 +556,79 @@ async function executeProgram(programName: string): Promise<void> {
       pr.push({ model: modelUsed, tokens: tokensUsed, timestamp: Date.now() });
       programRuns.set(programName, pr);
 
-      if (output.includes("PROPOSE:")) {
-        const proposeMatch = output.match(/PROPOSE:\s*([\s\S]*?)(?:\n\n|$)/);
-        if (proposeMatch) {
-          const proposedText = proposeMatch[1].trim();
-          const targetsSoul = /\bSOUL\b/i.test(proposedText) && /^\*{1,2}\s+/m.test(proposedText);
-          if (targetsSoul) {
-            console.log(`[SANDBOX] blocked SOUL modification attempt from program "${programName}"`);
-          } else {
-            const count = proposalCounts.get(programName) || 0;
-            if (count >= MAX_PROPOSALS_PER_ITERATION) {
-              console.log(`[SANDBOX] rate-limited proposal from "${programName}" (${count}/${MAX_PROPOSALS_PER_ITERATION})`);
+      const outputType = (prog.properties.OUTPUT_TYPE || "").toLowerCase();
+
+      if (outputType === "proposal") {
+        try {
+          await storage.createProposal({
+            section: "PROGRAMS",
+            targetName: programName,
+            reason: `Proposed by "${programName}" (iteration ${ps.iteration}, ${modelUsed})`,
+            currentContent: "",
+            proposedContent: output.trim(),
+            source: "agent",
+            proposalType: "change",
+          });
+          console.log(`[runtime] auto-proposal created from ${programName} output (${output.length} chars)`);
+        } catch (e) {
+          console.error("[agent-runtime] Failed to create auto-proposal:", e);
+        }
+      } else {
+        if (output.includes("PROPOSE:")) {
+          const proposeMatch = output.match(/PROPOSE:\s*([\s\S]*?)(?:\n\n|$)/);
+          if (proposeMatch) {
+            const proposedText = proposeMatch[1].trim();
+            const targetsSoul = /\bSOUL\b/i.test(proposedText) && /^\*{1,2}\s+/m.test(proposedText);
+            if (targetsSoul) {
+              console.log(`[SANDBOX] blocked SOUL modification attempt from program "${programName}"`);
             } else {
-              try {
-                await storage.createProposal({
-                  section: "PROGRAMS",
-                  targetName: programName,
-                  reason: `Auto-proposed by program "${programName}" at iteration ${ps.iteration}`,
-                  currentContent: prog.instructions,
-                  proposedContent: proposedText,
-                  source: "agent",
-                  proposalType: "change",
-                });
-                proposalCounts.set(programName, count + 1);
-                console.log(`[SANDBOX] proposal created: source=agent, section=PROGRAMS, program=${programName}`);
-              } catch (e) {
-                console.error("[agent-runtime] Failed to create proposal:", e);
+              const count = proposalCounts.get(programName) || 0;
+              if (count >= MAX_PROPOSALS_PER_ITERATION) {
+                console.log(`[SANDBOX] rate-limited proposal from "${programName}" (${count}/${MAX_PROPOSALS_PER_ITERATION})`);
+              } else {
+                try {
+                  await storage.createProposal({
+                    section: "PROGRAMS",
+                    targetName: programName,
+                    reason: `Auto-proposed by program "${programName}" at iteration ${ps.iteration}`,
+                    currentContent: prog.instructions,
+                    proposedContent: proposedText,
+                    source: "agent",
+                    proposalType: "change",
+                  });
+                  proposalCounts.set(programName, count + 1);
+                  console.log(`[SANDBOX] proposal created: source=agent, section=PROGRAMS, program=${programName}`);
+                } catch (e) {
+                  console.error("[agent-runtime] Failed to create proposal:", e);
+                }
               }
             }
           }
         }
-      }
 
-      if (output.includes("REMEMBER:")) {
-        const rememberMatch = output.match(/REMEMBER:\s*([\s\S]*?)(?:\n\n|$)/);
-        if (rememberMatch) {
-          const memoryText = rememberMatch[1].trim();
-          const count = proposalCounts.get(programName) || 0;
-          if (count >= MAX_PROPOSALS_PER_ITERATION) {
-            console.log(`[SANDBOX] rate-limited memory proposal from "${programName}" (${count}/${MAX_PROPOSALS_PER_ITERATION})`);
-          } else {
-            try {
-              await storage.createProposal({
-                section: "MEMORY",
-                targetName: "Persistent Context",
-                reason: `Program "${programName}" wants to remember: ${memoryText.slice(0, 100)}`,
-                currentContent: "",
-                proposedContent: memoryText,
-                source: "agent",
-                proposalType: "memory",
-              });
-              proposalCounts.set(programName, count + 1);
-              console.log(`[SANDBOX] memory proposal created: source=agent, program=${programName}`);
-            } catch (e) {
-              console.error("[agent-runtime] Failed to create memory proposal:", e);
+        if (output.includes("REMEMBER:")) {
+          const rememberMatch = output.match(/REMEMBER:\s*([\s\S]*?)(?:\n\n|$)/);
+          if (rememberMatch) {
+            const memoryText = rememberMatch[1].trim();
+            const count = proposalCounts.get(programName) || 0;
+            if (count >= MAX_PROPOSALS_PER_ITERATION) {
+              console.log(`[SANDBOX] rate-limited memory proposal from "${programName}" (${count}/${MAX_PROPOSALS_PER_ITERATION})`);
+            } else {
+              try {
+                await storage.createProposal({
+                  section: "MEMORY",
+                  targetName: "Persistent Context",
+                  reason: `Program "${programName}" wants to remember: ${memoryText.slice(0, 100)}`,
+                  currentContent: "",
+                  proposedContent: memoryText,
+                  source: "agent",
+                  proposalType: "memory",
+                });
+                proposalCounts.set(programName, count + 1);
+                console.log(`[SANDBOX] memory proposal created: source=agent, program=${programName}`);
+              } catch (e) {
+                console.error("[agent-runtime] Failed to create memory proposal:", e);
+              }
             }
           }
         }
