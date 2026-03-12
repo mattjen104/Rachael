@@ -97,6 +97,7 @@ export default function MailView() {
   const isRunning = bridgeStatus?.running ?? false;
   const authState = bridgeStatus?.authState ?? "unknown";
   const needsLogin = authState === "login_required" || authState === "expired";
+  const showLoginButton = tab !== "claw" && (needsLogin || authState === "unknown" || !isRunning);
 
   const statusIcon = isRunning
     ? needsLogin ? "[!]" : "[●]"
@@ -110,6 +111,7 @@ export default function MailView() {
     try {
       const service = tab === "teams" ? "teams" : "outlook";
       await apiRequest("POST", "/api/browser/login", { service });
+      queryClient.invalidateQueries({ queryKey: ["/api/browser/status"] });
     } catch (err) {
       console.error("Login failed:", err);
     } finally {
@@ -204,11 +206,20 @@ export default function MailView() {
           {statusIcon}
         </span>
 
-        {needsLogin && !loginLoading && (
+        {loginLoading && (
+          <span className="text-xs text-muted-foreground font-bold mr-2 animate-pulse" data-testid="login-loading">
+            [launching...]
+          </span>
+        )}
+
+        {showLoginButton && !loginLoading && !bridgeStatus?.loginInProgress && (
           <button
             onClick={handleLogin}
             data-testid="button-login"
-            className="text-xs text-org-todo hover:text-foreground font-bold mr-2"
+            className={cn(
+              "text-xs font-bold mr-2",
+              needsLogin ? "text-org-todo hover:text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
           >
             [login]
           </button>
