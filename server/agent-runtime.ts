@@ -820,7 +820,12 @@ async function tick(): Promise<void> {
       if (ps.status === "running" || ps.status === "queued") continue;
 
       const scheduledDate = parseScheduledDate(prog.scheduledRaw);
-      if (scheduledDate && scheduledDate <= now) {
+      const isOnce = prog.schedule === "once" || (!prog.scheduledRaw && !prog.schedule);
+      const shouldRun =
+        (scheduledDate && scheduledDate <= now) ||
+        (isOnce && ps.iteration === 0 && !ps.lastRun);
+
+      if (shouldRun) {
         ps.status = "queued";
         executeProgram(prog.name).catch(err => {
           console.error(`[agent-runtime] Error executing program "${prog.name}":`, err);
