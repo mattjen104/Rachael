@@ -91,7 +91,7 @@ export function pickCascadeModels(
   const result: ModelEntry[] = [];
   const used = new Set<string>();
 
-  for (let tierIdx = 0; tierIdx <= maxTierIdx; tierIdx++) {
+  for (let tierIdx = maxTierIdx; tierIdx >= 0; tierIdx--) {
     const tier = TIER_ORDER[tierIdx];
     const tierModels = MODEL_ROSTER.filter(
       m => m.tier === tier && !used.has(m.id)
