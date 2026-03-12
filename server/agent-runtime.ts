@@ -362,6 +362,8 @@ async function executeInlineCode(
 
   const wrappedCode = `
 const __ctx = JSON.parse(process.env.__INLINE_CTX || '{}');
+const __projectRoot = process.env.__PROJECT_ROOT || process.cwd();
+const __skillPath = (name: string) => __projectRoot + "/skills/" + name;
 
 ${cleanedCode}
 
@@ -386,6 +388,7 @@ __run().then((r) => {
     const { promisify } = await import("util");
     const execFileAsync = promisify(execFile);
 
+    const projectRoot = process.cwd();
     const safeEnv: Record<string, string> = {
       PATH: process.env.PATH || "",
       HOME: process.env.HOME || "",
@@ -395,6 +398,7 @@ __run().then((r) => {
       XDG_DATA_HOME: process.env.XDG_DATA_HOME || `${process.env.HOME || "/tmp"}/.local/share`,
       TMPDIR: process.env.TMPDIR || "/tmp",
       __INLINE_CTX: JSON.stringify(context),
+      __PROJECT_ROOT: projectRoot,
     };
 
     if (process.env.OPENROUTER_API_KEY) {
