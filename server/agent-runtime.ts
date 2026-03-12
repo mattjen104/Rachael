@@ -397,9 +397,17 @@ __run().then((r) => {
       __INLINE_CTX: JSON.stringify(context),
     };
 
+    if (process.env.OPENROUTER_API_KEY) {
+      safeEnv.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    }
+
+    const timeoutMs = context.properties?.TIMEOUT
+      ? parseInt(context.properties.TIMEOUT, 10) * 1000
+      : 120_000;
+
     const { stdout, stderr } = await execFileAsync(
       "npx", ["tsx", filepath],
-      { env: safeEnv, timeout: 60_000, maxBuffer: 1024 * 1024 }
+      { env: safeEnv, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 }
     );
 
     if (stderr && !stdout) {
