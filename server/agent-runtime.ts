@@ -401,9 +401,10 @@ __run().then((r) => {
       safeEnv.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
     }
 
-    const timeoutMs = context.properties?.TIMEOUT
-      ? parseInt(context.properties.TIMEOUT, 10) * 1000
-      : 120_000;
+    const rawTimeout = context.properties?.TIMEOUT
+      ? parseInt(context.properties.TIMEOUT, 10)
+      : 120;
+    const timeoutMs = Math.max(10, Math.min(isNaN(rawTimeout) ? 120 : rawTimeout, 600)) * 1000;
 
     const { stdout, stderr } = await execFileAsync(
       "npx", ["tsx", filepath],
