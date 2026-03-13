@@ -1055,12 +1055,8 @@ function BriefingsSectionInner() {
 
   const programs: BriefingProgram[] = useMemo(() => {
     if (!runtimeData?.programs) return [];
-    const now = Date.now();
-    const cutoff = now - 48 * 60 * 60 * 1000;
     return Object.entries(runtimeData.programs as Record<string, any>)
       .filter(([_, p]) => {
-        if (!p.lastRun) return false;
-        if (new Date(p.lastRun).getTime() < cutoff) return false;
         if (!p.lastOutput && !p.error) return false;
         return true;
       })
