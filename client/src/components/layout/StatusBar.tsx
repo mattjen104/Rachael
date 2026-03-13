@@ -1,6 +1,6 @@
 import React from "react";
 import type { ViewMode } from "./Sidebar";
-import { useRuntime } from "@/hooks/use-org-data";
+import { useRuntime, useControlState } from "@/hooks/use-org-data";
 
 interface StatusBarProps {
   viewMode: ViewMode;
@@ -10,6 +10,10 @@ interface StatusBarProps {
 
 export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: StatusBarProps) {
   const { data: runtime } = useRuntime();
+  const { data: control } = useControlState();
+
+  const controlMode = control?.mode || "human";
+  const pendingCount = control?.pendingTakeoverPoints?.length || 0;
 
   return (
     <div
@@ -21,13 +25,26 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
         <span className={runtime?.active ? "text-green-500" : "text-red-500"}>
           {runtime?.active ? "●" : "○"}
         </span>
+        <span
+          className={`px-1 py-0 font-bold text-[9px] rounded ${
+            controlMode === "agent" ? "bg-blue-500/20 text-blue-400" : "bg-orange-500/20 text-orange-400"
+          }`}
+          data-testid="status-control-mode"
+        >
+          {controlMode.toUpperCase()}
+        </span>
+        {pendingCount > 0 && (
+          <span className="text-yellow-400 font-bold" data-testid="status-pending-count">
+            ⚡{pendingCount}
+          </span>
+        )}
         <span className="text-primary font-bold">{viewMode.toUpperCase()}</span>
         {lastCommand && <span className="text-muted-foreground">— {lastCommand}</span>}
       </div>
       <div className="flex items-center gap-2">
         <span>M-x / Space</span>
-        <span>j/k:nav</span>
-        <span>Tab:fold</span>
+        <span>Tab:control</span>
+        <span>6:cockpit</span>
       </div>
     </div>
   );

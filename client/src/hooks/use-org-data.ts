@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Program, Skill, Task, Note, Capture, AgentResult, ReaderPage, AgentConfig, OpenclawProposal, SiteProfile, NavigationPath } from "@shared/schema";
+import type { Program, Skill, Task, Note, Capture, AgentResult, ReaderPage, AgentConfig, OpenclawProposal, SiteProfile, NavigationPath, AuditLog } from "@shared/schema";
 
 export function usePrograms() {
   return useQuery<Program[]>({ queryKey: ["/api/programs"] });
@@ -321,5 +321,116 @@ export function useExecuteScraper() {
       const res = await apiRequest("POST", "/api/scraper/execute", params);
       return res.json();
     },
+  });
+}
+
+export interface PausedExecutionState {
+  id: string;
+  type: "program" | "navigation";
+  programName?: string;
+  profileId?: number;
+  navPathId?: number;
+  stepIndex: number;
+  pausedAt: string;
+  context?: Record<string, unknown>;
+}
+
+export interface ControlState {
+  mode: "human" | "agent";
+  agentPaused: boolean;
+  pendingTakeoverPoints: Array<{
+    id: string;
+    timestamp: string;
+    action: string;
+    target?: string;
+    permissionLevel: string;
+    status: string;
+  }>;
+  activityStream: Array<{
+    id: string;
+    timestamp: string;
+    actor: string;
+    type: string;
+    action: string;
+    target?: string;
+    permissionLevel?: string;
+    result?: string;
+    details?: string;
+  }>;
+  pausedExecutions: PausedExecutionState[];
+}
+
+export function useControlState() {
+  return useQuery<ControlState>({
+    queryKey: ["/api/control"],
+    refetchInterval: 3000,
+  });
+}
+
+export function useToggleControlMode() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/control/toggle");
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/control"] }); },
+  });
+}
+
+export function useResolveTakeoverPoint() {
+  return useMutation({
+    mutationFn: async ({ id, decision }: { id: string; decision: "confirm" | "reject" | "takeover" }) => {
+      const res = await apiRequest("POST", `/api/control/takeover-points/${id}/resolve`, { decision });
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/control"] }); },
+  });
+}
+
+export function useAuditLog(limit = 100) {
+  return useQuery<AuditLog[]>({
+    queryKey: [`/api/audit-log?limit=${limit}`],
+    refetchInterval: 10000,
+  });
+}
+
+export function useUpdateSiteProfile() {
+  return useMutation({
+    mutationFn: async ({ id, ...data }: { id: number } & Partial<{ defaultPermission: string }>) => {
+      const res = await apiRequest("PATCH", `/api/site-profiles/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/site-profiles"] }); },
+  });
+}
+
+export function useUpdateNavigationPath() {
+  return useMutation({
+    mutationFn: async ({ id, ...data }: { id: number } & Partial<{ permissionLevel: string }>) => {
+      const res = await apiRequest("PATCH", `/api/navigation-paths/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/navigation-paths"] }); },
+  });
+}
+
+export function useActionPermissions() {
+  return useQuery<Array<{ navPathId: number; actionName: string; level: string }>>({
+    queryKey: ["/api/control/action-permissions"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/control/action-permissions");
+      return res.json();
+    },
+    refetchInterval: 5000,
+  });
+}
+
+export function useSetActionPermission() {
+  return useMutation({
+    mutationFn: async (data: { navPathId: number; actionName: string; level: string }) => {
+      const res = await apiRequest("POST", "/api/control/action-permissions", data);
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/control/action-permissions"] }); },
   });
 }

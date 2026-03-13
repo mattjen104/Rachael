@@ -213,6 +213,8 @@ export const insertOpenclawProposalSchema = z.object({
 export type InsertOpenclawProposal = z.infer<typeof insertOpenclawProposalSchema>;
 export type OpenclawProposal = typeof openclawProposals.$inferSelect;
 
+export type PermissionLevel = "autonomous" | "approval" | "blocked";
+
 export const siteProfiles = pgTable("site_profiles", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   name: text("name").notNull().unique(),
@@ -221,6 +223,7 @@ export const siteProfiles = pgTable("site_profiles", {
   urlPatterns: text("url_patterns").array().notNull().default([]),
   extractionSelectors: jsonb("extraction_selectors").$type<Record<string, string>>().default({}),
   actions: jsonb("actions").$type<Record<string, { selector: string; type: string; description?: string }>>().default({}),
+  defaultPermission: text("default_permission").notNull().default("autonomous"),
   version: integer("version").notNull().default(1),
   enabled: boolean("enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -237,6 +240,7 @@ export const insertSiteProfileSchema = z.object({
     type: z.string(),
     description: z.string().optional(),
   })).default({}),
+  defaultPermission: z.enum(["autonomous", "approval", "blocked"]).default("autonomous"),
   version: z.number().default(1),
   enabled: z.boolean().default(true),
 });
@@ -250,6 +254,7 @@ export const navigationPaths = pgTable("navigation_paths", {
   siteProfileId: integer("site_profile_id").notNull().references(() => siteProfiles.id, { onDelete: "cascade" }),
   steps: jsonb("steps").$type<NavigationStep[]>().notNull().default([]),
   extractionRules: jsonb("extraction_rules").$type<Record<string, string>>().default({}),
+  permissionLevel: text("permission_level").notNull().default("autonomous"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -273,6 +278,44 @@ export const insertNavigationPathSchema = z.object({
     description: z.string().optional(),
   })).default([]),
   extractionRules: z.record(z.string(), z.string()).default({}),
+  permissionLevel: z.enum(["autonomous", "approval", "blocked"]).default("autonomous"),
 });
 export type InsertNavigationPath = z.infer<typeof insertNavigationPathSchema>;
 export type NavigationPath = typeof navigationPaths.$inferSelect;
+
+export const auditLog = pgTable("audit_log", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  actor: text("actor").notNull(),
+  action: text("action").notNull(),
+  target: text("target"),
+  permissionLevel: text("permission_level"),
+  result: text("result").notNull().default("success"),
+  details: text("details"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAuditLogSchema = z.object({
+  actor: z.enum(["human", "agent"]),
+  action: z.string(),
+  target: z.string().nullable().optional(),
+  permissionLevel: z.enum(["autonomous", "approval", "blocked"]).nullable().optional(),
+  result: z.string().default("success"),
+  details: z.string().nullable().optional(),
+});
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLog.$inferSelect;
+
+export const actionPermissions = pgTable("action_permissions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  navPathId: integer("nav_path_id").notNull().references(() => navigationPaths.id, { onDelete: "cascade" }),
+  actionName: text("action_name").notNull(),
+  permissionLevel: text("permission_level").notNull().default("autonomous"),
+});
+
+export const insertActionPermissionSchema = z.object({
+  navPathId: z.number(),
+  actionName: z.string(),
+  permissionLevel: z.enum(["autonomous", "approval", "blocked"]).default("autonomous"),
+});
+export type InsertActionPermission = z.infer<typeof insertActionPermissionSchema>;
+export type ActionPermission = typeof actionPermissions.$inferSelect;

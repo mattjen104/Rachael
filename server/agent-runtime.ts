@@ -8,6 +8,7 @@ import {
 } from "./model-router";
 import { sanitizeResultRow } from "./output-sanitizer";
 import { emitEvent } from "./event-bus";
+import { isAgentPaused, shouldYield, recordAction, getControlMode, enqueueCommand, completeCommand, pauseExecution, onResume, removePausedExecution, getPausedExecutions, type PausedExecution } from "./control-bus";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import type { Program } from "@shared/schema";
@@ -292,16 +293,40 @@ __run().then((r) => {
   }
 }
 
-async function executeProgram(programName: string): Promise<void> {
+interface ProgramResumeContext {
+  phase: "post-llm";
+  llmContent: string;
+  llmModel: string;
+  llmTokens: number;
+  iteration: number;
+}
+
+async function executeProgram(programName: string, resumeCtx?: ProgramResumeContext): Promise<void> {
   const ps = runtime.programs.get(programName);
   if (!ps) return;
 
+  if (isAgentPaused()) {
+    ps.status = "idle";
+    emitEvent("agent-runtime", `Program "${programName}" skipped: agent paused`, "info", { program: programName });
+    recordAction(getControlMode(), `program-skipped: ${programName}`, programName, undefined, "paused");
+    return;
+  }
+
+  const cmd = enqueueCommand("agent", `execute-program: ${programName}`, programName);
+  if (!cmd) {
+    ps.status = "idle";
+    emitEvent("agent-runtime", `Program "${programName}" rejected by command bus`, "info", { program: programName });
+    return;
+  }
+
   ps.status = "running";
   ps.error = null;
-  emitEvent("agent-runtime", `Starting program: ${programName}`, "info", { program: programName });
+  const isResume = !!resumeCtx;
+  emitEvent("agent-runtime", `${isResume ? "Resuming" : "Starting"} program: ${programName}`, "info", { program: programName });
+  recordAction(getControlMode(), `program-${isResume ? "resume" : "start"}: ${programName}`, programName, undefined, isResume ? "resumed" : "started");
 
   try {
-    ps.iteration += 1;
+    if (!isResume) ps.iteration += 1;
 
     const prog = await storage.getProgramByName(programName);
     if (!prog) throw new Error(`Program "${programName}" not found in DB`);
@@ -315,7 +340,13 @@ async function executeProgram(programName: string): Promise<void> {
     let tokensUsed = 0;
     let metric: string | undefined;
 
-    if (prog.code) {
+    if (isResume) {
+      output = resumeCtx.llmContent;
+      modelUsed = resumeCtx.llmModel;
+      tokensUsed = resumeCtx.llmTokens;
+      trackTokenUsage(modelUsed, tokensUsed);
+      emitEvent("agent-runtime", `Resumed with saved LLM result for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
+    } else if (prog.code) {
       try {
         const result = await executeInlineCode(prog.code, prog.config as Record<string, string> || {});
         output = result.summary;
@@ -367,8 +398,36 @@ async function executeProgram(programName: string): Promise<void> {
       const costTier = parseCostTier(prog.costTier);
       const modelOverride = prog.config?.MODEL as string || undefined;
 
+      if (shouldYield()) {
+        ps.status = "idle";
+        pauseExecution({ type: "program", programName, stepIndex: ps.iteration, context: { phase: "pre-llm" } });
+        emitEvent("agent-runtime", `Program "${programName}" paused: human took control (will resume)`, "info", { program: programName });
+        recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
+        if (cmd) completeCommand(cmd.id, "error");
+        return;
+      }
+
       emitEvent("agent-runtime", `Calling LLM for "${programName}" (${taskType})`, "action", { program: programName });
       const llmResult = await executeLLMWithCascade(messages, taskType, costTier, modelOverride, llmConfig);
+
+      if (shouldYield()) {
+        ps.status = "idle";
+        pauseExecution({
+          type: "program", programName, stepIndex: ps.iteration,
+          context: {
+            phase: "post-llm",
+            llmContent: llmResult.content,
+            llmModel: llmResult.model,
+            llmTokens: llmResult.tokensUsed || 0,
+            iteration: ps.iteration,
+          },
+        });
+        emitEvent("agent-runtime", `Program "${programName}" paused after LLM: human took control (will resume with saved result)`, "info", { program: programName });
+        recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
+        if (cmd) completeCommand(cmd.id, "error");
+        return;
+      }
+
       output = llmResult.content;
       modelUsed = llmResult.model;
       tokensUsed = llmResult.tokensUsed || 0;
@@ -435,6 +494,8 @@ async function executeProgram(programName: string): Promise<void> {
     ps.status = "completed";
     ps.lastRun = new Date();
     emitEvent("agent-runtime", `Program completed: ${programName} — ${output.split("\n")[0].slice(0, 100)}`, "info", { program: programName });
+    recordAction(getControlMode(), `program-complete: ${programName}`, programName, undefined, "success");
+    if (cmd) completeCommand(cmd.id, "success");
 
     const rawSummary = output.split("\n")[0].slice(0, 200);
     const summaryLine = sanitizeResultRow(rawSummary);
@@ -464,6 +525,8 @@ async function executeProgram(programName: string): Promise<void> {
     ps.error = err.message || String(err);
     ps.lastRun = new Date();
     emitEvent("agent-runtime", `Program error: ${programName} — ${ps.error?.slice(0, 100)}`, "error", { program: programName });
+    recordAction(getControlMode(), `program-error: ${programName}`, programName, undefined, "error", ps.error?.slice(0, 200));
+    if (cmd) completeCommand(cmd.id, "error");
 
     const prog = await storage.getProgramByName(programName);
     if (prog) {
@@ -490,6 +553,7 @@ async function executeProgram(programName: string): Promise<void> {
 
 async function tick(): Promise<void> {
   if (!runtime.active) return;
+  if (isAgentPaused()) return;
   runtime.lastTick = new Date();
 
   try {
@@ -585,4 +649,26 @@ export function initRuntime(): void {
     tickInterval = setInterval(tick, TICK_INTERVAL_MS);
     setTimeout(tick, 5000);
   }
+
+  onResume((paused: PausedExecution) => {
+    if (paused.type === "program" && paused.programName) {
+      const name = paused.programName;
+      const ctx = paused.context as Record<string, unknown> | undefined;
+      removePausedExecution(paused.id);
+      emitEvent("agent-runtime", `Resuming paused program: ${name} (phase: ${ctx?.phase || "fresh"})`, "info", { program: name });
+
+      if (ctx?.phase === "post-llm" && ctx.llmContent) {
+        const resumeCtx: ProgramResumeContext = {
+          phase: "post-llm",
+          llmContent: ctx.llmContent as string,
+          llmModel: ctx.llmModel as string,
+          llmTokens: ctx.llmTokens as number,
+          iteration: ctx.iteration as number,
+        };
+        executeProgram(name, resumeCtx);
+      } else {
+        executeProgram(name);
+      }
+    }
+  });
 }

@@ -11,6 +11,7 @@ import { openOutlook, openTeams, getOutlookEmails, readOutlookEmail, getTeamsCha
 import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlValidator } from "./universal-scraper";
 import { subscribe, getEventHistory, type CockpitEvent } from "./event-bus";
 import { createNavigationSession, updateNavigationState, getNavigationSession, getActiveSessions, closeNavigationSession, getNavigationHistory } from "./navigation-session";
+import { getControlState, getControlMode, toggleControlMode, setControlMode, getActivityStream, getPendingTakeoverPoints, resolveTakeoverPoint, recordAction, checkPermission, createTakeoverPoint, enqueueCommand, dequeueCommand, completeCommand, drainQueue, getQueueDepth, setActionPermission, getActionPermissions, getPausedExecutions, removePausedExecution, clearPausedExecutions, onResume, type PausedExecution } from "./control-bus";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -664,6 +665,7 @@ export async function registerRoutes(
         const check = await validateUrlSafety(url);
         if (!check.safe) return res.status(400).json({ message: check.error });
 
+        recordAction("human", "best-effort-scrape", url, "autonomous", "success");
         const result = await bestEffortExtract(url);
         return res.json(result);
       }
@@ -677,6 +679,24 @@ export async function registerRoutes(
 
       const profile = await storage.getSiteProfile(navPath.siteProfileId);
       if (!profile) return res.status(404).json({ message: "Site profile not found" });
+
+      const permCheck = await checkPermission(profile.id, navPath.id, `execute: ${profile.name}/${navPath.name}`);
+      if (!permCheck.allowed && !permCheck.needsApproval) {
+        return res.status(403).json({ message: `Action blocked by permission rules (level: ${permCheck.level})` });
+      }
+
+      if (permCheck.needsApproval) {
+        const decision = await Promise.race([
+          createTakeoverPoint(`execute: ${profile.name}/${navPath.name}`, url || profile.baseUrl, "approval"),
+          new Promise<"reject">((resolve) => setTimeout(() => resolve("reject"), 300000)),
+        ]);
+        if (decision === "reject") {
+          return res.status(403).json({ message: "Action rejected at takeover point" });
+        }
+        if (decision === "takeover") {
+          return res.json({ success: false, message: "Human took over control", takenOver: true });
+        }
+      }
 
       const steps = (navPath.steps as Array<{ action: string; target?: string; value?: string; waitMs?: number; description?: string }>) || [];
       for (const step of steps) {
@@ -694,7 +714,10 @@ export async function registerRoutes(
           return res.status(400).json({ message: `Runtime URL blocked: ${urlCheck.error}` });
         }
       }
+
+      recordAction(getControlMode(), `execute: ${profile.name}/${navPath.name}`, url || profile.baseUrl, permCheck.level, "started");
       const result = await executeNavigationPath(profile, navPath, validateUrlSafety, url || undefined);
+      recordAction(getControlMode(), `completed: ${profile.name}/${navPath.name}`, url || profile.baseUrl, permCheck.level, result.success ? "success" : "error");
       return res.json(result);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -791,6 +814,178 @@ export async function registerRoutes(
   app.get("/api/cockpit/nav/sessions/:id/history", (req, res) => {
     const history = getNavigationHistory(req.params.id);
     res.json(history);
+  });
+
+  app.get("/api/control", async (_req, res) => {
+    const state = getControlState();
+    res.json({
+      mode: state.mode,
+      agentPaused: state.agentPaused,
+      pendingTakeoverPoints: getPendingTakeoverPoints(),
+      activityStream: getActivityStream(50),
+      pausedExecutions: state.pausedExecutions,
+    });
+  });
+
+  app.get("/api/control/mode", async (_req, res) => {
+    res.json({ mode: getControlMode() });
+  });
+
+  app.post("/api/control/toggle", async (_req, res) => {
+    const mode = toggleControlMode();
+    res.json({ mode });
+  });
+
+  app.post("/api/control/set-mode", async (req, res) => {
+    const { mode } = req.body;
+    if (mode !== "human" && mode !== "agent") {
+      return res.status(400).json({ message: "mode must be 'human' or 'agent'" });
+    }
+    const result = setControlMode(mode);
+    res.json({ mode: result });
+  });
+
+  app.get("/api/control/activity", async (req, res) => {
+    const limit = parseInt(req.query.limit as string || "50", 10);
+    const stream = getActivityStream(limit);
+    res.json(stream);
+  });
+
+  app.get("/api/control/takeover-points", async (_req, res) => {
+    const points = getPendingTakeoverPoints();
+    res.json(points);
+  });
+
+  app.post("/api/control/takeover-points/:id/resolve", async (req, res) => {
+    const { id } = req.params;
+    const { decision } = req.body;
+    if (!["confirm", "reject", "takeover"].includes(decision)) {
+      return res.status(400).json({ message: "decision must be 'confirm', 'reject', or 'takeover'" });
+    }
+    const ok = resolveTakeoverPoint(id, decision);
+    if (!ok) return res.status(404).json({ message: "Takeover point not found or already resolved" });
+    res.json({ resolved: true });
+  });
+
+  app.post("/api/control/record-action", async (req, res) => {
+    const { actor, action, target, permissionLevel, result, details } = req.body;
+    if (!actor || !action) return res.status(400).json({ message: "actor and action required" });
+    recordAction(actor, action, target, permissionLevel, result || "success", details);
+    res.json({ recorded: true });
+  });
+
+  app.get("/api/audit-log", async (req, res) => {
+    const limit = parseInt(req.query.limit as string || "100", 10);
+    const actor = req.query.actor as string | undefined;
+    if (actor) {
+      const logs = await storage.getAuditLogsByActor(actor, limit);
+      return res.json(logs);
+    }
+    const logs = await storage.getAuditLogs(limit);
+    res.json(logs);
+  });
+
+  app.post("/api/control/check-permission", async (req, res) => {
+    const { profileId, navPathId, action, actionName } = req.body;
+    if (!action) return res.status(400).json({ message: "action required" });
+    const result = await checkPermission(profileId || null, navPathId || null, action, actionName);
+    res.json(result);
+  });
+
+  app.get("/api/control/action-permissions", async (_req, res) => {
+    res.json(await getActionPermissions());
+  });
+
+  app.post("/api/control/action-permissions", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ") || authHeader.slice(7) !== process.env.OPENCLAW_API_KEY) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const { navPathId, actionName, level } = req.body;
+    if (!navPathId || !actionName || !level) {
+      return res.status(400).json({ message: "navPathId, actionName, and level required" });
+    }
+    if (!["autonomous", "approval", "blocked"].includes(level)) {
+      return res.status(400).json({ message: "level must be autonomous, approval, or blocked" });
+    }
+    await setActionPermission(navPathId, actionName, level);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/control/enqueue", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ") || authHeader.slice(7) !== process.env.OPENCLAW_API_KEY) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const { source, action, target } = req.body;
+    if (!source || !action) return res.status(400).json({ message: "source and action required" });
+    const cmd = enqueueCommand(source, action, target);
+    if (!cmd) return res.status(409).json({ message: "Command rejected: agent is paused or human has control" });
+    res.json(cmd);
+  });
+
+  app.post("/api/control/dequeue", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ") || authHeader.slice(7) !== process.env.OPENCLAW_API_KEY) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const { source } = req.body;
+    if (!source) return res.status(400).json({ message: "source required" });
+    const cmd = dequeueCommand(source);
+    if (!cmd) return res.status(204).end();
+    res.json(cmd);
+  });
+
+  app.post("/api/control/complete-command/:id", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ") || authHeader.slice(7) !== process.env.OPENCLAW_API_KEY) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const { result } = req.body;
+    completeCommand(req.params.id, result || "success");
+    res.json({ ok: true });
+  });
+
+  app.get("/api/control/queue-depth", async (req, res) => {
+    const source = req.query.source as string | undefined;
+    res.json({ depth: getQueueDepth(source === "agent" || source === "human" ? source : undefined) });
+  });
+
+  app.get("/api/control/paused-executions", async (_req, res) => {
+    res.json(getPausedExecutions());
+  });
+
+  app.delete("/api/control/paused-executions/:id", async (req, res) => {
+    const removed = removePausedExecution(req.params.id);
+    if (!removed) return res.status(404).json({ message: "Not found" });
+    res.json(removed);
+  });
+
+  app.delete("/api/control/paused-executions", async (_req, res) => {
+    clearPausedExecutions();
+    res.json({ ok: true });
+  });
+
+  onResume(async (paused: PausedExecution) => {
+    if (paused.type === "navigation" && paused.profileId && paused.navPathId) {
+      try {
+        const profile = await storage.getSiteProfile(paused.profileId);
+        const navPath = await storage.getNavigationPath(paused.navPathId);
+        if (!profile || !navPath) {
+          console.warn(`[control-bus] Cannot resume navigation: profile or path not found`);
+          return;
+        }
+        removePausedExecution(paused.id);
+        recordAction(getControlMode(), `nav-resuming: ${navPath.name} from step ${paused.stepIndex}`, profile.name, undefined, "resumed");
+        const runtimeUrl = paused.context?.runtimeUrl as string | undefined;
+        const savedPageId = paused.context?.pageId as string | undefined;
+        executeNavigationPath(profile, navPath, undefined, runtimeUrl, paused.stepIndex, savedPageId).catch(err => {
+          console.error(`[control-bus] Resume navigation failed:`, err);
+        });
+      } catch (err) {
+        console.error(`[control-bus] Error resuming navigation:`, err);
+      }
+    }
   });
 
   return httpServer;

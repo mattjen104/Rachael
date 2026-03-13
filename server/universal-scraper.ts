@@ -11,6 +11,7 @@ import {
   getPage,
   type PageContent,
 } from "./browser-bridge";
+import { shouldYield, checkPermission, createTakeoverPoint, recordAction, getControlMode, enqueueCommand, completeCommand, pauseExecution, removePausedExecution, getPausedExecutions } from "./control-bus";
 
 export type UrlValidator = (url: string) => Promise<{ safe: boolean; error?: string }>;
 
@@ -198,10 +199,12 @@ export async function executeNavigationPath(
   profile: SiteProfile,
   navPath: NavigationPath,
   validateUrl?: UrlValidator,
-  runtimeUrl?: string
+  runtimeUrl?: string,
+  resumeFromStep?: number,
+  resumePageId?: string
 ): Promise<ScrapeResult> {
   const startTime = Date.now();
-  const pageId = generatePageId(profile);
+  const pageId = resumePageId || generatePageId(profile);
 
   const result: ScrapeResult = {
     success: false,
@@ -216,43 +219,91 @@ export async function executeNavigationPath(
   try {
     const steps = navPath.steps as NavigationStep[];
 
-    const hasNavigateStep = steps.some(s => s.action === "navigate");
-    const initialUrl = runtimeUrl || (!hasNavigateStep && profile.baseUrl ? profile.baseUrl : (steps.length === 0 ? profile.baseUrl : null));
-    if (initialUrl) {
-      if (validateUrl) {
-        const check = await validateUrl(initialUrl);
-        if (!check.safe) {
-          result.error = `URL blocked: ${check.error}`;
+    const isResume = resumeFromStep !== undefined && resumeFromStep > 0;
+    if (!isResume) {
+      const hasNavigateStep = steps.some(s => s.action === "navigate");
+      const initialUrl = runtimeUrl || (!hasNavigateStep && profile.baseUrl ? profile.baseUrl : (steps.length === 0 ? profile.baseUrl : null));
+      if (initialUrl) {
+        if (validateUrl) {
+          const check = await validateUrl(initialUrl);
+          if (!check.safe) {
+            result.error = `URL blocked: ${check.error}`;
+            result.durationMs = Date.now() - startTime;
+            return result;
+          }
+        }
+        const nav = await openPage(pageId, initialUrl);
+        if (!nav.success) {
+          result.error = nav.error || "Failed to open URL";
           result.durationMs = Date.now() - startTime;
           return result;
         }
+        await waitForPage(pageId, 2000);
       }
-      const nav = await openPage(pageId, initialUrl);
-      if (!nav.success) {
-        result.error = nav.error || "Failed to open URL";
-        result.durationMs = Date.now() - startTime;
-        return result;
-      }
-      await waitForPage(pageId, 2000);
     }
 
     let hasCriticalFailure = false;
+    let wasPaused = false;
     const criticalActions = new Set(["navigate", "click", "click_text", "type"]);
+    const startStep = resumeFromStep || 0;
 
-    for (let i = 0; i < steps.length; i++) {
-      const stepResult = await executeStep(pageId, steps[i], i, profile, validateUrl);
-      result.stepResults.push(stepResult);
-
-      if (!stepResult.success && criticalActions.has(steps[i].action)) {
-        console.warn(`[universal-scraper] Critical step ${i} (${steps[i].action}) failed: ${stepResult.error}`);
-        hasCriticalFailure = true;
-        result.error = `Step ${i} (${steps[i].action}) failed: ${stepResult.error}`;
+    for (let i = startStep; i < steps.length; i++) {
+      if (shouldYield()) {
+        pauseExecution({
+          type: "navigation",
+          profileId: profile.id,
+          navPathId: navPath.id,
+          stepIndex: i,
+          context: { runtimeUrl, pageId, completedSteps: result.stepResults.length },
+        });
+        result.error = `Paused at step ${i}: human took control. Will resume when agent regains control.`;
+        wasPaused = true;
+        recordAction(getControlMode(), `nav-paused: ${navPath.name} step ${i}`, profile.name, undefined, "paused");
         break;
       }
 
-      if (steps[i].waitMs && steps[i].action !== "wait") {
-        await waitForPage(pageId, steps[i].waitMs!);
+      const step = steps[i];
+      const actionName = step.description || `${step.action}:${step.target || step.value || ""}`;
+
+      const permCheck = await checkPermission(profile.id, navPath.id, `step ${i}: ${actionName}`, actionName);
+      if (!permCheck.allowed && !permCheck.needsApproval) {
+        result.stepResults.push({ step: i, action: step.action, description: step.description, success: false, error: `Blocked by permission: ${actionName}` });
+        hasCriticalFailure = true;
+        result.error = `Step ${i} blocked: ${actionName} (permission: ${permCheck.level})`;
+        break;
       }
+
+      if (permCheck.needsApproval) {
+        const decision = await createTakeoverPoint(`nav-step: ${actionName}`, `${profile.name}/${navPath.name} step ${i}`, permCheck.level);
+        if (decision !== "confirm") {
+          result.stepResults.push({ step: i, action: step.action, description: step.description, success: false, error: `Step ${decision}: ${actionName}` });
+          hasCriticalFailure = true;
+          result.error = `Step ${i} ${decision}: ${actionName}`;
+          break;
+        }
+      }
+
+      const cmd = enqueueCommand("agent", `nav-step: ${step.action}`, `${profile.name}/${navPath.name}[${i}]`);
+      const stepResult = await executeStep(pageId, step, i, profile, validateUrl);
+      if (cmd) completeCommand(cmd.id, stepResult.success ? "success" : "error");
+      result.stepResults.push(stepResult);
+
+      if (!stepResult.success && criticalActions.has(step.action)) {
+        console.warn(`[universal-scraper] Critical step ${i} (${step.action}) failed: ${stepResult.error}`);
+        hasCriticalFailure = true;
+        result.error = `Step ${i} (${step.action}) failed: ${stepResult.error}`;
+        break;
+      }
+
+      if (step.waitMs && step.action !== "wait") {
+        await waitForPage(pageId, step.waitMs!);
+      }
+    }
+
+    if (wasPaused) {
+      result.success = false;
+      result.durationMs = Date.now() - startTime;
+      return result;
     }
 
     const content = await getPageContent(pageId);

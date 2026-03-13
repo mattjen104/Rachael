@@ -10,6 +10,8 @@ import {
   type OpenclawProposal, type InsertOpenclawProposal, openclawProposals,
   type SiteProfile, type InsertSiteProfile, siteProfiles,
   type NavigationPath, type InsertNavigationPath, navigationPaths,
+  type AuditLog, type InsertAuditLog, auditLog,
+  type ActionPermission, actionPermissions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql } from "drizzle-orm";
@@ -84,6 +86,15 @@ export interface IStorage {
   createNavigationPath(p: InsertNavigationPath): Promise<NavigationPath>;
   updateNavigationPath(id: number, data: Partial<InsertNavigationPath>): Promise<NavigationPath | undefined>;
   deleteNavigationPath(id: number): Promise<void>;
+
+  createAuditLog(entry: InsertAuditLog): Promise<AuditLog>;
+  getAuditLogs(limit?: number): Promise<AuditLog[]>;
+  getAuditLogsByActor(actor: string, limit?: number): Promise<AuditLog[]>;
+
+  getActionPermissions(): Promise<ActionPermission[]>;
+  getActionPermission(navPathId: number, actionName: string): Promise<ActionPermission | undefined>;
+  setActionPermission(navPathId: number, actionName: string, level: string): Promise<ActionPermission>;
+  deleteActionPermission(id: number): Promise<void>;
 
   searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>>;
 }
@@ -335,6 +346,46 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteNavigationPath(id: number): Promise<void> {
     await db.delete(navigationPaths).where(eq(navigationPaths.id, id));
+  }
+
+  async createAuditLog(entry: InsertAuditLog): Promise<AuditLog> {
+    const [created] = await db.insert(auditLog).values(entry).returning();
+    return created;
+  }
+  async getAuditLogs(limit = 100): Promise<AuditLog[]> {
+    return db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(limit);
+  }
+  async getAuditLogsByActor(actor: string, limit = 100): Promise<AuditLog[]> {
+    return db.select().from(auditLog).where(eq(auditLog.actor, actor)).orderBy(desc(auditLog.createdAt)).limit(limit);
+  }
+
+  async getActionPermissions(): Promise<ActionPermission[]> {
+    return db.select().from(actionPermissions);
+  }
+
+  async getActionPermission(navPathId: number, actionName: string): Promise<ActionPermission | undefined> {
+    const [result] = await db.select().from(actionPermissions)
+      .where(and(eq(actionPermissions.navPathId, navPathId), eq(actionPermissions.actionName, actionName)));
+    return result;
+  }
+
+  async setActionPermission(navPathId: number, actionName: string, level: string): Promise<ActionPermission> {
+    const existing = await this.getActionPermission(navPathId, actionName);
+    if (existing) {
+      const [updated] = await db.update(actionPermissions)
+        .set({ permissionLevel: level })
+        .where(eq(actionPermissions.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(actionPermissions)
+      .values({ navPathId, actionName, permissionLevel: level })
+      .returning();
+    return created;
+  }
+
+  async deleteActionPermission(id: number): Promise<void> {
+    await db.delete(actionPermissions).where(eq(actionPermissions.id, id));
   }
 
   async searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>> {

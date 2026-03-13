@@ -21,10 +21,18 @@ All data lives in Postgres tables:
 - `agent_results` — Chronological agent execution outputs
 - `reader_pages` — Saved/scraped web pages for reading
 - `openclaw_proposals` — Agent self-modification proposals
-- `site_profiles` — Configurable site scraping profiles (URL patterns, selectors, actions)
-- `navigation_paths` — Ordered step sequences for scraping (tied to site profiles)
+- `site_profiles` — Configurable site scraping profiles (URL patterns, selectors, actions, defaultPermission)
+- `navigation_paths` — Ordered step sequences for scraping (tied to site profiles, permissionLevel)
+- `audit_log` — Records all human/agent actions with timestamps, permission levels, and results
 
-## Five-View Architecture
+## Control Bus & Permissions
+
+- **Control Bus** (`server/control-bus.ts`) — Tracks who is driving (human vs agent), manages turn-taking with pause/resume semantics
+- **Permission Levels**: autonomous (agent acts freely), approval (agent pauses and waits for human), blocked (action refused)
+- **Takeover Points** — When agent hits an "approval" action, it emits a takeover point visible in Cockpit stream; human can confirm, reject, or take over
+- **Audit Log** — All actions (human and agent) logged with actor, action, permission level, result, timestamp
+
+## Six-View Architecture
 
 Narrow tab bar at top, full-height views below:
 
@@ -33,15 +41,16 @@ Narrow tab bar at top, full-height views below:
 3. **Programs View** (3:PRG) — List of all programs with enable/disable, trigger, runtime status. Runtime ON/OFF toggle.
 4. **Results View** (4:RES) — Chronological agent outputs. Tab to expand full output.
 5. **Reader View** (5:RDR) — Saved web pages. Enter to read, Escape to go back.
+6. **Cockpit View** (6:CPT) — Shared control cockpit. Activity stream, audit log, and permission editor. Tab to toggle control mode (human/agent).
 
 ## Keyboard Navigation
 
 - `j`/`k` — Move cursor up/down
 - `g`/`G` — Jump to top/bottom
-- `Tab` — Fold/unfold section or expand detail
+- `Tab` — Fold/unfold (in most views) or toggle control mode (in Cockpit)
 - `Enter` — Toggle task status, open item
 - `Escape` — Back to agenda
-- `1-5` — Switch views directly
+- `1-6` — Switch views directly
 - `Space` or `Alt-x` — Open command palette (M-x)
 - `/` — Open command palette in search mode
 - `c` — Open command palette for capture
