@@ -65,7 +65,7 @@ export function getHardenCandidatesFromRuntime(
 ): Array<{ programName: string; code: string }> {
   const candidates: Array<{ programName: string; code: string }> = [];
 
-  for (const [name, state] of runtimePrograms) {
+  for (const [name, state] of Array.from(runtimePrograms.entries())) {
     if (!state.lastOutput) continue;
     const codeBlockMatch = state.lastOutput.match(
       /```typescript\s*\n\/\/ HARDENABLE\s*\n([\s\S]*?)```/

@@ -7,13 +7,11 @@ import { CrtThemeProvider } from "@/lib/crt-theme";
 import AuthGate from "@/components/AuthGate";
 import NotFound from "@/pages/not-found";
 import Workspace from "@/pages/Workspace";
-import TUI from "@/pages/TUI";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Workspace} />
-      <Route path="/tui" component={TUI} />
       <Route component={NotFound} />
     </Switch>
   );

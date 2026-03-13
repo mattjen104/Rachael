@@ -1,41 +1,25 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import type { ViewMode } from "@/components/layout/Sidebar";
 import StatusBar from "@/components/layout/StatusBar";
-import MailView from "@/components/editor/MailView";
-import { OutlinerView, AgendaView } from "@/components/editor/OrgView";
-import OrgCapture from "@/components/editor/OrgCapture";
-import type { CaptureContext } from "@/components/editor/OrgCapture";
+import AgendaView from "@/components/views/AgendaView";
+import TreeView from "@/components/views/TreeView";
+import ProgramsView from "@/components/views/ProgramsView";
+import ResultsView from "@/components/views/ResultsView";
+import ReaderView from "@/components/views/ReaderView";
 import Minibuffer from "@/components/editor/Minibuffer";
-import { useSeedData, useOrgFiles } from "@/hooks/use-org-data";
+import { useSmartCapture } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
 
 export default function Workspace() {
   const [viewMode, setViewMode] = useState<ViewMode>("agenda");
-  const [captureOpen, setCaptureOpen] = useState(false);
-  const [capturePrefill, setCapturePrefill] = useState<CaptureContext | null>(null);
   const [minibufferOpen, setMinibufferOpen] = useState(false);
+  const [minibufferInitialMode, setMinibufferInitialMode] = useState<"command" | "search" | "capture" | "add-url">("command");
   const [lastCommand, setLastCommand] = useState<string | null>(null);
-  const [outlinerFile, setOutlinerFile] = useState<string | undefined>(undefined);
+  const [selectedItemId, setSelectedItemId] = useState<number | undefined>(undefined);
 
-  const seedMutation = useSeedData();
-  const { data: orgFiles } = useOrgFiles();
   const { cycleTheme } = useCrtTheme();
-
-  const defaultCaptureFile = useMemo(() => {
-    if (!orgFiles || orgFiles.length === 0) return "dad.org";
-    const inbox = orgFiles.find(f => f.name === "inbox.org");
-    if (inbox) return inbox.name;
-    const dad = orgFiles.find(f => f.name === "dad.org");
-    if (dad) return dad.name;
-    return orgFiles[0].name;
-  }, [orgFiles]);
-
-  useEffect(() => {
-    if (orgFiles && orgFiles.length === 0) {
-      seedMutation.mutate();
-    }
-  }, [orgFiles]);
+  const smartCapture = useSmartCapture();
 
   const handleCommandExecuted = useCallback((label: string) => {
     setLastCommand(label);
@@ -48,24 +32,9 @@ export default function Workspace() {
     }
   }, [lastCommand]);
 
-  const handleNavigateToFile = useCallback((file: string) => {
-    setOutlinerFile(file);
-    setViewMode("outliner");
-  }, []);
-
-  const handleJumpToHeading = useCallback((sourceFile: string, _title: string, _lineNumber: number) => {
-    setOutlinerFile(sourceFile);
-    setViewMode("outliner");
-  }, []);
-
-  const openCapture = useCallback((prefill?: CaptureContext) => {
-    setCapturePrefill(prefill || null);
-    setCaptureOpen(true);
-  }, []);
-
-  const closeCapture = useCallback(() => {
-    setCaptureOpen(false);
-    setCapturePrefill(null);
+  const handleNavigate = useCallback((view: string, id?: number) => {
+    setViewMode(view as ViewMode);
+    setSelectedItemId(id);
   }, []);
 
   useEffect(() => {
@@ -78,100 +47,104 @@ export default function Workspace() {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.action === "capture") {
         const { url, title, selection } = event.data;
-        openCapture({ url, title, selection });
+        const content = selection || title || url || "";
+        if (content) smartCapture.mutate(content);
       }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [openCapture]);
+  }, [smartCapture]);
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const tag = (document.activeElement as HTMLElement)?.tagName;
       const isEditable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
         (document.activeElement as HTMLElement)?.isContentEditable;
-      if (isEditable || captureOpen) return;
+      if (isEditable || minibufferOpen) return;
 
       const text = e.clipboardData?.getData("text/plain")?.trim();
       if (!text) return;
 
       e.preventDefault();
-
-      const isUrl = /^https?:\/\/\S+$/.test(text);
-      if (isUrl) {
-        openCapture({ url: text, title: "", selection: "" });
-      } else {
-        openCapture({ title: "", selection: text });
-      }
+      smartCapture.mutate(text);
+      setLastCommand(`Captured: ${text.slice(0, 30)}`);
     };
-    document.addEventListener("paste", handlePaste);
-    return () => document.removeEventListener("paste", handlePaste);
-  }, [captureOpen, openCapture]);
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [smartCapture, minibufferOpen]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (captureOpen) return;
-
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault();
-        setMinibufferOpen(prev => !prev);
-        return;
-      }
-
-      const tag = (e.target as HTMLElement)?.tagName;
-      const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (minibufferOpen) return;
 
-      if (isInput) return;
-
-      if (e.key === " ") {
+      if (e.key === " " || (e.altKey && e.key === "x") || (e.ctrlKey && e.key === "k")) {
         e.preventDefault();
+        setMinibufferInitialMode("command");
         setMinibufferOpen(true);
         return;
       }
 
-      if (e.key === "c" && e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (!captureOpen && window.parent === window) {
-          openCapture();
-        }
+        setMinibufferInitialMode("search");
+        setMinibufferOpen(true);
+        return;
+      }
+
+      if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setMinibufferInitialMode("capture");
+        setMinibufferOpen(true);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setViewMode("agenda");
+        return;
+      }
+
+      if (e.key >= "1" && e.key <= "5" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader"];
+        setViewMode(views[parseInt(e.key) - 1]);
+        return;
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [captureOpen, minibufferOpen]);
+  }, [minibufferOpen]);
 
   return (
-    <div className="crt-overlay flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground font-mono">
-      <div className="crt-noise-overlay" />
-      <div className="crt-glow-bar" />
+    <div className="flex flex-col h-screen w-full max-w-[500px] mx-auto bg-background text-foreground overflow-hidden" data-testid="workspace">
+      <Sidebar current={viewMode} onSwitch={setViewMode} />
 
-      <div className="flex flex-1 overflow-hidden relative z-0">
-        <Sidebar viewMode={viewMode} onSwitchView={setViewMode} />
-        <main className="flex-1 flex flex-col relative overflow-hidden bg-background">
-          {viewMode === "outliner" ? (
-            <OutlinerView initialFile={outlinerFile} />
-          ) : viewMode === "agenda" ? (
-            <AgendaView onNavigateToFile={handleNavigateToFile} />
-          ) : (
-            <MailView />
-          )}
-        </main>
+      <div className="flex-1 overflow-hidden">
+        {viewMode === "agenda" && <AgendaView onNavigate={handleNavigate} />}
+        {viewMode === "tree" && <TreeView onNavigate={handleNavigate} />}
+        {viewMode === "programs" && <ProgramsView onNavigate={handleNavigate} />}
+        {viewMode === "results" && <ResultsView selectedResultId={selectedItemId} />}
+        {viewMode === "reader" && <ReaderView selectedPageId={selectedItemId} />}
       </div>
-      {minibufferOpen ? (
+
+      <StatusBar
+        viewMode={viewMode}
+        lastCommand={lastCommand}
+        onOpenMinibuffer={() => setMinibufferOpen(true)}
+      />
+
+      {minibufferOpen && (
         <Minibuffer
+          initialMode={minibufferInitialMode}
           onClose={() => setMinibufferOpen(false)}
-          onSwitchView={(v) => setViewMode(v)}
-          onOpenCapture={() => openCapture()}
+          onSwitchView={setViewMode}
+          onNavigate={handleNavigate}
           onCycleTheme={cycleTheme}
           onCommandExecuted={handleCommandExecuted}
-          onJumpToHeading={handleJumpToHeading}
         />
-      ) : (
-        <StatusBar viewMode={viewMode} lastCommand={lastCommand} onOpenMinibuffer={() => setMinibufferOpen(true)} />
       )}
-      <OrgCapture open={captureOpen} onClose={closeCapture} defaultFile={defaultCaptureFile} prefill={capturePrefill} />
     </div>
   );
 }

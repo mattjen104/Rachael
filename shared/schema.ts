@@ -1,48 +1,189 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
+import { pgTable, text, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
-export const orgFiles = pgTable("org_files", {
+export const programs = pgTable("programs", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   name: text("name").notNull().unique(),
-  content: text("content").notNull().default(""),
+  type: text("type").notNull().default("monitor"),
+  schedule: text("schedule"),
+  cronExpression: text("cron_expression"),
+  code: text("code"),
+  codeLang: text("code_lang").default("typescript"),
+  instructions: text("instructions").notNull().default(""),
+  config: jsonb("config").$type<Record<string, string>>().default({}),
+  enabled: boolean("enabled").notNull().default(true),
+  costTier: text("cost_tier").notNull().default("free"),
+  tags: text("tags").array().notNull().default([]),
+  lastRun: timestamp("last_run"),
+  nextRun: timestamp("next_run"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertOrgFileSchema = createInsertSchema(orgFiles).omit({ id: true });
-export type InsertOrgFile = z.infer<typeof insertOrgFileSchema>;
-export type OrgFile = typeof orgFiles.$inferSelect;
+export const insertProgramSchema = z.object({
+  name: z.string(),
+  type: z.string().default("monitor"),
+  schedule: z.string().nullable().optional(),
+  cronExpression: z.string().nullable().optional(),
+  code: z.string().nullable().optional(),
+  codeLang: z.string().default("typescript"),
+  instructions: z.string().default(""),
+  config: z.record(z.string(), z.string()).default({}),
+  enabled: z.boolean().default(true),
+  costTier: z.string().default("free"),
+  tags: z.array(z.string()).default([]),
+});
+export type InsertProgram = z.infer<typeof insertProgramSchema>;
+export type Program = typeof programs.$inferSelect;
 
-export const clipboardItems = pgTable("clipboard_items", {
+export const skills = pgTable("skills", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  content: text("content").notNull().default(""),
+  type: text("type").notNull().default("skill"),
+  scriptPath: text("script_path"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSkillSchema = z.object({
+  name: z.string(),
+  description: z.string().default(""),
+  content: z.string().default(""),
+  type: z.string().default("skill"),
+  scriptPath: z.string().nullable().optional(),
+});
+export type InsertSkill = z.infer<typeof insertSkillSchema>;
+export type Skill = typeof skills.$inferSelect;
+
+export const agentConfig = pgTable("agent_config", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  key: text("key").notNull().unique(),
+  value: text("value").notNull().default(""),
+  category: text("category").notNull().default("general"),
+});
+
+export const insertAgentConfigSchema = z.object({
+  key: z.string(),
+  value: z.string().default(""),
+  category: z.string().default("general"),
+});
+export type InsertAgentConfig = z.infer<typeof insertAgentConfigSchema>;
+export type AgentConfig = typeof agentConfig.$inferSelect;
+
+export const tasks = pgTable("tasks", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  title: text("title").notNull(),
+  status: text("status").notNull().default("TODO"),
+  body: text("body").notNull().default(""),
+  scheduledDate: text("scheduled_date"),
+  deadlineDate: text("deadline_date"),
+  priority: text("priority"),
+  tags: text("tags").array().notNull().default([]),
+  parentId: integer("parent_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertTaskSchema = z.object({
+  title: z.string(),
+  status: z.string().default("TODO"),
+  body: z.string().default(""),
+  scheduledDate: z.string().nullable().optional(),
+  deadlineDate: z.string().nullable().optional(),
+  priority: z.string().nullable().optional(),
+  tags: z.array(z.string()).default([]),
+  parentId: z.number().nullable().optional(),
+});
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+export type Task = typeof tasks.$inferSelect;
+
+export const notes = pgTable("notes", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  tags: text("tags").array().notNull().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertNoteSchema = z.object({
+  title: z.string(),
+  body: z.string().default(""),
+  tags: z.array(z.string()).default([]),
+});
+export type InsertNote = z.infer<typeof insertNoteSchema>;
+export type Note = typeof notes.$inferSelect;
+
+export const captures = pgTable("captures", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   content: text("content").notNull(),
   type: text("type").notNull().default("text"),
-  capturedAt: timestamp("captured_at").notNull().defaultNow(),
-  archived: boolean("archived").notNull().default(false),
+  source: text("source"),
+  processed: boolean("processed").notNull().default(false),
   detectedType: text("detected_type"),
   urlTitle: text("url_title"),
   urlDescription: text("url_description"),
   urlImage: text("url_image"),
   urlDomain: text("url_domain"),
-  pinned: boolean("pinned").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertClipboardItemSchema = createInsertSchema(clipboardItems).omit({ id: true, capturedAt: true, archived: true });
-export type InsertClipboardItem = z.infer<typeof insertClipboardItemSchema>;
-export type ClipboardItem = typeof clipboardItems.$inferSelect;
+export const insertCaptureSchema = z.object({
+  content: z.string(),
+  type: z.string().default("text"),
+  source: z.string().nullable().optional(),
+  detectedType: z.string().nullable().optional(),
+  urlTitle: z.string().nullable().optional(),
+  urlDescription: z.string().nullable().optional(),
+  urlImage: z.string().nullable().optional(),
+  urlDomain: z.string().nullable().optional(),
+});
+export type InsertCapture = z.infer<typeof insertCaptureSchema>;
+export type Capture = typeof captures.$inferSelect;
 
-export const agendaItems = pgTable("agenda_items", {
+export const agentResults = pgTable("agent_results", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  text: text("text").notNull(),
-  status: text("status").notNull().default("TODO"),
-  scheduledDate: text("scheduled_date").notNull(),
-  orgFileId: integer("org_file_id"),
-  carriedOver: boolean("carried_over").notNull().default(false),
+  programId: integer("program_id"),
+  programName: text("program_name").notNull(),
+  summary: text("summary").notNull(),
+  metric: text("metric"),
+  model: text("model"),
+  tokensUsed: integer("tokens_used"),
+  iteration: integer("iteration"),
+  rawOutput: text("raw_output"),
+  status: text("status").notNull().default("ok"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertAgendaItemSchema = createInsertSchema(agendaItems).omit({ id: true, carriedOver: true });
-export type InsertAgendaItem = z.infer<typeof insertAgendaItemSchema>;
-export type AgendaItem = typeof agendaItems.$inferSelect;
+export const insertAgentResultSchema = z.object({
+  programId: z.number().nullable().optional(),
+  programName: z.string(),
+  summary: z.string(),
+  metric: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
+  tokensUsed: z.number().nullable().optional(),
+  iteration: z.number().nullable().optional(),
+  rawOutput: z.string().nullable().optional(),
+  status: z.string().default("ok"),
+});
+export type InsertAgentResult = z.infer<typeof insertAgentResultSchema>;
+export type AgentResult = typeof agentResults.$inferSelect;
+
+export const readerPages = pgTable("reader_pages", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  url: text("url").notNull(),
+  title: text("title").notNull().default(""),
+  extractedText: text("extracted_text").notNull().default(""),
+  domain: text("domain"),
+  scrapedAt: timestamp("scraped_at").notNull().defaultNow(),
+});
+
+export const insertReaderPageSchema = z.object({
+  url: z.string(),
+  title: z.string().default(""),
+  extractedText: z.string().default(""),
+  domain: z.string().nullable().optional(),
+});
+export type InsertReaderPage = z.infer<typeof insertReaderPageSchema>;
+export type ReaderPage = typeof readerPages.$inferSelect;
 
 export const openclawProposals = pgTable("openclaw_proposals", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -59,17 +200,15 @@ export const openclawProposals = pgTable("openclaw_proposals", {
   resolvedAt: timestamp("resolved_at"),
 });
 
-export const insertOpenclawProposalSchema = createInsertSchema(openclawProposals).omit({ id: true, status: true, createdAt: true, resolvedAt: true });
+export const insertOpenclawProposalSchema = z.object({
+  section: z.string(),
+  targetName: z.string().nullable().optional(),
+  reason: z.string(),
+  currentContent: z.string(),
+  proposedContent: z.string(),
+  source: z.string().default("agent"),
+  warnings: z.string().nullable().optional(),
+  proposalType: z.string().default("change"),
+});
 export type InsertOpenclawProposal = z.infer<typeof insertOpenclawProposalSchema>;
 export type OpenclawProposal = typeof openclawProposals.$inferSelect;
-
-export const openclawVersions = pgTable("openclaw_versions", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  orgContent: text("org_content").notNull(),
-  label: text("label").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
-export const insertOpenclawVersionSchema = createInsertSchema(openclawVersions).omit({ id: true, createdAt: true });
-export type InsertOpenclawVersion = z.infer<typeof insertOpenclawVersionSchema>;
-export type OpenclawVersion = typeof openclawVersions.$inferSelect;

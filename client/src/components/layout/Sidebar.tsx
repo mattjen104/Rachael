@@ -1,58 +1,40 @@
 import React from "react";
-import { cn } from "@/lib/utils";
-import { useCrtTheme } from "@/lib/crt-theme";
 
-export type ViewMode = "outliner" | "agenda" | "control";
+export type ViewMode = "agenda" | "tree" | "programs" | "results" | "reader";
 
 interface SidebarProps {
-  viewMode: ViewMode;
-  onSwitchView: (mode: ViewMode) => void;
+  current: ViewMode;
+  onSwitch: (mode: ViewMode) => void;
 }
 
-const views: { key: ViewMode; label: string; icon: string }[] = [
-  { key: "agenda", label: "Agenda", icon: "☰" },
-  { key: "outliner", label: "Outliner", icon: "{*}" },
-  { key: "control", label: "Control", icon: "⌘" },
+const VIEWS: Array<{ mode: ViewMode; label: string; key: string }> = [
+  { mode: "agenda", label: "AGD", key: "1" },
+  { mode: "tree", label: "TRE", key: "2" },
+  { mode: "programs", label: "PRG", key: "3" },
+  { mode: "results", label: "RES", key: "4" },
+  { mode: "reader", label: "RDR", key: "5" },
 ];
 
-export default function Sidebar({ viewMode, onSwitchView }: SidebarProps) {
-  const { cycleTheme, t } = useCrtTheme();
-
+export default function Sidebar({ current, onSwitch }: SidebarProps) {
   return (
-    <aside className="w-10 border-r border-border bg-card flex flex-col h-full flex-shrink-0 items-center">
-      <div className="py-2 border-b border-border w-full flex items-center justify-center">
+    <div
+      className="flex flex-row items-center gap-0 border-b border-border bg-background font-mono text-[10px] px-1"
+      data-testid="sidebar"
+    >
+      {VIEWS.map(v => (
         <button
-          onClick={cycleTheme}
-          className="text-foreground phosphor-glow font-bold"
-          title={`Theme: ${t.label}`}
-          data-testid="theme-cycle-btn"
+          key={v.mode}
+          data-testid={`nav-${v.mode}`}
+          className={`px-2 py-1 cursor-pointer select-none transition-colors ${
+            current === v.mode
+              ? "text-primary bg-primary/10 font-bold"
+              : "text-muted-foreground hover:text-primary"
+          }`}
+          onClick={() => onSwitch(v.mode)}
         >
-          #
+          {v.key}:{v.label}
         </button>
-      </div>
-
-      <div className="flex-1 flex flex-col items-center py-2 gap-0.5 w-full">
-        {views.map((v) => (
-          <button
-            key={v.key}
-            onClick={() => onSwitchView(v.key)}
-            data-testid={`view-${v.key}`}
-            className={cn(
-              "w-full flex flex-col items-center py-2 px-1 transition-colors text-center",
-              viewMode === v.key
-                ? "text-foreground bg-muted border-r-2 border-foreground phosphor-glow"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            title={v.label}
-          >
-            <span className="font-bold">{v.icon}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="py-2 border-t border-border w-full flex items-center justify-center">
-        <span className="text-muted-foreground phosphor-glow-dim" title="iCloud Sync Active">☁</span>
-      </div>
-    </aside>
+      ))}
+    </div>
   );
 }

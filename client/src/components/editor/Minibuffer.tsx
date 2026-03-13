@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { cn } from "@/lib/utils";
-import { useHeadingsSearch, useClipboardItems, useClipboardHistory } from "@/hooks/use-org-data";
+import { useSearch, useSmartCapture, useToggleRuntime, useCreateReaderPage, usePrograms, useProposals, useTasks } from "@/hooks/use-org-data";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ViewMode } from "@/components/layout/Sidebar";
 
@@ -12,32 +11,36 @@ interface MinibufferCommand {
 }
 
 interface MinibufferProps {
+  initialMode?: "command" | "search" | "capture" | "add-url";
   onClose: () => void;
   onSwitchView: (view: ViewMode) => void;
-  onOpenCapture: () => void;
+  onNavigate: (view: string, id?: number) => void;
   onCycleTheme: () => void;
   onCommandExecuted: (label: string) => void;
-  onJumpToHeading?: (sourceFile: string, title: string, lineNumber: number) => void;
 }
 
 export default function Minibuffer({
+  initialMode = "command",
   onClose,
   onSwitchView,
-  onOpenCapture,
+  onNavigate,
   onCycleTheme,
   onCommandExecuted,
-  onJumpToHeading,
 }: MinibufferProps) {
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [mode, setMode] = useState<"command" | "search" | "clipboard" | "create-file">("command");
+  const [mode, setMode] = useState<"command" | "search" | "capture" | "add-url">(initialMode);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const searchQuery = mode === "search" ? query : "";
-  const { data: headings = [] } = useHeadingsSearch(searchQuery);
-  const { data: clipboardItems = [] } = useClipboardItems();
-  const { data: historyItems = [] } = useClipboardHistory();
+  const { data: searchResults = [] } = useSearch(searchQuery);
+  const smartCapture = useSmartCapture();
+  const toggleRuntime = useToggleRuntime();
+  const createReaderPage = useCreateReaderPage();
+  const { data: allPrograms = [] } = usePrograms();
+  const { data: pendingProposals = [] } = useProposals("pending");
+  const { data: allTasks = [] } = useTasks();
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -49,194 +52,279 @@ export default function Minibuffer({
     onClose();
   }, [onCommandExecuted, onClose]);
 
-  const commands: MinibufferCommand[] = useMemo(() => [
-    { id: "switch-to-agenda", label: "switch-to-agenda", hint: "☰", action: () => exec("Switched to Agenda", () => onSwitchView("agenda")) },
-    { id: "switch-to-outliner", label: "switch-to-outliner", hint: "{*}", action: () => exec("Switched to Outliner", () => onSwitchView("outliner")) },
-    { id: "switch-to-control", label: "switch-to-control", hint: "⌘", action: () => exec("Switched to Control", () => onSwitchView("control")) },
-    { id: "org-capture", label: "org-capture", hint: "c", action: () => exec("Org Capture", () => onOpenCapture()) },
-    { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
-    { id: "search-headings", label: "search-headings", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
-    { id: "clipboard-search", label: "clipboard-search", hint: "⎘", action: () => { setMode("clipboard"); setQuery(""); setSelectedIdx(0); } },
-    { id: "create-file", label: "create-file", hint: "+", action: () => { setMode("create-file"); setQuery(""); setSelectedIdx(0); } },
-    { id: "toggle-hints", label: "toggle-hints", hint: "?", action: () => exec("Hints toggled", () => window.dispatchEvent(new Event("toggle-hints"))) },
-  ], [exec, onSwitchView, onOpenCapture, onCycleTheme]);
+  const triggerProgram = useCallback(async (id: number, name: string) => {
+    await apiRequest("POST", `/api/programs/${id}/trigger`);
+    queryClient.invalidateQueries({ queryKey: ["/api/runtime"] });
+    onCommandExecuted(`Triggered: ${name}`);
+    onClose();
+  }, [onCommandExecuted, onClose]);
+
+  const toggleProgram = useCallback(async (id: number, name: string) => {
+    await apiRequest("POST", `/api/programs/${id}/toggle`);
+    queryClient.invalidateQueries({ queryKey: ["/api/programs"] });
+    onCommandExecuted(`Toggled: ${name}`);
+    onClose();
+  }, [onCommandExecuted, onClose]);
+
+  const toggleTaskDone = useCallback(async (id: number, title: string) => {
+    await apiRequest("POST", `/api/tasks/${id}/toggle`);
+    queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/tasks/agenda"] });
+    onCommandExecuted(`Toggled: ${title}`);
+    onClose();
+  }, [onCommandExecuted, onClose]);
+
+  const rescheduleTask = useCallback(async (id: number, title: string, date: string) => {
+    await apiRequest("PATCH", `/api/tasks/${id}`, { scheduledDate: date });
+    queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/tasks/agenda"] });
+    onCommandExecuted(`Rescheduled: ${title} → ${date}`);
+    onClose();
+  }, [onCommandExecuted, onClose]);
+
+  const resolveProposal = useCallback(async (id: number, action: "accept" | "reject") => {
+    await apiRequest("POST", `/api/proposals/${id}/${action}`);
+    queryClient.invalidateQueries({ queryKey: ["/api/proposals"] });
+    onCommandExecuted(`Proposal ${action}ed`);
+    onClose();
+  }, [onCommandExecuted, onClose]);
+
+  const commands: MinibufferCommand[] = useMemo(() => {
+    const cmds: MinibufferCommand[] = [
+      { id: "switch-agenda", label: "switch-to-agenda", hint: "1", action: () => exec("Agenda", () => onSwitchView("agenda")) },
+      { id: "switch-tree", label: "switch-to-tree", hint: "2", action: () => exec("Tree", () => onSwitchView("tree")) },
+      { id: "switch-programs", label: "switch-to-programs", hint: "3", action: () => exec("Programs", () => onSwitchView("programs")) },
+      { id: "switch-results", label: "switch-to-results", hint: "4", action: () => exec("Results", () => onSwitchView("results")) },
+      { id: "switch-reader", label: "switch-to-reader", hint: "5", action: () => exec("Reader", () => onSwitchView("reader")) },
+      { id: "capture", label: "capture", hint: "c", action: () => { setMode("capture"); setQuery(""); setSelectedIdx(0); } },
+      { id: "quick-capture", label: "quick-capture", hint: "q", action: () => { setMode("capture"); setQuery(""); setSelectedIdx(0); } },
+      { id: "search", label: "search-all", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
+      { id: "add-url", label: "read-url", hint: "u", action: () => { setMode("add-url"); setQuery(""); setSelectedIdx(0); } },
+      { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
+      { id: "toggle-runtime", label: "toggle-runtime", hint: "R", action: () => exec("Runtime toggled", () => toggleRuntime.mutate()) },
+      { id: "refresh", label: "refresh-all", hint: "r", action: () => exec("Refreshed", () => queryClient.invalidateQueries()) },
+      { id: "launch-bridge", label: "launch-browser-bridge", action: () => exec("Launching bridge...", () => { apiRequest("POST", "/api/bridge/launch"); }) },
+      { id: "close-bridge", label: "close-browser-bridge", action: () => exec("Closing bridge", () => { apiRequest("POST", "/api/bridge/close"); }) },
+      { id: "fetch-mail", label: "fetch-outlook-inbox", action: () => exec("Fetching inbox...", () => { queryClient.invalidateQueries({ queryKey: ["/api/mail/inbox"] }); }) },
+      { id: "fetch-chats", label: "fetch-teams-chats", action: () => exec("Fetching chats...", () => { queryClient.invalidateQueries({ queryKey: ["/api/chat/list"] }); }) },
+    ];
+
+    for (const prog of allPrograms) {
+      cmds.push({
+        id: `trigger-${prog.name}`,
+        label: `run-program: ${prog.name}`,
+        action: () => triggerProgram(prog.id, prog.name),
+      });
+      cmds.push({
+        id: `toggle-${prog.name}`,
+        label: `toggle-program: ${prog.name} [${prog.enabled ? "ON" : "OFF"}]`,
+        action: () => toggleProgram(prog.id, prog.name),
+      });
+      cmds.push({
+        id: `results-${prog.name}`,
+        label: `view-results: ${prog.name}`,
+        action: () => { onSwitchView("results"); onCommandExecuted(`Results: ${prog.name}`); onClose(); },
+      });
+    }
+
+    for (const prop of pendingProposals) {
+      cmds.push({
+        id: `approve-proposal-${prop.id}`,
+        label: `approve-proposal: ${prop.section} — ${prop.reason.slice(0, 40)}`,
+        action: () => resolveProposal(prop.id, "accept"),
+      });
+      cmds.push({
+        id: `reject-proposal-${prop.id}`,
+        label: `reject-proposal: ${prop.section} — ${prop.reason.slice(0, 40)}`,
+        action: () => resolveProposal(prop.id, "reject"),
+      });
+    }
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    const nextWeekStr = nextWeek.toISOString().split("T")[0];
+
+    for (const task of allTasks.filter(t => t.status !== "DONE")) {
+      cmds.push({
+        id: `done-task-${task.id}`,
+        label: `mark-done: ${task.title}`,
+        action: () => toggleTaskDone(task.id, task.title),
+      });
+      cmds.push({
+        id: `reschedule-tomorrow-${task.id}`,
+        label: `reschedule-tomorrow: ${task.title}`,
+        action: () => rescheduleTask(task.id, task.title, tomorrowStr),
+      });
+      cmds.push({
+        id: `reschedule-week-${task.id}`,
+        label: `reschedule-next-week: ${task.title}`,
+        action: () => rescheduleTask(task.id, task.title, nextWeekStr),
+      });
+    }
+
+    return cmds;
+  }, [exec, onSwitchView, onCycleTheme, toggleRuntime, allPrograms, pendingProposals, allTasks, triggerProgram, toggleProgram, resolveProposal, toggleTaskDone, rescheduleTask]);
 
   const filteredCommands = useMemo(() => {
     if (mode !== "command") return [];
-    if (!query.trim()) return commands;
+    if (!query) return commands;
     const q = query.toLowerCase();
-    return commands.filter(c => c.label.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
-  }, [query, commands, mode]);
 
-  const headingItems = useMemo(() => {
-    if (mode !== "search") return [];
-    return headings.slice(0, 20).map((h) => ({
-      id: `heading-${h.sourceFile}-${h.lineNumber}`,
-      label: `${"*".repeat(h.level)} ${h.status ? h.status + " " : ""}${h.title}`,
-      hint: `${h.sourceFile}:${h.lineNumber}`,
-      action: () => {
-        if (onJumpToHeading) {
-          exec(`Jumped to ${h.title}`, () => onJumpToHeading(h.sourceFile, h.title, h.lineNumber));
+    function fuzzyScore(text: string, pattern: string): number {
+      let pi = 0;
+      let score = 0;
+      let consecutive = 0;
+      for (let ti = 0; ti < text.length && pi < pattern.length; ti++) {
+        if (text[ti] === pattern[pi]) {
+          pi++;
+          consecutive++;
+          score += consecutive;
+          if (ti === 0 || text[ti - 1] === "-" || text[ti - 1] === " " || text[ti - 1] === ":") score += 5;
         } else {
-          exec(`Jumped to ${h.title}`, () => onSwitchView("outliner"));
+          consecutive = 0;
         }
-      },
-    }));
-  }, [headings, mode, exec, onSwitchView, onJumpToHeading]);
+      }
+      return pi === pattern.length ? score : -1;
+    }
 
-  const clipboardSearchItems = useMemo(() => {
-    if (mode !== "clipboard") return [];
-    const all = [...clipboardItems, ...historyItems];
-    const q = query.toLowerCase();
-    const filtered = q ? all.filter(item =>
-      item.content.toLowerCase().includes(q) ||
-      (item.urlTitle && item.urlTitle.toLowerCase().includes(q))
-    ) : all;
-    return filtered.slice(0, 20).map((item) => ({
-      id: `clip-${item.id}`,
-      label: item.urlTitle || item.content.slice(0, 80).replace(/\n/g, " "),
-      hint: item.type,
-      action: () => {
-        navigator.clipboard.writeText(item.content).then(() => {
-          exec("Copied to clipboard", () => {});
-        }).catch(() => {
-          exec("Copy failed", () => {});
-        });
-      },
-    }));
-  }, [clipboardItems, historyItems, query, mode, exec]);
+    return commands
+      .map(c => {
+        const labelScore = fuzzyScore(c.label.toLowerCase(), q);
+        const hintScore = (c.hint || "").toLowerCase().includes(q) ? 10 : -1;
+        const best = Math.max(labelScore, hintScore);
+        return { cmd: c, score: best };
+      })
+      .filter(x => x.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .map(x => x.cmd);
+  }, [commands, query, mode]);
 
-  const items = mode === "search" ? headingItems
-    : mode === "clipboard" ? clipboardSearchItems
-    : mode === "create-file" ? []
-    : filteredCommands;
+  const displayItems = mode === "command" ? filteredCommands :
+    mode === "search" ? searchResults : [];
 
   useEffect(() => {
     setSelectedIdx(0);
   }, [query, mode]);
 
-  useEffect(() => {
-    if (listRef.current) {
-      const selected = listRef.current.querySelector("[data-selected='true']");
-      if (selected) {
-        selected.scrollIntoView({ block: "nearest" });
-      }
-    }
-  }, [selectedIdx]);
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const maxIdx = mode === "command" ? filteredCommands.length - 1 :
+      mode === "search" ? searchResults.length - 1 : 0;
 
-  const handleCreateFile = async () => {
-    const name = query.trim();
-    if (!name) return;
-    const fileName = name.endsWith(".org") ? name : `${name}.org`;
-    try {
-      await apiRequest("POST", "/api/org-files", { name: fileName, content: "" });
-      queryClient.invalidateQueries({ queryKey: ["/api/org-files"] });
-      exec(`Created ${fileName}`, () => {});
-    } catch {
-      exec(`Failed to create ${fileName}`, () => {});
+    switch (e.key) {
+      case "Escape":
+        e.preventDefault();
+        if (mode !== "command") { setMode("command"); setQuery(""); }
+        else onClose();
+        break;
+      case "ArrowDown":
+      case "Tab":
+        if (!e.shiftKey) {
+          e.preventDefault();
+          setSelectedIdx(i => Math.min(i + 1, maxIdx));
+        }
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        setSelectedIdx(i => Math.max(i - 1, 0));
+        break;
+      case "Enter":
+        e.preventDefault();
+        if (mode === "command" && filteredCommands[selectedIdx]) {
+          filteredCommands[selectedIdx].action();
+        } else if (mode === "search" && searchResults[selectedIdx]) {
+          const r = searchResults[selectedIdx];
+          const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader" };
+          const targetView = viewMap[r.type] || "tree";
+          onNavigate(targetView, r.id);
+          onCommandExecuted(`Found: ${r.title}`);
+          onClose();
+        } else if (mode === "capture" && query.trim()) {
+          smartCapture.mutate(query.trim());
+          onCommandExecuted(`Captured: ${query.trim().slice(0, 30)}`);
+          onClose();
+        } else if (mode === "add-url" && query.trim()) {
+          createReaderPage.mutate(query.trim());
+          onCommandExecuted(`Saving: ${query.trim().slice(0, 30)}`);
+          onClose();
+        }
+        break;
     }
-  };
+  }, [mode, filteredCommands, searchResults, selectedIdx, query, onClose, onCommandExecuted, smartCapture, createReaderPage]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      if (mode !== "command") {
-        setMode("command");
-        setQuery("");
-      } else {
-        onClose();
-      }
-      return;
-    }
-    if (mode === "create-file" && e.key === "Enter") {
-      e.preventDefault();
-      handleCreateFile();
-      return;
-    }
-    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
-      e.preventDefault();
-      setSelectedIdx(i => Math.min(i + 1, items.length - 1));
-      return;
-    }
-    if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
-      e.preventDefault();
-      setSelectedIdx(i => Math.max(i - 1, 0));
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (items[selectedIdx]) {
-        items[selectedIdx].action();
-      }
-      return;
-    }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    if (mode === "command" && val === "/") {
-      setMode("search");
-      setQuery("");
-      return;
-    }
-    setQuery(val);
-  };
-
-  const prompt = mode === "search" ? "Search: "
-    : mode === "clipboard" ? "Clipboard: "
-    : mode === "create-file" ? "New file: "
-    : "M-x ";
+  const modeLabel = mode === "command" ? "M-x" :
+    mode === "search" ? "Search" :
+    mode === "capture" ? "Capture (t task / note)" :
+    "URL";
 
   return (
-    <div className="flex flex-col w-full font-mono z-50" data-testid="minibuffer">
-      {items.length > 0 && (
-        <div
-          ref={listRef}
-          className="max-h-[calc(8*1.4em+16px)] overflow-y-auto border-t border-border bg-card"
-          data-testid="minibuffer-completions"
-        >
-          {items.map((item, i) => (
-            <button
-              key={item.id}
-              data-selected={i === selectedIdx}
-              onClick={() => item.action()}
-              onMouseEnter={() => setSelectedIdx(i)}
-              className={cn(
-                "w-full text-left px-4 py-0.5 flex items-center gap-2 transition-colors",
-                i === selectedIdx
-                  ? "bg-muted text-foreground phosphor-glow"
-                  : "text-foreground"
-              )}
-              data-testid={`minibuffer-item-${item.id}`}
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[20%]"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="minibuffer"
+    >
+      <div className="w-full max-w-[380px] bg-background border border-border rounded shadow-lg font-mono text-xs">
+        <div className="flex items-center border-b border-border px-2 py-1">
+          <span className="text-muted-foreground mr-2 shrink-0">{modeLabel}:</span>
+          <input
+            ref={inputRef}
+            data-testid="minibuffer-input"
+            className="flex-1 bg-transparent outline-none text-primary"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" ? "https://..." : "Type to filter..."}
+          />
+        </div>
+        <div ref={listRef} className="max-h-64 overflow-y-auto">
+          {mode === "command" && filteredCommands.map((cmd, idx) => (
+            <div
+              key={cmd.id}
+              data-testid={`cmd-${cmd.id}`}
+              className={`px-2 py-1 cursor-pointer flex justify-between items-center ${
+                idx === selectedIdx ? "bg-primary/20 text-primary" : "text-foreground"
+              }`}
+              onClick={() => cmd.action()}
+              onMouseEnter={() => setSelectedIdx(idx)}
             >
-              <span className="flex-1 truncate">{item.label}</span>
-              {item.hint && (
-                <span className="text-muted-foreground ml-2 flex-shrink-0">{item.hint}</span>
-              )}
-            </button>
+              <span>{cmd.label}</span>
+              {cmd.hint && <span className="text-muted-foreground text-[10px]">{cmd.hint}</span>}
+            </div>
           ))}
+          {mode === "search" && searchResults.map((r, idx) => (
+            <div
+              key={`${r.type}-${r.id}`}
+              className={`px-2 py-1 cursor-pointer flex items-center gap-1 ${
+                idx === selectedIdx ? "bg-primary/20 text-primary" : "text-foreground"
+              }`}
+              onClick={() => {
+                const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader" };
+                onNavigate(viewMap[r.type] || "tree", r.id);
+                onCommandExecuted(`Found: ${r.title}`);
+                onClose();
+              }}
+              onMouseEnter={() => setSelectedIdx(idx)}
+            >
+              <span className="text-muted-foreground w-10 shrink-0 text-[10px]">{r.type}</span>
+              <span className="truncate">{r.title}</span>
+            </div>
+          ))}
+          {mode === "search" && query && searchResults.length === 0 && (
+            <div className="px-2 py-2 text-muted-foreground">No results for "{query}"</div>
+          )}
+          {mode === "capture" && query && (
+            <div className="px-2 py-2 text-muted-foreground">
+              Press Enter to capture. Prefix with "t " for a task.
+            </div>
+          )}
+          {mode === "add-url" && query && (
+            <div className="px-2 py-2 text-muted-foreground">
+              Press Enter to save URL to Reader.
+            </div>
+          )}
         </div>
-      )}
-
-      {items.length === 0 && query.length > 0 && mode !== "create-file" && (
-        <div className="border-t border-border bg-card px-4 py-1 text-muted-foreground phosphor-glow-dim">
-          {mode === "search" ? "No headings found" : mode === "clipboard" ? "No matching clips" : "No matching commands"}
-        </div>
-      )}
-
-      <div className="h-6 flex items-center bg-muted border-t border-border px-4 flex-shrink-0">
-        <span className="text-muted-foreground mr-1 flex-shrink-0">{prompt}</span>
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          className="flex-1 bg-transparent text-foreground outline-none phosphor-glow caret-foreground"
-          spellCheck={false}
-          autoComplete="off"
-          placeholder={mode === "create-file" ? "filename.org" : undefined}
-          data-testid="minibuffer-input"
-        />
       </div>
     </div>
   );

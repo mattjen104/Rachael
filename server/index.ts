@@ -35,16 +35,23 @@ app.get("/api/auth/check", (_req: Request, res: Response) => {
   res.json({ requiresAuth: !!API_KEY });
 });
 
-if (API_KEY) {
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (!req.path.startsWith("/api") || req.path === "/api/auth/check") return next();
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.slice(7) !== API_KEY) {
-      return res.status(401).json({ message: "Unauthorized" });
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (!req.path.startsWith("/api") || req.path === "/api/auth/check") return next();
+
+  if (!API_KEY) {
+    const writeMethods = ["POST", "PUT", "PATCH", "DELETE"];
+    if (writeMethods.includes(req.method)) {
+      return res.status(401).json({ message: "OPENCLAW_API_KEY not configured — write operations disabled" });
     }
-    next();
-  });
-}
+    return next();
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.slice(7) !== API_KEY) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

@@ -1,5 +1,6 @@
 import React from "react";
 import type { ViewMode } from "./Sidebar";
+import { useRuntime } from "@/hooks/use-org-data";
 
 interface StatusBarProps {
   viewMode: ViewMode;
@@ -8,46 +9,26 @@ interface StatusBarProps {
 }
 
 export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: StatusBarProps) {
-  const modeLabels: Record<ViewMode, string> = {
-    outliner: "OUTLINER",
-    agenda: "AGENDA",
-    control: "CONTROL",
-  };
-
-  const viewDescriptions: Record<ViewMode, string> = {
-    outliner: "Org Outliner [View]",
-    agenda: "Agenda [View]",
-    control: "Control [Bridge]",
-  };
+  const { data: runtime } = useRuntime();
 
   return (
-    <div className="h-6 flex w-full font-mono select-none z-50 flex-shrink-0 text-xs">
-      <div className="flex items-center justify-center font-bold px-2 uppercase transition-colors phosphor-glow-bright bg-foreground text-background flex-shrink-0">
-        {modeLabels[viewMode]}
+    <div
+      className="flex items-center justify-between border-t border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground bg-background shrink-0 cursor-pointer select-none"
+      data-testid="status-bar"
+      onClick={onOpenMinibuffer}
+    >
+      <div className="flex items-center gap-2">
+        <span className={runtime?.active ? "text-green-500" : "text-red-500"}>
+          {runtime?.active ? "●" : "○"}
+        </span>
+        <span className="text-primary font-bold">{viewMode.toUpperCase()}</span>
+        {lastCommand && <span className="text-muted-foreground">— {lastCommand}</span>}
       </div>
-
-      <div className="bg-muted text-foreground flex items-center px-2 flex-1 min-w-0 gap-2 phosphor-glow-dim overflow-hidden">
-        {lastCommand ? (
-          <span className="phosphor-glow truncate" data-testid="statusbar-echo">{lastCommand}</span>
-        ) : (
-          <>
-            <span className="font-bold phosphor-glow truncate">
-              {viewDescriptions[viewMode]}
-            </span>
-            <span className="hidden sm:flex items-center gap-1 ml-auto text-muted-foreground flex-shrink-0">
-              [✓] Sync
-            </span>
-          </>
-        )}
+      <div className="flex items-center gap-2">
+        <span>M-x / Space</span>
+        <span>j/k:nav</span>
+        <span>Tab:fold</span>
       </div>
-
-      <button
-        onClick={onOpenMinibuffer}
-        className="bg-card text-muted-foreground flex items-center px-2 border-t border-border cursor-pointer hover:text-foreground hover:phosphor-glow transition-colors flex-shrink-0"
-        data-testid="statusbar-mx-button"
-      >
-        <span>M-x</span>
-      </button>
     </div>
   );
 }

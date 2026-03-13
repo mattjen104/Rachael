@@ -1,5 +1,3 @@
-import { compileOpenClaw } from "./openclaw-compiler";
-
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -20,13 +18,19 @@ interface ModelConfig {
   modelId: string;
 }
 
+export interface LLMConfig {
+  defaultModel?: string;
+  aliases?: Record<string, string>;
+  routing?: Record<string, string | undefined>;
+}
+
 function resolveModel(
   modelRef: string | undefined,
-  config: ReturnType<typeof compileOpenClaw>["config"],
+  config: LLMConfig | undefined,
   routing: Record<string, string | undefined>
 ): ModelConfig {
-  const aliases: Record<string, string> = (config as any)?.model_aliases || {};
-  const defaultModel = (config as any)?.agents?.DEFAULT_MODEL || routing?.default || "openrouter/meta-llama/llama-3.1-8b-instruct:free";
+  const aliases: Record<string, string> = config?.aliases || {};
+  const defaultModel = config?.defaultModel || routing?.default || "openrouter/meta-llama/llama-3.1-8b-instruct:free";
 
   let fullId = modelRef || defaultModel;
 
@@ -154,7 +158,7 @@ async function callOpenAICompat(
 export async function executeLLM(
   messages: LLMMessage[],
   modelRef: string | undefined,
-  compiledConfig: ReturnType<typeof compileOpenClaw>["config"],
+  compiledConfig: LLMConfig | undefined,
   routing: Record<string, string | undefined>
 ): Promise<LLMResponse> {
   const { provider, modelId } = resolveModel(modelRef, compiledConfig, routing);
