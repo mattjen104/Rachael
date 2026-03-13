@@ -195,26 +195,101 @@ function parseSchedule(schedule: string | null, lastRun: Date | null, cronExpres
   return null;
 }
 
+const INLINE_SCRIPTS_DIR = join(process.cwd(), ".inline-scripts");
+
 async function executeInlineCode(code: string, config: Record<string, string>): Promise<{ summary: string; metric?: string; proposals?: Array<{ section: string; diff: string; reason: string }> }> {
-  const sandbox = `
-    const __ctx = { properties: ${JSON.stringify(config)} };
-    ${code}
-    return execute();
-  `;
+  await mkdir(INLINE_SCRIPTS_DIR, { recursive: true });
 
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const fn = new AsyncFunction(sandbox);
-  const result = await Promise.race([
-    fn(),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Inline code timed out (300s)")), 300_000)
-    ),
-  ]);
+  const filename = `prog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.ts`;
+  const filepath = join(INLINE_SCRIPTS_DIR, filename);
+  const projectRoot = process.cwd();
 
-  if (!result || typeof result.summary !== "string") {
-    return { summary: String(result || "No output") };
+  const wrappedCode = `
+const __ctx = JSON.parse(process.env.__INLINE_CTX || '{}');
+const __projectRoot = process.env.__PROJECT_ROOT || process.cwd();
+const __skillPath = (name: string) => __projectRoot + "/skills/" + name;
+
+${code}
+
+async function __run() {
+  if (typeof execute === 'function') return execute(__ctx);
+  if (typeof run === 'function') return run(__ctx);
+  return { summary: "No execute/run function found in code block" };
+}
+
+__run().then((r) => {
+  process.stdout.write(JSON.stringify(r));
+}).catch((e) => {
+  process.stderr.write(e.message || String(e));
+  process.exit(1);
+});
+`;
+
+  try {
+    await writeFile(filepath, wrappedCode, "utf-8");
+
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    const safeEnv: Record<string, string> = {
+      PATH: process.env.PATH || "",
+      HOME: process.env.HOME || "",
+      NODE_ENV: process.env.NODE_ENV || "production",
+      TMPDIR: process.env.TMPDIR || "/tmp",
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || `${process.env.HOME || "/tmp"}/.config`,
+      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || `${process.env.HOME || "/tmp"}/.cache`,
+      XDG_DATA_HOME: process.env.XDG_DATA_HOME || `${process.env.HOME || "/tmp"}/.local/share`,
+      npm_config_cache: process.env.npm_config_cache || "/tmp/.npm",
+      __INLINE_CTX: JSON.stringify({ properties: config }),
+      __PROJECT_ROOT: projectRoot,
+    };
+
+    if (process.env.OPENROUTER_API_KEY) {
+      safeEnv.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    }
+
+    const timeoutMs = config.TIMEOUT
+      ? Math.min(Math.max(parseInt(config.TIMEOUT, 10) * 1000, 10000), 600000)
+      : 300000;
+
+    const { stdout, stderr } = await execFileAsync(
+      "npx", ["tsx", filepath],
+      { env: safeEnv, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 }
+    );
+
+    if (stderr && !stdout) {
+      return { summary: `Script error: ${stderr.slice(0, 500)}` };
+    }
+
+    try {
+      const trimmed = stdout.trim();
+      const parsed = JSON.parse(trimmed);
+      return {
+        summary: parsed.summary || String(parsed),
+        metric: parsed.metric,
+        proposals: parsed.proposals,
+      };
+    } catch {
+      const trimmed = stdout.trim();
+      const lastBrace = trimmed.lastIndexOf('}');
+      if (lastBrace >= 0) {
+        for (let i = lastBrace; i >= 0; i--) {
+          if (trimmed[i] === '{') {
+            try {
+              const parsed = JSON.parse(trimmed.substring(i, lastBrace + 1));
+              if (parsed && typeof parsed === 'object' && parsed.summary) {
+                return { summary: parsed.summary, metric: parsed.metric, proposals: parsed.proposals };
+              }
+            } catch {}
+          }
+        }
+      }
+      return { summary: trimmed.slice(0, 2000) || "Script completed with no output" };
+    }
+  } finally {
+    try { const { unlink } = await import("fs/promises"); await unlink(filepath); } catch {}
   }
-  return result;
 }
 
 async function executeProgram(programName: string): Promise<void> {
