@@ -52,6 +52,7 @@ The workspace has exactly 3 swappable views via a narrow icon sidebar. All GUI i
   - `resilient-fetch.ts` — `rfetch/rfetchText/rfetchJSON` with retries, exponential backoff, jitter, rotating User-Agents; `throttledBatch` for parallel rate-limited work
   - `fuzzy-match.ts` — `levenshtein`, `fuzzyMatch` (trigram-prefiltered sliding window), `fuzzyMatchLines` (line-by-line with context), `soundex`/`phoneticMatch`
   - `craigslist-toolkit.ts` — `searchCraigslist` (multi-page with pagination), `enrichListing` (JSON-LD extraction), `makeDedupeStore`/`parseIdsFromResults` for cross-run dedup
+  - `reddit-toolkit.ts` — `fetchSubreddit`, `fetchMultipleSubreddits`, `fetchPostComments`, `dedupeByTitle`, `filterByScore`, `sortByScore`. Uses RSS fallback when Reddit JSON API blocks datacenter IPs (403). RSS posts have score=0; callers should check `hasScores` before filtering by score.
   - `archive-toolkit.ts` — `searchArchive`, `getOCRText`, `batchSearchOCR` (parallel fuzzy OCR scanning with stats)
 - `server/skill-committer.ts` - WRITE-CAPABLE skill committer. Contains `saveHardenedSkill()` and `hardenProgram()` — only imported by human-triggered commit routes, never by agent-runtime.
 - `server/output-sanitizer.ts` - Output sanitization and code safety analysis. `sanitizeResultRow()` strips org syntax/code blocks/pipes, caps at 300 chars. `analyzeCodeSafety()` detects dangerous patterns (fs.writeFile, exec, spawn, eval, etc.).

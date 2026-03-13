@@ -420,13 +420,29 @@ __run().then((r) => {
     }
 
     try {
-      const parsed = JSON.parse(stdout.trim());
+      const trimmed = stdout.trim();
+      const parsed = JSON.parse(trimmed);
       return {
         summary: parsed.summary || String(parsed),
         metric: parsed.metric,
       };
     } catch {
-      return { summary: stdout.trim().slice(0, 2000) || "Script completed with no output" };
+      const trimmed = stdout.trim();
+      const lastBrace = trimmed.lastIndexOf('}');
+      if (lastBrace >= 0) {
+        for (let i = lastBrace; i >= 0; i--) {
+          if (trimmed[i] === '{') {
+            const candidate = trimmed.substring(i, lastBrace + 1);
+            try {
+              const parsed = JSON.parse(candidate);
+              if (parsed && typeof parsed === 'object' && parsed.summary) {
+                return { summary: parsed.summary, metric: parsed.metric };
+              }
+            } catch {}
+          }
+        }
+      }
+      return { summary: trimmed.slice(0, 2000) || "Script completed with no output" };
     }
   } finally {
     try { await unlink(filepath); } catch {}
