@@ -1035,7 +1035,16 @@ interface BriefingProgram {
   iteration: number;
 }
 
-function BriefingsSection() {
+class BriefingsErrorBoundary extends React.Component<{children: React.ReactNode}, {error: string | null}> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(error: Error) { return { error: error.message }; }
+  render() {
+    if (this.state.error) return <div className="text-xs text-red-400 px-2">[briefings error: {this.state.error}]</div>;
+    return this.props.children;
+  }
+}
+
+function BriefingsSectionInner() {
   const { data: runtimeData } = useRuntimeState();
   const dailyCapture = useDailyCapture();
   const journalAdd = useJournalAdd();
@@ -1121,7 +1130,14 @@ function BriefingsSection() {
     journalAdd.mutate({ text: "[" + p.name + "] " + output });
   };
 
-  if (visiblePrograms.length === 0) return null;
+  if (visiblePrograms.length === 0) {
+    return (
+      <div className="mb-2 px-2 py-1">
+        <span className="text-muted-foreground/40 text-xs uppercase tracking-wider font-bold">briefings</span>
+        <span className="text-muted-foreground/30 text-xs ml-2">-- no recent results --</span>
+      </div>
+    );
+  }
 
   return (
     <div className="mb-2">
@@ -1226,6 +1242,14 @@ function BriefingsSection() {
         </div>
       )}
     </div>
+  );
+}
+
+function BriefingsSection() {
+  return (
+    <BriefingsErrorBoundary>
+      <BriefingsSectionInner />
+    </BriefingsErrorBoundary>
   );
 }
 
