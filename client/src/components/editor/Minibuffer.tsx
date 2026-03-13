@@ -1,7 +1,18 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { useSearch, useSmartCapture, useToggleRuntime, useCreateReaderPage, usePrograms, useProposals, useTasks } from "@/hooks/use-org-data";
+import { useSearch, useSmartCapture, useToggleRuntime, useCreateReaderPage, usePrograms, useProposals, useTasks, useSiteProfiles, useNavigationPaths } from "@/hooks/use-org-data";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ViewMode } from "@/components/layout/Sidebar";
+
+interface ScraperResultData {
+  success: boolean;
+  profileName: string;
+  pathName: string;
+  content: { title?: string; url?: string; text?: string; elements?: unknown[] } | null;
+  extractedData: Record<string, string>;
+  stepResults: Array<{ step: number; action: string; description?: string; success: boolean; error?: string }>;
+  error?: string;
+  durationMs: number;
+}
 
 interface MinibufferCommand {
   id: string;
@@ -29,7 +40,10 @@ export default function Minibuffer({
 }: MinibufferProps) {
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [mode, setMode] = useState<"command" | "search" | "capture" | "add-url">(initialMode);
+  const [mode, setMode] = useState<"command" | "search" | "capture" | "add-url" | "scrape-url" | "scraper-result">(initialMode);
+  const [scraperResult, setScraperResult] = useState<ScraperResultData | null>(null);
+  const [pendingNavPathId, setPendingNavPathId] = useState<number | null>(null);
+  const [pendingNavPathLabel, setPendingNavPathLabel] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -41,6 +55,8 @@ export default function Minibuffer({
   const { data: allPrograms = [] } = usePrograms();
   const { data: pendingProposals = [] } = useProposals("pending");
   const { data: allTasks = [] } = useTasks();
+  const { data: allSiteProfiles = [] } = useSiteProfiles();
+  const { data: allNavPaths = [] } = useNavigationPaths();
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -89,6 +105,40 @@ export default function Minibuffer({
     onClose();
   }, [onCommandExecuted, onClose]);
 
+  const executeNavPath = useCallback(async (pathId: number, pathName: string, runtimeUrl?: string) => {
+    onCommandExecuted(`Running: ${pathName}...`);
+    try {
+      const body: Record<string, unknown> = { navigationPathId: pathId };
+      if (runtimeUrl) body.url = runtimeUrl;
+      const res = await apiRequest("POST", "/api/scraper/execute", body);
+      const data: ScraperResultData = await res.json();
+      setScraperResult(data);
+      setMode("scraper-result");
+      setQuery("");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Execution failed";
+      setScraperResult({ success: false, profileName: "", pathName: pathName, content: null, extractedData: {}, stepResults: [], error: msg, durationMs: 0 });
+      setMode("scraper-result");
+      setQuery("");
+    }
+  }, [onCommandExecuted]);
+
+  const executeScraperUrl = useCallback(async (url: string) => {
+    onCommandExecuted(`Scraping: ${url.slice(0, 40)}...`);
+    try {
+      const res = await apiRequest("POST", "/api/scraper/execute", { url });
+      const data: ScraperResultData = await res.json();
+      setScraperResult(data);
+      setMode("scraper-result");
+      setQuery("");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Execution failed";
+      setScraperResult({ success: false, profileName: "any-website", pathName: "best-effort", content: null, extractedData: {}, stepResults: [], error: msg, durationMs: 0 });
+      setMode("scraper-result");
+      setQuery("");
+    }
+  }, [onCommandExecuted]);
+
   const commands: MinibufferCommand[] = useMemo(() => {
     const cmds: MinibufferCommand[] = [
       { id: "switch-agenda", label: "switch-to-agenda", hint: "1", action: () => exec("Agenda", () => onSwitchView("agenda")) },
@@ -100,6 +150,7 @@ export default function Minibuffer({
       { id: "quick-capture", label: "quick-capture", hint: "q", action: () => { setMode("capture"); setQuery(""); setSelectedIdx(0); } },
       { id: "search", label: "search-all", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
       { id: "add-url", label: "read-url", hint: "u", action: () => { setMode("add-url"); setQuery(""); setSelectedIdx(0); } },
+      { id: "scrape-url", label: "scrape-url", hint: "Scrape any URL", action: () => { setMode("scrape-url"); setQuery(""); setSelectedIdx(0); } },
       { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
       { id: "toggle-runtime", label: "toggle-runtime", hint: "R", action: () => exec("Runtime toggled", () => toggleRuntime.mutate()) },
       { id: "refresh", label: "refresh-all", hint: "r", action: () => exec("Refreshed", () => queryClient.invalidateQueries()) },
@@ -140,6 +191,41 @@ export default function Minibuffer({
       });
     }
 
+    cmds.push({
+      id: "list-profiles",
+      label: "list-site-profiles",
+      action: () => exec(`${allSiteProfiles.length} site profiles`, () => {}),
+    });
+
+    if (scraperResult) {
+      cmds.push({
+        id: "view-scraper-results",
+        label: "view-scraper-results",
+        action: () => { setMode("scraper-result"); setQuery(""); setSelectedIdx(0); },
+      });
+    }
+
+    for (const profile of allSiteProfiles) {
+      const profilePaths = allNavPaths.filter(p => p.siteProfileId === profile.id);
+      cmds.push({
+        id: `view-profile-${profile.id}`,
+        label: `view-profile: ${profile.name}`,
+        action: () => exec(`Profile: ${profile.name}`, () => {}),
+      });
+      for (const navPath of profilePaths) {
+        const requiresUrl = profile.name === "any-website" || (!profile.baseUrl && !(navPath.steps as Array<{ action: string }>)?.some(s => s.action === "navigate"));
+        const pathLabel = `${profile.name}/${navPath.name}`;
+        const pathId = navPath.id;
+        cmds.push({
+          id: `run-path-${pathId}`,
+          label: `run-scraper: ${pathLabel}`,
+          action: requiresUrl
+            ? () => { setPendingNavPathId(pathId); setPendingNavPathLabel(pathLabel); setMode("scrape-url"); setQuery(""); setSelectedIdx(0); }
+            : () => executeNavPath(pathId, pathLabel),
+        });
+      }
+    }
+
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split("T")[0];
@@ -166,7 +252,7 @@ export default function Minibuffer({
     }
 
     return cmds;
-  }, [exec, onSwitchView, onCycleTheme, toggleRuntime, allPrograms, pendingProposals, allTasks, triggerProgram, toggleProgram, resolveProposal, toggleTaskDone, rescheduleTask]);
+  }, [exec, onSwitchView, onCycleTheme, toggleRuntime, allPrograms, pendingProposals, allTasks, allSiteProfiles, allNavPaths, scraperResult, triggerProgram, toggleProgram, resolveProposal, toggleTaskDone, rescheduleTask, executeNavPath, executeScraperUrl, pendingNavPathId]);
 
   const filteredCommands = useMemo(() => {
     if (mode !== "command") return [];
@@ -249,14 +335,24 @@ export default function Minibuffer({
           createReaderPage.mutate(query.trim());
           onCommandExecuted(`Saving: ${query.trim().slice(0, 30)}`);
           onClose();
+        } else if (mode === "scrape-url" && query.trim()) {
+          if (pendingNavPathId) {
+            executeNavPath(pendingNavPathId, pendingNavPathLabel, query.trim());
+            setPendingNavPathId(null);
+            setPendingNavPathLabel("");
+          } else {
+            executeScraperUrl(query.trim());
+          }
         }
         break;
     }
-  }, [mode, filteredCommands, searchResults, selectedIdx, query, onClose, onCommandExecuted, smartCapture, createReaderPage]);
+  }, [mode, filteredCommands, searchResults, selectedIdx, query, onClose, onCommandExecuted, smartCapture, createReaderPage, executeScraperUrl, executeNavPath, pendingNavPathId, pendingNavPathLabel]);
 
   const modeLabel = mode === "command" ? "M-x" :
     mode === "search" ? "Search" :
     mode === "capture" ? "Capture (t task / note)" :
+    mode === "scraper-result" ? "Scraper Result" :
+    mode === "scrape-url" ? (pendingNavPathId ? `URL for ${pendingNavPathLabel}` : "Scrape URL") :
     "URL";
 
   return (
@@ -275,7 +371,7 @@ export default function Minibuffer({
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" ? "https://..." : "Type to filter..."}
+            placeholder={mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" || mode === "scrape-url" ? "https://..." : "Type to filter..."}
           />
         </div>
         <div ref={listRef} className="max-h-64 overflow-y-auto">
@@ -322,6 +418,61 @@ export default function Minibuffer({
           {mode === "add-url" && query && (
             <div className="px-2 py-2 text-muted-foreground">
               Press Enter to save URL to Reader.
+            </div>
+          )}
+          {mode === "scrape-url" && query && (
+            <div className="px-2 py-2 text-muted-foreground">
+              Press Enter to scrape this URL.
+            </div>
+          )}
+          {mode === "scraper-result" && scraperResult && (
+            <div className="px-2 py-1 text-foreground" data-testid="scraper-result-view">
+              <div className="flex items-center gap-2 py-1 border-b border-border">
+                <span className={scraperResult.success ? "text-green-400" : "text-red-400"}>
+                  {scraperResult.success ? "[OK]" : "[FAIL]"}
+                </span>
+                <span className="truncate">{scraperResult.profileName}/{scraperResult.pathName}</span>
+                <span className="text-muted-foreground text-[10px] ml-auto">{scraperResult.durationMs}ms</span>
+              </div>
+              {scraperResult.error && (
+                <div className="py-1 text-red-400 text-[10px]">{scraperResult.error}</div>
+              )}
+              {scraperResult.content?.title && (
+                <div className="py-1"><span className="text-muted-foreground">title:</span> {scraperResult.content.title}</div>
+              )}
+              {scraperResult.content?.url && (
+                <div className="py-1 truncate"><span className="text-muted-foreground">url:</span> {scraperResult.content.url}</div>
+              )}
+              {Object.keys(scraperResult.extractedData || {}).length > 0 && (
+                <div className="py-1 border-t border-border mt-1">
+                  <span className="text-muted-foreground">Extracted:</span>
+                  {Object.entries(scraperResult.extractedData).map(([key, val]) => (
+                    <div key={key} className="pl-2 truncate">
+                      <span className="text-muted-foreground">{key}:</span> {String(val).slice(0, 100)}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {scraperResult.stepResults?.length > 0 && (
+                <div className="py-1 border-t border-border mt-1">
+                  <span className="text-muted-foreground">Steps:</span>
+                  {scraperResult.stepResults.map((s) => (
+                    <div key={s.step} className="pl-2">
+                      <span className={s.success ? "text-green-400" : "text-red-400"}>
+                        {s.success ? "✓" : "✗"}
+                      </span>{" "}
+                      {s.action}{s.description ? ` — ${s.description}` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {scraperResult.content?.text && (
+                <div className="py-1 border-t border-border mt-1 max-h-32 overflow-y-auto">
+                  <span className="text-muted-foreground">Content preview:</span>
+                  <div className="text-[10px] whitespace-pre-wrap">{scraperResult.content.text.slice(0, 500)}</div>
+                </div>
+              )}
+              <div className="py-1 text-muted-foreground text-[10px]">Press Escape to go back</div>
             </div>
           )}
         </div>

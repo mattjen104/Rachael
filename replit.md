@@ -21,6 +21,8 @@ All data lives in Postgres tables:
 - `agent_results` — Chronological agent execution outputs
 - `reader_pages` — Saved/scraped web pages for reading
 - `openclaw_proposals` — Agent self-modification proposals
+- `site_profiles` — Configurable site scraping profiles (URL patterns, selectors, actions)
+- `navigation_paths` — Ordered step sequences for scraping (tied to site profiles)
 
 ## Five-View Architecture
 
@@ -67,14 +69,28 @@ Emacs-style M-x with modes:
 
 hn-pulse, openrouter-model-scout, research-radar (meta), hn-deep-digest, github-trending, estate-car-finder, fed-rates, free-stuff-radar, sec-filings, price-watch, foreclosure-monitor, mandela-berenstain
 
+## Site Profiles & Universal Scraper Engine
+
+Database-driven scraping system replacing hardcoded adapters:
+- `site_profiles` — Configurable site definitions (name, base URL, URL patterns, extraction selectors, named actions)
+- `navigation_paths` — Reusable step sequences tied to a profile (navigate, click, type, wait, extract)
+- `server/universal-scraper.ts` — Universal engine executing navigation paths via browser bridge
+- Seeded profiles: outlook, teams, any-website (best-effort extraction)
+- CRUD API: `/api/site-profiles`, `/api/navigation-paths`
+- Execution: `POST /api/scraper/execute` (by pathId or raw URL)
+- Profile matching: `POST /api/scraper/match` (finds matching profile for a URL)
+- Minibuffer commands: `list-site-profiles`, `view-profile:`, `run-scraper:`
+- Old `app-adapters.ts` retained as fallback
+
 ## Key Server Files
 
 - `server/routes.ts` — REST API for all entities
 - `server/storage.ts` — Database CRUD layer
+- `server/universal-scraper.ts` — Universal scraper engine (profile-driven)
 - `server/agent-runtime.ts` — Program execution, scheduling, LLM cascade
 - `server/llm-client.ts` — Multi-provider LLM client (Anthropic, OpenAI, OpenRouter)
 - `server/model-router.ts` — Model selection, cost tiers, task type detection
-- `server/seed-data.ts` — Initial program/skill/config data
+- `server/seed-data.ts` — Initial program/skill/config/site-profile data
 - `server/capture-parser.ts` — Smart capture parsing (dates, task detection)
 - `server/content-detector.ts` — URL/image/code detection
 

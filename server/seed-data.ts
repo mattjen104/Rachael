@@ -1,7 +1,9 @@
 import { storage } from "./storage";
-import { insertProgramSchema, insertSkillSchema } from "@shared/schema";
+import { insertProgramSchema, insertSkillSchema, insertSiteProfileSchema, insertNavigationPathSchema } from "@shared/schema";
 
 export async function seedDatabase(): Promise<void> {
+  await seedSiteProfiles();
+
   const existingPrograms = await storage.getPrograms();
   if (existingPrograms.length > 0) {
     console.log("[seed] Database already has programs, skipping seed");
@@ -455,4 +457,180 @@ async function execute() {
   }
 
   console.log(`[seed] Seeded ${programSeedInputs.length} programs, ${skillSeedInputs.length} skills, ${configSeeds.length} config entries`);
+}
+
+async function seedSiteProfiles(): Promise<void> {
+  const siteProfileSeeds = [
+    {
+      name: "outlook",
+      description: "Microsoft Outlook Web — email inbox scraping",
+      baseUrl: "https://outlook.cloud.microsoft/mail/inbox",
+      urlPatterns: ["outlook\\.office\\.com", "outlook\\.live\\.com", "outlook\\.office365\\.com", "outlook\\.cloud\\.microsoft"],
+      extractionSelectors: {
+        messageList: '[aria-label*="Message list"], [data-convid]',
+        readingPane: '[data-app-section="ReadingPane"]',
+        subject: '[role="heading"]',
+        sender: '[title]',
+      },
+      actions: {
+        reply: { selector: 'button[aria-label*="Reply"]', type: "click", description: "Reply to current email" },
+        send: { selector: 'button[aria-label*="Send"]', type: "click", description: "Send composed email" },
+      },
+      enabled: true,
+    },
+    {
+      name: "teams",
+      description: "Microsoft Teams — chat scraping",
+      baseUrl: "https://teams.microsoft.com/_#/conversations",
+      urlPatterns: ["teams\\.microsoft\\.com", "teams\\.live\\.com", "teams\\.cloud\\.microsoft"],
+      extractionSelectors: {
+        chatList: '[data-tid="chat-list-item"], [data-tid="left-rail-chat-list"]',
+        messagePane: '[data-tid="message-pane-list"]',
+        chatTitle: '[data-tid="chat-item-title"]',
+        chatMessage: '[data-tid="chat-item-message"]',
+      },
+      actions: {
+        sendMessage: { selector: '[data-tid="ckeditor"] [contenteditable="true"]', type: "type", description: "Type and send a message" },
+        openChat: { selector: '[data-tid="app-bar-chat-button"]', type: "click", description: "Navigate to Chat tab" },
+      },
+      enabled: true,
+    },
+    {
+      name: "any-website",
+      description: "Generic website — best-effort content extraction using page content API",
+      baseUrl: "",
+      urlPatterns: ["https?://.*"],
+      extractionSelectors: {
+        title: "title",
+        body: "body",
+        main: "main, article, [role='main']",
+        headings: "h1, h2, h3",
+      },
+      actions: {},
+      enabled: true,
+    },
+  ];
+
+  let seededCount = 0;
+  for (const raw of siteProfileSeeds) {
+    try {
+      const existing = await storage.getSiteProfileByName(raw.name);
+      if (existing) continue;
+      const p = insertSiteProfileSchema.parse(raw);
+      await storage.createSiteProfile(p);
+      seededCount++;
+    } catch (e) {
+      console.error(`[seed] Failed to create site profile ${raw.name}:`, e);
+    }
+  }
+
+  const allProfiles = await storage.getSiteProfiles();
+  const profileMap = new Map(allProfiles.map(p => [p.name, p.id]));
+
+  const navPathSeeds = [
+    {
+      name: "open-inbox",
+      description: "Navigate to Outlook inbox, scroll to load more, and extract message list",
+      siteProfileId: profileMap.get("outlook")!,
+      steps: [
+        { action: "navigate" as const, target: "https://outlook.cloud.microsoft/mail/inbox", description: "Open Outlook inbox" },
+        { action: "wait" as const, waitMs: 3000, description: "Wait for inbox message list to load" },
+        { action: "scroll" as const, target: '[aria-label*="Message list"], [role="listbox"]', description: "Scroll inbox to load more messages" },
+        { action: "wait" as const, waitMs: 1500, description: "Wait after scroll for additional messages" },
+        { action: "extract" as const, description: "Extract message summaries (from, subject, preview, date)" },
+      ],
+      extractionRules: {
+        messageItems: '[data-convid], [role="listbox"] [role="option"]',
+        subject: '[role="heading"]',
+        sender: '[title]',
+        preview: '[aria-label*="Message list"] span',
+      },
+    },
+    {
+      name: "read-email",
+      description: "Click an email to open it in the reading pane and extract full content (from/to/subject/body/date)",
+      siteProfileId: profileMap.get("outlook")!,
+      steps: [
+        { action: "click" as const, target: '[data-convid], [role="listbox"] [role="option"]', description: "Click first email in list" },
+        { action: "wait" as const, waitMs: 2000, description: "Wait for reading pane to render" },
+        { action: "extract" as const, description: "Extract email detail: from, to, subject, body, date" },
+      ],
+      extractionRules: {
+        readingPane: '[data-app-section="ReadingPane"], .ReadingPaneContainerClass, [aria-label*="Reading"], [role="complementary"]',
+        subject: '[role="heading"]',
+        sender: '[title]',
+        body: '[data-app-section="ReadingPane"] div, article, [data-app-section="ConversationContainer"]',
+      },
+    },
+    {
+      name: "open-chat-list",
+      description: "Navigate to Teams chat view, wait for chat list, and extract conversation summaries",
+      siteProfileId: profileMap.get("teams")!,
+      steps: [
+        { action: "navigate" as const, target: "https://teams.microsoft.com/_#/conversations", description: "Open Teams chat view" },
+        { action: "wait" as const, waitMs: 3000, description: "Wait for chat list to load" },
+        { action: "scroll" as const, target: '[data-tid="left-rail-chat-list"], [data-tid="chat-list"]', description: "Scroll to load more chats" },
+        { action: "wait" as const, waitMs: 1000, description: "Wait after scroll" },
+        { action: "extract" as const, description: "Extract chat list (title, last message, timestamp)" },
+      ],
+      extractionRules: {
+        chatItems: '[data-tid="chat-list-item"]',
+        chatTitle: '[data-tid="chat-item-title"]',
+        lastMessage: '[data-tid="chat-item-message"]',
+        timestamp: '[data-tid="chat-item-timestamp"]',
+      },
+    },
+    {
+      name: "read-chat",
+      description: "Click a chat conversation and extract the message thread (sender, text, time per message)",
+      siteProfileId: profileMap.get("teams")!,
+      steps: [
+        { action: "click" as const, target: '[data-tid="chat-list-item"]', description: "Click first chat conversation" },
+        { action: "wait" as const, waitMs: 2000, description: "Wait for message thread to load" },
+        { action: "scroll" as const, target: '[data-tid="message-pane-list"]', description: "Scroll up to load older messages" },
+        { action: "wait" as const, waitMs: 1000, description: "Wait after scroll" },
+        { action: "extract" as const, description: "Extract messages: sender, body, timestamp" },
+      ],
+      extractionRules: {
+        messagePane: '[data-tid="message-pane-list"]',
+        messages: '[data-tid="chat-pane-message"]',
+        sender: '[data-tid="message-author-name"]',
+        body: '[data-tid="message-body"]',
+        timestamp: '[data-tid="message-timestamp"]',
+      },
+    },
+    {
+      name: "best-effort-extract",
+      description: "Open any URL and extract content using generic selectors (use with url parameter)",
+      siteProfileId: profileMap.get("any-website")!,
+      steps: [
+        { action: "wait" as const, waitMs: 3000, description: "Wait for page to load" },
+        { action: "extract" as const, description: "Extract all visible content" },
+      ],
+      extractionRules: { content: "body" },
+    },
+  ];
+
+  const existingPaths = new Set<string>();
+  for (const profile of allProfiles) {
+    const paths = await storage.getNavigationPaths(profile.id);
+    for (const p of paths) existingPaths.add(`${p.siteProfileId}:${p.name}`);
+  }
+
+  let pathSeededCount = 0;
+  for (const raw of navPathSeeds) {
+    try {
+      if (!raw.siteProfileId) continue;
+      if (existingPaths.has(`${raw.siteProfileId}:${raw.name}`)) continue;
+      const p = insertNavigationPathSchema.parse(raw);
+      await storage.createNavigationPath(p);
+      pathSeededCount++;
+    } catch (e) {
+      console.error(`[seed] Failed to create nav path ${raw.name}:`, e);
+    }
+  }
+
+  if (seededCount > 0 || pathSeededCount > 0) {
+    console.log(`[seed] Seeded ${seededCount} site profiles, ${pathSeededCount} navigation paths`);
+  }
 }

@@ -1,13 +1,14 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema } from "@shared/schema";
+import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema } from "@shared/schema";
 import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
 import { getRuntimeState, toggleRuntime, manualTrigger } from "./agent-runtime";
 import { getBridgeStatus, launchBrowser, closeBrowser, startLoginSession, getPageContent, openPage, getPageText } from "./browser-bridge";
 import { openOutlook, openTeams, getOutlookEmails, readOutlookEmail, getTeamsChats, readTeamsChat } from "./app-adapters";
+import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlValidator } from "./universal-scraper";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -551,6 +552,164 @@ export async function registerRoutes(
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ error: msg });
     }
+  });
+
+  app.get("/api/site-profiles", async (_req, res) => {
+    const profiles = await storage.getSiteProfiles();
+    res.json(profiles);
+  });
+
+  app.get("/api/site-profiles/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const profile = await storage.getSiteProfile(id);
+    if (!profile) return res.status(404).json({ message: "Site profile not found" });
+    res.json(profile);
+  });
+
+  app.post("/api/site-profiles", async (req, res) => {
+    const parsed = insertSiteProfileSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const profile = await storage.createSiteProfile(parsed.data);
+    res.status(201).json(profile);
+  });
+
+  app.patch("/api/site-profiles/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const parsed = insertSiteProfileSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const updated = await storage.updateSiteProfile(id, parsed.data);
+    if (!updated) return res.status(404).json({ message: "Site profile not found" });
+    res.json(updated);
+  });
+
+  app.delete("/api/site-profiles/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deleteSiteProfile(id);
+    res.status(204).send();
+  });
+
+  app.get("/api/navigation-paths", async (req, res) => {
+    const siteProfileId = req.query.siteProfileId ? parseInt(req.query.siteProfileId as string, 10) : undefined;
+    const paths = await storage.getNavigationPaths(siteProfileId);
+    res.json(paths);
+  });
+
+  app.get("/api/navigation-paths/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const path = await storage.getNavigationPath(id);
+    if (!path) return res.status(404).json({ message: "Navigation path not found" });
+    res.json(path);
+  });
+
+  app.post("/api/navigation-paths", async (req, res) => {
+    const parsed = insertNavigationPathSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const profile = await storage.getSiteProfile(parsed.data.siteProfileId);
+    if (!profile) return res.status(400).json({ message: "Site profile not found" });
+    const path = await storage.createNavigationPath(parsed.data);
+    res.status(201).json(path);
+  });
+
+  app.patch("/api/navigation-paths/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const parsed = insertNavigationPathSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const updated = await storage.updateNavigationPath(id, parsed.data);
+    if (!updated) return res.status(404).json({ message: "Navigation path not found" });
+    res.json(updated);
+  });
+
+  app.delete("/api/navigation-paths/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deleteNavigationPath(id);
+    res.status(204).send();
+  });
+
+  async function validateUrlSafety(url: string): Promise<{ safe: boolean; error?: string }> {
+    try {
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        return { safe: false, error: "Only http/https URLs allowed" };
+      }
+      const blockedPatterns = /^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|0\.|169\.254\.|::1|\[::1\]|metadata\.google|169\.254\.169\.254)/i;
+      if (blockedPatterns.test(parsed.hostname)) {
+        return { safe: false, error: "Internal/private URLs are not allowed" };
+      }
+
+      const dnsModule = await import("dns");
+      const { promisify } = await import("util");
+      const resolve4 = promisify(dnsModule.resolve4);
+      try {
+        const addresses = await resolve4(parsed.hostname);
+        for (const addr of addresses) {
+          if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|0\.|169\.254\.)/.test(addr)) {
+            return { safe: false, error: "URL resolves to private network" };
+          }
+        }
+      } catch {}
+
+      return { safe: true };
+    } catch {
+      return { safe: false, error: "Invalid URL" };
+    }
+  }
+
+  app.post("/api/scraper/execute", async (req, res) => {
+    const { navigationPathId, url } = req.body;
+
+    try {
+      if (url && !navigationPathId) {
+        const check = await validateUrlSafety(url);
+        if (!check.safe) return res.status(400).json({ message: check.error });
+
+        const result = await bestEffortExtract(url);
+        return res.json(result);
+      }
+
+      if (!navigationPathId) {
+        return res.status(400).json({ message: "navigationPathId or url required" });
+      }
+
+      const navPath = await storage.getNavigationPath(navigationPathId);
+      if (!navPath) return res.status(404).json({ message: "Navigation path not found" });
+
+      const profile = await storage.getSiteProfile(navPath.siteProfileId);
+      if (!profile) return res.status(404).json({ message: "Site profile not found" });
+
+      const steps = (navPath.steps as Array<{ action: string; target?: string; value?: string; waitMs?: number; description?: string }>) || [];
+      for (const step of steps) {
+        if (step.action === "navigate" && step.target) {
+          const check = await validateUrlSafety(step.target);
+          if (!check.safe) {
+            return res.status(400).json({ message: `Navigation step URL blocked: ${check.error}` });
+          }
+        }
+      }
+
+      if (url) {
+        const urlCheck = await validateUrlSafety(url);
+        if (!urlCheck.safe) {
+          return res.status(400).json({ message: `Runtime URL blocked: ${urlCheck.error}` });
+        }
+      }
+      const result = await executeNavigationPath(profile, navPath, validateUrlSafety, url || undefined);
+      return res.json(result);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ message: "Scraper execution failed: " + msg });
+    }
+  });
+
+  app.post("/api/scraper/match", async (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ message: "url required" });
+
+    const profiles = await storage.getSiteProfiles();
+    const match = matchProfileToUrl(profiles, url);
+    if (!match) return res.json({ matched: false, profile: null, paths: [] });
+
+    const paths = await storage.getNavigationPaths(match.id);
+    res.json({ matched: true, profile: match, paths });
   });
 
   return httpServer;

@@ -212,3 +212,67 @@ export const insertOpenclawProposalSchema = z.object({
 });
 export type InsertOpenclawProposal = z.infer<typeof insertOpenclawProposalSchema>;
 export type OpenclawProposal = typeof openclawProposals.$inferSelect;
+
+export const siteProfiles = pgTable("site_profiles", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  baseUrl: text("base_url").notNull().default(""),
+  urlPatterns: text("url_patterns").array().notNull().default([]),
+  extractionSelectors: jsonb("extraction_selectors").$type<Record<string, string>>().default({}),
+  actions: jsonb("actions").$type<Record<string, { selector: string; type: string; description?: string }>>().default({}),
+  version: integer("version").notNull().default(1),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSiteProfileSchema = z.object({
+  name: z.string(),
+  description: z.string().default(""),
+  baseUrl: z.string().default(""),
+  urlPatterns: z.array(z.string()).default([]),
+  extractionSelectors: z.record(z.string(), z.string()).default({}),
+  actions: z.record(z.string(), z.object({
+    selector: z.string(),
+    type: z.string(),
+    description: z.string().optional(),
+  })).default({}),
+  version: z.number().default(1),
+  enabled: z.boolean().default(true),
+});
+export type InsertSiteProfile = z.infer<typeof insertSiteProfileSchema>;
+export type SiteProfile = typeof siteProfiles.$inferSelect;
+
+export const navigationPaths = pgTable("navigation_paths", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  siteProfileId: integer("site_profile_id").notNull().references(() => siteProfiles.id, { onDelete: "cascade" }),
+  steps: jsonb("steps").$type<NavigationStep[]>().notNull().default([]),
+  extractionRules: jsonb("extraction_rules").$type<Record<string, string>>().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export interface NavigationStep {
+  action: "navigate" | "click" | "click_text" | "type" | "press_key" | "wait" | "scroll" | "extract";
+  target?: string;
+  value?: string;
+  waitMs?: number;
+  description?: string;
+}
+
+export const insertNavigationPathSchema = z.object({
+  name: z.string(),
+  description: z.string().default(""),
+  siteProfileId: z.number(),
+  steps: z.array(z.object({
+    action: z.enum(["navigate", "click", "click_text", "type", "press_key", "wait", "scroll", "extract"]),
+    target: z.string().optional(),
+    value: z.string().optional(),
+    waitMs: z.number().optional(),
+    description: z.string().optional(),
+  })).default([]),
+  extractionRules: z.record(z.string(), z.string()).default({}),
+});
+export type InsertNavigationPath = z.infer<typeof insertNavigationPathSchema>;
+export type NavigationPath = typeof navigationPaths.$inferSelect;

@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Program, Skill, Task, Note, Capture, AgentResult, ReaderPage, AgentConfig, OpenclawProposal } from "@shared/schema";
+import type { Program, Skill, Task, Note, Capture, AgentResult, ReaderPage, AgentConfig, OpenclawProposal, SiteProfile, NavigationPath } from "@shared/schema";
 
 export function usePrograms() {
   return useQuery<Program[]>({ queryKey: ["/api/programs"] });
@@ -303,5 +303,23 @@ export function useTeamsChats() {
   return useQuery<Array<{ name: string; lastMessage: string; timestamp: string; unread: boolean }>>({
     queryKey: ["/api/chat/list"],
     enabled: false,
+  });
+}
+
+export function useSiteProfiles() {
+  return useQuery<SiteProfile[]>({ queryKey: ["/api/site-profiles"] });
+}
+
+export function useNavigationPaths(siteProfileId?: number) {
+  const url = siteProfileId ? `/api/navigation-paths?siteProfileId=${siteProfileId}` : "/api/navigation-paths";
+  return useQuery<NavigationPath[]>({ queryKey: [url] });
+}
+
+export function useExecuteScraper() {
+  return useMutation({
+    mutationFn: async (params: { navigationPathId?: number; url?: string }) => {
+      const res = await apiRequest("POST", "/api/scraper/execute", params);
+      return res.json();
+    },
   });
 }

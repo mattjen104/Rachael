@@ -8,6 +8,8 @@ import {
   type AgentResult, type InsertAgentResult, agentResults,
   type ReaderPage, type InsertReaderPage, readerPages,
   type OpenclawProposal, type InsertOpenclawProposal, openclawProposals,
+  type SiteProfile, type InsertSiteProfile, siteProfiles,
+  type NavigationPath, type InsertNavigationPath, navigationPaths,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql } from "drizzle-orm";
@@ -69,6 +71,19 @@ export interface IStorage {
   getProposals(status?: string): Promise<OpenclawProposal[]>;
   getProposal(id: number): Promise<OpenclawProposal | undefined>;
   updateProposalStatus(id: number, status: string, resolvedAt: Date): Promise<OpenclawProposal | undefined>;
+
+  getSiteProfiles(): Promise<SiteProfile[]>;
+  getSiteProfile(id: number): Promise<SiteProfile | undefined>;
+  getSiteProfileByName(name: string): Promise<SiteProfile | undefined>;
+  createSiteProfile(p: InsertSiteProfile): Promise<SiteProfile>;
+  updateSiteProfile(id: number, data: Partial<InsertSiteProfile>): Promise<SiteProfile | undefined>;
+  deleteSiteProfile(id: number): Promise<void>;
+
+  getNavigationPaths(siteProfileId?: number): Promise<NavigationPath[]>;
+  getNavigationPath(id: number): Promise<NavigationPath | undefined>;
+  createNavigationPath(p: InsertNavigationPath): Promise<NavigationPath>;
+  updateNavigationPath(id: number, data: Partial<InsertNavigationPath>): Promise<NavigationPath | undefined>;
+  deleteNavigationPath(id: number): Promise<void>;
 
   searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>>;
 }
@@ -274,6 +289,52 @@ export class DatabaseStorage implements IStorage {
   async updateProposalStatus(id: number, status: string, resolvedAt: Date): Promise<OpenclawProposal | undefined> {
     const [updated] = await db.update(openclawProposals).set({ status, resolvedAt }).where(eq(openclawProposals.id, id)).returning();
     return updated;
+  }
+
+  async getSiteProfiles(): Promise<SiteProfile[]> {
+    return db.select().from(siteProfiles).orderBy(siteProfiles.name);
+  }
+  async getSiteProfile(id: number): Promise<SiteProfile | undefined> {
+    const [p] = await db.select().from(siteProfiles).where(eq(siteProfiles.id, id));
+    return p;
+  }
+  async getSiteProfileByName(name: string): Promise<SiteProfile | undefined> {
+    const [p] = await db.select().from(siteProfiles).where(eq(siteProfiles.name, name));
+    return p;
+  }
+  async createSiteProfile(p: InsertSiteProfile): Promise<SiteProfile> {
+    const [created] = await db.insert(siteProfiles).values(p).returning();
+    return created;
+  }
+  async updateSiteProfile(id: number, data: Partial<InsertSiteProfile>): Promise<SiteProfile | undefined> {
+    const [updated] = await db.update(siteProfiles).set(data).where(eq(siteProfiles.id, id)).returning();
+    return updated;
+  }
+  async deleteSiteProfile(id: number): Promise<void> {
+    await db.delete(navigationPaths).where(eq(navigationPaths.siteProfileId, id));
+    await db.delete(siteProfiles).where(eq(siteProfiles.id, id));
+  }
+
+  async getNavigationPaths(siteProfileId?: number): Promise<NavigationPath[]> {
+    if (siteProfileId !== undefined) {
+      return db.select().from(navigationPaths).where(eq(navigationPaths.siteProfileId, siteProfileId)).orderBy(navigationPaths.name);
+    }
+    return db.select().from(navigationPaths).orderBy(navigationPaths.name);
+  }
+  async getNavigationPath(id: number): Promise<NavigationPath | undefined> {
+    const [p] = await db.select().from(navigationPaths).where(eq(navigationPaths.id, id));
+    return p;
+  }
+  async createNavigationPath(p: InsertNavigationPath): Promise<NavigationPath> {
+    const [created] = await db.insert(navigationPaths).values(p).returning();
+    return created;
+  }
+  async updateNavigationPath(id: number, data: Partial<InsertNavigationPath>): Promise<NavigationPath | undefined> {
+    const [updated] = await db.update(navigationPaths).set(data).where(eq(navigationPaths.id, id)).returning();
+    return updated;
+  }
+  async deleteNavigationPath(id: number): Promise<void> {
+    await db.delete(navigationPaths).where(eq(navigationPaths.id, id));
   }
 
   async searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>> {
