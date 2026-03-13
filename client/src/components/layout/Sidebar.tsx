@@ -1,6 +1,6 @@
 import React from "react";
 
-export type ViewMode = "agenda" | "tree" | "programs" | "results" | "reader";
+export type ViewMode = "agenda" | "tree" | "programs" | "results" | "reader" | "cockpit";
 
 interface SidebarProps {
   current: ViewMode;
@@ -13,6 +13,7 @@ const VIEWS: Array<{ mode: ViewMode; label: string; key: string }> = [
   { mode: "programs", label: "PRG", key: "3" },
   { mode: "results", label: "RES", key: "4" },
   { mode: "reader", label: "RDR", key: "5" },
+  { mode: "cockpit", label: "CKP", key: "6" },
 ];
 
 export default function Sidebar({ current, onSwitch }: SidebarProps) {

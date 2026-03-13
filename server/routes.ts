@@ -9,6 +9,8 @@ import { getRuntimeState, toggleRuntime, manualTrigger } from "./agent-runtime";
 import { getBridgeStatus, launchBrowser, closeBrowser, startLoginSession, getPageContent, openPage, getPageText } from "./browser-bridge";
 import { openOutlook, openTeams, getOutlookEmails, readOutlookEmail, getTeamsChats, readTeamsChat } from "./app-adapters";
 import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlValidator } from "./universal-scraper";
+import { subscribe, getEventHistory, type CockpitEvent } from "./event-bus";
+import { createNavigationSession, updateNavigationState, getNavigationSession, getActiveSessions, closeNavigationSession, getNavigationHistory } from "./navigation-session";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -710,6 +712,85 @@ export async function registerRoutes(
 
     const paths = await storage.getNavigationPaths(match.id);
     res.json({ matched: true, profile: match, paths });
+  });
+
+  app.get("/api/cockpit/events", (req, res) => {
+    const token = req.query.token as string | undefined;
+    const API_KEY = process.env.OPENCLAW_API_KEY;
+    if (API_KEY) {
+      const authHeader = req.headers.authorization;
+      const headerKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      if (headerKey !== API_KEY && token !== API_KEY) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+    }
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const history = getEventHistory(50);
+    for (const event of history) {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
+
+    const unsubscribe = subscribe((event: CockpitEvent) => {
+      try {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch {}
+    });
+
+    const keepAlive = setInterval(() => {
+      try { res.write(": ping\n\n"); } catch {}
+    }, 30000);
+
+    req.on("close", () => {
+      unsubscribe();
+      clearInterval(keepAlive);
+    });
+  });
+
+  app.get("/api/cockpit/history", (_req, res) => {
+    const limit = parseInt((_req.query.limit as string) || "100", 10);
+    res.json(getEventHistory(limit));
+  });
+
+  app.get("/api/cockpit/nav/sessions", (_req, res) => {
+    res.json(getActiveSessions());
+  });
+
+  app.post("/api/cockpit/nav/sessions", (req, res) => {
+    const { sessionId, profileName, url } = req.body;
+    if (!sessionId || !profileName || !url) {
+      return res.status(400).json({ message: "sessionId, profileName, and url are required" });
+    }
+    const session = createNavigationSession(sessionId, profileName, url);
+    res.status(201).json(session);
+  });
+
+  app.get("/api/cockpit/nav/sessions/:id", (req, res) => {
+    const session = getNavigationSession(req.params.id);
+    if (!session) return res.status(404).json({ message: "Session not found" });
+    res.json(session);
+  });
+
+  app.patch("/api/cockpit/nav/sessions/:id", (req, res) => {
+    const updated = updateNavigationState(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ message: "Session not found" });
+    res.json(updated);
+  });
+
+  app.delete("/api/cockpit/nav/sessions/:id", (req, res) => {
+    closeNavigationSession(req.params.id);
+    res.status(204).send();
+  });
+
+  app.get("/api/cockpit/nav/sessions/:id/history", (req, res) => {
+    const history = getNavigationHistory(req.params.id);
+    res.json(history);
   });
 
   return httpServer;

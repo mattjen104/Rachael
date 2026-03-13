@@ -146,6 +146,7 @@ export default function Minibuffer({
       { id: "switch-programs", label: "switch-to-programs", hint: "3", action: () => exec("Programs", () => onSwitchView("programs")) },
       { id: "switch-results", label: "switch-to-results", hint: "4", action: () => exec("Results", () => onSwitchView("results")) },
       { id: "switch-reader", label: "switch-to-reader", hint: "5", action: () => exec("Reader", () => onSwitchView("reader")) },
+      { id: "switch-cockpit", label: "switch-to-cockpit", hint: "6", action: () => exec("Cockpit", () => onSwitchView("cockpit")) },
       { id: "capture", label: "capture", hint: "c", action: () => { setMode("capture"); setQuery(""); setSelectedIdx(0); } },
       { id: "quick-capture", label: "quick-capture", hint: "q", action: () => { setMode("capture"); setQuery(""); setSelectedIdx(0); } },
       { id: "search", label: "search-all", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
@@ -158,6 +159,8 @@ export default function Minibuffer({
       { id: "close-bridge", label: "close-browser-bridge", action: () => exec("Closing bridge", () => { apiRequest("POST", "/api/bridge/close"); }) },
       { id: "fetch-mail", label: "fetch-outlook-inbox", action: () => exec("Fetching inbox...", () => { queryClient.invalidateQueries({ queryKey: ["/api/mail/inbox"] }); }) },
       { id: "fetch-chats", label: "fetch-teams-chats", action: () => exec("Fetching chats...", () => { queryClient.invalidateQueries({ queryKey: ["/api/chat/list"] }); }) },
+      { id: "cockpit-focus", label: "cockpit-focus-program", action: () => exec("Cockpit", () => onSwitchView("cockpit")) },
+      { id: "cockpit-history", label: "cockpit-view-history", action: () => exec("Cockpit History", () => onSwitchView("cockpit")) },
     ];
 
     for (const prog of allPrograms) {

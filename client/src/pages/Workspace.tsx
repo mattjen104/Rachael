@@ -7,6 +7,7 @@ import TreeView from "@/components/views/TreeView";
 import ProgramsView from "@/components/views/ProgramsView";
 import ResultsView from "@/components/views/ResultsView";
 import ReaderView from "@/components/views/ReaderView";
+import CockpitView from "@/components/views/CockpitView";
 import Minibuffer from "@/components/editor/Minibuffer";
 import { useSmartCapture } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
@@ -101,21 +102,23 @@ export default function Workspace() {
       }
 
       if (e.key === "Escape") {
+        if (viewMode === "cockpit") return;
         e.preventDefault();
         setViewMode("agenda");
         return;
       }
 
-      if (e.key >= "1" && e.key <= "5" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key >= "1" && e.key <= "6" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (viewMode === "cockpit") return;
         e.preventDefault();
-        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader"];
+        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader", "cockpit"];
         setViewMode(views[parseInt(e.key) - 1]);
         return;
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [minibufferOpen]);
+  }, [minibufferOpen, viewMode]);
 
   return (
     <div className="flex flex-col h-screen w-full max-w-[500px] mx-auto bg-background text-foreground overflow-hidden" data-testid="workspace">
@@ -127,6 +130,7 @@ export default function Workspace() {
         {viewMode === "programs" && <ProgramsView onNavigate={handleNavigate} />}
         {viewMode === "results" && <ResultsView selectedResultId={selectedItemId} />}
         {viewMode === "reader" && <ReaderView selectedPageId={selectedItemId} />}
+        {viewMode === "cockpit" && <CockpitView />}
       </div>
 
       <StatusBar

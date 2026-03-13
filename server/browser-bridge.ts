@@ -3,6 +3,7 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 import { exec } from "child_process";
+import { emitEvent } from "./event-bus";
 
 function safeEvaluate<T>(page: Page, fn: (...args: any[]) => T, ...args: any[]): Promise<T> {
   const fnStr = fn.toString();
@@ -627,9 +628,12 @@ export async function openPage(id: string, url: string): Promise<{ success: bool
       pages.set(id, page);
     }
 
+    emitEvent("browser-bridge", `Navigating to ${url}`, "action", { sessionId: id });
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    emitEvent("browser-bridge", `Page loaded: ${url}`, "info", { sessionId: id });
     return { success: true };
   } catch (err: any) {
+    emitEvent("browser-bridge", `Navigation failed: ${err.message}`, "error", { sessionId: id });
     return { success: false, error: err.message };
   }
 }
@@ -641,6 +645,7 @@ export async function getPageContent(id: string): Promise<PageContent | null> {
   try {
     const title = await page.title();
     const url = page.url();
+    emitEvent("browser-bridge", `Extracting content from: ${title}`, "info", { sessionId: id });
     const text = await safeEvaluate(page, () => {
       return document.body?.innerText?.substring(0, 8000) || "";
     });

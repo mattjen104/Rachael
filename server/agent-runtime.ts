@@ -7,6 +7,7 @@ import {
   type TaskType, type CostTier,
 } from "./model-router";
 import { sanitizeResultRow } from "./output-sanitizer";
+import { emitEvent } from "./event-bus";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import type { Program } from "@shared/schema";
@@ -222,6 +223,7 @@ async function executeProgram(programName: string): Promise<void> {
 
   ps.status = "running";
   ps.error = null;
+  emitEvent("agent-runtime", `Starting program: ${programName}`, "info", { program: programName });
 
   try {
     ps.iteration += 1;
@@ -290,11 +292,13 @@ async function executeProgram(programName: string): Promise<void> {
       const costTier = parseCostTier(prog.costTier);
       const modelOverride = prog.config?.MODEL as string || undefined;
 
+      emitEvent("agent-runtime", `Calling LLM for "${programName}" (${taskType})`, "action", { program: programName });
       const llmResult = await executeLLMWithCascade(messages, taskType, costTier, modelOverride, llmConfig);
       output = llmResult.content;
       modelUsed = llmResult.model;
       tokensUsed = llmResult.tokensUsed || 0;
       trackTokenUsage(modelUsed, tokensUsed);
+      emitEvent("agent-runtime", `LLM response received for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
 
       const outputType = (prog.config?.OUTPUT_TYPE as string || "").toLowerCase();
       if (outputType === "proposal") {
@@ -355,6 +359,7 @@ async function executeProgram(programName: string): Promise<void> {
     ps.lastOutput = output;
     ps.status = "completed";
     ps.lastRun = new Date();
+    emitEvent("agent-runtime", `Program completed: ${programName} — ${output.split("\n")[0].slice(0, 100)}`, "info", { program: programName });
 
     const rawSummary = output.split("\n")[0].slice(0, 200);
     const summaryLine = sanitizeResultRow(rawSummary);
@@ -383,6 +388,7 @@ async function executeProgram(programName: string): Promise<void> {
     ps.status = "error";
     ps.error = err.message || String(err);
     ps.lastRun = new Date();
+    emitEvent("agent-runtime", `Program error: ${programName} — ${ps.error?.slice(0, 100)}`, "error", { program: programName });
 
     const prog = await storage.getProgramByName(programName);
     if (prog) {
