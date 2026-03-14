@@ -70,11 +70,12 @@ Emacs-style M-x with modes:
 Unix-style command interface with chain parsing. Both humans and the agent can execute commands.
 
 - **Chain operators**: `|` (pipe stdout), `&&` (run if success), `||` (run if fail), `;` (always run)
-- **Two-layer output**: Layer 1 (raw execution, pipes work correctly), Layer 2 (presentation: truncation, exit codes, duration)
+- **Branch suppression**: When `&&`/`||` skips a segment, downstream `|` pipes in the same branch are also skipped
+- **Two-layer output**: `executeChainRaw()` returns raw stdout/stderr/exitCode (for pipes, recipes, internal use); `executeChain()` wraps with presentation (truncation, exit codes, duration)
 - **Progressive discovery**: `command --help` for usage, error messages point to correct commands
-- **Built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda
-- **Recipes**: Saved command chains that can run on schedule (no LLM needed)
-- **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`
+- **26 built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe
+- **Cockpit events**: CLI commands emit events to the cockpit activity stream (recipe save/run/approve, memory store/forget, scrape)
+- **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`
 
 ## Recipes (server/cli-engine.ts + shared/schema.ts)
 
@@ -82,6 +83,29 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - CLI: `recipe save <name> "<command>"`, `recipe run <name>`, `recipe list`, `recipe info/delete`
 - REST: `/api/recipes` CRUD, `/api/recipes/:id/trigger`
 - Recipes reuse CLI commands — save a working pipeline, run it later without LLM calls
+
+## Agent-Authored Recipes (server/agent-runtime.ts)
+
+- Programs can emit `RECIPE: <name> "<command>" [--schedule <sched>] [--desc <desc>]` directives in their output
+- Directives auto-create proposals in `openclaw_proposals` with section "RECIPES"
+- Proposals appear as takeover points in the cockpit stream
+- Human can approve via `proposals approve <id>` — recipe is auto-created from the proposal data
+- Also available: `propose-recipe <name> "<command>"` CLI command for manual proposals
+
+## Memory Commands (server/cli-engine.ts)
+
+- `memory show` — View all persistent memory
+- `memory store <text>` — Append timestamped entry to persistent context
+- `memory search <query>` — Search persistent context + agent results
+- `memory recent [N]` — Last N memory entries
+- `memory forget <pattern>` — Remove matching entries
+
+## Scraper CLI (server/cli-engine.ts)
+
+- `scrape <url>` — Best-effort extract (or auto-match to a site profile if available)
+- `scrape profile <name>` — Run a named site profile's default navigation path
+- `scrape path <id>` — Run a specific navigation path by ID
+- Output is pipeable text (title, extracted data, body text)
 
 ## Agent Runtime
 

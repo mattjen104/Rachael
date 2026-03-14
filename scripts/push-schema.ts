@@ -161,11 +161,41 @@ const tables = [
   )`,
 ];
 
+const extraTables = [
+  `CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    "timestamp" TIMESTAMP NOT NULL DEFAULT NOW(),
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target TEXT,
+    permission_level TEXT,
+    result TEXT NOT NULL DEFAULT 'success',
+    details TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS action_permissions (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nav_path_id INTEGER NOT NULL REFERENCES navigation_paths(id) ON DELETE CASCADE,
+    action_name TEXT NOT NULL,
+    permission_level TEXT NOT NULL DEFAULT 'autonomous'
+  )`,
+];
+
+const alterations = [
+  `ALTER TABLE site_profiles ADD COLUMN IF NOT EXISTS default_permission TEXT NOT NULL DEFAULT 'autonomous'`,
+  `ALTER TABLE navigation_paths ADD COLUMN IF NOT EXISTS permission_level TEXT NOT NULL DEFAULT 'autonomous'`,
+];
+
 async function pushSchema() {
   for (const ddl of tables) {
     await db.execute(sql.raw(ddl));
   }
-  console.log(`[push-schema] Ensured ${tables.length} tables exist`);
+  for (const ddl of extraTables) {
+    await db.execute(sql.raw(ddl));
+  }
+  for (const alt of alterations) {
+    try { await db.execute(sql.raw(alt)); } catch {}
+  }
+  console.log(`[push-schema] Ensured ${tables.length + extraTables.length} tables exist`);
   await pool.end();
 }
 

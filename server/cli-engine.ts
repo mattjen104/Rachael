@@ -1,6 +1,7 @@
 import { storage } from "./storage";
 import { manualTrigger, getRuntimeState } from "./agent-runtime";
 import { emitEvent } from "./event-bus";
+import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
 
 export interface CommandResult {
   stdout: string;
@@ -549,10 +550,12 @@ function registerBuiltinCommands(): void {
       const existing = await storage.getRecipeByName(name);
       if (existing) {
         await storage.updateRecipe(existing.id, { command, schedule, description: description || existing.description });
+        emitEvent("cli", `Recipe updated: ${name} = "${command}"`, "info", { metadata: { command: "recipe save", recipe: name } });
         return ok(`Updated recipe "${name}": ${command}`);
       }
 
       await storage.createRecipe({ name, command, schedule, description });
+      emitEvent("cli", `Recipe saved: ${name} = "${command}"${schedule ? ` (schedule: ${schedule})` : ""}`, "action", { metadata: { command: "recipe save", recipe: name } });
       return ok(`Saved recipe "${name}": ${command}${schedule ? ` (schedule: ${schedule})` : ""}`);
     }
 
@@ -561,9 +564,11 @@ function registerBuiltinCommands(): void {
       if (!name) return fail("[error] recipe run: usage: recipe run <name>");
       const r = await storage.getRecipeByName(name);
       if (!r) return fail(`[error] recipe "${name}" not found. Use 'recipe list' to see available.`);
+      emitEvent("cli", `Recipe executing: ${name}`, "action", { metadata: { command: "recipe run", recipe: name } });
       const raw = await executeChainRaw(r.command);
       const now = new Date();
       await storage.updateRecipeLastRun(r.id, now, null, raw.stdout.slice(0, 10000));
+      emitEvent("cli", `Recipe complete: ${name} (exit:${raw.exitCode}, ${raw.durationMs}ms)`, raw.exitCode === 0 ? "info" : "error", { metadata: { command: "recipe run", recipe: name, exitCode: raw.exitCode } });
       return raw;
     }
 
@@ -685,18 +690,247 @@ function registerBuiltinCommands(): void {
     return fail(`[error] profiles: unknown subcommand "${sub}"\nUsage: profiles [list|info <name>]`);
   });
 
-  registerCommand("proposals", "List proposals", "proposals [--status pending|accepted|rejected]", async (args) => {
+  registerCommand("proposals", "List or manage proposals", "proposals [list|approve <id>|reject <id>] [--status pending|accepted|rejected]", async (args) => {
+    const sub = args[0] || "list";
+
+    if (sub === "approve" || sub === "reject") {
+      const id = parseInt(args[1], 10);
+      if (isNaN(id)) return fail(`[error] proposals ${sub}: usage: proposals ${sub} <id>`);
+      const proposal = (await storage.getProposals()).find(p => p.id === id);
+      if (!proposal) return fail(`[error] proposal #${id} not found`);
+      if (proposal.status !== "pending") return fail(`[error] proposal #${id} is already ${proposal.status}`);
+
+      if (sub === "approve") {
+        await storage.updateProposalStatus(id, "accepted", new Date());
+
+        if (proposal.section === "RECIPES" && proposal.proposedContent) {
+          try {
+            const data = JSON.parse(proposal.proposedContent);
+            const existing = await storage.getRecipeByName(data.name);
+            if (!existing) {
+              await storage.createRecipe({
+                name: data.name,
+                command: data.command,
+                schedule: data.schedule || undefined,
+                description: data.description || "",
+              });
+              emitEvent("cli", `Recipe approved and created: ${data.name}`, "action", { metadata: { command: "proposals approve", recipe: data.name } });
+              return ok(`Approved proposal #${id} and created recipe "${data.name}": ${data.command}`);
+            }
+          } catch {}
+        }
+        emitEvent("cli", `Proposal #${id} approved`, "action", { metadata: { command: "proposals approve" } });
+        return ok(`Approved proposal #${id}`);
+      }
+
+      await storage.updateProposalStatus(id, "rejected", new Date());
+      emitEvent("cli", `Proposal #${id} rejected`, "info", { metadata: { command: "proposals reject" } });
+      return ok(`Rejected proposal #${id}`);
+    }
+
     let status: string | undefined;
     for (let i = 0; i < args.length; i++) {
       if (args[i] === "--status" && args[i + 1]) { status = args[i + 1]; i++; }
     }
+    if (sub === "list") { /* use status filter from flags */ }
+    else { status = undefined; }
     const all = await storage.getProposals(status);
     if (all.length === 0) return ok("No proposals.");
     const lines = all.map(p => {
       const ts = p.createdAt.toISOString().slice(0, 16);
-      return `[${ts}] ${p.status.padEnd(10)} ${p.section.padEnd(12)} ${p.reason.slice(0, 60)}`;
+      return `#${String(p.id).padEnd(4)} [${ts}] ${p.status.padEnd(10)} ${p.section.padEnd(12)} ${p.reason.split("\n")[0].slice(0, 60)}`;
     });
     return ok(lines.join("\n"));
+  });
+
+  registerCommand("memory", "Search, store, or recall agent memory", "memory [search <query>|store <text>|recent|forget <pattern>|show]", async (args) => {
+    const sub = args[0] || "show";
+
+    if (sub === "show") {
+      const mem = await storage.getAgentConfig("persistent_context");
+      const text = mem?.value || "";
+      if (!text.trim()) return ok("Memory is empty.");
+      return ok(text);
+    }
+
+    if (sub === "search") {
+      const query = args.slice(1).join(" ");
+      if (!query) return fail("[error] memory search: usage: memory search <query>");
+      const mem = await storage.getAgentConfig("persistent_context");
+      const lines = (mem?.value || "").split("\n").filter(l => l.toLowerCase().includes(query.toLowerCase()));
+
+      const resultHits = await storage.getAgentResults(undefined, 50);
+      const matchedResults = resultHits
+        .filter(r => r.summary.toLowerCase().includes(query.toLowerCase()) || (r.rawOutput || "").toLowerCase().includes(query.toLowerCase()))
+        .slice(0, 10);
+
+      const output: string[] = [];
+      if (lines.length > 0) {
+        output.push("=== PERSISTENT MEMORY ===");
+        for (const l of lines) output.push(`  ${l}`);
+      }
+      if (matchedResults.length > 0) {
+        output.push("=== AGENT RESULTS ===");
+        for (const r of matchedResults) {
+          output.push(`  [${r.createdAt.toISOString().slice(0, 16)}] ${r.programName}: ${r.summary.slice(0, 80)}`);
+        }
+      }
+      if (output.length === 0) return ok(`No memory matching "${query}".`);
+      return ok(output.join("\n"));
+    }
+
+    if (sub === "store") {
+      const text = args.slice(1).join(" ");
+      if (!text) return fail("[error] memory store: usage: memory store <text to remember>");
+      const existing = await storage.getAgentConfig("persistent_context");
+      const timestamp = new Date().toISOString().slice(0, 16);
+      const entry = `[${timestamp}] ${text}`;
+      const newValue = (existing?.value || "") + "\n" + entry;
+      await storage.setAgentConfig("persistent_context", newValue.trim(), "memory");
+      emitEvent("cli", `Memory stored: ${text.slice(0, 60)}`, "info", { metadata: { command: "memory store" } });
+      return ok(`Stored: ${entry}`);
+    }
+
+    if (sub === "recent") {
+      const n = parseInt(args[1] || "10", 10);
+      const mem = await storage.getAgentConfig("persistent_context");
+      const lines = (mem?.value || "").split("\n").filter(Boolean);
+      if (lines.length === 0) return ok("No memory entries.");
+      return ok(lines.slice(-n).join("\n"));
+    }
+
+    if (sub === "forget") {
+      const pattern = args.slice(1).join(" ");
+      if (!pattern) return fail("[error] memory forget: usage: memory forget <pattern>");
+      const mem = await storage.getAgentConfig("persistent_context");
+      if (!mem?.value) return ok("Memory is already empty.");
+      const lines = mem.value.split("\n");
+      const kept = lines.filter(l => !l.toLowerCase().includes(pattern.toLowerCase()));
+      const removed = lines.length - kept.length;
+      await storage.setAgentConfig("persistent_context", kept.join("\n"), "memory");
+      emitEvent("cli", `Memory: forgot ${removed} entries matching "${pattern}"`, "info", { metadata: { command: "memory forget" } });
+      return ok(`Removed ${removed} entries matching "${pattern}". ${kept.length} entries remaining.`);
+    }
+
+    return fail(`[error] memory: unknown subcommand "${sub}"\nUsage: memory [search <query>|store <text>|recent|forget <pattern>|show]`);
+  });
+
+  registerCommand("scrape", "Scrape a URL or run a site profile", "scrape <url> | scrape profile <name> | scrape path <id>", async (args) => {
+    const sub = args[0];
+    if (!sub) return fail("[error] scrape: usage: scrape <url> | scrape profile <name> | scrape path <id>");
+
+    if (sub === "profile") {
+      const name = args.slice(1).join(" ");
+      if (!name) return fail("[error] scrape profile: usage: scrape profile <name>. Use 'profiles list' to see available.");
+      const profile = await storage.getSiteProfileByName(name);
+      if (!profile) return fail(`[error] scrape: profile "${name}" not found. Use 'profiles list' to see available.`);
+      const paths = await storage.getNavigationPaths(profile.id);
+      if (paths.length === 0) return fail(`[error] scrape: profile "${name}" has no navigation paths configured.`);
+      const navPath = paths[0];
+      emitEvent("cli", `Scraping via profile: ${name}/${navPath.name}`, "action", { metadata: { command: "scrape profile" } });
+      try {
+        const result = await executeNavigationPath(profile, navPath);
+        if (!result.success) return fail(`[error] scrape: ${result.error || "scraping failed"}`);
+        const lines: string[] = [`# ${result.profileName} / ${result.pathName}`];
+        if (result.content?.title) lines.push(`Title: ${result.content.title}`);
+        if (Object.keys(result.extractedData).length > 0) {
+          for (const [k, v] of Object.entries(result.extractedData)) {
+            lines.push(`${k}: ${v.slice(0, 500)}`);
+          }
+        }
+        if (result.content?.text) lines.push("", result.content.text.slice(0, 10000));
+        emitEvent("cli", `Scrape complete: ${name} (${result.durationMs}ms)`, "info", { metadata: { command: "scrape profile" } });
+        return ok(lines.join("\n"));
+      } catch (e: any) {
+        return fail(`[error] scrape profile: ${e.message}`);
+      }
+    }
+
+    if (sub === "path") {
+      const pathId = parseInt(args[1], 10);
+      if (isNaN(pathId)) return fail("[error] scrape path: usage: scrape path <id>");
+      const navPath = await storage.getNavigationPath(pathId);
+      if (!navPath) return fail(`[error] scrape: navigation path #${pathId} not found`);
+      const profile = await storage.getSiteProfile(navPath.siteProfileId);
+      if (!profile) return fail("[error] scrape: site profile not found for this path");
+      emitEvent("cli", `Scraping path #${pathId}: ${profile.name}/${navPath.name}`, "action", { metadata: { command: "scrape path" } });
+      try {
+        const result = await executeNavigationPath(profile, navPath);
+        if (!result.success) return fail(`[error] scrape: ${result.error || "scraping failed"}`);
+        const lines: string[] = [`# ${result.profileName} / ${result.pathName}`];
+        if (result.content?.title) lines.push(`Title: ${result.content.title}`);
+        if (Object.keys(result.extractedData).length > 0) {
+          for (const [k, v] of Object.entries(result.extractedData)) {
+            lines.push(`${k}: ${v.slice(0, 500)}`);
+          }
+        }
+        if (result.content?.text) lines.push("", result.content.text.slice(0, 10000));
+        emitEvent("cli", `Scrape complete: path #${pathId} (${result.durationMs}ms)`, "info", { metadata: { command: "scrape path" } });
+        return ok(lines.join("\n"));
+      } catch (e: any) {
+        return fail(`[error] scrape path: ${e.message}`);
+      }
+    }
+
+    if (sub.startsWith("http://") || sub.startsWith("https://")) {
+      const url = sub;
+      emitEvent("cli", `Scraping URL: ${url}`, "action", { metadata: { command: "scrape" } });
+      try {
+        const profiles = await storage.getSiteProfiles();
+        const matched = matchProfileToUrl(profiles, url);
+        if (matched) {
+          const paths = await storage.getNavigationPaths(matched.id);
+          if (paths.length > 0) {
+            const result = await executeNavigationPath(matched, paths[0], undefined, url);
+            if (result.success) {
+              const lines: string[] = [`# ${result.profileName} / ${result.pathName}`, `URL: ${url}`];
+              if (result.content?.title) lines.push(`Title: ${result.content.title}`);
+              if (result.content?.text) lines.push("", result.content.text.slice(0, 10000));
+              emitEvent("cli", `Scrape complete: ${url} via ${matched.name} (${result.durationMs}ms)`, "info", { metadata: { command: "scrape" } });
+              return ok(lines.join("\n"));
+            }
+          }
+        }
+        const result = await bestEffortExtract(url);
+        const lines: string[] = [`# Best-effort scrape`, `URL: ${url}`];
+        if (result.content?.title) lines.push(`Title: ${result.content.title}`);
+        if (result.content?.text) lines.push("", result.content.text.slice(0, 10000));
+        emitEvent("cli", `Scrape complete: ${url} (best-effort, ${result.durationMs}ms)`, "info", { metadata: { command: "scrape" } });
+        return ok(lines.join("\n"));
+      } catch (e: any) {
+        return fail(`[error] scrape: ${e.message}`);
+      }
+    }
+
+    return fail(`[error] scrape: "${sub}" is not a valid URL or subcommand.\nUsage: scrape <url> | scrape profile <name> | scrape path <id>`);
+  });
+
+  registerCommand("propose-recipe", "Propose a new recipe for approval", "propose-recipe <name> <command> [--schedule <schedule>] [--desc <description>]", async (args) => {
+    const name = args[0];
+    if (!name) return fail("[error] propose-recipe: usage: propose-recipe <name> <command> [--schedule <schedule>]");
+    let command = "";
+    let schedule = "";
+    let description = "";
+    let i = 1;
+    while (i < args.length) {
+      if (args[i] === "--schedule" && args[i + 1]) { schedule = args[i + 1]; i += 2; }
+      else if (args[i] === "--desc" && args[i + 1]) { description = args.slice(i + 1).join(" "); break; }
+      else { command += (command ? " " : "") + args[i]; i++; }
+    }
+    if (!command) return fail("[error] propose-recipe: command is required");
+
+    await storage.createProposal({
+      section: "RECIPES",
+      targetName: name,
+      reason: `Proposed recipe: ${name}\nCommand: ${command}${schedule ? `\nSchedule: ${schedule}` : ""}${description ? `\nDescription: ${description}` : ""}`,
+      currentContent: "",
+      proposedContent: JSON.stringify({ name, command, schedule: schedule || null, description }),
+      source: "agent",
+      proposalType: "change",
+    });
+
+    emitEvent("cli", `Recipe proposed: ${name} = "${command}"`, "take-over-point", { metadata: { command: "propose-recipe", recipe: name } });
+    return ok(`Proposed recipe "${name}": ${command}${schedule ? ` (schedule: ${schedule})` : ""}\nAwaiting human approval in proposals.`);
   });
 
   registerCommand("agenda", "Show today's agenda", "agenda", async () => {

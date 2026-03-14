@@ -516,6 +516,8 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       console.error("[agent-runtime] Failed to store result:", e);
     }
 
+    await extractRecipeDirectives(output, programName);
+
     const nextRun = parseSchedule(prog.schedule, ps.lastRun, prog.cronExpression);
     ps.nextRun = nextRun;
     await storage.updateProgramLastRun(prog.id, ps.lastRun, nextRun);
@@ -671,4 +673,32 @@ export function initRuntime(): void {
       }
     }
   });
+}
+
+async function extractRecipeDirectives(output: string, programName: string): Promise<void> {
+  const recipePattern = /^RECIPE:\s+(\S+)\s+"([^"]+)"(?:\s+--schedule\s+(\S+))?(?:\s+--desc\s+(.+))?$/gm;
+  let match: RegExpExecArray | null;
+
+  while ((match = recipePattern.exec(output)) !== null) {
+    const [, name, command, schedule, description] = match;
+
+    try {
+      const existing = await storage.getRecipeByName(name);
+      if (existing) continue;
+
+      await storage.createProposal({
+        section: "RECIPES",
+        targetName: name,
+        reason: `Auto-proposed by program "${programName}"\nCommand: ${command}${schedule ? `\nSchedule: ${schedule}` : ""}${description ? `\nDescription: ${description}` : ""}`,
+        currentContent: "",
+        proposedContent: JSON.stringify({ name, command, schedule: schedule || null, description: description || `Auto-generated from ${programName}` }),
+        source: "agent",
+        proposalType: "change",
+      });
+
+      emitEvent("agent-runtime", `Recipe proposed by ${programName}: "${name}" = ${command}`, "take-over-point", { program: programName, metadata: { recipe: name, command } });
+    } catch (e) {
+      console.error(`[agent-runtime] Failed to create recipe proposal for "${name}":`, e);
+    }
+  }
 }
