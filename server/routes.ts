@@ -12,6 +12,8 @@ import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlVa
 import { subscribe, getEventHistory, type CockpitEvent } from "./event-bus";
 import { createNavigationSession, updateNavigationState, getNavigationSession, getActiveSessions, closeNavigationSession, getNavigationHistory } from "./navigation-session";
 import { getControlState, getControlMode, toggleControlMode, setControlMode, getActivityStream, getPendingTakeoverPoints, resolveTakeoverPoint, recordAction, checkPermission, createTakeoverPoint, enqueueCommand, dequeueCommand, completeCommand, drainQueue, getQueueDepth, setActionPermission, getActionPermissions, getPausedExecutions, removePausedExecution, clearPausedExecutions, onResume, type PausedExecution } from "./control-bus";
+import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
+import { insertRecipeSchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -964,6 +966,82 @@ export async function registerRoutes(
   app.delete("/api/control/paused-executions", async (_req, res) => {
     clearPausedExecutions();
     res.json({ ok: true });
+  });
+
+  app.post("/api/cli/run", async (req, res) => {
+    const { command } = req.body;
+    if (!command || typeof command !== "string") {
+      return res.status(400).json({ message: "command string required" });
+    }
+    try {
+      const result = await executeChain(command);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/cli/commands", async (_req, res) => {
+    res.json({ commands: getCommandHelp() });
+  });
+
+  app.get("/api/cli/help", async (_req, res) => {
+    res.json({ help: getCommandHelp() });
+  });
+
+  app.get("/api/recipes", async (_req, res) => {
+    const all = await storage.getRecipes();
+    res.json(all);
+  });
+
+  app.get("/api/recipes/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const r = await storage.getRecipe(id);
+    if (!r) return res.status(404).json({ message: "Recipe not found" });
+    res.json(r);
+  });
+
+  app.post("/api/recipes", async (req, res) => {
+    const parsed = insertRecipeSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const r = await storage.createRecipe(parsed.data);
+    res.status(201).json(r);
+  });
+
+  app.patch("/api/recipes/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const parsed = insertRecipeSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const updated = await storage.updateRecipe(id, parsed.data);
+    if (!updated) return res.status(404).json({ message: "Recipe not found" });
+    res.json(updated);
+  });
+
+  app.delete("/api/recipes/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deleteRecipe(id);
+    res.status(204).send();
+  });
+
+  app.post("/api/recipes/:id/toggle", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updated = await storage.toggleRecipeEnabled(id);
+    if (!updated) return res.status(404).json({ message: "Recipe not found" });
+    res.json(updated);
+  });
+
+  app.post("/api/recipes/:id/trigger", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const r = await storage.getRecipe(id);
+    if (!r) return res.status(404).json({ message: "Recipe not found" });
+    try {
+      const raw = await executeChainRaw(r.command);
+      const now = new Date();
+      await storage.updateRecipeLastRun(r.id, now, null, raw.stdout.slice(0, 10000));
+      res.json({ triggered: true, output: raw.stdout, exitCode: raw.exitCode, durationMs: raw.durationMs });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
 
   onResume(async (paused: PausedExecution) => {

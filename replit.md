@@ -65,10 +65,28 @@ Emacs-style M-x with modes:
 - **capture** — Quick capture (prefix "t " for task, plain text for note)
 - **add-url** — Save URL to Reader
 
+## CLI Engine (server/cli-engine.ts)
+
+Unix-style command interface with chain parsing. Both humans and the agent can execute commands.
+
+- **Chain operators**: `|` (pipe stdout), `&&` (run if success), `||` (run if fail), `;` (always run)
+- **Two-layer output**: Layer 1 (raw execution, pipes work correctly), Layer 2 (presentation: truncation, exit codes, duration)
+- **Progressive discovery**: `command --help` for usage, error messages point to correct commands
+- **Built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda
+- **Recipes**: Saved command chains that can run on schedule (no LLM needed)
+- **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`
+
+## Recipes (server/cli-engine.ts + shared/schema.ts)
+
+- `recipes` table: name, command (chain string), schedule, cron, enabled, run_count, last_output
+- CLI: `recipe save <name> "<command>"`, `recipe run <name>`, `recipe list`, `recipe info/delete`
+- REST: `/api/recipes` CRUD, `/api/recipes/:id/trigger`
+- Recipes reuse CLI commands — save a working pipeline, run it later without LLM calls
+
 ## Agent Runtime
 
 - Programs read from DB `programs` table
-- Inline TypeScript code executed in sandboxed `AsyncFunction`
+- Inline TypeScript code executed via subprocess (`npx tsx`) for TypeScript support
 - LLM cascade (free → cheap → standard → premium) via model-router
 - Results written to `agent_results` table
 - Proposals written to `openclaw_proposals` table

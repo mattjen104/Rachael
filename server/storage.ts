@@ -12,6 +12,7 @@ import {
   type NavigationPath, type InsertNavigationPath, navigationPaths,
   type AuditLog, type InsertAuditLog, auditLog,
   type ActionPermission, actionPermissions,
+  type Recipe, type InsertRecipe, recipes,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql } from "drizzle-orm";
@@ -95,6 +96,15 @@ export interface IStorage {
   getActionPermission(navPathId: number, actionName: string): Promise<ActionPermission | undefined>;
   setActionPermission(navPathId: number, actionName: string, level: string): Promise<ActionPermission>;
   deleteActionPermission(id: number): Promise<void>;
+
+  getRecipes(): Promise<Recipe[]>;
+  getRecipe(id: number): Promise<Recipe | undefined>;
+  getRecipeByName(name: string): Promise<Recipe | undefined>;
+  createRecipe(r: InsertRecipe): Promise<Recipe>;
+  updateRecipe(id: number, data: Partial<InsertRecipe>): Promise<Recipe | undefined>;
+  deleteRecipe(id: number): Promise<void>;
+  updateRecipeLastRun(id: number, lastRun: Date, nextRun: Date | null, output: string): Promise<void>;
+  toggleRecipeEnabled(id: number): Promise<Recipe | undefined>;
 
   searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>>;
 }
@@ -386,6 +396,43 @@ export class DatabaseStorage implements IStorage {
 
   async deleteActionPermission(id: number): Promise<void> {
     await db.delete(actionPermissions).where(eq(actionPermissions.id, id));
+  }
+
+  async getRecipes(): Promise<Recipe[]> {
+    return db.select().from(recipes).orderBy(recipes.name);
+  }
+  async getRecipe(id: number): Promise<Recipe | undefined> {
+    const [r] = await db.select().from(recipes).where(eq(recipes.id, id));
+    return r;
+  }
+  async getRecipeByName(name: string): Promise<Recipe | undefined> {
+    const [r] = await db.select().from(recipes).where(eq(recipes.name, name));
+    return r;
+  }
+  async createRecipe(r: InsertRecipe): Promise<Recipe> {
+    const [created] = await db.insert(recipes).values(r).returning();
+    return created;
+  }
+  async updateRecipe(id: number, data: Partial<InsertRecipe>): Promise<Recipe | undefined> {
+    const [updated] = await db.update(recipes).set(data).where(eq(recipes.id, id)).returning();
+    return updated;
+  }
+  async deleteRecipe(id: number): Promise<void> {
+    await db.delete(recipes).where(eq(recipes.id, id));
+  }
+  async updateRecipeLastRun(id: number, lastRun: Date, nextRun: Date | null, output: string): Promise<void> {
+    await db.update(recipes).set({
+      lastRun,
+      nextRun,
+      lastOutput: output.slice(0, 10000),
+      runCount: sql`${recipes.runCount} + 1`,
+    }).where(eq(recipes.id, id));
+  }
+  async toggleRecipeEnabled(id: number): Promise<Recipe | undefined> {
+    const existing = await this.getRecipe(id);
+    if (!existing) return undefined;
+    const [updated] = await db.update(recipes).set({ enabled: !existing.enabled }).where(eq(recipes.id, id)).returning();
+    return updated;
   }
 
   async searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>> {

@@ -283,6 +283,32 @@ export const insertNavigationPathSchema = z.object({
 export type InsertNavigationPath = z.infer<typeof insertNavigationPathSchema>;
 export type NavigationPath = typeof navigationPaths.$inferSelect;
 
+export const recipes = pgTable("recipes", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  command: text("command").notNull(),
+  schedule: text("schedule"),
+  cronExpression: text("cron_expression"),
+  enabled: boolean("enabled").notNull().default(true),
+  lastRun: timestamp("last_run"),
+  nextRun: timestamp("next_run"),
+  runCount: integer("run_count").notNull().default(0),
+  lastOutput: text("last_output"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertRecipeSchema = z.object({
+  name: z.string(),
+  description: z.string().default(""),
+  command: z.string(),
+  schedule: z.string().nullable().optional(),
+  cronExpression: z.string().nullable().optional(),
+  enabled: z.boolean().default(true),
+});
+export type InsertRecipe = z.infer<typeof insertRecipeSchema>;
+export type Recipe = typeof recipes.$inferSelect;
+
 export const auditLog = pgTable("audit_log", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   actor: text("actor").notNull(),

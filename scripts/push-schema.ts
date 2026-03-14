@@ -127,6 +127,20 @@ const tables = [
     extraction_rules JSONB DEFAULT '{}',
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
+  `CREATE TABLE IF NOT EXISTS recipes (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    command TEXT NOT NULL,
+    schedule TEXT,
+    cron_expression TEXT,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    last_run TIMESTAMP,
+    next_run TIMESTAMP,
+    run_count INTEGER NOT NULL DEFAULT 0,
+    last_output TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
   `CREATE TABLE IF NOT EXISTS org_files (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL,
