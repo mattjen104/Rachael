@@ -30,7 +30,7 @@ function resolveModel(
   routing: Record<string, string | undefined>
 ): ModelConfig {
   const aliases: Record<string, string> = config?.aliases || {};
-  const defaultModel = config?.defaultModel || routing?.default || "openrouter/meta-llama/llama-3.1-8b-instruct:free";
+  const defaultModel = config?.defaultModel || routing?.default || "openrouter/anthropic/claude-sonnet-4";
 
   let fullId = modelRef || defaultModel;
 

@@ -65,7 +65,7 @@ async function getLLMConfig(): Promise<LLMConfig> {
     configMap[c.key] = c.value;
   }
   return {
-    defaultModel: configMap["default_model"] || "openrouter/google/gemma-3-4b-it:free",
+    defaultModel: configMap["default_model"] || "openrouter/anthropic/claude-sonnet-4",
     aliases: {},
     routing: {},
   };

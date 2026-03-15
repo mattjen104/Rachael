@@ -935,6 +935,63 @@ function registerBuiltinCommands(): void {
     return ok(`Proposed recipe "${name}": ${command}${schedule ? ` (schedule: ${schedule})` : ""}\nAwaiting human approval in proposals.`);
   });
 
+  function buildHardenedBriefing(
+    today: string,
+    grouped: Map<string, any[]>,
+    programs: any[],
+    errorResults: any[],
+    recipesRun: any[],
+    taskSection: string
+  ): string {
+    const urlRegex = /https?:\/\/[^\s"'<>\])+,]+/g;
+    const lines: string[] = [`MORNING BRIEFING — ${today}\n`];
+
+    lines.push(`${grouped.size} agents reported, ${errorResults.length} errors, ${recipesRun.length} recipes fired.\n`);
+
+    lines.push("DETAILED REPORTS\n");
+    for (const [name, runs] of grouped) {
+      const prog = programs.find((p: any) => p.name === name);
+      const latest = runs[0];
+      const output = latest.rawOutput || latest.summary || "";
+      const summary = latest.summary || "";
+
+      lines.push(`${name}`);
+      if (prog?.instructions) {
+        lines.push(`  Purpose: ${prog.instructions.slice(0, 150)}`);
+      }
+      lines.push(`  Runs: ${runs.length} | Latest: ${summary.slice(0, 200)}`);
+
+      const urls = [...new Set((output.match(urlRegex) || []).map((u: string) => u.replace(/[.)]+$/, "")))];
+      if (urls.length > 0) {
+        lines.push(`  Links:`);
+        for (const url of urls.slice(0, 20)) {
+          lines.push(`    ${url}`);
+        }
+      }
+      lines.push("");
+    }
+
+    if (errorResults.length > 0) {
+      lines.push("ERRORS\n");
+      for (const r of errorResults) {
+        lines.push(`  ${r.programName}: ${r.summary.slice(0, 200)}`);
+      }
+      lines.push("");
+    }
+
+    if (recipesRun.length > 0) {
+      lines.push("RECIPES FIRED\n");
+      for (const r of recipesRun) {
+        lines.push(`  ${r.recipeName || r.programName}: ${r.summary.slice(0, 120)}`);
+      }
+      lines.push("");
+    }
+
+    lines.push(`TASKS\n${taskSection}`);
+
+    return lines.join("\n");
+  }
+
   registerCommand("standup", "Morning standup briefing of yesterday's work", "standup [--days N] [--raw]", async (args) => {
     let days = 1;
     let raw = false;
@@ -1050,65 +1107,20 @@ Write the briefing now. Remember: no placeholders, no brackets, no markdown. Rea
       const configMap: Record<string, string> = {};
       for (const c of configs) configMap[c.key] = c.value;
       const llmConfig: LLMConfig = {
-        defaultModel: configMap["default_model"] || "openrouter/google/gemma-3-4b-it:free",
+        defaultModel: configMap["default_model"] || "openrouter/anthropic/claude-sonnet-4",
         aliases: {},
         routing: {},
       };
 
       const messages: LLMMessage[] = [{ role: "user", content: briefingPrompt }];
-      const standupModel = configMap["standup_model"];
-      const fallbackModels = [
-        standupModel,
-        "openrouter/google/gemma-3-12b-it:free",
-        "openrouter/mistralai/mistral-small-3.1-24b-instruct:free",
-        "openrouter/qwen/qwen3-8b:free",
-        "openrouter/deepseek/deepseek-r1-0528:free",
-      ].filter(Boolean) as string[];
+      const standupModel = configMap["standup_model"] || "openrouter/anthropic/claude-sonnet-4";
+      const result = await executeLLM(messages, standupModel, llmConfig, {});
 
-      let result: LLMResponse | null = null;
-      const isRetryable = (err: any) => {
-        const msg = err?.message || "";
-        return msg.includes("429") || msg.includes("503") || msg.includes("502") || msg.includes("rate") || msg.includes("timeout");
-      };
-      for (let attempt = 0; attempt < 2; attempt++) {
-        for (const model of fallbackModels) {
-          try {
-            result = await executeLLM(messages, model, llmConfig, {});
-            break;
-          } catch (retryErr: any) {
-            const msg = retryErr?.message?.slice(0, 120) || "unknown";
-            if (!isRetryable(retryErr)) {
-              console.warn(`[standup] Model ${model} non-retryable error: ${msg}, skipping`);
-              continue;
-            }
-            console.warn(`[standup] Model ${model} rate-limited (attempt ${attempt + 1}): ${msg}`);
-          }
-        }
-        if (result) break;
-        if (attempt === 0) {
-          console.warn("[standup] All models rate-limited, waiting 8s before retry...");
-          await new Promise(r => setTimeout(r, 8000));
-        }
-      }
-      if (!result) {
-        throw new Error("All LLM models unavailable after retries");
-      }
-
-      emitEvent("cli", `Standup briefing generated (${result.tokensUsed} tokens)`, "info", { metadata: { command: "standup" } });
+      emitEvent("cli", `Standup briefing generated (${result.tokensUsed} tokens, model: ${standupModel})`, "info", { metadata: { command: "standup" } });
       return ok(`MORNING BRIEFING — ${today}\n\n${result.content.trim()}`);
     } catch (e: any) {
-      console.error("[standup] LLM error:", e?.message || e);
-      const fallback: string[] = [`MORNING BRIEFING — ${today} (LLM unavailable, raw summary)\n`];
-      fallback.push(`${successResults.length} agents ran, ${errorResults.length} errors, ${recipesRun.length} recipes fired.\n`);
-      for (const [name, runs] of grouped) {
-        fallback.push(`${name}: ${runs[0].summary.slice(0, 120)}`);
-      }
-      if (errorReports.length) {
-        fallback.push("\nErrors:");
-        for (const r of errorResults) fallback.push(`  ${r.programName}: ${r.summary.slice(0, 100)}`);
-      }
-      fallback.push(`\nTasks: ${taskSection}`);
-      return ok(fallback.join("\n"));
+      console.error("[standup] LLM error, using hardened fallback:", e?.message || e);
+      return ok(buildHardenedBriefing(today, grouped, programs, errorResults, recipesRun, taskSection));
     }
   });
 
