@@ -69,15 +69,33 @@ async function getOrgCloudUrl() {
   return baseUrl;
 }
 
+const BRIDGE_VERSION = "2.1.0";
+const JOB_DELAY_MS = 1500;
+
 function bridgeHeaders(token) {
-  const h = { "Content-Type": "application/json", "X-Bridge-Client": "chrome-extension" };
+  const h = {
+    "Content-Type": "application/json",
+    "X-Bridge-Client": "chrome-extension",
+    "X-Bridge-Version": BRIDGE_VERSION,
+    "X-Bridge-Jobs": String(bridgeJobsCompleted),
+  };
   if (token) h["X-Bridge-Token"] = token;
+  if (bridgeLastError) h["X-Bridge-Error"] = bridgeLastError.substring(0, 200);
   return h;
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+let pollInProgress = false;
+
 async function pollForJobs() {
+  if (pollInProgress) return;
+  pollInProgress = true;
+
   const { baseUrl, token } = await getConfig();
-  if (!baseUrl) return;
+  if (!baseUrl) { pollInProgress = false; return; }
 
   try {
     const res = await fetch(`${baseUrl}/api/bridge/ext/jobs`, {
@@ -93,7 +111,9 @@ async function pollForJobs() {
     bridgeLastPoll = new Date().toISOString();
     bridgeLastError = null;
 
-    for (const job of jobs) {
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i];
+      if (i > 0) await sleep(JOB_DELAY_MS);
       try {
         const result = await executeJob(job);
         await fetch(`${baseUrl}/api/bridge/ext/results`, {
@@ -112,6 +132,8 @@ async function pollForJobs() {
     }
   } catch (err) {
     bridgeLastError = err.message || String(err);
+  } finally {
+    pollInProgress = false;
   }
 }
 
@@ -140,47 +162,76 @@ async function executeJob(job) {
   }
 
   if (type === "dom") {
-    const res = await fetch(url, { credentials: "include" });
-    const html = await res.text();
-
     const selectors = options?.selectors || {};
-    const extracted = {};
+    const hasSelectors = Object.keys(selectors).length > 0;
+    const maxText = options?.maxText || 15000;
+    const includeHtml = options?.includeHtml || false;
+    const maxHtml = options?.maxHtml || 50000;
 
-    if (Object.keys(selectors).length > 0) {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
+    const tab = await chrome.tabs.create({ url, active: false });
 
-      for (const [key, selector] of Object.entries(selectors)) {
-        const els = doc.querySelectorAll(selector);
-        extracted[key] = Array.from(els).map((el) => ({
-          text: el.textContent?.trim().substring(0, 1000) || "",
-          href: el.getAttribute("href") || undefined,
-          src: el.getAttribute("src") || undefined,
-        }));
-      }
+    try {
+      await new Promise((resolve, reject) => {
+        function listener(tabId, info) {
+          if (tabId === tab.id && info.status === "complete") {
+            cleanup();
+            setTimeout(resolve, 1500);
+          }
+        }
+        function cleanup() {
+          clearTimeout(timeout);
+          chrome.tabs.onUpdated.removeListener(listener);
+        }
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error("Tab load timed out after 30s"));
+        }, 30000);
+        chrome.tabs.onUpdated.addListener(listener);
+      });
+
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (sels, maxT, inclHtml, maxH) => {
+          const extracted = {};
+          for (const [key, selector] of Object.entries(sels)) {
+            const els = document.querySelectorAll(selector);
+            extracted[key] = Array.from(els).map((el) => ({
+              text: (el.textContent || "").trim().substring(0, 1000),
+              href: el.getAttribute("href") || undefined,
+              src: el.getAttribute("src") || undefined,
+            }));
+          }
+
+          const text = document.body?.innerText?.substring(0, maxT) || "";
+          const html = inclHtml ? document.documentElement.outerHTML.substring(0, maxH) : undefined;
+
+          return { text, html, extracted, url: location.href, title: document.title };
+        },
+        args: [selectors, maxText, includeHtml, maxHtml],
+      });
+
+      const data = results?.[0]?.result || {};
+      return {
+        status: 200,
+        url: data.url || url,
+        text: data.text,
+        html: data.html,
+        extracted: data.extracted || {},
+      };
+    } finally {
+      try { await chrome.tabs.remove(tab.id); } catch {}
     }
-
-    return {
-      status: res.status,
-      url: res.url,
-      html: options?.includeHtml ? html.substring(0, options?.maxHtml || 50000) : undefined,
-      text: html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-               .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-               .replace(/<[^>]+>/g, " ")
-               .replace(/\s+/g, " ")
-               .trim()
-               .substring(0, options?.maxText || 15000),
-      extracted,
-    };
   }
 
   throw new Error(`Unknown job type: ${type}`);
 }
 
+const POLL_ALARM_MINUTES = 0.5;
+
 function startBridge() {
   if (bridgeRunning) return;
   bridgeRunning = true;
-  chrome.alarms.create("bridge-poll", { periodInMinutes: POLL_INTERVAL_MS / 60000 });
+  chrome.alarms.create("bridge-poll", { periodInMinutes: POLL_ALARM_MINUTES });
   pollForJobs();
 }
 

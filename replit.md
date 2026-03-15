@@ -73,7 +73,7 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - **Branch suppression**: When `&&`/`||` skips a segment, downstream `|` pipes in the same branch are also skipped
 - **Two-layer output**: `executeChainRaw()` returns raw stdout/stderr/exitCode (for pipes, recipes, internal use); `executeChain()` wraps with presentation (truncation, exit codes, duration)
 - **Progressive discovery**: `command --help` for usage, error messages point to correct commands
-- **28+ built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe, bridge, bridge-token, notify, standup
+- **30+ built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe, bridge, bridge-status, bridge-token, notify, standup
 - **Cockpit events**: CLI commands emit events to the cockpit activity stream (recipe save/run/approve, memory store/forget, scrape)
 - **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`
 
@@ -195,12 +195,18 @@ Database-driven scraping system replacing hardcoded adapters:
 ## Chrome Extension Bridge (chrome-extension/ + server/bridge-queue.ts)
 
 - **Purpose**: Routes scraping through the user's real Chrome browser (real cookies, real IP) — bypasses cloud IP blocks
-- **Flow**: Server queues jobs → Extension polls `/api/bridge/ext/jobs` → executes fetch/DOM extraction → posts results to `/api/bridge/ext/results`
+- **Unified bridge**: `smartFetch()` tries Chrome extension first → falls back to direct server-side fetch. Agents don't need to know which path is used.
+- **Flow**: Server queues jobs → Extension polls `/api/bridge/ext/jobs` (sends heartbeat headers) → executes fetch/DOM extraction → posts results to `/api/bridge/ext/results`
 - **Auth**: Bridge token (lazy-generated UUID) — extension stores token from options page, sends as `X-Bridge-Token` header
-- **CLI commands**: `bridge <url>` (submit + wait for result), `bridge-token` (get token for extension setup)
-- **Job types**: `fetch` (raw HTTP via browser cookies) and `dom` (tab injection with CSS selector extraction)
-- **API routes**: `/api/bridge/ext/token` (auth-gated), `/api/bridge/ext/jobs`, `/api/bridge/ext/results`, `/api/bridge/ext/queue`, `/api/bridge/ext/submit`
-- **Extension files**: `background.js` (polling + execution), `options.html/js` (URL + token config), `manifest.json` (MV3, `<all_urls>`)
+- **Heartbeat**: Extension sends version/jobs-completed/error in poll headers; server tracks `extensionLastSeen` with 90s staleness window
+- **Retry logic**: Failed jobs auto-requeue up to `maxRetries` (default 2) before returning error to caller
+- **Serial execution**: Extension processes jobs sequentially with 1.5s delay between them to avoid anti-bot detection
+- **DOM job type**: Opens a real background tab, waits for JS rendering, injects content script for extraction (not just static HTML parsing)
+- **CLI commands**: `bridge <url>` (smart fetch), `bridge-status` (unified status), `bridge-token` (get token for extension setup)
+- **Job types**: `fetch` (raw HTTP via browser cookies) and `dom` (real tab injection with CSS selector extraction, full JS rendering)
+- **API routes**: `/api/bridge/status` (unified Playwright + extension + queue), `/api/bridge/ext/token` (auth-gated), `/api/bridge/ext/jobs`, `/api/bridge/ext/results`, `/api/bridge/ext/queue`, `/api/bridge/ext/submit`
+- **Extension files**: `background.js` (polling + tab-based execution), `options.html/js` (URL + token config), `manifest.json` (MV3, `<all_urls>`)
+- **Polling interval**: Chrome alarms at 30s minimum; extension polls every ~30s when active
 
 ## Preserved Utilities
 

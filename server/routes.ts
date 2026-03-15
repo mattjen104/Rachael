@@ -14,7 +14,7 @@ import { createNavigationSession, updateNavigationState, getNavigationSession, g
 import { getControlState, getControlMode, toggleControlMode, setControlMode, getActivityStream, getPendingTakeoverPoints, resolveTakeoverPoint, recordAction, checkPermission, createTakeoverPoint, enqueueCommand, dequeueCommand, completeCommand, drainQueue, getQueueDepth, setActionPermission, getActionPermissions, getPausedExecutions, removePausedExecution, clearPausedExecutions, onResume, type PausedExecution } from "./control-bus";
 import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
 import { insertRecipeSchema } from "@shared/schema";
-import { claimJobs, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken } from "./bridge-queue";
+import { claimJobsTracked, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken, recordHeartbeat, isExtensionConnected, smartFetch } from "./bridge-queue";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -486,8 +486,23 @@ export async function registerRoutes(
   });
 
   app.get("/api/bridge/status", async (_req, res) => {
-    const status = getBridgeStatus();
-    res.json(status);
+    const playwrightStatus = getBridgeStatus();
+    const queueStatus = getQueueStatus();
+    res.json({
+      ...playwrightStatus,
+      extension: {
+        connected: queueStatus.extensionConnected,
+        lastSeen: queueStatus.extensionLastSeen,
+        version: queueStatus.extensionVersion,
+        jobsCompleted: queueStatus.extensionJobsCompleted,
+        lastError: queueStatus.extensionLastError,
+      },
+      queue: {
+        pending: queueStatus.pending,
+        completed: queueStatus.completed,
+        jobs: queueStatus.jobs,
+      },
+    });
   });
 
   app.post("/api/bridge/launch", async (_req, res) => {
@@ -1084,15 +1099,19 @@ export async function registerRoutes(
     res.json({ token: getBridgeToken() });
   });
 
-  app.get("/api/bridge/ext/jobs", bridgeAuth, (_req, res) => {
-    const jobs = claimJobs();
+  app.get("/api/bridge/ext/jobs", bridgeAuth, (req, res) => {
+    const version = req.headers["x-bridge-version"] as string | undefined;
+    const jobsCompleted = req.headers["x-bridge-jobs"] ? parseInt(req.headers["x-bridge-jobs"] as string, 10) : undefined;
+    const lastError = req.headers["x-bridge-error"] as string | undefined;
+    recordHeartbeat({ version, jobsCompleted, error: lastError || null });
+    const jobs = claimJobsTracked();
     res.json(jobs);
   });
 
   app.post("/api/bridge/ext/results", bridgeAuth, (req, res) => {
     const { jobId, ...result } = req.body;
     if (!jobId) return res.status(400).json({ error: "jobId required" });
-    resolveResult(jobId, { ...result, jobId, completedAt: Date.now() });
+    resolveResult(jobId, { ...result, jobId, completedAt: Date.now(), source: "extension" });
     res.json({ ok: true });
   });
 

@@ -169,7 +169,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -1176,11 +1176,37 @@ ${fullHtml}`;
     return ok(`Bridge token: ${token}\n\nPaste this into the Chrome extension options page.`);
   });
 
-  registerCommand("bridge", "Fetch a URL through the Chrome extension bridge (uses your real browser cookies/IP)", "bridge <url> [--dom] [--wait <ms>] [--selector key=sel]", async (args) => {
-    const { submitJob, waitForResult } = await import("./bridge-queue");
+  registerCommand("bridge-status", "Show unified bridge status (extension + playwright + queue)", "bridge-status", async () => {
+    const { getQueueStatus, isExtensionConnected } = await import("./bridge-queue");
+    const status = getQueueStatus();
+    const lines: string[] = [];
+    lines.push("=== Bridge Status ===");
+    lines.push("");
+    lines.push(`Chrome Extension: ${status.extensionConnected ? "CONNECTED" : "OFFLINE"}`);
+    if (status.extensionLastSeen) {
+      const ago = Math.round((Date.now() - status.extensionLastSeen) / 1000);
+      lines.push(`  Last seen: ${ago}s ago`);
+    }
+    if (status.extensionVersion) lines.push(`  Version: ${status.extensionVersion}`);
+    lines.push(`  Jobs completed: ${status.extensionJobsCompleted}`);
+    if (status.extensionLastError) lines.push(`  Last error: ${status.extensionLastError}`);
+    lines.push("");
+    lines.push(`Queue: ${status.pending} pending, ${status.completed} completed`);
+    if (status.jobs.length > 0) {
+      for (const j of status.jobs) {
+        const ageSec = Math.round(j.age / 1000);
+        lines.push(`  [${j.id.slice(0, 8)}] ${j.url} (${ageSec}s ago, retry ${j.retryCount})`);
+      }
+    }
+    return ok(lines.join("\n"));
+  });
+
+  registerCommand("bridge", "Smart fetch: tries Chrome extension first, falls back to direct fetch", "bridge <url> [--dom] [--wait <ms>] [--selector key=sel] [--direct]", async (args) => {
+    const { smartFetch, getQueueStatus, isExtensionConnected } = await import("./bridge-queue");
     if (args.length === 0) {
-      const status = (await import("./bridge-queue")).getQueueStatus();
-      return ok(`Bridge queue: ${status.pending} pending, ${status.completed} completed`);
+      const status = getQueueStatus();
+      const ext = isExtensionConnected() ? "CONNECTED" : "OFFLINE";
+      return ok(`Bridge: ext=${ext}, queue=${status.pending} pending, ${status.completed} completed`);
     }
 
     const url = args.find(a => a.startsWith("http"));
@@ -1188,7 +1214,7 @@ ${fullHtml}`;
 
     const isDom = args.includes("--dom");
     const waitIdx = args.indexOf("--wait");
-    const timeoutMs = waitIdx >= 0 && args[waitIdx + 1] ? parseInt(args[waitIdx + 1], 10) : 30000;
+    const timeoutMs = waitIdx >= 0 && args[waitIdx + 1] ? parseInt(args[waitIdx + 1], 10) : 45000;
 
     const selectors: Record<string, string> = {};
     for (let i = 0; i < args.length; i++) {
@@ -1204,16 +1230,32 @@ ${fullHtml}`;
     if (Object.keys(selectors).length > 0) options.selectors = selectors;
     if (isDom) options.maxText = 15000;
 
-    const jobId = submitJob(type as any, url, "cli", options);
-    emitEvent("cli", `Bridge job ${jobId} submitted for ${url}`, "info", { metadata: { command: "bridge" } });
+    const forceDirect = args.includes("--direct");
+    emitEvent("cli", `Bridge: ${type} ${url} (ext=${isExtensionConnected() ? "on" : "off"}, direct=${forceDirect})`, "info", { metadata: { command: "bridge" } });
 
-    const result = await waitForResult(jobId, timeoutMs);
-    if (result.error) return fail(`[bridge error] ${result.error}`);
+    let result;
+    if (forceDirect) {
+      const res = await fetch(url, { headers: options?.headers || {} });
+      const ct = res.headers.get("content-type") || "";
+      let body: any;
+      if (ct.includes("json")) body = await res.json();
+      else body = await res.text();
+      let text: string | undefined;
+      if (typeof body === "string" && type === "dom") {
+        text = body.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().substring(0, options?.maxText || 15000);
+      }
+      result = { jobId: "direct", status: res.status, contentType: ct, body, text, url: res.url, completedAt: Date.now(), source: "direct" as const };
+    } else {
+      result = await smartFetch(url, type as any, "cli", options, timeoutMs);
+    }
+
+    const sourceTag = result.source ? ` [via ${result.source}]` : "";
+    if (result.error) return fail(`[bridge error${sourceTag}] ${result.error}`);
 
     if (result.text) return ok(result.text);
     if (result.body && typeof result.body === "string") return ok(result.body);
     if (result.body) return ok(JSON.stringify(result.body, null, 2));
-    return ok(`Bridge response: status ${result.status}`);
+    return ok(`Bridge response: status ${result.status}${sourceTag}`);
   });
 
   registerCommand("notify", "Send a notification via ntfy.sh or webhook", "notify <message> | echo <text> | notify\nConfig: config set notify_channel <channel> | config set notify_webhook <url>", async (args, stdin) => {
