@@ -595,6 +595,44 @@ async function tick(): Promise<void> {
   } catch (err) {
     console.error("[agent-runtime] Tick error:", err);
   }
+
+  try {
+    await tickRecipes();
+  } catch (err) {
+    console.error("[agent-runtime] Recipe tick error:", err);
+  }
+}
+
+const recipeLastChecked = new Map<number, Date>();
+
+async function tickRecipes(): Promise<void> {
+  const allRecipes = await storage.getRecipes();
+  const now = new Date();
+
+  for (const recipe of allRecipes) {
+    if (!recipe.enabled || !recipe.schedule) continue;
+
+    const cronExpr = recipe.cronExpression || recipe.schedule;
+    const lastRun = recipe.lastRun || recipeLastChecked.get(recipe.id) || null;
+    const nextRun = recipe.nextRun ? new Date(recipe.nextRun) : parseCronNextRun(cronExpr, lastRun || new Date(now.getTime() - 60000));
+
+    if (!nextRun || nextRun > now) continue;
+
+    recipeLastChecked.set(recipe.id, now);
+    emitEvent("agent-runtime", `Running scheduled recipe: ${recipe.name} ("${recipe.command}")`, "action", { metadata: { recipe: recipe.name } });
+
+    try {
+      const { executeChainRaw } = await import("./cli-engine");
+      const result = await executeChainRaw(recipe.command);
+      const nextAfterRun = parseCronNextRun(cronExpr, now);
+      await storage.updateRecipeLastRun(recipe.id, now, nextAfterRun, (result.stdout || "").slice(0, 10000));
+      emitEvent("agent-runtime", `Recipe complete: ${recipe.name} (exit:${result.exitCode})`, result.exitCode === 0 ? "info" : "error", { metadata: { recipe: recipe.name, exitCode: result.exitCode } });
+    } catch (e: any) {
+      console.error(`[agent-runtime] Recipe "${recipe.name}" failed:`, e.message);
+      const nextAfterErr = parseCronNextRun(cronExpr, now);
+      await storage.updateRecipeLastRun(recipe.id, now, nextAfterErr, "Error: " + (e.message || "").slice(0, 500));
+    }
+  }
 }
 
 export function getRuntimeState(): {

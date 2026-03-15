@@ -129,10 +129,31 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - Results written to `agent_results` table
 - Proposals written to `openclaw_proposals` table
 - PROPOSE: / REMEMBER: directives in LLM output auto-create proposals/memory
+- **Recipe scheduler**: `tickRecipes()` runs inside the main tick loop, checks recipes with cron schedules and executes them automatically
+- **Default model**: `openrouter/anthropic/claude-sonnet-4` everywhere (NO free models for real work)
 
-## Seeded Programs (12)
+## Seeded Programs (12) — ALL with real inline code
 
-hn-pulse, openrouter-model-scout, research-radar (meta), hn-deep-digest, github-trending, estate-car-finder, fed-rates, free-stuff-radar, sec-filings, price-watch, foreclosure-monitor, mandela-berenstain
+All programs have hardened inline TypeScript code (no LLM-only programs remaining):
+- hn-pulse — HN top stories via Firebase API
+- openrouter-model-scout — Tests free model availability on OpenRouter
+- research-radar (meta) — Aggregates HN + GitHub trending + 4 Reddit subs, synthesizes via Claude
+- hn-deep-digest — Deep discussion digest: fetches 15 comment threads per story (3 levels), Claude summarizes debate substance, key arguments, tensions
+- github-trending — GitHub trending repos
+- estate-car-finder — SoCal Craigslist estate/low-mile car scanner across 4 regions
+- fed-rates — Treasury yields (10Y/2Y/5Y/30Y) via Yahoo Finance JSON API
+- free-stuff-radar — Craigslist free section scanner with keyword matching
+- sec-filings — SEC EDGAR filings (10-K/10-Q/8-K) via data.sec.gov API
+- price-watch — Craigslist vehicle listings under max price with dedup
+- foreclosure-monitor — HUD HomeStore + Fannie Mae HomePath + CL REO search (HUD/HomePath need browser bridge)
+- mandela-berenstain — Internet Archive + Open Library search for Berenstain/Berenstein spelling variants
+
+## Inline Code Safety Rules
+
+- NEVER use `\n` inside string literals in program code stored to DB — the template wrapper turns them into real newlines
+- Use `const NL = String.fromCharCode(10)` + concatenation instead
+- OpenRouter model ID is `anthropic/claude-sonnet-4` (NOT `claude-sonnet-4-20250514`)
+- Must restart workflow after PATCH to programs (runtime caches in memory)
 
 ## Site Profiles & Universal Scraper Engine
 
