@@ -1030,25 +1030,35 @@ function registerBuiltinCommands(): void {
 
     const channelConfig = await storage.getAgentConfig("notify_channel");
     const webhookConfig = await storage.getAgentConfig("notify_webhook");
+    const emailConfig = await storage.getAgentConfig("notify_email");
     const channel = channelConfig?.value;
     const webhook = webhookConfig?.value;
+    const email = emailConfig?.value;
 
     if (!channel && !webhook) {
-      return fail("[error] notify: no notification target configured.\nSet up ntfy.sh:  config set notify_channel orgcloud-briefing\nOr a webhook:    config set notify_webhook https://your-webhook-url\n\nFor ntfy.sh: install the ntfy app on your phone, subscribe to the same channel name.");
+      return fail("[error] notify: no notification target configured.\nSet up ntfy.sh:  config set notify_channel orgcloud-briefing\nOr a webhook:    config set notify_webhook https://your-webhook-url\nFor email:       config set notify_email you@example.com\n\nFor ntfy.sh: install the ntfy app on your phone, subscribe to the same channel name.");
     }
 
     const results: string[] = [];
 
     if (channel) {
       try {
+        const headers: Record<string, string> = {
+          "Title": "OrgCloud Standup",
+          "Priority": "default",
+          "Tags": "briefcase",
+        };
+        if (email) {
+          headers["Email"] = email;
+        }
         const resp = await fetch(`https://ntfy.sh/${channel}`, {
           method: "POST",
-          headers: { "Title": "OrgCloud Standup", "Priority": "default", "Tags": "briefcase" },
+          headers,
           body: message.slice(0, 4000),
         });
         if (resp.ok) {
-          results.push(`Sent to ntfy.sh/${channel}`);
-          emitEvent("cli", `Notification sent to ntfy.sh/${channel}`, "info", { metadata: { command: "notify" } });
+          results.push(`Sent to ntfy.sh/${channel}${email ? ` + email to ${email}` : ""}`);
+          emitEvent("cli", `Notification sent to ntfy.sh/${channel}${email ? ` + ${email}` : ""}`, "info", { metadata: { command: "notify" } });
         } else {
           results.push(`ntfy.sh error: ${resp.status} ${resp.statusText}`);
         }
