@@ -1066,5 +1066,34 @@ export async function registerRoutes(
     }
   });
 
+  const path = await import("path");
+  const fs = await import("fs");
+  const briefingsDir = path.join(process.cwd(), ".briefings");
+  if (!fs.existsSync(briefingsDir)) fs.mkdirSync(briefingsDir, { recursive: true });
+
+  app.get("/briefings/:filename", (req, res) => {
+    const filename = req.params.filename.replace(/[^a-zA-Z0-9._-]/g, "");
+    const filePath = path.resolve(briefingsDir, filename);
+    if (!fs.existsSync(filePath)) return res.status(404).send("Not found");
+    if (filename.endsWith(".mp3")) {
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    } else if (filename.endsWith(".html")) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+    }
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", () => { if (!res.headersSent) res.status(500).send("Read error"); });
+    stream.pipe(res);
+  });
+
+  app.get("/briefings", (_req, res) => {
+    const files = fs.readdirSync(briefingsDir)
+      .filter((f: string) => f.endsWith(".html"))
+      .sort()
+      .reverse();
+    const links = files.map((f: string) => `<li><a href="/briefings/${f}">${f.replace(".html", "")}</a></li>`).join("\n");
+    res.send(`<!DOCTYPE html><html><head><title>Briefings</title><style>body{background:#0a0a0a;color:#00ff41;font-family:'IBM Plex Mono',monospace;padding:2em}a{color:#00ff41}a:hover{color:#fff}</style></head><body><h1>Briefing Archive</h1><ul>${links}</ul></body></html>`);
+  });
+
   return httpServer;
 }

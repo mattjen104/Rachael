@@ -1184,6 +1184,8 @@ ${fullHtml}`;
     }
 
     const results: string[] = [];
+    const fs = await import("fs");
+    const pathMod = await import("path");
 
     const isHtml = message.includes("<h1") || message.includes("<h2") || message.includes("<div");
 
@@ -1208,35 +1210,69 @@ ${fullHtml}`;
       }
     }
 
-    function htmlToMarkdown(html: string): string {
-      return html
-        .replace(/<div[^>]*>/gi, "").replace(/<\/div>/gi, "")
-        .replace(/<h1[^>]*>(.*?)<\/h1>/gi, "# $1\n")
-        .replace(/<h2[^>]*id="([^"]*)"[^>]*>(.*?)<\/h2>/gi, "## $2\n")
-        .replace(/<h2[^>]*>(.*?)<\/h2>/gi, "## $1\n")
-        .replace(/<strong>(.*?)<\/strong>/gi, "**$1**")
-        .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, "[$2]($1)")
-        .replace(/<li>(.*?)<\/li>/gi, "- $1")
-        .replace(/<\/?ul>/gi, "")
-        .replace(/<\/?ol>/gi, "")
-        .replace(/<p[^>]*>(.*?)<\/p>/gi, "$1\n")
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
+    const domain = (process.env.REPLIT_DOMAINS || "").split(",")[0].trim();
+    const baseUrl = domain ? `https://${domain}` : "http://localhost:5000";
+    const briefingsDir = pathMod.join(process.cwd(), ".briefings");
+    if (!fs.existsSync(briefingsDir)) fs.mkdirSync(briefingsDir, { recursive: true });
+
+    const now = new Date();
+    const dateStamp = now.toISOString().slice(0, 10);
+    let htmlUrl = "";
+    let audioUrl = "";
+
+    if (isHtml) {
+      const htmlFilename = `briefing-${dateStamp}.html`;
+
+      let audioPlayerHtml = "";
+      if (audioFilePath && fs.existsSync(audioFilePath)) {
+        const audioFilename = `briefing-${dateStamp}.mp3`;
+        const audioDest = pathMod.join(briefingsDir, audioFilename);
+        fs.copyFileSync(audioFilePath, audioDest);
+        audioUrl = `${baseUrl}/briefings/${audioFilename}`;
+        audioPlayerHtml = [
+          '<div style="background:#1a1a2e;border:1px solid #00ff41;border-radius:8px;padding:16px;margin:20px 0;">',
+          '<p style="color:#00ff41;margin:0 0 10px 0;font-size:14px;">&#127911; VOICE BRIEFING</p>',
+          `<audio controls preload="auto" style="width:100%;max-width:500px;display:block;">`,
+          `<source src="${audioUrl}" type="audio/mpeg">`,
+          '</audio>',
+          `<p style="margin:8px 0 0 0;font-size:12px;"><a href="${audioUrl}" style="color:#4fc3f7;" download="morning-briefing.mp3">Download MP3</a></p>`,
+          '</div>',
+        ].join("");
+      }
+
+      const closingDiv = htmlBody.lastIndexOf("</div>");
+      const withPlayer = closingDiv >= 0
+        ? htmlBody.slice(0, closingDiv) + audioPlayerHtml + htmlBody.slice(closingDiv)
+        : htmlBody + audioPlayerHtml;
+      const fullHtml = withPlayer
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+        .replace(/\bon\w+\s*=\s*"[^"]*"/gi, "")
+        .replace(/\bon\w+\s*=\s*'[^']*'/gi, "");
+      const htmlDest = pathMod.join(briefingsDir, htmlFilename);
+      fs.writeFileSync(htmlDest, fullHtml);
+      htmlUrl = `${baseUrl}/briefings/${htmlFilename}`;
     }
 
     if (channel) {
       try {
-        const ntfyBody = isHtml ? htmlToMarkdown(htmlBody) : htmlBody;
+        const ntfyLines: string[] = [];
+        if (htmlUrl) {
+          ntfyLines.push("Your morning briefing is ready.");
+          ntfyLines.push("");
+          ntfyLines.push("Read: " + htmlUrl);
+          if (audioUrl) {
+            ntfyLines.push("Listen: " + audioUrl);
+          }
+        } else {
+          ntfyLines.push(message.slice(0, 4000));
+        }
         const headers: Record<string, string> = {
           "Title": "OrgCloud Morning Briefing",
           "Priority": "default",
           "Tags": "briefcase,radio",
         };
-        if (isHtml) {
-          headers["Content-Type"] = "text/markdown";
+        if (htmlUrl) {
+          headers["Click"] = htmlUrl;
         }
         if (email) {
           headers["Email"] = email;
@@ -1244,45 +1280,18 @@ ${fullHtml}`;
         const resp = await fetch(`https://ntfy.sh/${channel}`, {
           method: "POST",
           headers,
-          body: ntfyBody.slice(0, 16000),
+          body: ntfyLines.join("\n"),
         });
         if (resp.ok) {
           results.push(`Sent to ntfy.sh/${channel}${email ? ` + email to ${email}` : ""}`);
+          if (htmlUrl) results.push(`Briefing: ${htmlUrl}`);
+          if (audioUrl) results.push(`Audio: ${audioUrl}`);
           emitEvent("cli", `Notification sent to ntfy.sh/${channel}${email ? ` + ${email}` : ""}`, "info", { metadata: { command: "notify" } });
         } else {
           results.push(`ntfy.sh error: ${resp.status} ${resp.statusText}`);
         }
       } catch (e: any) {
         results.push(`ntfy.sh error: ${e.message}`);
-      }
-    }
-
-    if (channel && audioFilePath) {
-      try {
-        const fs = await import("fs");
-        const audioData = fs.readFileSync(audioFilePath);
-        const audioHeaders: Record<string, string> = {
-          "Title": "OrgCloud Voice Briefing",
-          "Priority": "default",
-          "Tags": "studio_microphone",
-          "Filename": "morning-briefing.mp3",
-        };
-        if (email) {
-          audioHeaders["Email"] = email;
-        }
-        const audioResp = await fetch(`https://ntfy.sh/${channel}`, {
-          method: "PUT",
-          headers: audioHeaders,
-          body: audioData,
-        });
-        if (audioResp.ok) {
-          results.push("Voice briefing attached");
-          emitEvent("cli", "Voice briefing sent via ntfy", "info", { metadata: { command: "notify" } });
-        } else {
-          results.push(`Voice attachment error: ${audioResp.status}`);
-        }
-      } catch (audioErr: any) {
-        results.push(`Voice attachment error: ${audioErr?.message}`);
       }
     }
 

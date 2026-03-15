@@ -1,0 +1,115 @@
+<div style="font-family:'IBM Plex Mono',monospace;max-width:680px;margin:0 auto;color:#e0e0e0;background:#0a0a0a;padding:24px;border:1px solid #333"><h1 style="margin:0 0 4px;font-size:18px;color:#00ff41">MORNING BRIEFING</h1><p style="margin:0 0 16px;font-size:12px;color:#888">2026-03-15</p><h2 style="margin:0 0 8px">TLDR</h2>
+<p>OpenRouter free models mostly down (only 2/6 working), but strong overnight intel gathered across markets, tech trends, and research developments.</p>
+
+<h2 style="margin:16px 0 8px">INDEX</h2>
+<ul>
+<li><a href="#highlights">Highlights</a></li>
+<li><a href="#openrouter-model-scout">openrouter-model-scout</a> — 2/6 free models operational</li>
+<li><a href="#free-stuff-radar">free-stuff-radar</a> — 27 free items found on Craigslist</li>
+<li><a href="#price-watch">price-watch</a> — 54 vehicles under $5K tracked</li>
+<li><a href="#foreclosure-monitor">foreclosure-monitor</a> — HUD/Fannie Mae sites need browser bridge</li>
+<li><a href="#sec-filings">sec-filings</a> — 17 recent filings from major tech companies</li>
+<li><a href="#github-trending">github-trending</a> — 90 trending repos across key languages</li>
+<li><a href="#fed-rates">fed-rates</a> — Current Treasury yields captured</li>
+<li><a href="#hn-pulse">hn-pulse</a> — 10 HN stories above 100 points</li>
+<li><a href="#research-radar">research-radar</a> — Claude Partner Network launch, new AI frameworks</li>
+<li><a href="#estate-car-finder">estate-car-finder</a> — 147 estate/low-mile vehicles found</li>
+<li><a href="#mandela-berenstain">mandela-berenstain</a> — 42% misspelling rate in archives</li>
+<li><a href="#hn-deep-digest">hn-deep-digest</a> — Deep analysis of top HN discussions</li>
+<li><a href="#attention">Needs Attention</a></li>
+</ul>
+
+<h2 id="highlights" style="margin:16px 0 8px">HIGHLIGHTS</h2>
+<ul>
+<li>Anthropic launches Claude Partner Network with official plugin ecosystem — <a href="https://www.anthropic.com/news/claude-partner-network">source</a></li>
+<li>NVIDIA filed 8-K on March 6, latest in series of recent major tech filings — <a href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000024/nvda-20260302.htm">source</a></li>
+<li>$96 3D-printed rocket with mid-air trajectory recalculation trending on HN (191 points) — <a href="https://github.com/novatic14/MANPADS-System-Launcher-and-Rocket">source</a></li>
+<li>Treasury 30Y yield hits 4.908%, highest in current curve — <a href="#fed-rates">rates detail</a></li>
+</ul>
+
+<h2 id="openrouter-model-scout" style="margin:16px 0 8px">openrouter-model-scout</h2>
+<p><strong>What it does:</strong> Tests free model availability on OpenRouter platform.</p>
+<p><strong>Found:</strong> Only 2 out of 6 free models are currently operational. Gemma-3-4b-it and Gemma-3-12b-it are working with response times of 1030ms and 5466ms respectively. Mistral-small, Qwen3 models, and DeepSeek-R1 are all returning errors - either provider errors or missing endpoints entirely.</p>
+
+<h2 id="free-stuff-radar" style="margin:16px 0 8px">free-stuff-radar</h2>
+<p><strong>What it does:</strong> Scans Craigslist free section for furniture, electronics, tools, and appliances.</p>
+<p><strong>Found:</strong> 27 items discovered in Inland Empire with strong furniture selection (10 furniture + 8 desk hits). Notable finds include four large filing cabinets in Victorville, a 6-person Catalina Spas hot tub in Temecula, and a Sony receiver in Yucaipa. Heavy concentration of office furniture and storage solutions available.</p>
+<ul>
+<li><a href="https://inlandempire.craigslist.org/fuo/d/victorville-free-four-large-filing/7921206433.html">FREE four large filing cabinets</a></li>
+<li><a href="https://inlandempire.craigslist.org/zip/d/temecula-free-hot-tub-catalina-spas/7919966779.html">FREE Hot Tub – Catalina Spas Malibu, 6-Person</a></li>
+</ul>
+
+<h2 id="price-watch" style="margin:16px 0 8px">price-watch</h2>
+<p><strong>What it does:</strong> Monitors vehicle listings under $5,000 across car, truck, and SUV categories.</p>
+<p><strong>Found:</strong> 54 vehicles tracked with average price of $3,067. Standout deals include a 2003 Isuzu NPR HD for $1, multiple sub-$500 dealer financing options, and several $2,000-$2,500 trucks including a 1979 Dodge D300 and 2000 Chevy S-10. High concentration of financing deals from Bloomington dealers.</p>
+<ul>
+<li><a href="https://inlandempire.craigslist.org/cto/d/hesperia-2003-izuzu-npr-hd/7916120614.html">2003 izuzu npr hd - $1</a></li>
+<li><a href="https://inlandempire.craigslist.org/cto/d/daggett-1979-dodge-d300-for-sale/7921235106.html">1979 Dodge D300 For Sale - $1,700</a></li>
+</ul>
+
+<h2 id="foreclosure-monitor" style="margin:16px 0 8px">foreclosure-monitor</h2>
+<p><strong>What it does:</strong> Searches HUD homes and Fannie Mae listings for foreclosures in 25-mile radius.</p>
+<p><strong>Found:</strong> All major sources returned errors or empty results. HUD HomeStore returned HTTP 404, Fannie Mae HomePath loaded but had no parseable listings, and Craigslist REO search found no results. The sites appear to require browser-based access rather than direct scraping.</p>
+
+<h2 id="sec-filings" style="margin:16px 0 8px">sec-filings</h2>
+<p><strong>What it does:</strong> Tracks recent SEC EDGAR filings from major technology companies.</p>
+<p><strong>Found:</strong> 17 filings in last 90 days across AAPL, TSLA, NVDA, MSFT, and GOOG. NVIDIA most active with recent March 6 8-K filing and February 25 10-K annual report. Apple filed multiple 8-Ks in January and February. Tesla submitted 10-K on January 29. All major tech companies maintaining regular reporting schedules.</p>
+<ul>
+<li><a href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000024/nvda-20260302.htm">NVIDIA 8-K March 6, 2026</a></li>
+<li><a href="https://www.sec.gov/Archives/edgar/data/1652044/000165204426000026/goog-20260304.htm">Alphabet 8-K March 6, 2026</a></li>
+</ul>
+
+<h2 id="github-trending" style="margin:16px 0 8px">github-trending</h2>
+<p><strong>What it does:</strong> Monitors GitHub trending repositories across TypeScript, Rust, Python, and Go.</p>
+<p><strong>Found:</strong> 90 repositories detected with strong TypeScript representation. Notable projects include Crosstalk-Solutions/project-nomad, shareAI-lab/learn-claude-code, abhigyanpatwari/GitNexus, alibaba/page-agent, ChromeDevTools/chrome-devtools-mcp, and vitejs/vite. Heavy focus on AI tooling and development automation.</p>
+<ul>
+<li><a href="https://github.com/alibaba/page-agent">alibaba/page-agent</a></li>
+<li><a href="https://github.com/ChromeDevTools/chrome-devtools-mcp">ChromeDevTools/chrome-devtools-mcp</a></li>
+</ul>
+
+<h2 id="fed-rates" style="margin:16px 0 8px">fed-rates</h2>
+<p><strong>What it does:</strong> Fetches current US Treasury yield curve rates from Yahoo Finance.</p>
+<p><strong>Found:</strong> All 4 yield points successfully captured. 30Y Treasury leading at 4.908%, 10Y at 4.285%, 5Y at 3.874%, and 2Y at 3.603%. Normal upward-sloping yield curve indicating healthy economic expectations.</p>
+
+<h2 id="hn-pulse" style="margin:16px 0 8px">hn-pulse</h2>
+<p><strong>What it does:</strong> Monitors Hacker News for top stories using Firebase API.</p>
+<p><strong>Found:</strong> 10 stories above 100 points led by kernel anti-cheat analysis (240 points), rack-mount hydroponics (221 points), and Spotify AI DJ criticism (215 points). Strong technical content including $96 3D-printed rocket (191 points), TCP hole punching algorithm (131 points), and Korean programming language "Han" (188 points).</p>
+<ul>
+<li><a href="https://s4dbrd.github.io/posts/how-kernel-anti-cheats-work/">How kernel anti-cheats work - 240 points</a></li>
+<li><a href="https://github.com/novatic14/MANPADS-System-Launcher-and-Rocket">$96 3D-printed rocket with trajectory calculation - 191 points</a></li>
+</ul>
+
+<h2 id="research-radar" style="margin:16px 0 8px">research-radar</h2>
+<p><strong>What it does:</strong> Aggregates research developments across HN, GitHub, ArXiv, and synthesizes key findings.</p>
+<p><strong>Found:</strong> Major developments include Anthropic's Claude Partner Network launch with official plugin ecosystem, Alibaba's Page-Agent framework for AI web automation, and OpenRAG by Langflow trending on GitHub. Security focus on kernel-level detection methods applicable to LLM defense. Recommends testing Promptfoo for LLM evaluation and exploring OpenViking multimodal capabilities.</p>
+<ul>
+<li><a href="https://www.anthropic.com/news/claude-partner-network">Claude Partner Network official announcement</a></li>
+<li><a href="https://github.com/promptfoo/promptfoo">Promptfoo LLM evaluation framework</a></li>
+</ul>
+
+<h2 id="estate-car-finder" style="margin:16px 0 8px">estate-car-finder</h2>
+<p><strong>What it does:</strong> Scans SoCal Craigslist for estate sales and low-mileage vehicles $2K-$15K.</p>
+<p><strong>Found:</strong> 147 vehicles across 4 regions with notable finds including 2000 Toyota Sienna XLE original owner in Agoura Hills ($2,799), 2007 Mercedes E-350 with 55K miles in Upland ($4,600), 2009 Mini Cooper with 77K miles in San Diego ($4,300), and 2010 Jeep Liberty with 97K garage-kept miles in Jurupa Valley ($4,500). Strong concentration of low-mileage, single-owner vehicles.</p>
+<ul>
+<li><a href="https://losangeles.craigslist.org/sfv/cto/d/agoura-hills-reliable-2000-toyota/7917140414.html">2000 Toyota Sienna XLE Original Owner - $2,799</a></li>
+<li><a href="https://inlandempire.craigslist.org/cto/d/rancho-cucamonga-2007-mercedez-350/7921126217.html">2007 Mercedes E-350 55K miles - $4,600</a></li>
+</ul>
+
+<h2 id="mandela-berenstain" style="margin:16px 0 8px">mandela-berenstain</h2>
+<p><strong>What it does:</strong> Researches Mandela Effect by scanning Internet Archive for Berenstain vs Berenstein spelling variants.</p>
+<p><strong>Found:</strong> 42.1% misspelling rate discovered across Internet Archive and Open Library sources. 70 correct "Berenstain" entries vs 51 misspelled "Berenstein" entries. Notable misspellings found in 1990s-2000s software titles and recent book publications, suggesting persistent confusion about correct spelling spans decades and multiple media types.</p>
+<ul>
+<li><a href="https://archive.org/details/the-berenstein-bears-prize-pumpkin">The Berenstein Bears Prize Pumpkin (2003)</a></li>
+<li><a href="https://archive.org/details/the-berenstein-bears-in-the-dark.iso">The Berenstein Bears In The Dark (1996)</a></li>
+</ul>
+
+<h2 id="hn-deep-digest" style="margin:16px 0 8px">hn-deep-digest</h2>
+<p><strong>What it does:</strong> Provides deep analysis of top HN stories with community consensus and contrarian viewpoints.</p>
+<p><strong>Found:</strong> 8 stories analyzed with major discussion around Ageless Linux's deliberate non-compliance with California age verification law (372 points, 236 comments). Community split between viewing this as principled resistance against digital authoritarianism vs unnecessary grandstanding. Secondary discussion on Airbus uncrewed combat aircraft reveals anxiety about autonomous lethal decision-making and mesh network reliability in contested environments.</p>
+<ul>
+<li><a href="https://news.ycombinator.com/item?id=47381791">Ageless Linux discussion - 372 points</a></li>
+<li><a href="https://news.ycombinator.com/item?id=47382277">Airbus uncrewed combat aircraft - 76 points</a></li>
+</ul>
+
+<h2 id="attention" style="margin:16px 0 8px">NEEDS ATTENTION</h2>
+<p>OpenRouter free models degraded (4/6 failing). Foreclosure monitoring broken - HUD/Fannie Mae sites need browser bridge implementation. Research radar reports Reddit sources returning HTTP 403 - diversify to Twitter/X API and Discord monitoring for comprehensive coverage.</p></div>
