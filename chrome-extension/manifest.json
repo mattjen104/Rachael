@@ -1,19 +1,21 @@
 {
   "manifest_version": 3,
-  "name": "OrgCloud Space",
-  "version": "1.0.0",
-  "description": "Org-capture and org-roam in your browser side panel",
+  "name": "OrgCloud Bridge",
+  "version": "2.0.0",
+  "description": "Personal browser bridge for OrgCloud — scrapes any site you're logged into",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Open OrgCloud Space"
+    "default_title": "OrgCloud Bridge"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

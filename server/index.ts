@@ -36,7 +36,7 @@ app.get("/api/auth/check", (_req: Request, res: Response) => {
 });
 
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (!req.path.startsWith("/api") || req.path === "/api/auth/check" || req.path === "/api/cockpit/events") return next();
+  if (!req.path.startsWith("/api") || req.path === "/api/auth/check" || req.path === "/api/cockpit/events" || req.path.startsWith("/api/bridge/")) return next();
 
   if (!API_KEY) {
     const writeMethods = ["POST", "PUT", "PATCH", "DELETE"];

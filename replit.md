@@ -73,7 +73,7 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - **Branch suppression**: When `&&`/`||` skips a segment, downstream `|` pipes in the same branch are also skipped
 - **Two-layer output**: `executeChainRaw()` returns raw stdout/stderr/exitCode (for pipes, recipes, internal use); `executeChain()` wraps with presentation (truncation, exit codes, duration)
 - **Progressive discovery**: `command --help` for usage, error messages point to correct commands
-- **26 built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe
+- **28+ built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe, bridge, bridge-token, notify, standup
 - **Cockpit events**: CLI commands emit events to the cockpit activity stream (recipe save/run/approve, memory store/forget, scrape)
 - **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`
 
@@ -191,6 +191,16 @@ Database-driven scraping system replacing hardcoded adapters:
 - `client/src/components/layout/StatusBar.tsx` — Bottom status bar with runtime indicator
 - `client/src/components/editor/Minibuffer.tsx` — Command palette
 - `client/src/lib/crt-theme.tsx` — CRT phosphor theme provider
+
+## Chrome Extension Bridge (chrome-extension/ + server/bridge-queue.ts)
+
+- **Purpose**: Routes scraping through the user's real Chrome browser (real cookies, real IP) — bypasses cloud IP blocks
+- **Flow**: Server queues jobs → Extension polls `/api/bridge/ext/jobs` → executes fetch/DOM extraction → posts results to `/api/bridge/ext/results`
+- **Auth**: Bridge token (lazy-generated UUID) — extension stores token from options page, sends as `X-Bridge-Token` header
+- **CLI commands**: `bridge <url>` (submit + wait for result), `bridge-token` (get token for extension setup)
+- **Job types**: `fetch` (raw HTTP via browser cookies) and `dom` (tab injection with CSS selector extraction)
+- **API routes**: `/api/bridge/ext/token` (auth-gated), `/api/bridge/ext/jobs`, `/api/bridge/ext/results`, `/api/bridge/ext/queue`, `/api/bridge/ext/submit`
+- **Extension files**: `background.js` (polling + execution), `options.html/js` (URL + token config), `manifest.json` (MV3, `<all_urls>`)
 
 ## Preserved Utilities
 

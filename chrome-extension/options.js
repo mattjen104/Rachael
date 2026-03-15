@@ -1,18 +1,20 @@
 const urlInput = document.getElementById("url-input");
+const tokenInput = document.getElementById("token-input");
 const saveBtn = document.getElementById("save-btn");
 const status = document.getElementById("status");
 
-chrome.storage.sync.get(["orgcloudUrl"], (result) => {
-  if (result.orgcloudUrl) {
-    urlInput.value = result.orgcloudUrl;
-  }
+chrome.storage.sync.get(["orgcloudUrl", "bridgeToken"], (result) => {
+  if (result.orgcloudUrl) urlInput.value = result.orgcloudUrl;
+  if (result.bridgeToken) tokenInput.value = result.bridgeToken;
 });
 
 saveBtn.addEventListener("click", async () => {
   let url = urlInput.value.trim();
+  const token = tokenInput.value.trim();
+
   if (!url) {
-    chrome.storage.sync.remove("orgcloudUrl");
-    status.textContent = "URL cleared.";
+    chrome.storage.sync.remove(["orgcloudUrl", "bridgeToken"]);
+    status.textContent = "Settings cleared.";
     status.className = "info";
     return;
   }
@@ -28,9 +30,18 @@ saveBtn.addEventListener("click", async () => {
   }
 
   try {
-    const res = await fetch(`${url}/api/org-files`, { method: "GET" });
+    const headers = {};
+    if (token) headers["X-Bridge-Token"] = token;
+    const res = await fetch(`${url}/api/bridge/ext/queue`, { method: "GET", headers });
+    if (res.status === 403) {
+      status.textContent = "Invalid bridge token.";
+      status.className = "error";
+      return;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    chrome.storage.sync.set({ orgcloudUrl: url });
+    const saveData = { orgcloudUrl: url };
+    if (token) saveData.bridgeToken = token;
+    chrome.storage.sync.set(saveData);
     status.textContent = "Connected and saved.";
     status.className = "success";
   } catch (e) {
@@ -40,5 +51,8 @@ saveBtn.addEventListener("click", async () => {
 });
 
 urlInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") saveBtn.click();
+});
+tokenInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") saveBtn.click();
 });

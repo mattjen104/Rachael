@@ -1170,6 +1170,52 @@ ${fullHtml}`;
     }
   });
 
+  registerCommand("bridge-token", "Get or set the bridge token for Chrome extension auth", "bridge-token", async () => {
+    const { getBridgeToken } = await import("./bridge-queue");
+    const token = getBridgeToken();
+    return ok(`Bridge token: ${token}\n\nPaste this into the Chrome extension options page.`);
+  });
+
+  registerCommand("bridge", "Fetch a URL through the Chrome extension bridge (uses your real browser cookies/IP)", "bridge <url> [--dom] [--wait <ms>] [--selector key=sel]", async (args) => {
+    const { submitJob, waitForResult } = await import("./bridge-queue");
+    if (args.length === 0) {
+      const status = (await import("./bridge-queue")).getQueueStatus();
+      return ok(`Bridge queue: ${status.pending} pending, ${status.completed} completed`);
+    }
+
+    const url = args.find(a => a.startsWith("http"));
+    if (!url) return fail("[error] bridge: provide a URL starting with http");
+
+    const isDom = args.includes("--dom");
+    const waitIdx = args.indexOf("--wait");
+    const timeoutMs = waitIdx >= 0 && args[waitIdx + 1] ? parseInt(args[waitIdx + 1], 10) : 30000;
+
+    const selectors: Record<string, string> = {};
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--selector" && args[i + 1]) {
+        const [key, ...selParts] = args[i + 1].split("=");
+        if (key && selParts.length) selectors[key] = selParts.join("=");
+        i++;
+      }
+    }
+
+    const type = isDom || Object.keys(selectors).length > 0 ? "dom" : "fetch";
+    const options: any = {};
+    if (Object.keys(selectors).length > 0) options.selectors = selectors;
+    if (isDom) options.maxText = 15000;
+
+    const jobId = submitJob(type as any, url, "cli", options);
+    emitEvent("cli", `Bridge job ${jobId} submitted for ${url}`, "info", { metadata: { command: "bridge" } });
+
+    const result = await waitForResult(jobId, timeoutMs);
+    if (result.error) return fail(`[bridge error] ${result.error}`);
+
+    if (result.text) return ok(result.text);
+    if (result.body && typeof result.body === "string") return ok(result.body);
+    if (result.body) return ok(JSON.stringify(result.body, null, 2));
+    return ok(`Bridge response: status ${result.status}`);
+  });
+
   registerCommand("notify", "Send a notification via ntfy.sh or webhook", "notify <message> | echo <text> | notify\nConfig: config set notify_channel <channel> | config set notify_webhook <url>", async (args, stdin) => {
     const message = args.length > 0 ? args.join(" ") : stdin;
     if (!message.trim()) return fail("[error] notify: no message. Pipe input or provide text.\nUsage: standup | notify  OR  notify Hello world");

@@ -14,6 +14,7 @@ import { createNavigationSession, updateNavigationState, getNavigationSession, g
 import { getControlState, getControlMode, toggleControlMode, setControlMode, getActivityStream, getPendingTakeoverPoints, resolveTakeoverPoint, recordAction, checkPermission, createTakeoverPoint, enqueueCommand, dequeueCommand, completeCommand, drainQueue, getQueueDepth, setActionPermission, getActionPermissions, getPausedExecutions, removePausedExecution, clearPausedExecutions, onResume, type PausedExecution } from "./control-bus";
 import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
 import { insertRecipeSchema } from "@shared/schema";
+import { claimJobs, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken } from "./bridge-queue";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1063,6 +1064,55 @@ export async function registerRoutes(
       } catch (err) {
         console.error(`[control-bus] Error resuming navigation:`, err);
       }
+    }
+  });
+
+  const bridgeAuth = (req: any, res: any, next: any) => {
+    const token = req.headers["x-bridge-token"] || req.query.token;
+    if (!validateBridgeToken(token)) {
+      return res.status(403).json({ error: "Invalid bridge token" });
+    }
+    next();
+  };
+
+  app.get("/api/bridge/ext/token", (req, res) => {
+    const authHeader = req.headers.authorization;
+    const apiKey = process.env.OPENCLAW_API_KEY;
+    if (apiKey && (!authHeader || authHeader.slice(7) !== apiKey)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    res.json({ token: getBridgeToken() });
+  });
+
+  app.get("/api/bridge/ext/jobs", bridgeAuth, (_req, res) => {
+    const jobs = claimJobs();
+    res.json(jobs);
+  });
+
+  app.post("/api/bridge/ext/results", bridgeAuth, (req, res) => {
+    const { jobId, ...result } = req.body;
+    if (!jobId) return res.status(400).json({ error: "jobId required" });
+    resolveResult(jobId, { ...result, jobId, completedAt: Date.now() });
+    res.json({ ok: true });
+  });
+
+  app.get("/api/bridge/ext/queue", bridgeAuth, (_req, res) => {
+    res.json(getQueueStatus());
+  });
+
+  app.post("/api/bridge/ext/submit", bridgeAuth, async (req, res) => {
+    const { type, url, submittedBy, options, wait } = req.body;
+    if (!type || !url) return res.status(400).json({ error: "type and url required" });
+    try {
+      const jobId = submitJob(type, url, submittedBy || "api", options);
+      if (wait) {
+        const timeoutMs = typeof wait === "number" ? wait : 30000;
+        const result = await waitForResult(jobId, timeoutMs);
+        return res.json(result);
+      }
+      res.json({ jobId });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
     }
   });
 
