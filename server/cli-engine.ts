@@ -970,8 +970,8 @@ function registerBuiltinCommands(): void {
     for (const [name, runs] of grouped) {
       const prog = programs.find(p => p.name === name);
       const latest = runs[0];
-      const output = (latest.rawOutput || latest.summary).slice(0, 2000);
-      agentReports.push(`AGENT: ${name}\nTYPE: ${prog?.type || "unknown"}\nGOAL: ${prog?.instructions?.slice(0, 200) || "No instructions"}\nRUNS: ${runs.length}\nOUTPUT:\n${output}\n`);
+      const output = (latest.rawOutput || latest.summary).slice(0, 4000);
+      agentReports.push(`AGENT: ${name}\nTYPE: ${prog?.type || "unknown"}\nGOAL: ${prog?.instructions?.slice(0, 300) || "No instructions"}\nRUNS: ${runs.length}\nOUTPUT:\n${output}\n`);
     }
 
     const errorReports: string[] = [];
@@ -999,18 +999,38 @@ function registerBuiltinCommands(): void {
       return ok(lines.join("\n"));
     }
 
-    const briefingPrompt = `You are the chief of staff summarizing overnight agent activity for your boss. Write a concise morning briefing.
+    const briefingPrompt = `You are the chief of staff summarizing overnight agent activity for your boss. Write a morning briefing.
+
+FORMAT — use this exact structure:
+
+TLDR
+One sentence: the single most important thing from overnight.
+
+HIGHLIGHTS
+Bullet each noteworthy finding. Include the source URL on its own line right after the description, like:
+- Channel Surfer lets you watch YouTube like cable TV — 354 points on HN
+  https://channelsurfer.tv
+- Qatar helium shutdown threatens chip supply chain within two weeks
+  https://www.tomshardware.com/...
+
+AGENT REPORTS
+For EACH agent that ran, write a section like this:
+
+[agent-name] — one sentence summary of what it found in context of its goal
+Then 2-4 sentences of detail. Include ALL relevant URLs found in the output, each on its own line. Do not truncate or cut off — cover everything the agent found. If the agent found a list of items (stories, repos, listings, etc.), include the top items with their URLs.
+
+ERRORS (only if any)
+For each errored agent, explain what went wrong in plain language and whether it needs attention.
+
+ACTION ITEMS
+Bullet anything that needs human decision or attention.
 
 RULES:
-- Write in first person plural ("Your agents", "We found", "Our monitors detected")
-- Lead with the single most important finding or action item
-- For each agent that ran, summarize what it found in 1-2 sentences in context of its goal — not raw data, but what the data MEANS
-- Flag anything that needs human attention or decision
-- If an agent errored, explain what went wrong simply
-- End with a one-line "Bottom line" takeaway
-- Keep the whole briefing under 400 words
-- No markdown headers, just clean readable text with line breaks
-- Use plain language, not technical jargon
+- Write as "Your agents", "We found", "Our monitors detected"
+- Include EVERY URL found in the agent outputs — these must be on their own line so they are clickable
+- Do not truncate results — if an agent found 10 stories, include all 10 with URLs
+- Plain language, no technical jargon
+- Do not use markdown formatting like ** or ## — use plain text with the section headers above
 - Date range: ${sinceStr} to ${today}
 
 AGENT REPORTS:
@@ -1084,7 +1104,7 @@ Write the briefing now.`;
         const resp = await fetch(`https://ntfy.sh/${channel}`, {
           method: "POST",
           headers,
-          body: message.slice(0, 4000),
+          body: message.slice(0, 16000),
         });
         if (resp.ok) {
           results.push(`Sent to ntfy.sh/${channel}${email ? ` + email to ${email}` : ""}`);
@@ -1102,7 +1122,7 @@ Write the briefing now.`;
         const resp = await fetch(webhook, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: message.slice(0, 4000), title: "OrgCloud Morning Standup", timestamp: new Date().toISOString() }),
+          body: JSON.stringify({ text: message.slice(0, 16000), title: "OrgCloud Morning Standup", timestamp: new Date().toISOString() }),
         });
         if (resp.ok) {
           results.push(`Sent to webhook`);
