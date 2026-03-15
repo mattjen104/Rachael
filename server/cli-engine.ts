@@ -1029,7 +1029,7 @@ function registerBuiltinCommands(): void {
       const prog = programs.find(p => p.name === name);
       const latest = runs[0];
       const output = (latest.rawOutput || latest.summary).slice(0, 4000);
-      agentReports.push(`AGENT: ${name}\nTYPE: ${prog?.type || "unknown"}\nGOAL: ${prog?.instructions?.slice(0, 300) || "No instructions"}\nRUNS: ${runs.length}\nOUTPUT:\n${output}\n`);
+      agentReports.push(`AGENT: ${name}\nRUNS: ${runs.length}\nOUTPUT:\n${output}\n`);
     }
 
     const errorReports: string[] = [];
@@ -1038,7 +1038,7 @@ function registerBuiltinCommands(): void {
       if (seenErrors.has(r.programName)) continue;
       seenErrors.add(r.programName);
       const prog = programs.find(p => p.name === r.programName);
-      errorReports.push(`AGENT: ${r.programName}\nGOAL: ${prog?.instructions?.slice(0, 200) || "No instructions"}\nERROR: ${r.summary}\n${(r.rawOutput || "").slice(0, 500)}\n`);
+      errorReports.push(`AGENT: ${r.programName}\nERROR: ${r.summary}\n${(r.rawOutput || "").slice(0, 500)}\n`);
     }
 
     const taskSection = [
@@ -1057,46 +1057,48 @@ function registerBuiltinCommands(): void {
       return ok(lines.join("\n"));
     }
 
-    const briefingPrompt = `You are writing a morning briefing for the boss. Agents ran overnight — summarize findings. The boss wants to scan this in 60 seconds and know what matters.
+    const briefingPrompt = `You are Matt's personal assistant writing his morning briefing. You know him well — be warm but succinct. He set up all these agents himself, so DO NOT explain what each one does or what its purpose is. Just tell him what they found.
+
+Things Matt cares about especially:
+- Good deals on cars (any interesting listings, price drops, or market moves)
+- Free hot tubs on Craigslist/marketplace (flag immediately if found)
+- Anything that needs his attention or action
 
 Write HTML email format. Use this EXACT structure — return ONLY the HTML inside <body>, no <html>/<head> tags:
 
 <h2 style="margin:0 0 8px">TLDR</h2>
-<p>One sentence: the most important overnight finding.</p>
+<p>One sentence: the single most interesting or actionable finding overnight.</p>
 
 <h2 style="margin:16px 0 8px">INDEX</h2>
 <ul>
 <li><a href="#highlights">Highlights</a></li>
-<li><a href="#agent-name-1">agent-name-1</a> — one-line summary</li>
-<li><a href="#agent-name-2">agent-name-2</a> — one-line summary</li>
+<li><a href="#agent-name-1">agent-name-1</a> — what it found</li>
+<li><a href="#agent-name-2">agent-name-2</a> — what it found</li>
 <li><a href="#attention">Needs Attention</a></li>
 </ul>
 
 <h2 id="highlights" style="margin:16px 0 8px">HIGHLIGHTS</h2>
 <ul>
-<li>Description of finding — <a href="https://actual-url-here.com">source</a></li>
-<li>Another finding — <a href="https://url">source</a></li>
+<li>What was found — <a href="https://actual-url-here.com">source</a></li>
 </ul>
 
 <h2 id="agent-name" style="margin:16px 0 8px">agent-name</h2>
-<p><strong>What it does:</strong> one sentence.</p>
-<p><strong>Found:</strong> 2-4 sentences with real data — titles, prices, counts, names. Be specific.</p>
+<p>2-4 sentences of actual findings — specific data, prices, titles, numbers. No preamble about what the agent is.</p>
 <ul>
 <li><a href="https://url1">Link title 1</a></li>
-<li><a href="https://url2">Link title 2</a></li>
 </ul>
 
 <h2 id="attention" style="margin:16px 0 8px">NEEDS ATTENTION</h2>
-<p>List anything broken, errored, or needing a decision. If nothing, say "All systems nominal."</p>
+<p>Anything broken or needing a decision. If nothing, say "All clear."</p>
 
 RULES:
 - Return ONLY HTML body content (no <html>, <head>, <body> tags, no markdown, no backtick fences)
+- DO NOT explain what agents do — Matt already knows. Just report findings.
 - The INDEX must link to every agent section using <a href="#agent-name">
 - Each agent <h2> must have a matching id="agent-name" attribute
 - Every URL must be a REAL URL from the agent output — never invent URLs
-- DO NOT write template placeholders — actually summarize the data
 - Links should use descriptive anchor text, not bare URLs
-- Keep it scannable: short paragraphs, bullet lists
+- Keep it tight: short paragraphs, bullet lists, no filler
 - Date range: ${sinceStr} to ${today}
 
 Agent data:
