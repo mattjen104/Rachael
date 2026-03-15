@@ -963,15 +963,30 @@ function registerBuiltinCommands(): void {
     lines.push(`=== MORNING STANDUP (${sinceStr} → ${today}) ===`);
     lines.push("");
 
-    lines.push(`>> PROGRAMS: ${enabledPrograms.length} active, ${successResults.length} successful runs, ${errorResults.length} errors`);
+    lines.push(`>> ${successResults.length} programs ran, ${errorResults.length} errors, ${recipesRun.length} recipes fired, ${overdue.length} overdue tasks`);
+
     if (successResults.length > 0) {
       lines.push("");
-      lines.push(">> COMPLETED WORK:");
-      const seen = new Set<string>();
+      lines.push(">> RESULTS:");
+      const grouped = new Map<string, typeof successResults>();
       for (const r of successResults) {
-        if (seen.has(r.programName)) continue;
-        seen.add(r.programName);
-        lines.push(`  [OK] ${r.programName}: ${r.summary.slice(0, 100)}`);
+        if (!grouped.has(r.programName)) grouped.set(r.programName, []);
+        grouped.get(r.programName)!.push(r);
+      }
+      for (const [name, runs] of grouped) {
+        const latest = runs[0];
+        lines.push("");
+        lines.push(`  [OK] ${name} (${runs.length} run${runs.length > 1 ? "s" : ""})`);
+        lines.push(`  ${latest.summary}`);
+        if (latest.rawOutput) {
+          const detail = latest.rawOutput
+            .split("\n")
+            .filter(l => l.trim())
+            .slice(0, 15)
+            .map(l => `    ${l.slice(0, 120)}`)
+            .join("\n");
+          if (detail) lines.push(detail);
+        }
       }
     }
 
@@ -982,7 +997,13 @@ function registerBuiltinCommands(): void {
       for (const r of errorResults) {
         if (seen.has(r.programName)) continue;
         seen.add(r.programName);
-        lines.push(`  [!!] ${r.programName}: ${r.summary.slice(0, 100)}`);
+        lines.push("");
+        lines.push(`  [!!] ${r.programName}`);
+        lines.push(`  ${r.summary}`);
+        if (r.rawOutput) {
+          const detail = r.rawOutput.split("\n").filter(l => l.trim()).slice(0, 5).map(l => `    ${l.slice(0, 120)}`).join("\n");
+          if (detail) lines.push(detail);
+        }
       }
     }
 
@@ -1019,7 +1040,8 @@ function registerBuiltinCommands(): void {
     }
 
     lines.push("");
-    lines.push(`>> SUMMARY: ${successResults.length} runs completed, ${errorResults.length} errors, ${recipesRun.length} recipes fired, ${overdue.length} overdue tasks`);
+    lines.push("---");
+    lines.push(`End of standup. ${successResults.length} programs ran, ${errorResults.length} errors.`);
 
     return ok(lines.join("\n"));
   });
