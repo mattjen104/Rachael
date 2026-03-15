@@ -6,8 +6,8 @@ import { existsSync, statSync } from "fs";
 const VOICE_DIR = join(process.cwd(), ".voice-cache");
 
 const VOICES = {
-  assistant: "en-US-JennyNeural",
-  warm: "en-US-AriaNeural",
+  assistant: "en-US-GuyNeural",
+  warm: "en-US-AndrewMultilingualNeural",
   crisp: "en-US-BrianMultilingualNeural",
 } as const;
 
