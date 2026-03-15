@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import { manualTrigger, getRuntimeState } from "./agent-runtime";
 import { emitEvent } from "./event-bus";
 import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
+import { executeLLM, type LLMConfig, type LLMMessage } from "./llm-client";
 
 export interface CommandResult {
   stdout: string;
@@ -934,10 +935,12 @@ function registerBuiltinCommands(): void {
     return ok(`Proposed recipe "${name}": ${command}${schedule ? ` (schedule: ${schedule})` : ""}\nAwaiting human approval in proposals.`);
   });
 
-  registerCommand("standup", "Morning standup briefing of yesterday's work", "standup [--days N]", async (args) => {
+  registerCommand("standup", "Morning standup briefing of yesterday's work", "standup [--days N] [--raw]", async (args) => {
     let days = 1;
+    let raw = false;
     for (let i = 0; i < args.length; i++) {
       if (args[i] === "--days" && args[i + 1]) { days = parseInt(args[i + 1], 10); i++; }
+      if (args[i] === "--raw") raw = true;
     }
 
     const since = new Date();
@@ -957,93 +960,98 @@ function registerBuiltinCommands(): void {
     const successResults = recentResults.filter(r => r.status === "ok");
     const errorResults = recentResults.filter(r => r.status === "error");
     const recipesRun = allRecipes.filter(r => r.lastRun && r.lastRun >= since);
-    const enabledPrograms = programs.filter(p => p.enabled);
 
-    const lines: string[] = [];
-    lines.push(`=== MORNING STANDUP (${sinceStr} → ${today}) ===`);
-    lines.push("");
+    const agentReports: string[] = [];
+    const grouped = new Map<string, typeof successResults>();
+    for (const r of successResults) {
+      if (!grouped.has(r.programName)) grouped.set(r.programName, []);
+      grouped.get(r.programName)!.push(r);
+    }
+    for (const [name, runs] of grouped) {
+      const prog = programs.find(p => p.name === name);
+      const latest = runs[0];
+      const output = (latest.rawOutput || latest.summary).slice(0, 2000);
+      agentReports.push(`AGENT: ${name}\nTYPE: ${prog?.type || "unknown"}\nGOAL: ${prog?.instructions?.slice(0, 200) || "No instructions"}\nRUNS: ${runs.length}\nOUTPUT:\n${output}\n`);
+    }
 
-    lines.push(`>> ${successResults.length} programs ran, ${errorResults.length} errors, ${recipesRun.length} recipes fired, ${overdue.length} overdue tasks`);
+    const errorReports: string[] = [];
+    const seenErrors = new Set<string>();
+    for (const r of errorResults) {
+      if (seenErrors.has(r.programName)) continue;
+      seenErrors.add(r.programName);
+      const prog = programs.find(p => p.name === r.programName);
+      errorReports.push(`AGENT: ${r.programName}\nGOAL: ${prog?.instructions?.slice(0, 200) || "No instructions"}\nERROR: ${r.summary}\n${(r.rawOutput || "").slice(0, 500)}\n`);
+    }
 
-    if (successResults.length > 0) {
-      lines.push("");
-      lines.push(">> RESULTS:");
-      const grouped = new Map<string, typeof successResults>();
-      for (const r of successResults) {
-        if (!grouped.has(r.programName)) grouped.set(r.programName, []);
-        grouped.get(r.programName)!.push(r);
-      }
+    const taskSection = [
+      ...overdue.map(t => `OVERDUE: ${t.title}`),
+      ...todayTasks.map(t => `TODAY: ${t.title}`),
+    ].join("\n") || "No tasks due.";
+
+    const recipeSection = recipesRun.map(r => `${r.name} (ran ${r.runCount}x, last: ${r.lastRun?.toISOString().slice(0, 16)})`).join("\n") || "None.";
+
+    if (raw) {
+      const lines: string[] = [`=== STANDUP (${sinceStr} → ${today}) ===`, ""];
+      for (const r of agentReports) lines.push(r);
+      if (errorReports.length) { lines.push("ERRORS:"); for (const e of errorReports) lines.push(e); }
+      lines.push(`TASKS:\n${taskSection}`);
+      lines.push(`RECIPES:\n${recipeSection}`);
+      return ok(lines.join("\n"));
+    }
+
+    const briefingPrompt = `You are the chief of staff summarizing overnight agent activity for your boss. Write a concise morning briefing.
+
+RULES:
+- Write in first person plural ("Your agents", "We found", "Our monitors detected")
+- Lead with the single most important finding or action item
+- For each agent that ran, summarize what it found in 1-2 sentences in context of its goal — not raw data, but what the data MEANS
+- Flag anything that needs human attention or decision
+- If an agent errored, explain what went wrong simply
+- End with a one-line "Bottom line" takeaway
+- Keep the whole briefing under 400 words
+- No markdown headers, just clean readable text with line breaks
+- Use plain language, not technical jargon
+- Date range: ${sinceStr} to ${today}
+
+AGENT REPORTS:
+${agentReports.join("\n---\n")}
+
+${errorReports.length > 0 ? `ERRORS:\n${errorReports.join("\n---\n")}` : ""}
+
+TASKS:\n${taskSection}
+
+RECIPES FIRED:\n${recipeSection}
+
+Write the briefing now.`;
+
+    try {
+      const configs = await storage.getAgentConfigs();
+      const configMap: Record<string, string> = {};
+      for (const c of configs) configMap[c.key] = c.value;
+      const llmConfig: LLMConfig = {
+        defaultModel: configMap["default_model"] || "openrouter/google/gemma-3-4b-it:free",
+        aliases: {},
+        routing: {},
+      };
+
+      const messages: LLMMessage[] = [{ role: "user", content: briefingPrompt }];
+      const result = await executeLLM(messages, configMap["standup_model"] || undefined, llmConfig, {});
+
+      emitEvent("cli", `Standup briefing generated (${result.tokensUsed} tokens)`, "info", { metadata: { command: "standup" } });
+      return ok(`MORNING BRIEFING — ${today}\n\n${result.content.trim()}`);
+    } catch (e: any) {
+      const fallback: string[] = [`MORNING BRIEFING — ${today} (LLM unavailable, raw summary)\n`];
+      fallback.push(`${successResults.length} agents ran, ${errorResults.length} errors, ${recipesRun.length} recipes fired.\n`);
       for (const [name, runs] of grouped) {
-        const latest = runs[0];
-        lines.push("");
-        lines.push(`  [OK] ${name} (${runs.length} run${runs.length > 1 ? "s" : ""})`);
-        lines.push(`  ${latest.summary}`);
-        if (latest.rawOutput) {
-          const detail = latest.rawOutput
-            .split("\n")
-            .filter(l => l.trim())
-            .slice(0, 15)
-            .map(l => `    ${l.slice(0, 120)}`)
-            .join("\n");
-          if (detail) lines.push(detail);
-        }
+        fallback.push(`${name}: ${runs[0].summary.slice(0, 120)}`);
       }
-    }
-
-    if (errorResults.length > 0) {
-      lines.push("");
-      lines.push(">> ERRORS:");
-      const seen = new Set<string>();
-      for (const r of errorResults) {
-        if (seen.has(r.programName)) continue;
-        seen.add(r.programName);
-        lines.push("");
-        lines.push(`  [!!] ${r.programName}`);
-        lines.push(`  ${r.summary}`);
-        if (r.rawOutput) {
-          const detail = r.rawOutput.split("\n").filter(l => l.trim()).slice(0, 5).map(l => `    ${l.slice(0, 120)}`).join("\n");
-          if (detail) lines.push(detail);
-        }
+      if (errorReports.length) {
+        fallback.push("\nErrors:");
+        for (const r of errorResults) fallback.push(`  ${r.programName}: ${r.summary.slice(0, 100)}`);
       }
+      fallback.push(`\nTasks: ${taskSection}`);
+      return ok(fallback.join("\n"));
     }
-
-    if (recipesRun.length > 0) {
-      lines.push("");
-      lines.push(">> RECIPES RUN:");
-      for (const r of recipesRun) {
-        lines.push(`  [${r.name}] runs: ${r.runCount}, last: ${r.lastRun?.toISOString().slice(0, 16)}`);
-      }
-    }
-
-    if (overdue.length > 0) {
-      lines.push("");
-      lines.push(">> OVERDUE TASKS:");
-      for (const t of overdue) lines.push(`  [!] ${t.title}`);
-    }
-
-    if (todayTasks.length > 0) {
-      lines.push("");
-      lines.push(">> TODAY'S TASKS:");
-      for (const t of todayTasks) lines.push(`  [ ] ${t.title}`);
-    }
-
-    const mem = await storage.getAgentConfig("persistent_context");
-    const memLines = (mem?.value || "").split("\n").filter(Boolean);
-    const recentMem = memLines.filter(l => {
-      const match = l.match(/^\[(\d{4}-\d{2}-\d{2})/);
-      return match && match[1] >= sinceStr;
-    });
-    if (recentMem.length > 0) {
-      lines.push("");
-      lines.push(">> NEW MEMORY:");
-      for (const m of recentMem) lines.push(`  ${m}`);
-    }
-
-    lines.push("");
-    lines.push("---");
-    lines.push(`End of standup. ${successResults.length} programs ran, ${errorResults.length} errors.`);
-
-    return ok(lines.join("\n"));
   });
 
   registerCommand("notify", "Send a notification via ntfy.sh or webhook", "notify <message> | echo <text> | notify\nConfig: config set notify_channel <channel> | config set notify_webhook <url>", async (args, stdin) => {
