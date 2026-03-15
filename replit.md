@@ -137,7 +137,7 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 All programs have hardened inline TypeScript code (no LLM-only programs remaining):
 - hn-pulse — HN top stories via Firebase API
 - openrouter-model-scout — Tests free model availability on OpenRouter
-- research-radar (meta) — Aggregates HN + GitHub trending + 4 Reddit subs, synthesizes via Claude
+- research-radar (meta) — Aggregates HN + GitHub trending + Lobsters + Lemmy (c/machinelearning, c/artificial_intelligence) + ArXiv CS.AI, synthesizes via Claude (Reddit replaced due to cloud IP blocking)
 - hn-deep-digest — Deep discussion digest: fetches 15 comment threads per story (3 levels), Claude summarizes debate substance, key arguments, tensions
 - github-trending — GitHub trending repos
 - estate-car-finder — SoCal Craigslist estate/low-mile car scanner across 4 regions

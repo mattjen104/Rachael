@@ -94,38 +94,37 @@ async function execute() {
       type: "meta",
       schedule: "daily",
       cronExpression: "30 23 * * *",
-      instructions: "Unified research radar — aggregates HN, GitHub trending, Reddit (r/MachineLearning, r/LocalLLaMA, r/artificial, r/netsec) and synthesizes via LLM into: (a) what's new and important, (b) concrete experiments to try, (c) how people are exploiting/jailbreaking LLMs, (d) improvement proposals for the system itself. Output is both a readable briefing and structured proposals.",
+      instructions: "Unified research radar — aggregates HN, GitHub trending, Lobsters, Lemmy (c/machinelearning), ArXiv CS.AI, and synthesizes via LLM into: (a) what's new and important, (b) concrete experiments to try, (c) how people are exploiting/jailbreaking LLMs, (d) improvement proposals for the system itself. Output is both a readable briefing and structured proposals.",
       config: { TASK_TYPE: "research", COST_TIER: "premium", METRIC: "proposals_made", DIRECTION: "higher", OUTPUT_TYPE: "proposal", TIMEOUT: "300" },
       costTier: "premium",
       tags: ["program", "meta"],
-      code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
-const MODELS = ["anthropic/claude-sonnet-4-20250514", "openai/gpt-4o-mini", "google/gemma-3-12b-it:free"];
+      code: `const NL = String.fromCharCode(10);
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+const MODEL = "anthropic/claude-sonnet-4";
 
 async function callLLM(prompt: string): Promise<string> {
-  for (const model of MODELS) {
-    try {
-      const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2000, temperature: 0.7 }),
-      });
-      const d = await r.json();
-      const text = d.choices?.[0]?.message?.content?.trim();
-      if (text) return text;
-    } catch { continue; }
-  }
-  return "[models unavailable]";
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2000, temperature: 0.7 }),
+    });
+    const d = await r.json();
+    const text = d.choices?.[0]?.message?.content?.trim();
+    if (text) return text;
+  } catch {}
+  return "[model unavailable]";
 }
 
 async function fetchHN(): Promise<string> {
   const topIds = await fetch("https://hacker-news.firebaseio.com/v0/topstories.json").then(r => r.json());
-  const stories = [];
-  for (const id of topIds.slice(0, 15)) {
+  const stories: string[] = [];
+  for (const id of topIds.slice(0, 20)) {
     const s = await fetch("https://hacker-news.firebaseio.com/v0/item/" + id + ".json").then(r => r.json());
     if (s && s.score >= 50) stories.push(s.title + " (" + s.score + " pts)");
     if (stories.length >= 10) break;
   }
-  return "HN Top:\\n" + stories.join("\\n");
+  return "HN Top:" + NL + stories.join(NL);
 }
 
 async function fetchGitHub(): Promise<string> {
@@ -137,51 +136,79 @@ async function fetchGitHub(): Promise<string> {
         headers: { "User-Agent": "OrgCloud/1.0", "Accept": "text/html" }
       });
       const html = await r.text();
-      const re = new RegExp('href="/(\\\\w+/\\\\w+)"', 'g');
+      const re = /class="Box-row"[\\s\\S]*?href="\\/([^"]+)"/g;
       let m;
       while ((m = re.exec(html)) !== null && repos.length < 5) {
-        repos.push("[" + lang + "] " + m[1]);
+        repos.push("[" + lang + "] " + m[1].replace(/\\/\\s/g, "/"));
       }
     } catch {}
   }
-  return "GitHub Trending:\\n" + repos.join("\\n");
+  return "GitHub Trending:" + NL + repos.join(NL);
 }
 
-async function fetchReddit(subreddit: string): Promise<string> {
+async function fetchLobsters(): Promise<string> {
   try {
-    const r = await fetch("https://www.reddit.com/r/" + subreddit + "/hot.json?limit=10", {
-      headers: { "User-Agent": "OrgCloud/1.0" },
-      signal: AbortSignal.timeout(10000),
+    const r = await fetch("https://lobste.rs/hottest.json", { signal: AbortSignal.timeout(10000) });
+    const d = await r.json();
+    const items = d.slice(0, 10)
+      .filter((p: any) => p.score >= 5)
+      .map((p: any) => p.title + " (" + p.score + " pts, " + (p.tags || []).join(",") + ")");
+    return "Lobsters Hot:" + NL + items.join(NL);
+  } catch { return "Lobsters: [fetch failed]"; }
+}
+
+async function fetchLemmy(community: string): Promise<string> {
+  try {
+    const r = await fetch("https://lemmy.world/api/v3/post/list?sort=Hot&limit=10&community_name=" + community, {
+      signal: AbortSignal.timeout(10000)
     });
     const d = await r.json();
-    const posts = (d?.data?.children || [])
-      .filter((c: any) => c.data?.score >= 20 && !c.data?.stickied)
+    const posts = (d.posts || [])
+      .filter((p: any) => p.counts.score >= 3)
       .slice(0, 5)
-      .map((c: any) => c.data.title + " (" + c.data.score + " pts)");
-    return "r/" + subreddit + ":\\n" + (posts.length ? posts.join("\\n") : "[no recent hot posts]");
-  } catch { return "r/" + subreddit + ": [fetch failed]"; }
+      .map((p: any) => p.post.name + " (" + p.counts.score + " pts)");
+    return "Lemmy c/" + community + ":" + NL + (posts.length ? posts.join(NL) : "[no recent hot posts]");
+  } catch { return "Lemmy c/" + community + ": [fetch failed]"; }
+}
+
+async function fetchArxiv(): Promise<string> {
+  try {
+    const r = await fetch("https://rss.arxiv.org/rss/cs.AI", { signal: AbortSignal.timeout(10000) });
+    const xml = await r.text();
+    const titles: string[] = [];
+    const re = /<item>[\\s\\S]*?<title>([^<]+)<\\/title>/g;
+    let m;
+    while ((m = re.exec(xml)) !== null && titles.length < 8) {
+      const t = m[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+      if (!t.includes("updates on arXiv")) titles.push(t.trim());
+    }
+    return "ArXiv CS.AI (recent):" + NL + titles.join(NL);
+  } catch { return "ArXiv: [fetch failed]"; }
 }
 
 async function execute() {
-  const [hn, gh, rML, rLLM, rAI, rNetsec] = await Promise.all([
-    fetchHN(), fetchGitHub(),
-    fetchReddit("MachineLearning"), fetchReddit("LocalLLaMA"),
-    fetchReddit("artificial"), fetchReddit("netsec"),
+  const [hn, gh, lobsters, lemmyML, lemmyAI, arxiv] = await Promise.all([
+    fetchHN(), fetchGitHub(), fetchLobsters(),
+    fetchLemmy("machinelearning"), fetchLemmy("artificial_intelligence"),
+    fetchArxiv(),
   ]);
-  const redditAll = [rML, rLLM, rAI, rNetsec].join("\\n\\n");
+  const communityAll = [lobsters, lemmyML, lemmyAI].join(NL + NL);
   const briefing = await callLLM(
-    "You are a research radar for an AI/LLM-focused developer. Synthesize these sources into a briefing:\\n\\n" +
-    hn + "\\n\\n" + gh + "\\n\\n" + redditAll + "\\n\\n" +
-    "Produce:\\n1. WHAT'S NEW: Top 3 developments worth knowing\\n2. EXPERIMENTS: 2 concrete things to try\\n3. LLM EXPLOITATION: Any notable jailbreaks, prompt injection techniques, or security concerns from r/netsec and r/LocalLLaMA\\n4. SYSTEM PROPOSALS: 1-2 improvements for an automated research agent system\\n\\nBe concise and actionable."
+    "You are a research radar for an AI/LLM-focused developer. Synthesize these sources into a briefing:" + NL + NL +
+    hn + NL + NL + gh + NL + NL + communityAll + NL + NL + arxiv + NL + NL +
+    "Produce:" + NL +
+    "1. WHAT'S NEW: Top 3 developments worth knowing" + NL +
+    "2. EXPERIMENTS: 2 concrete things to try" + NL +
+    "3. LLM EXPLOITATION: Any notable jailbreaks, prompt injection techniques, or security concerns" + NL +
+    "4. SYSTEM PROPOSALS: 1-2 improvements for an automated research agent system" + NL + NL +
+    "Be concise and actionable."
   );
 
   const proposals: Array<{section: string; diff: string; reason: string}> = [];
-  const sections = briefing.split(/\\n(?=\\d+\\.)/);
-  for (const sec of sections) {
-    const m = sec.match(/^\\d+\\.\\s*([^:]+):\\s*(.+)/s);
-    if (m) {
-      proposals.push({ section: m[1].trim(), diff: "", reason: m[2].trim().slice(0, 500) });
-    }
+  const re = /\\d+\\.\\s*([^:]+):\\s*([\\s\\S]*?)(?=\\d+\\.|$)/g;
+  let m;
+  while ((m = re.exec(briefing)) !== null) {
+    proposals.push({ section: m[1].trim(), diff: "", reason: m[2].trim().slice(0, 500) });
   }
 
   return { summary: briefing, metric: String(proposals.length || 1), proposals };
