@@ -3,6 +3,7 @@ import { manualTrigger, getRuntimeState } from "./agent-runtime";
 import { emitEvent } from "./event-bus";
 import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
 import { executeLLM, type LLMConfig, type LLMMessage, type LLMResponse } from "./llm-client";
+import { synthesizeBriefing, htmlToSpokenScript } from "./voice-synth";
 
 export interface CommandResult {
   stdout: string;
@@ -1131,7 +1132,36 @@ Write the HTML briefing now.`;
         `<h1 style="margin:0 0 4px;font-size:18px;color:#00ff41">MORNING BRIEFING</h1>` +
         `<p style="margin:0 0 16px;font-size:12px;color:#888">${today}</p>`;
       const footer = `</div>`;
-      return ok(header + html + footer);
+      const fullHtml = header + html + footer;
+
+      let voiceScript = "";
+      try {
+        const voicePrompt = `Convert this HTML briefing into an NPR Morning Edition style radio script. Write it as if you are the host reading it aloud to a listener over coffee.
+
+Rules:
+- Write in a warm, conversational, natural cadence — like an NPR host, not a robot
+- Open with a brief greeting and date: "Good morning. It's ${today}."
+- Use transitions: "Moving on...", "Meanwhile...", "And finally...", "Here's what caught our eye..."
+- Summarize, don't read HTML literally — paraphrase naturally
+- Skip URLs, HTML tags, and technical formatting
+- Keep it under 90 seconds when read aloud (roughly 200-250 words)
+- End with a brief sign-off: "That's your morning brief from OrgCloud. Have a good one."
+- Write ONLY the spoken script, no stage directions, no [brackets], no markdown
+
+HTML briefing:
+${fullHtml}`;
+
+        const voiceMessages: LLMMessage[] = [{ role: "user", content: voicePrompt }];
+        const voiceResult = await executeLLM(voiceMessages, standupModel, llmConfig, {});
+        voiceScript = voiceResult.content.trim();
+        voiceScript = voiceScript.replace(/^```[a-z]*\s*/i, "").replace(/```\s*$/, "").trim();
+        emitEvent("cli", `Voice script generated (${voiceResult.tokensUsed} tokens)`, "info", { metadata: { command: "standup" } });
+      } catch (voiceErr: any) {
+        console.error("[standup] Voice script generation failed:", voiceErr?.message);
+        voiceScript = htmlToSpokenScript(fullHtml);
+      }
+
+      return ok(fullHtml + "\n<!--VOICE_SCRIPT_START-->\n" + voiceScript + "\n<!--VOICE_SCRIPT_END-->");
     } catch (e: any) {
       console.error("[standup] LLM error, using hardened fallback:", e?.message || e);
       return ok(buildHardenedBriefing(today, grouped, programs, errorResults, recipesRun, taskSection));
@@ -1157,6 +1187,27 @@ Write the HTML briefing now.`;
 
     const isHtml = message.includes("<h1") || message.includes("<h2") || message.includes("<div");
 
+    let voiceScript = "";
+    let htmlBody = message;
+    const voiceMatch = message.match(/<!--VOICE_SCRIPT_START-->\n([\s\S]*?)\n<!--VOICE_SCRIPT_END-->/);
+    if (voiceMatch) {
+      voiceScript = voiceMatch[1].trim();
+      htmlBody = message.replace(/\n<!--VOICE_SCRIPT_START-->[\s\S]*<!--VOICE_SCRIPT_END-->/, "").trim();
+    }
+
+    let audioFilePath: string | null = null;
+    if (voiceScript) {
+      try {
+        emitEvent("cli", "Synthesizing voice briefing...", "info", { metadata: { command: "notify" } });
+        const voiceResult = await synthesizeBriefing(voiceScript, "npr");
+        audioFilePath = voiceResult.filePath;
+        emitEvent("cli", `Voice synthesized: ${voiceResult.sizeBytes} bytes, ~${voiceResult.durationEstSec}s`, "info", { metadata: { command: "notify" } });
+      } catch (voiceErr: any) {
+        console.error("[notify] Voice synthesis failed:", voiceErr?.message);
+        results.push(`Voice synthesis failed: ${voiceErr?.message || "unknown error"}`);
+      }
+    }
+
     function htmlToMarkdown(html: string): string {
       return html
         .replace(/<div[^>]*>/gi, "").replace(/<\/div>/gi, "")
@@ -1178,11 +1229,11 @@ Write the HTML briefing now.`;
 
     if (channel) {
       try {
-        const ntfyBody = isHtml ? htmlToMarkdown(message) : message;
+        const ntfyBody = isHtml ? htmlToMarkdown(htmlBody) : htmlBody;
         const headers: Record<string, string> = {
-          "Title": "OrgCloud Standup",
+          "Title": "OrgCloud Morning Briefing",
           "Priority": "default",
-          "Tags": "briefcase",
+          "Tags": "briefcase,radio",
         };
         if (isHtml) {
           headers["Content-Type"] = "text/markdown";
@@ -1203,6 +1254,35 @@ Write the HTML briefing now.`;
         }
       } catch (e: any) {
         results.push(`ntfy.sh error: ${e.message}`);
+      }
+    }
+
+    if (channel && audioFilePath) {
+      try {
+        const fs = await import("fs");
+        const audioData = fs.readFileSync(audioFilePath);
+        const audioHeaders: Record<string, string> = {
+          "Title": "OrgCloud Voice Briefing",
+          "Priority": "default",
+          "Tags": "studio_microphone",
+          "Filename": "morning-briefing.mp3",
+        };
+        if (email) {
+          audioHeaders["Email"] = email;
+        }
+        const audioResp = await fetch(`https://ntfy.sh/${channel}`, {
+          method: "PUT",
+          headers: audioHeaders,
+          body: audioData,
+        });
+        if (audioResp.ok) {
+          results.push("Voice briefing attached");
+          emitEvent("cli", "Voice briefing sent via ntfy", "info", { metadata: { command: "notify" } });
+        } else {
+          results.push(`Voice attachment error: ${audioResp.status}`);
+        }
+      } catch (audioErr: any) {
+        results.push(`Voice attachment error: ${audioErr?.message}`);
       }
     }
 
