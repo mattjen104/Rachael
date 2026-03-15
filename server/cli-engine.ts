@@ -1260,11 +1260,6 @@ ${fullHtml}`;
         const ntfyLines: string[] = [];
         if (htmlUrl) {
           ntfyLines.push("Your morning briefing is ready.");
-          ntfyLines.push("");
-          ntfyLines.push("Read: " + htmlUrl);
-          if (audioUrl) {
-            ntfyLines.push("Listen: " + audioUrl);
-          }
         } else {
           ntfyLines.push(message.slice(0, 4000));
         }
@@ -1275,6 +1270,12 @@ ${fullHtml}`;
         };
         if (htmlUrl) {
           headers["Click"] = htmlUrl;
+          const actions: string[] = [];
+          actions.push(`view, Read Briefing, ${htmlUrl}`);
+          if (audioUrl) {
+            actions.push(`view, Listen to Audio, ${audioUrl}`);
+          }
+          headers["Actions"] = actions.join("; ");
         }
         if (email) {
           headers["Email"] = email;
