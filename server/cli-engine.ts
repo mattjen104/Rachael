@@ -166,7 +166,8 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
   const args = parseArgs(argStr);
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
-    "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config"].includes(cmdName);
+    "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
+    "standup", "memory"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -931,6 +932,150 @@ function registerBuiltinCommands(): void {
 
     emitEvent("cli", `Recipe proposed: ${name} = "${command}"`, "take-over-point", { metadata: { command: "propose-recipe", recipe: name } });
     return ok(`Proposed recipe "${name}": ${command}${schedule ? ` (schedule: ${schedule})` : ""}\nAwaiting human approval in proposals.`);
+  });
+
+  registerCommand("standup", "Morning standup briefing of yesterday's work", "standup [--days N]", async (args) => {
+    let days = 1;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--days" && args[i + 1]) { days = parseInt(args[i + 1], 10); i++; }
+    }
+
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceStr = since.toISOString().slice(0, 10);
+    const today = new Date().toISOString().split("T")[0];
+
+    const [allResults, allRecipes, overdue, todayTasks, programs] = await Promise.all([
+      storage.getAgentResults(undefined, 100),
+      storage.getRecipes(),
+      storage.getOverdueTasks(today),
+      storage.getTasksByDate(today),
+      storage.getPrograms(),
+    ]);
+
+    const recentResults = allResults.filter(r => r.createdAt >= since);
+    const successResults = recentResults.filter(r => r.status === "ok");
+    const errorResults = recentResults.filter(r => r.status === "error");
+    const recipesRun = allRecipes.filter(r => r.lastRun && r.lastRun >= since);
+    const enabledPrograms = programs.filter(p => p.enabled);
+
+    const lines: string[] = [];
+    lines.push(`=== MORNING STANDUP (${sinceStr} → ${today}) ===`);
+    lines.push("");
+
+    lines.push(`>> PROGRAMS: ${enabledPrograms.length} active, ${successResults.length} successful runs, ${errorResults.length} errors`);
+    if (successResults.length > 0) {
+      lines.push("");
+      lines.push(">> COMPLETED WORK:");
+      const seen = new Set<string>();
+      for (const r of successResults) {
+        if (seen.has(r.programName)) continue;
+        seen.add(r.programName);
+        lines.push(`  [OK] ${r.programName}: ${r.summary.slice(0, 100)}`);
+      }
+    }
+
+    if (errorResults.length > 0) {
+      lines.push("");
+      lines.push(">> ERRORS:");
+      const seen = new Set<string>();
+      for (const r of errorResults) {
+        if (seen.has(r.programName)) continue;
+        seen.add(r.programName);
+        lines.push(`  [!!] ${r.programName}: ${r.summary.slice(0, 100)}`);
+      }
+    }
+
+    if (recipesRun.length > 0) {
+      lines.push("");
+      lines.push(">> RECIPES RUN:");
+      for (const r of recipesRun) {
+        lines.push(`  [${r.name}] runs: ${r.runCount}, last: ${r.lastRun?.toISOString().slice(0, 16)}`);
+      }
+    }
+
+    if (overdue.length > 0) {
+      lines.push("");
+      lines.push(">> OVERDUE TASKS:");
+      for (const t of overdue) lines.push(`  [!] ${t.title}`);
+    }
+
+    if (todayTasks.length > 0) {
+      lines.push("");
+      lines.push(">> TODAY'S TASKS:");
+      for (const t of todayTasks) lines.push(`  [ ] ${t.title}`);
+    }
+
+    const mem = await storage.getAgentConfig("persistent_context");
+    const memLines = (mem?.value || "").split("\n").filter(Boolean);
+    const recentMem = memLines.filter(l => {
+      const match = l.match(/^\[(\d{4}-\d{2}-\d{2})/);
+      return match && match[1] >= sinceStr;
+    });
+    if (recentMem.length > 0) {
+      lines.push("");
+      lines.push(">> NEW MEMORY:");
+      for (const m of recentMem) lines.push(`  ${m}`);
+    }
+
+    lines.push("");
+    lines.push(`>> SUMMARY: ${successResults.length} runs completed, ${errorResults.length} errors, ${recipesRun.length} recipes fired, ${overdue.length} overdue tasks`);
+
+    return ok(lines.join("\n"));
+  });
+
+  registerCommand("notify", "Send a notification via ntfy.sh or webhook", "notify <message> | echo <text> | notify\nConfig: config set notify_channel <channel> | config set notify_webhook <url>", async (args, stdin) => {
+    const message = args.length > 0 ? args.join(" ") : stdin;
+    if (!message.trim()) return fail("[error] notify: no message. Pipe input or provide text.\nUsage: standup | notify  OR  notify Hello world");
+
+    const channelConfig = await storage.getAgentConfig("notify_channel");
+    const webhookConfig = await storage.getAgentConfig("notify_webhook");
+    const channel = channelConfig?.value;
+    const webhook = webhookConfig?.value;
+
+    if (!channel && !webhook) {
+      return fail("[error] notify: no notification target configured.\nSet up ntfy.sh:  config set notify_channel orgcloud-briefing\nOr a webhook:    config set notify_webhook https://your-webhook-url\n\nFor ntfy.sh: install the ntfy app on your phone, subscribe to the same channel name.");
+    }
+
+    const results: string[] = [];
+
+    if (channel) {
+      try {
+        const resp = await fetch(`https://ntfy.sh/${channel}`, {
+          method: "POST",
+          headers: { "Title": "OrgCloud Standup", "Priority": "default", "Tags": "briefcase" },
+          body: message.slice(0, 4000),
+        });
+        if (resp.ok) {
+          results.push(`Sent to ntfy.sh/${channel}`);
+          emitEvent("cli", `Notification sent to ntfy.sh/${channel}`, "info", { metadata: { command: "notify" } });
+        } else {
+          results.push(`ntfy.sh error: ${resp.status} ${resp.statusText}`);
+        }
+      } catch (e: any) {
+        results.push(`ntfy.sh error: ${e.message}`);
+      }
+    }
+
+    if (webhook) {
+      try {
+        const resp = await fetch(webhook, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: message.slice(0, 4000), title: "OrgCloud Morning Standup", timestamp: new Date().toISOString() }),
+        });
+        if (resp.ok) {
+          results.push(`Sent to webhook`);
+          emitEvent("cli", `Notification sent to webhook`, "info", { metadata: { command: "notify" } });
+        } else {
+          results.push(`Webhook error: ${resp.status} ${resp.statusText}`);
+        }
+      } catch (e: any) {
+        results.push(`Webhook error: ${e.message}`);
+      }
+    }
+
+    return ok(results.join("\n"));
   });
 
   registerCommand("agenda", "Show today's agenda", "agenda", async () => {

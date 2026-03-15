@@ -107,6 +107,20 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - `scrape path <id>` — Run a specific navigation path by ID
 - Output is pipeable text (title, extracted data, body text)
 
+## Notifications (server/cli-engine.ts)
+
+- `notify <message>` — Send a push notification (or pipe: `standup | notify`)
+- Supports ntfy.sh (free, no account) and generic webhooks
+- Config: `config set notify_channel <channel>` for ntfy.sh, `config set notify_webhook <url>` for webhooks
+- For ntfy.sh: install the ntfy app on your phone, subscribe to the same channel name
+
+## Morning Standup (server/cli-engine.ts)
+
+- `standup` — Compiles yesterday's program runs, errors, recipes fired, overdue tasks, new memory
+- `standup --days N` — Look back N days instead of 1
+- Saved recipe: `morning-standup` = `standup --days 1 | notify` (daily schedule)
+- Currently configured to send to ntfy.sh/orgcloud-standup
+
 ## Agent Runtime
 
 - Programs read from DB `programs` table
