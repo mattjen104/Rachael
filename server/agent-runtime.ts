@@ -205,10 +205,69 @@ async function executeInlineCode(code: string, config: Record<string, string>): 
   const filepath = join(INLINE_SCRIPTS_DIR, filename);
   const projectRoot = process.cwd();
 
+  const bridgePort = process.env.PORT || "5000";
   const wrappedCode = `
 const __ctx = JSON.parse(process.env.__INLINE_CTX || '{}');
 const __projectRoot = process.env.__PROJECT_ROOT || process.cwd();
 const __skillPath = (name: string) => __projectRoot + "/skills/" + name;
+const __bridgePort = process.env.__BRIDGE_PORT || "5000";
+const __bridgeToken = process.env.__BRIDGE_TOKEN || "";
+const __apiKey = process.env.__API_KEY || "";
+
+async function bridgeFetch(url: string, options?: { type?: "fetch" | "dom"; selectors?: Record<string, string>; timeout?: number; headers?: Record<string, string> }): Promise<{ status?: number; body?: any; text?: string; extracted?: any; error?: string; source?: string }> {
+  const type = options?.type || "fetch";
+  const timeout = options?.timeout || 45000;
+  const directFallback = async (): Promise<{ status?: number; body?: any; text?: string; error?: string; source?: string }> => {
+    try {
+      const r = await fetch(url, { headers: options?.headers || { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" }, signal: AbortSignal.timeout(15000) });
+      const ct = r.headers.get("content-type") || "";
+      if (ct.includes("json")) { const j = await r.json(); return { status: r.status, body: j, text: JSON.stringify(j), source: "direct" }; }
+      const t = await r.text(); return { status: r.status, body: t, text: t, source: "direct" };
+    } catch (e2: any) {
+      return { error: e2.message || String(e2), source: "direct" };
+    }
+  };
+  try {
+    const r = await fetch("http://localhost:" + __bridgePort + "/api/bridge/ext/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Bridge-Token": __bridgeToken },
+      body: JSON.stringify({ type, url, submittedBy: "program", wait: timeout, options: { selectors: options?.selectors, headers: options?.headers, maxText: 15000 } }),
+    });
+    if (!r.ok) return await directFallback();
+    const result = await r.json();
+    if (result.error) {
+      const fallback = await directFallback();
+      if (!fallback.error) return fallback;
+      return { error: result.error + " (bridge); " + fallback.error + " (direct)", source: "both-failed" };
+    }
+    if (result.body && !result.text) result.text = typeof result.body === "string" ? result.body : JSON.stringify(result.body);
+    result.source = result.source || "bridge";
+    return result;
+  } catch (e: any) {
+    return await directFallback();
+  }
+}
+
+async function smartFetch(url: string, init?: RequestInit): Promise<Response> {
+  const ANTI_BOT = [403, 429, 503];
+  try {
+    const r = await fetch(url, init);
+    if (ANTI_BOT.includes(r.status)) {
+      const bridgeResult = await bridgeFetch(url, { type: "fetch", headers: init?.headers as Record<string, string> | undefined });
+      if (!bridgeResult.error) {
+        const body = bridgeResult.text || (typeof bridgeResult.body === "string" ? bridgeResult.body : JSON.stringify(bridgeResult.body));
+        return new Response(body, { status: bridgeResult.status || 200, headers: { "content-type": r.headers.get("content-type") || "text/html" } });
+      }
+      return r;
+    }
+    return r;
+  } catch (e: any) {
+    const bridgeResult = await bridgeFetch(url, { type: "fetch", headers: init?.headers as Record<string, string> | undefined });
+    if (bridgeResult.error) throw new Error(bridgeResult.error);
+    const body = bridgeResult.text || (typeof bridgeResult.body === "string" ? bridgeResult.body : JSON.stringify(bridgeResult.body));
+    return new Response(body, { status: bridgeResult.status || 200, headers: { "content-type": "text/html" } });
+  }
+}
 
 ${code}
 
@@ -249,6 +308,13 @@ __run().then((r) => {
     if (process.env.OPENROUTER_API_KEY) {
       safeEnv.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
     }
+
+    try {
+      const { getBridgeToken } = await import("./bridge-queue");
+      safeEnv.__BRIDGE_TOKEN = getBridgeToken();
+      safeEnv.__BRIDGE_PORT = bridgePort;
+      if (process.env.OPENCLAW_API_KEY) safeEnv.__API_KEY = process.env.OPENCLAW_API_KEY;
+    } catch {}
 
     const timeoutMs = config.TIMEOUT
       ? Math.min(Math.max(parseInt(config.TIMEOUT, 10) * 1000, 10000), 600000)
