@@ -2,7 +2,7 @@ import { storage } from "./storage";
 import { manualTrigger, getRuntimeState } from "./agent-runtime";
 import { emitEvent } from "./event-bus";
 import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
-import { executeLLM, type LLMConfig, type LLMMessage } from "./llm-client";
+import { executeLLM, type LLMConfig, type LLMMessage, type LLMResponse } from "./llm-client";
 
 export interface CommandResult {
   stdout: string;
@@ -999,50 +999,51 @@ function registerBuiltinCommands(): void {
       return ok(lines.join("\n"));
     }
 
-    const briefingPrompt = `You are the chief of staff summarizing overnight agent activity for your boss. Write a morning briefing.
+    const briefingPrompt = `You are writing a morning briefing email for the boss. Your agents ran overnight — summarize what they found. The boss wants to scan this in 60 seconds and know what matters.
 
-FORMAT — use this exact structure:
+Write this EXACT format (plain text, no markdown, no ** or ## or *):
 
 TLDR
-One sentence: the single most important thing from overnight.
+Write one sentence: the most important overnight finding.
 
 HIGHLIGHTS
-Bullet each noteworthy finding. Include the source URL on its own line right after the description, like:
-- Channel Surfer lets you watch YouTube like cable TV — 354 points on HN
-  https://channelsurfer.tv
-- Qatar helium shutdown threatens chip supply chain within two weeks
-  https://www.tomshardware.com/...
+Write 3-5 bullet points of the most interesting or actionable findings. After each bullet, put the URL on the next line so it's clickable:
+- Description of the finding
+  https://actual-url-here.com
 
-AGENT REPORTS
-For EACH agent that ran, write a section like this:
+DETAILED REPORTS
 
-[agent-name] — one sentence summary of what it found in context of its goal
-Then 2-4 sentences of detail. Include ALL relevant URLs found in the output, each on its own line. Do not truncate or cut off — cover everything the agent found. If the agent found a list of items (stories, repos, listings, etc.), include the top items with their URLs.
+For each agent below, write a section. DO NOT copy the template literally. Actually summarize what the agent found:
 
-ERRORS (only if any)
-For each errored agent, explain what went wrong in plain language and whether it needs attention.
+agent-name
+What it does: one sentence explaining this agent's job.
+What it found: 2-4 sentences describing the actual findings, data, numbers. Be specific — mention actual titles, prices, counts, names from the output. If the agent found articles or stories, list the most interesting ones with their URLs.
+Relevant links:
+  https://url1
+  https://url2
 
-ACTION ITEMS
-Bullet anything that needs human decision or attention.
+NEEDS ATTENTION
+List anything broken, errored, or requiring a human decision.
 
-RULES:
-- Write as "Your agents", "We found", "Our monitors detected"
-- Include EVERY URL found in the agent outputs — these must be on their own line so they are clickable
-- Do not truncate results — if an agent found 10 stories, include all 10 with URLs
-- Plain language, no technical jargon
-- Do not use markdown formatting like ** or ## — use plain text with the section headers above
+IMPORTANT RULES:
+- DO NOT write template placeholders like "one sentence summary of what it found in context of its goal" — actually write the summary
+- DO NOT put content in brackets like [No data retrieved] — describe what happened in plain English
+- Every URL must be a real URL from the agent output, on its own line
+- No markdown: no **, no ##, no *, just plain text
+- Write naturally as if briefing your boss over coffee
 - Date range: ${sinceStr} to ${today}
 
-AGENT REPORTS:
+Here is the raw data from each agent:
+
 ${agentReports.join("\n---\n")}
 
-${errorReports.length > 0 ? `ERRORS:\n${errorReports.join("\n---\n")}` : ""}
+${errorReports.length > 0 ? `AGENT ERRORS:\n${errorReports.join("\n---\n")}` : ""}
 
 TASKS:\n${taskSection}
 
 RECIPES FIRED:\n${recipeSection}
 
-Write the briefing now.`;
+Write the briefing now. Remember: no placeholders, no brackets, no markdown. Real summaries with real data from the output above.`;
 
     try {
       const configs = await storage.getAgentConfigs();
@@ -1055,11 +1056,48 @@ Write the briefing now.`;
       };
 
       const messages: LLMMessage[] = [{ role: "user", content: briefingPrompt }];
-      const result = await executeLLM(messages, configMap["standup_model"] || undefined, llmConfig, {});
+      const standupModel = configMap["standup_model"];
+      const fallbackModels = [
+        standupModel,
+        "openrouter/google/gemma-3-12b-it:free",
+        "openrouter/mistralai/mistral-small-3.1-24b-instruct:free",
+        "openrouter/qwen/qwen3-8b:free",
+        "openrouter/deepseek/deepseek-r1-0528:free",
+      ].filter(Boolean) as string[];
+
+      let result: LLMResponse | null = null;
+      const isRetryable = (err: any) => {
+        const msg = err?.message || "";
+        return msg.includes("429") || msg.includes("503") || msg.includes("502") || msg.includes("rate") || msg.includes("timeout");
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        for (const model of fallbackModels) {
+          try {
+            result = await executeLLM(messages, model, llmConfig, {});
+            break;
+          } catch (retryErr: any) {
+            const msg = retryErr?.message?.slice(0, 120) || "unknown";
+            if (!isRetryable(retryErr)) {
+              console.warn(`[standup] Model ${model} non-retryable error: ${msg}, skipping`);
+              continue;
+            }
+            console.warn(`[standup] Model ${model} rate-limited (attempt ${attempt + 1}): ${msg}`);
+          }
+        }
+        if (result) break;
+        if (attempt === 0) {
+          console.warn("[standup] All models rate-limited, waiting 8s before retry...");
+          await new Promise(r => setTimeout(r, 8000));
+        }
+      }
+      if (!result) {
+        throw new Error("All LLM models unavailable after retries");
+      }
 
       emitEvent("cli", `Standup briefing generated (${result.tokensUsed} tokens)`, "info", { metadata: { command: "standup" } });
       return ok(`MORNING BRIEFING — ${today}\n\n${result.content.trim()}`);
     } catch (e: any) {
+      console.error("[standup] LLM error:", e?.message || e);
       const fallback: string[] = [`MORNING BRIEFING — ${today} (LLM unavailable, raw summary)\n`];
       fallback.push(`${successResults.length} agents ran, ${errorResults.length} errors, ${recipesRun.length} recipes fired.\n`);
       for (const [name, runs] of grouped) {
