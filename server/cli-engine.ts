@@ -957,9 +957,6 @@ function registerBuiltinCommands(): void {
       const summary = latest.summary || "";
 
       lines.push(`${name}`);
-      if (prog?.instructions) {
-        lines.push(`  Purpose: ${prog.instructions.slice(0, 150)}`);
-      }
       lines.push(`  Runs: ${runs.length} | Latest: ${summary.slice(0, 200)}`);
 
       const urls = [...new Set((output.match(urlRegex) || []).map((u: string) => u.replace(/[.)]+$/, "")))];
@@ -1138,23 +1135,26 @@ Write the HTML briefing now.`;
 
       let voiceScript = "";
       try {
-        const voicePrompt = `Convert this HTML briefing into an NPR Morning Edition style radio script. Write it as if you are the host reading it aloud to a listener over coffee.
+        const voicePrompt = `You are Matt's personal assistant. Convert this briefing into a spoken script that you'd read to him over coffee. You know him well — you're warm, personable, and efficient. You don't waste his time.
 
 Rules:
-- Write in a warm, conversational, natural cadence — like an NPR host, not a robot
-- Open with a brief greeting and date: "Good morning. It's ${today}."
-- Use transitions: "Moving on...", "Meanwhile...", "And finally...", "Here's what caught our eye..."
-- Summarize, don't read HTML literally — paraphrase naturally
+- Open casually: "Good morning, Matt." then the date and straight into what matters
+- You know his interests — if there's anything about car deals or free hot tubs, lead with that
+- Be conversational and natural — like a real person who likes Matt, not a news anchor
+- Don't explain what agents are or what they do — he built them, he knows
+- Just tell him the interesting findings, anything that needs his attention, and anything fun or notable
+- Use natural transitions, not broadcast cliches
 - Skip URLs, HTML tags, and technical formatting
 - Keep it under 90 seconds when read aloud (roughly 200-250 words)
-- End with a brief sign-off: "That's your morning brief from OrgCloud. Have a good one."
+- End warmly but briefly — "Have a good one" or similar
 - Write ONLY the spoken script, no stage directions, no [brackets], no markdown
 
 HTML briefing:
 ${fullHtml}`;
 
         const voiceMessages: LLMMessage[] = [{ role: "user", content: voicePrompt }];
-        const voiceResult = await executeLLM(voiceMessages, standupModel, llmConfig, {});
+        const voiceModel = "openrouter/anthropic/claude-opus-4";
+        const voiceResult = await executeLLM(voiceMessages, voiceModel, llmConfig, {});
         voiceScript = voiceResult.content.trim();
         voiceScript = voiceScript.replace(/^```[a-z]*\s*/i, "").replace(/```\s*$/, "").trim();
         emitEvent("cli", `Voice script generated (${voiceResult.tokensUsed} tokens)`, "info", { metadata: { command: "standup" } });
@@ -1203,7 +1203,7 @@ ${fullHtml}`;
     if (voiceScript) {
       try {
         emitEvent("cli", "Synthesizing voice briefing...", "info", { metadata: { command: "notify" } });
-        const voiceResult = await synthesizeBriefing(voiceScript, "npr");
+        const voiceResult = await synthesizeBriefing(voiceScript, "assistant");
         audioFilePath = voiceResult.filePath;
         emitEvent("cli", `Voice synthesized: ${voiceResult.sizeBytes} bytes, ~${voiceResult.durationEstSec}s`, "info", { metadata: { command: "notify" } });
       } catch (voiceErr: any) {

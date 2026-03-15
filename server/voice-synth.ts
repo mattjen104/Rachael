@@ -6,8 +6,8 @@ import { existsSync, statSync } from "fs";
 const VOICE_DIR = join(process.cwd(), ".voice-cache");
 
 const VOICES = {
-  npr: "en-US-GuyNeural",
-  warm: "en-US-AndrewMultilingualNeural",
+  assistant: "en-US-JennyNeural",
+  warm: "en-US-AriaNeural",
   crisp: "en-US-BrianMultilingualNeural",
 } as const;
 
@@ -15,11 +15,11 @@ export type VoiceStyle = keyof typeof VOICES;
 
 export async function synthesizeBriefing(
   text: string,
-  style: VoiceStyle = "npr"
+  style: VoiceStyle = "assistant"
 ): Promise<{ filePath: string; durationEstSec: number; sizeBytes: number }> {
   await mkdir(VOICE_DIR, { recursive: true });
 
-  const voice = VOICES[style] || VOICES.npr;
+  const voice = VOICES[style] || VOICES.assistant;
   const tts = new MsEdgeTTS();
   await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
 
@@ -60,7 +60,7 @@ export function htmlToSpokenScript(html: string): string {
 
 export function getLatestAudioPath(): string | null {
   if (!existsSync(VOICE_DIR)) return null;
-  const { readdirSync } = require("fs");
+  const { readdirSync } = require("node:fs") as typeof import("fs");
   const files = readdirSync(VOICE_DIR)
     .filter((f: string) => f.endsWith(".mp3"))
     .map((f: string) => ({
