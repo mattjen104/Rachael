@@ -32,7 +32,7 @@ export interface RuntimeState {
 }
 
 const runtime: RuntimeState = {
-  active: false,
+  active: true,
   programs: new Map(),
   lastTick: null,
 };
@@ -684,8 +684,8 @@ export async function manualTrigger(programName: string): Promise<ProgramState> 
 
 export function initRuntime(): void {
   console.log("[agent-runtime] Initialized (DB-first mode, auto-starting scheduler)");
-  if (!runtime.active) {
-    runtime.active = true;
+  runtime.active = true;
+  if (!tickInterval) {
     tickInterval = setInterval(tick, TICK_INTERVAL_MS);
     setTimeout(tick, 5000);
   }

@@ -60,7 +60,7 @@ function genId(): string {
 }
 
 const state: ControlBusState = {
-  mode: "human",
+  mode: "agent",
   agentPaused: false,
   takeoverPoints: [],
   activityStream: [],

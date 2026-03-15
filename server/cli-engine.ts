@@ -1056,41 +1056,49 @@ function registerBuiltinCommands(): void {
       return ok(lines.join("\n"));
     }
 
-    const briefingPrompt = `You are writing a morning briefing email for the boss. Your agents ran overnight — summarize what they found. The boss wants to scan this in 60 seconds and know what matters.
+    const briefingPrompt = `You are writing a morning briefing for the boss. Agents ran overnight — summarize findings. The boss wants to scan this in 60 seconds and know what matters.
 
-Write this EXACT format (plain text, no markdown, no ** or ## or *):
+Write HTML email format. Use this EXACT structure — return ONLY the HTML inside <body>, no <html>/<head> tags:
 
-TLDR
-Write one sentence: the most important overnight finding.
+<h2 style="margin:0 0 8px">TLDR</h2>
+<p>One sentence: the most important overnight finding.</p>
 
-HIGHLIGHTS
-Write 3-5 bullet points of the most interesting or actionable findings. After each bullet, put the URL on the next line so it's clickable:
-- Description of the finding
-  https://actual-url-here.com
+<h2 style="margin:16px 0 8px">INDEX</h2>
+<ul>
+<li><a href="#highlights">Highlights</a></li>
+<li><a href="#agent-name-1">agent-name-1</a> — one-line summary</li>
+<li><a href="#agent-name-2">agent-name-2</a> — one-line summary</li>
+<li><a href="#attention">Needs Attention</a></li>
+</ul>
 
-DETAILED REPORTS
+<h2 id="highlights" style="margin:16px 0 8px">HIGHLIGHTS</h2>
+<ul>
+<li>Description of finding — <a href="https://actual-url-here.com">source</a></li>
+<li>Another finding — <a href="https://url">source</a></li>
+</ul>
 
-For each agent below, write a section. DO NOT copy the template literally. Actually summarize what the agent found:
+<h2 id="agent-name" style="margin:16px 0 8px">agent-name</h2>
+<p><strong>What it does:</strong> one sentence.</p>
+<p><strong>Found:</strong> 2-4 sentences with real data — titles, prices, counts, names. Be specific.</p>
+<ul>
+<li><a href="https://url1">Link title 1</a></li>
+<li><a href="https://url2">Link title 2</a></li>
+</ul>
 
-agent-name
-What it does: one sentence explaining this agent's job.
-What it found: 2-4 sentences describing the actual findings, data, numbers. Be specific — mention actual titles, prices, counts, names from the output. If the agent found articles or stories, list the most interesting ones with their URLs.
-Relevant links:
-  https://url1
-  https://url2
+<h2 id="attention" style="margin:16px 0 8px">NEEDS ATTENTION</h2>
+<p>List anything broken, errored, or needing a decision. If nothing, say "All systems nominal."</p>
 
-NEEDS ATTENTION
-List anything broken, errored, or requiring a human decision.
-
-IMPORTANT RULES:
-- DO NOT write template placeholders like "one sentence summary of what it found in context of its goal" — actually write the summary
-- DO NOT put content in brackets like [No data retrieved] — describe what happened in plain English
-- Every URL must be a real URL from the agent output, on its own line
-- No markdown: no **, no ##, no *, just plain text
-- Write naturally as if briefing your boss over coffee
+RULES:
+- Return ONLY HTML body content (no <html>, <head>, <body> tags, no markdown, no backtick fences)
+- The INDEX must link to every agent section using <a href="#agent-name">
+- Each agent <h2> must have a matching id="agent-name" attribute
+- Every URL must be a REAL URL from the agent output — never invent URLs
+- DO NOT write template placeholders — actually summarize the data
+- Links should use descriptive anchor text, not bare URLs
+- Keep it scannable: short paragraphs, bullet lists
 - Date range: ${sinceStr} to ${today}
 
-Here is the raw data from each agent:
+Agent data:
 
 ${agentReports.join("\n---\n")}
 
@@ -1100,7 +1108,7 @@ TASKS:\n${taskSection}
 
 RECIPES FIRED:\n${recipeSection}
 
-Write the briefing now. Remember: no placeholders, no brackets, no markdown. Real summaries with real data from the output above.`;
+Write the HTML briefing now.`;
 
     try {
       const configs = await storage.getAgentConfigs();
@@ -1117,7 +1125,13 @@ Write the briefing now. Remember: no placeholders, no brackets, no markdown. Rea
       const result = await executeLLM(messages, standupModel, llmConfig, {});
 
       emitEvent("cli", `Standup briefing generated (${result.tokensUsed} tokens, model: ${standupModel})`, "info", { metadata: { command: "standup" } });
-      return ok(`MORNING BRIEFING — ${today}\n\n${result.content.trim()}`);
+      let html = result.content.trim();
+      html = html.replace(/^```html?\s*/i, "").replace(/```\s*$/, "").trim();
+      const header = `<div style="font-family:'IBM Plex Mono',monospace;max-width:680px;margin:0 auto;color:#e0e0e0;background:#0a0a0a;padding:24px;border:1px solid #333">` +
+        `<h1 style="margin:0 0 4px;font-size:18px;color:#00ff41">MORNING BRIEFING</h1>` +
+        `<p style="margin:0 0 16px;font-size:12px;color:#888">${today}</p>`;
+      const footer = `</div>`;
+      return ok(header + html + footer);
     } catch (e: any) {
       console.error("[standup] LLM error, using hardened fallback:", e?.message || e);
       return ok(buildHardenedBriefing(today, grouped, programs, errorResults, recipesRun, taskSection));
@@ -1141,20 +1155,45 @@ Write the briefing now. Remember: no placeholders, no brackets, no markdown. Rea
 
     const results: string[] = [];
 
+    const isHtml = message.includes("<h1") || message.includes("<h2") || message.includes("<div");
+
+    function htmlToMarkdown(html: string): string {
+      return html
+        .replace(/<div[^>]*>/gi, "").replace(/<\/div>/gi, "")
+        .replace(/<h1[^>]*>(.*?)<\/h1>/gi, "# $1\n")
+        .replace(/<h2[^>]*id="([^"]*)"[^>]*>(.*?)<\/h2>/gi, "## $2\n")
+        .replace(/<h2[^>]*>(.*?)<\/h2>/gi, "## $1\n")
+        .replace(/<strong>(.*?)<\/strong>/gi, "**$1**")
+        .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, "[$2]($1)")
+        .replace(/<li>(.*?)<\/li>/gi, "- $1")
+        .replace(/<\/?ul>/gi, "")
+        .replace(/<\/?ol>/gi, "")
+        .replace(/<p[^>]*>(.*?)<\/p>/gi, "$1\n")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+
     if (channel) {
       try {
+        const ntfyBody = isHtml ? htmlToMarkdown(message) : message;
         const headers: Record<string, string> = {
           "Title": "OrgCloud Standup",
           "Priority": "default",
           "Tags": "briefcase",
         };
+        if (isHtml) {
+          headers["Content-Type"] = "text/markdown";
+        }
         if (email) {
           headers["Email"] = email;
         }
         const resp = await fetch(`https://ntfy.sh/${channel}`, {
           method: "POST",
           headers,
-          body: message.slice(0, 16000),
+          body: ntfyBody.slice(0, 16000),
         });
         if (resp.ok) {
           results.push(`Sent to ntfy.sh/${channel}${email ? ` + email to ${email}` : ""}`);
