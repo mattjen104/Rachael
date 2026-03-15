@@ -169,7 +169,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -1199,6 +1199,58 @@ ${fullHtml}`;
       }
     }
     return ok(lines.join("\n"));
+  });
+
+  registerCommand("cwp", "Browse UCSD Citrix Workspace (cwp.ucsd.edu) via bridge", "cwp [--list] [--raw]", async (args) => {
+    const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+    if (!isExtensionConnected()) {
+      return fail("[cwp] Chrome extension bridge not connected. CWP requires your real browser session.\nRun: bridge-status");
+    }
+    const showRaw = args.includes("--raw");
+    const result = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-cwp", { maxText: 30000 }, 60000);
+    if (result.error) return fail(`[cwp] ${result.error}`);
+
+    const text = result.text || "";
+    const html = typeof result.body === "string" ? result.body : "";
+
+    if (showRaw) {
+      return ok("=== CWP Raw Content ===\n\n" + text.slice(0, 8000));
+    }
+
+    const apps: {name: string; url: string}[] = [];
+
+    const launchRe = /href="([^"]*(?:launch|Launch|store|Store|citrix|Citrix)[^"]*)"\s*[^>]*>([^<]*)</g;
+    let m: RegExpExecArray | null;
+    const source = html || text;
+    while ((m = launchRe.exec(source)) !== null) {
+      const url = m[1].trim();
+      const name = m[2].trim();
+      if (name.length > 1 && name.length < 120) apps.push({ name, url });
+    }
+
+    if (apps.length === 0) {
+      const appRe = /class="[^"]*(?:app-name|resource-name|storeapp-name)[^"]*"[^>]*>([^<]+)/gi;
+      while ((m = appRe.exec(source)) !== null) {
+        apps.push({ name: m[1].trim(), url: "" });
+      }
+    }
+
+    if (apps.length === 0) {
+      const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 3 && l.length < 80);
+      const uniqueLines = [...new Set(lines)];
+      return ok("=== CWP Citrix Workspace ===\n\nPage loaded (" + text.length + " chars) but no app links parsed.\nPage content preview:\n\n" + uniqueLines.slice(0, 30).join("\n") + "\n\nTry: cwp --raw  for full content\nOr:  bridge https://cwp.ucsd.edu --dom  for detailed extraction");
+    }
+
+    const unique = new Map<string, string>();
+    for (const app of apps) {
+      if (!unique.has(app.name)) unique.set(app.name, app.url);
+    }
+
+    const appLines = Array.from(unique.entries()).map(([name, url], i) => {
+      return `  ${i + 1}. ${name}${url ? "\n     " + url : ""}`;
+    });
+
+    return ok(`=== CWP Citrix Workspace ===\n${unique.size} applications found\n\n${appLines.join("\n")}`);
   });
 
   registerCommand("bridge", "Smart fetch: tries Chrome extension first, falls back to direct fetch", "bridge <url> [--dom] [--wait <ms>] [--selector key=sel] [--direct]", async (args) => {
