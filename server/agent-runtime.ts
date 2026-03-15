@@ -214,10 +214,20 @@ const __bridgePort = process.env.__BRIDGE_PORT || "5000";
 const __bridgeToken = process.env.__BRIDGE_TOKEN || "";
 const __apiKey = process.env.__API_KEY || "";
 
+const __BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu"];
+function __isBridgeOnly(targetUrl: string): boolean {
+  try {
+    const host = new URL(targetUrl).hostname.toLowerCase();
+    return __BRIDGE_ONLY_DOMAINS.some(d => d.startsWith(".") ? host.endsWith(d) || host === d.slice(1) : host === d);
+  } catch { return false; }
+}
+
 async function bridgeFetch(url: string, options?: { type?: "fetch" | "dom"; selectors?: Record<string, string>; timeout?: number; headers?: Record<string, string> }): Promise<{ status?: number; body?: any; text?: string; extracted?: any; error?: string; source?: string }> {
   const type = options?.type || "fetch";
   const timeout = options?.timeout || 45000;
+  const bridgeOnly = __isBridgeOnly(url);
   const directFallback = async (): Promise<{ status?: number; body?: any; text?: string; error?: string; source?: string }> => {
+    if (bridgeOnly) return { error: "bridge-only domain — direct fetch blocked (requires browser bridge with real session)", source: "blocked" };
     try {
       const r = await fetch(url, { headers: options?.headers || { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" }, signal: AbortSignal.timeout(15000) });
       const ct = r.headers.get("content-type") || "";
@@ -236,6 +246,7 @@ async function bridgeFetch(url: string, options?: { type?: "fetch" | "dom"; sele
     if (!r.ok) return await directFallback();
     const result = await r.json();
     if (result.error) {
+      if (bridgeOnly) return { error: result.error + " (bridge-only domain, no fallback)", source: "bridge-only-failed" };
       const fallback = await directFallback();
       if (!fallback.error) return fallback;
       return { error: result.error + " (bridge); " + fallback.error + " (direct)", source: "both-failed" };
@@ -250,6 +261,12 @@ async function bridgeFetch(url: string, options?: { type?: "fetch" | "dom"; sele
 
 async function smartFetch(url: string, init?: RequestInit): Promise<Response> {
   const ANTI_BOT = [403, 429, 503];
+  if (__isBridgeOnly(url)) {
+    const bridgeResult = await bridgeFetch(url, { type: "fetch", headers: init?.headers as Record<string, string> | undefined });
+    if (bridgeResult.error) throw new Error(bridgeResult.error);
+    const body = bridgeResult.text || (typeof bridgeResult.body === "string" ? bridgeResult.body : JSON.stringify(bridgeResult.body));
+    return new Response(body, { status: bridgeResult.status || 200, headers: { "content-type": "text/html" } });
+  }
   try {
     const r = await fetch(url, init);
     if (ANTI_BOT.includes(r.status)) {

@@ -1,6 +1,14 @@
 import { randomUUID } from "crypto";
 import { emitEvent } from "./event-bus";
 
+const BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu"];
+export function isBridgeOnlyDomain(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return BRIDGE_ONLY_DOMAINS.some(d => d.startsWith(".") ? host.endsWith(d) || host === d.slice(1) : host === d);
+  } catch { return false; }
+}
+
 export interface BridgeJob {
   id: string;
   type: "fetch" | "dom";
@@ -231,11 +239,26 @@ export async function smartFetch(
   options?: BridgeJob["options"],
   timeoutMs: number = 45000
 ): Promise<BridgeResult> {
+  const bridgeOnly = isBridgeOnlyDomain(url);
+
   if (isExtensionConnected()) {
     const jobId = submitJob(type, url, submittedBy, options);
     const result = await waitForResult(jobId, timeoutMs);
     if (!result.error) return result;
+    if (bridgeOnly) {
+      emitEvent("bridge", `Bridge-only domain ${url} failed: ${result.error} (no direct fallback allowed)`, "warn");
+      return result;
+    }
     emitEvent("bridge", `Extension bridge failed for ${url}: ${result.error}, trying direct fetch`, "warn");
+  }
+
+  if (bridgeOnly) {
+    return {
+      jobId: "blocked-" + randomUUID().slice(0, 8),
+      error: "bridge-only domain — direct fetch blocked (requires browser bridge with real session)",
+      completedAt: Date.now(),
+      source: "blocked" as any,
+    };
   }
 
   try {

@@ -1230,8 +1230,14 @@ ${fullHtml}`;
     if (Object.keys(selectors).length > 0) options.selectors = selectors;
     if (isDom) options.maxText = 15000;
 
+    const { isBridgeOnlyDomain } = await import("./bridge-queue");
     const forceDirect = args.includes("--direct");
-    emitEvent("cli", `Bridge: ${type} ${url} (ext=${isExtensionConnected() ? "on" : "off"}, direct=${forceDirect})`, "info", { metadata: { command: "bridge" } });
+    const bridgeOnlyUrl = isBridgeOnlyDomain(url);
+    emitEvent("cli", `Bridge: ${type} ${url} (ext=${isExtensionConnected() ? "on" : "off"}, direct=${forceDirect}, bridgeOnly=${bridgeOnlyUrl})`, "info", { metadata: { command: "bridge" } });
+
+    if (forceDirect && bridgeOnlyUrl) {
+      return fail(`[error] ${new URL(url).hostname} is a bridge-only domain — direct fetch is blocked to avoid automated detection. Remove --direct flag.`);
+    }
 
     let result;
     if (forceDirect) {

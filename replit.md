@@ -204,6 +204,7 @@ Database-driven scraping system replacing hardcoded adapters:
 - **Serial execution**: Extension processes jobs sequentially with 1.5s delay between them to avoid anti-bot detection
 - **DOM job type**: Opens a real background tab, waits for JS rendering, injects content script for extraction (not just static HTML parsing)
 - **CLI commands**: `bridge <url>` (smart fetch), `bridge-status` (unified status), `bridge-token` (get token for extension setup)
+- **Bridge-only domains**: `galaxy.epic.com` and `*.ucsd.edu` — these never fall back to direct server-side fetch to avoid automated detection. Enforced in both server-side `smartFetch`, inline program `bridgeFetch`/`smartFetch`, and CLI `bridge --direct` (blocked). List defined in `bridge-queue.ts` (server) and `agent-runtime.ts` (inline wrapper).
 - **Job types**: `fetch` (raw HTTP via browser cookies) and `dom` (real tab injection with CSS selector extraction, full JS rendering)
 - **API routes**: `/api/bridge/status` (unified Playwright + extension + queue), `/api/bridge/ext/token` (auth-gated), `/api/bridge/ext/jobs`, `/api/bridge/ext/results`, `/api/bridge/ext/queue`, `/api/bridge/ext/submit`
 - **Extension files**: `background.js` (polling + tab-based execution), `options.html/js` (URL + token config), `manifest.json` (MV3, `<all_urls>`)
