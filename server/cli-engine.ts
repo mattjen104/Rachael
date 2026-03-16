@@ -265,6 +265,7 @@ interface CachedEmail {
   date: string;
   preview: string;
   unread: boolean;
+  fullBody?: string;
 }
 
 interface CachedCalEvent {
@@ -721,6 +722,9 @@ function registerBuiltinCommands(): void {
       const results: string[] = [];
       const baseTags = ["email", "outlook", ...tags];
       for (const { email, idx } of toCapture) {
+        const contentSection = email.fullBody
+          ? ["## Body", "", email.fullBody]
+          : ["## Preview", "", email.preview || "(no preview)"];
         const body = [
           `# ${email.subject || "(no subject)"}`,
           "",
@@ -728,9 +732,7 @@ function registerBuiltinCommands(): void {
           `- **Date:** ${email.date || "unknown"}`,
           `- **Status:** ${email.unread ? "unread" : "read"}`,
           "",
-          "## Preview",
-          "",
-          email.preview || "(no preview)",
+          ...contentSection,
         ].join(String.fromCharCode(10));
 
         await storage.createNote({
@@ -1985,6 +1987,65 @@ ${fullHtml}`;
       if (!cached || cached.emails.length === 0) return fail("[outlook] No cached emails. Run: outlook inbox");
       if (isNaN(n) || n < 1 || n > cached.emails.length) return fail(`[outlook] read: specify a number 1-${cached.emails.length}`);
       const email = cached.emails[n - 1];
+      const fetchBody = args.includes("--body") || !args.includes("--preview");
+      const nl = String.fromCharCode(10);
+
+      if (fetchBody && isExtensionConnected()) {
+        emitEvent("cli", `Opening email #${n}: ${email.subject?.slice(0, 40)}...`, "info", { metadata: { command: "outlook read" } });
+        const readResult = await smartFetch("https://outlook.office.com/mail/inbox", "dom", "cli-outlook-read", {
+          maxText: 30000,
+          spaWaitMs: 15000,
+          clickSelector: '[role="option"][aria-label], [role="listbox"] [role="option"], div[data-convid], tr[aria-label]',
+          clickIndex: n - 1,
+          postClickWaitMs: 5000,
+          postClickSelector: '[role="document"], [class*="ReadingPane"], [class*="readingPane"], [aria-label*="Message body"], div[class*="body"]',
+          selectors: {
+            messageBody: '[role="document"], [class*="ReadingPane"] [role="region"], div[aria-label*="Message body"], [class*="ItemBody"], [class*="body"] [role="document"]',
+            messageHeaders: '[class*="DetailHeader"], [class*="fromContainer"], [class*="SubjectLine"]',
+          },
+        }, 60000);
+
+        if (!readResult.error) {
+          const extracted = (readResult as any).extracted || {};
+          const bodyEls = extracted.messageBody || [];
+          const headerEls = extracted.messageHeaders || [];
+          let bodyText = "";
+          for (const el of bodyEls) {
+            const t = cleanUnicode((el.text || "").trim());
+            if (t.length > bodyText.length) bodyText = t;
+          }
+
+          if (!bodyText) {
+            bodyText = cleanUnicode((readResult.text || "").trim());
+          }
+
+          if (bodyText.length > 100) {
+            const bodySnippet = bodyText.length > 5000 ? bodyText.slice(0, 5000) + nl + "... (truncated)" : bodyText;
+
+            email.fullBody = bodyText;
+            email.preview = bodyText.slice(0, 500);
+
+            const lines = [
+              `=== EMAIL #${n} ===`,
+              "",
+              `From:    ${email.from}`,
+              `Subject: ${email.subject}`,
+              `Date:    ${email.date}`,
+              `Status:  ${email.unread ? "UNREAD" : "read"}`,
+              "",
+              "--- Body ---",
+              "",
+              bodySnippet,
+              "",
+              `--- Actions ---`,
+              `capture mail ${n}          Save to knowledge base`,
+              `capture mail ${n} --tag work  Save with tag`,
+            ];
+            return ok(lines.join(nl));
+          }
+        }
+      }
+
       const lines = [
         `=== EMAIL #${n} ===`,
         "",
@@ -2001,7 +2062,10 @@ ${fullHtml}`;
         `capture mail ${n}          Save to knowledge base`,
         `capture mail ${n} --tag work  Save with tag`,
       ];
-      return ok(lines.join("\n"));
+      if (isExtensionConnected()) {
+        lines.push(`outlook read ${n} --body    Fetch full body via bridge`);
+      }
+      return ok(lines.join(nl));
     }
 
     return fail(`[outlook] unknown subcommand "${sub}"\nUsage: outlook [inbox|calendar|read <n>] [--limit N] [--refresh]`);

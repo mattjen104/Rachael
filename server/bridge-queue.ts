@@ -20,6 +20,11 @@ export interface BridgeJob {
     includeHtml?: boolean;
     maxHtml?: number;
     maxText?: number;
+    spaWaitMs?: number;
+    clickSelector?: string;
+    clickIndex?: number;
+    postClickWaitMs?: number;
+    postClickSelector?: string;
   };
   submittedBy: string;
   submittedAt: number;

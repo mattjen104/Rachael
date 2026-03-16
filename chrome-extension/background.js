@@ -217,6 +217,27 @@ async function executeJob(job) {
         chrome.tabs.onUpdated.addListener(listener);
       });
 
+      const clickSelector = options?.clickSelector || null;
+      const clickIndex = options?.clickIndex || 0;
+      const postClickWaitMs = options?.postClickWaitMs || 3000;
+      const postClickSelector = options?.postClickSelector || null;
+
+      if (clickSelector) {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (sel, idx) => {
+            const els = document.querySelectorAll(sel);
+            if (els[idx]) els[idx].click();
+          },
+          args: [clickSelector, clickIndex],
+        });
+        if (postClickSelector) {
+          await pollForSelector(tab.id, postClickSelector, postClickWaitMs);
+        } else {
+          await new Promise((r) => setTimeout(r, postClickWaitMs));
+        }
+      }
+
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (sels, maxT, inclHtml, maxH) => {
