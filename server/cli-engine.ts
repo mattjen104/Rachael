@@ -2367,22 +2367,28 @@ ${fullHtml}`;
     });
 
     if (save) {
-      const body = [
-        `# Citrix Workspace Apps (cwp.ucsd.edu)`,
-        "",
-        `Scraped: ${new Date().toISOString().slice(0, 16)}`,
-        `Source: ${finalUrl}`,
-        "",
-        ...apps.map(a => a.href ? `- [${a.name}](${a.href})` : `- ${a.name}`),
-      ].join(nl);
-      await storage.createNote({
-        title: "[Wiki] Citrix Workspace Apps",
-        body,
-        tags: ["wiki", "citrix", "apps", "ucsd"],
-      });
-      lines.push("", "Saved to knowledge base with tags: wiki, citrix, apps, ucsd");
+      const existingNotes = await storage.getNotes();
+      const existingAppTitles = new Set(
+        existingNotes.filter(n => n.tags?.includes("apps")).map(n => n.title)
+      );
+
+      let created = 0;
+      for (const a of apps) {
+        const title = `[App] ${a.name}`;
+        if (existingAppTitles.has(title)) continue;
+        const body = a.href
+          ? `[${a.name}](${a.href})`
+          : a.name;
+        await storage.createNote({
+          title,
+          body,
+          tags: ["apps", "citrix", "ucsd"],
+        });
+        created++;
+      }
+      lines.push("", `Saved ${created} new app(s) to APPS section (${apps.length - created} already existed)`);
     } else {
-      lines.push("", "Use: citrix --save  to save to knowledge base");
+      lines.push("", "Use: citrix --save  to save to APPS section in TreeView");
     }
 
     return ok(lines.join(nl));

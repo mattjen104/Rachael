@@ -57,6 +57,11 @@ type TreeNode = {
   name: string;
   lastMessage: string;
   unread: boolean;
+} | {
+  type: "appLink";
+  id: number;
+  name: string;
+  href: string;
 };
 
 export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
@@ -102,16 +107,26 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       }
     }
 
-    const isWiki = (n: any) => n.tags?.some((t: string) => t.toLowerCase() === "wiki");
-    const wikiNotes = data.notes.filter(isWiki);
-    const regularNotes = data.notes.filter((n: any) => !isWiki(n));
+    const isApp = (n: any) => n.tags?.some((t: string) => t.toLowerCase() === "apps");
+    const appNotes = data.notes.filter(isApp);
+    const regularNotes = data.notes.filter((n: any) => !isApp(n));
 
-    if (wikiNotes.length > 0) {
-      nodes.push({ type: "section", label: "WIKI", key: "wiki", count: wikiNotes.length });
-      if (expanded.has("wiki")) {
-        for (const n of wikiNotes) {
-          nodes.push({ type: "note", id: n.id, title: n.title.replace(/^\[Wiki\]\s*/i, "") });
+    const parseAppLink = (n: any): { name: string; href: string } => {
+      const linkMatch = (n.body || "").match(/\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) return { name: linkMatch[1], href: linkMatch[2] };
+      const urlMatch = (n.body || "").match(/(https?:\/\/\S+)/);
+      return { name: n.title.replace(/^\[App\]\s*/i, ""), href: urlMatch?.[1] || "" };
+    };
+
+    nodes.push({ type: "section", label: "APPS (Citrix)", key: "apps", count: appNotes.length || (bridgeConnected ? -1 : 0) });
+    if (expanded.has("apps")) {
+      if (appNotes.length > 0) {
+        for (const n of appNotes) {
+          const app = parseAppLink(n);
+          nodes.push({ type: "appLink", id: n.id, name: app.name, href: app.href });
         }
+      } else {
+        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter to scrape CWP" : "Bridge not connected", actionCmd: bridgeConnected ? "citrix --save" : "bridge-status" });
       }
     }
 
@@ -239,6 +254,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "mail" && onRunCommand) {
           onRunCommand(`outlook read ${node.index + 1}`);
         }
+        else if (node?.type === "appLink" && node.href) {
+          window.open(node.href, "_blank");
+        }
         else if (node?.type === "chat") {
         }
         break;
@@ -313,6 +331,10 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           icon = "📖";
           label = node.title.slice(0, 50);
           extra = node.domain || "";
+        } else if (node.type === "appLink") {
+          icon = "→";
+          label = node.name;
+          extra = node.href ? "↗" : "";
         } else if (node.type === "bridge-info") {
           icon = "ℹ";
           label = node.label;
@@ -339,6 +361,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 onRunCommand(node.actionCmd);
               } else if (node.type === "mail" && onRunCommand) {
                 onRunCommand(`outlook read ${node.index + 1}`);
+              } else if (node.type === "appLink" && node.href) {
+                window.open(node.href, "_blank");
               }
             }}
           >
