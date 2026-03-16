@@ -2280,6 +2280,24 @@ ${fullHtml}`;
     const CITRIX_JUNK_SET = new Set(["open", "restart", "request", "cancel request", "add to favorites", "remove from favorites", "install", "more", "less", "cancel", "save", "refresh"]);
     const CITRIX_CAT_HEADER_RE = /^\[App\]\s*(Epic Non-Production|Epic Production|Epic Training|Epic Utilities|MyChart|Troubleshooting|Uncategorized)\s*\(\d+\)$/i;
 
+    if (args[0] === "launch") {
+      const appName = args.slice(1).join(" ").trim();
+      if (!appName) return fail("[citrix] Usage: citrix launch <app name>");
+      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+      if (!isExtensionConnected()) {
+        return fail("[citrix] Bridge not connected. Cannot launch Citrix apps without browser session.");
+      }
+      emitEvent("cli", `Launching Citrix app: ${appName}`, "info", { metadata: { command: "citrix" } });
+      const launchResult = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
+        maxText: 5000,
+        clickSelector: `a, button, [class*="app"], [class*="App"], [role="listitem"]`,
+        clickMatchText: appName,
+        postClickWaitMs: 3000,
+      }, 30000);
+      if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
+      return ok(`Launched "${appName}" via Citrix portal`);
+    }
+
     if (args[0] === "clean") {
       const allNotes = await storage.getNotes();
       const toDelete = allNotes.filter(n => {

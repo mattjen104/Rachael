@@ -391,8 +391,13 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 onRunCommand(node.actionCmd);
               } else if (node.type === "mail" && onRunCommand) {
                 onRunCommand(`outlook read ${node.index + 1}`);
-              } else if (node.type === "appLink" && node.href) {
-                window.open(node.href, "_blank");
+              } else if (node.type === "appLink" && onRunCommand) {
+                const href = node.href && node.href !== "#" ? node.href : "";
+                if (href && href.startsWith("http")) {
+                  window.open(href, "_blank");
+                } else {
+                  onRunCommand(`citrix launch ${node.name}`);
+                }
               }
             }}
           >

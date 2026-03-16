@@ -219,20 +219,30 @@ async function executeJob(job) {
 
       const clickSelector = options?.clickSelector || null;
       const clickIndex = options?.clickIndex || 0;
+      const clickMatchText = options?.clickMatchText || null;
       const postClickWaitMs = options?.postClickWaitMs || 3000;
       const postClickSelector = options?.postClickSelector || null;
 
       if (clickSelector) {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: (sel, idx) => {
-            const els = document.querySelectorAll(sel);
-            if (els[idx]) {
-              els[idx].scrollIntoView({ block: "center" });
-              els[idx].click();
+          func: (sel, idx, matchText) => {
+            const els = Array.from(document.querySelectorAll(sel));
+            let target = null;
+            if (matchText) {
+              const lower = matchText.toLowerCase();
+              target = els.find(el => {
+                const t = (el.textContent || "").trim().toLowerCase();
+                return t === lower || t.includes(lower);
+              });
+            }
+            if (!target) target = els[idx] || null;
+            if (target) {
+              target.scrollIntoView({ block: "center" });
+              target.click();
             }
           },
-          args: [clickSelector, clickIndex],
+          args: [clickSelector, clickIndex, clickMatchText],
         });
         if (postClickSelector) {
           await pollForSelector(tab.id, postClickSelector, postClickWaitMs);

@@ -23,6 +23,7 @@ export interface BridgeJob {
     spaWaitMs?: number;
     clickSelector?: string;
     clickIndex?: number;
+    clickMatchText?: string;
     postClickWaitMs?: number;
     postClickSelector?: string;
   };
