@@ -8,6 +8,7 @@ import ProgramsView from "@/components/views/ProgramsView";
 import ResultsView from "@/components/views/ResultsView";
 import ReaderView from "@/components/views/ReaderView";
 import CockpitView from "@/components/views/CockpitView";
+import SnowView from "@/components/views/SnowView";
 import Minibuffer from "@/components/editor/Minibuffer";
 import { useSmartCapture } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
@@ -122,10 +123,10 @@ export default function Workspace() {
         return;
       }
 
-      if (e.key >= "1" && e.key <= "6" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key >= "1" && e.key <= "7" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (viewMode === "cockpit") return;
         e.preventDefault();
-        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader", "cockpit"];
+        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader", "cockpit", "snow"];
         setViewMode(views[parseInt(e.key) - 1]);
         return;
       }
@@ -145,6 +146,7 @@ export default function Workspace() {
         {viewMode === "results" && <ResultsView selectedResultId={selectedItemId} />}
         {viewMode === "reader" && <ReaderView selectedPageId={selectedItemId} />}
         {viewMode === "cockpit" && <CockpitView />}
+        {viewMode === "snow" && <SnowView />}
       </div>
 
       <StatusBar

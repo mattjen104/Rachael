@@ -169,7 +169,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -287,9 +287,24 @@ interface CachedChannel {
   team: string;
 }
 
+interface CachedSnowRecord {
+  number: string;
+  shortDescription: string;
+  state: string;
+  priority: string;
+  assignedTo: string;
+  assignmentGroup: string;
+  updatedOn: string;
+  type: "incident" | "change" | "request";
+  source: "personal" | "team";
+  slaBreached: boolean;
+  url?: string;
+}
+
 let mailCache: { emails: CachedEmail[]; fetchedAt: number } | null = null;
 let calendarCache: { events: CachedCalEvent[]; fetchedAt: number } | null = null;
 let teamsCache: { chats: CachedChat[]; fetchedAt: number } | null = null;
+let snowCache: { records: CachedSnowRecord[]; fetchedAt: number } | null = null;
 
 export function getMailCache() { return mailCache; }
 export function setMailCache(c: typeof mailCache) { mailCache = c; }
@@ -297,6 +312,84 @@ export function getCalendarCache() { return calendarCache; }
 export function setCalendarCache(c: typeof calendarCache) { calendarCache = c; }
 export function getTeamsCache() { return teamsCache; }
 export function setTeamsCache(c: typeof teamsCache) { teamsCache = c; }
+export function getSnowCache() { return snowCache; }
+export function setSnowCache(c: typeof snowCache) { snowCache = c; }
+
+function parseSnowListFromText(text: string, recordType: "incident" | "change" | "request", baseUrl: string, source: "personal" | "team" = "personal"): CachedSnowRecord[] {
+  const records: CachedSnowRecord[] = [];
+  const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 0);
+  const numberPattern = recordType === "incident" ? /\b(INC\d{7,})\b/gi
+    : recordType === "change" ? /\b(CHG\d{7,})\b/gi
+    : /\b(REQ|RITM)\d{7,}\b/gi;
+
+  const fullPattern = recordType === "request" ? /\b((REQ|RITM)\d{7,})\b/gi : numberPattern;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const matches = line.match(fullPattern);
+    if (!matches) continue;
+    for (const match of matches) {
+      const num = match.toUpperCase();
+      if (records.some(r => r.number === num)) continue;
+      const contextLines = lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 4)).join(" ");
+      const stateMatch = contextLines.match(/\b(New|In Progress|On Hold|Resolved|Closed|Pending|Active|Implement|Review|Scheduled|Canceled|Open|Awaiting|Assess|Authorize|Work in Progress)\b/i);
+      const priorityMatch = contextLines.match(/\b([1-5]\s*-\s*(Critical|High|Moderate|Low|Planning))\b/i) || contextLines.match(/\bP([1-5])\b/);
+      const assignedToMatch = contextLines.match(/(?:assigned\s*to|assignee)[:\s]+([A-Z][a-z]+ [A-Z][a-z]+(?:\s[A-Z][a-z]+)?)/i)
+        || contextLines.match(/([A-Z][a-z]+ [A-Z][a-z]+)\s+(?:INC|CHG|REQ|RITM)/i);
+      const groupMatch = contextLines.match(/(?:assignment\s*group|group)[:\s]+([^,\n|]+?)(?:\s+(?:INC|CHG|REQ|RITM|\d{4}-\d{2}|$))/i)
+        || contextLines.match(/(?:Service Desk|IT Support|Network|Infrastructure|Application|Desktop|Help Desk|Operations|Security|Development)[A-Za-z\s]*/i);
+      const dateMatch = contextLines.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+      const tableName = recordType === "incident" ? "incident" : recordType === "change" ? "change_request" : "sc_req_item";
+      records.push({
+        number: num,
+        shortDescription: extractSnowDescription(contextLines, num),
+        state: stateMatch ? stateMatch[0] : "Unknown",
+        priority: priorityMatch ? priorityMatch[0] : "",
+        assignedTo: assignedToMatch ? assignedToMatch[1].trim() : "",
+        assignmentGroup: groupMatch ? groupMatch[0].trim() : "",
+        updatedOn: dateMatch ? dateMatch[1] : "",
+        type: recordType,
+        source,
+        slaBreached: /breach|overdue|exceeded|sla/i.test(contextLines),
+        url: `${baseUrl}/nav_to.do?uri=${tableName}.do?sysparm_query=number=${num}`,
+      });
+    }
+  }
+  return records;
+}
+
+function extractSnowDescription(context: string, recordNumber: string): string {
+  let desc = context.replace(new RegExp(recordNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "gi"), "").trim();
+  desc = desc.replace(/\b(New|In Progress|On Hold|Resolved|Closed|Pending|Active|Implement|Review|Scheduled|Canceled|Open|Awaiting|Assess|Authorize|Work in Progress)\b/gi, "").trim();
+  desc = desc.replace(/\b[1-5]\s*-\s*(Critical|High|Moderate|Low|Planning)\b/gi, "").trim();
+  desc = desc.replace(/^\s*[-|]\s*/, "").trim();
+  return desc.slice(0, 120) || "(no description)";
+}
+
+function formatSnowList(title: string, records: CachedSnowRecord[], cacheAge?: number): string {
+  const nl = String.fromCharCode(10);
+  const header = cacheAge !== undefined
+    ? `=== SNOW ${title} === (cached ${cacheAge}s ago, ${records.length} items)`
+    : `=== SNOW ${title} === (${records.length} items)`;
+  const lines = [header, ""];
+  for (const r of records) {
+    const sla = r.slaBreached ? " ⚠SLA" : "";
+    const priority = r.priority ? ` [${r.priority}]` : "";
+    lines.push(`  ${r.number.padEnd(15)} ${r.state.padEnd(12)} ${r.shortDescription.slice(0, 50)}${priority}${sla}`);
+  }
+  lines.push("", `Use: snow detail <number> | snow refresh`);
+  return lines.join(nl);
+}
+
+function mergeSnowCache(records: CachedSnowRecord[], recordType: "incident" | "change" | "request", source: "personal" | "team" = "personal"): void {
+  if (!snowCache) {
+    snowCache = { records, fetchedAt: Date.now() };
+  } else {
+    const existing = snowCache.records.filter(r => !(r.type === recordType && r.source === source));
+    const deduped = records.filter(nr => !existing.some(er => er.number === nr.number));
+    snowCache = { records: [...existing, ...deduped], fetchedAt: Date.now() };
+  }
+}
 
 function cleanUnicode(s: string): string {
   return s
@@ -2274,6 +2367,240 @@ ${fullHtml}`;
       for (const r of briefings) lines.push(`  [${r.programName}] ${r.summary.slice(0, 70)}`);
     }
     return ok(lines.length > 0 ? lines.join("\n") : "Nothing on the agenda today.");
+  });
+
+  registerCommand("snow", "ServiceNow command center", "snow [incidents|changes|requests|detail <number>|queue|refresh]", async (args) => {
+    const { isExtensionConnected } = await import("./bridge-queue");
+    if (!isExtensionConnected()) {
+      return fail("[snow] Chrome extension bridge not connected. ServiceNow requires your real browser session.\nRun: bridge-status");
+    }
+
+    const instanceConfig = await storage.getAgentConfig("snow_instance");
+    const instanceUrl = instanceConfig?.value || "";
+    if (!instanceUrl) {
+      return fail("[snow] No ServiceNow instance configured.\nUsage: config set snow_instance https://yourinstance.service-now.com");
+    }
+    const baseUrl = instanceUrl.replace(/\/+$/, "");
+
+    const sub = args[0] || "incidents";
+    const refresh = args.includes("--refresh");
+    const nl = String.fromCharCode(10);
+
+    const snowProfile = await storage.getSiteProfileByName("servicenow");
+    if (!snowProfile) {
+      return fail("[snow] ServiceNow site profile not found. Run seed or restart server.");
+    }
+
+    const updatedProfile = { ...snowProfile, baseUrl };
+    const allNavPaths = await storage.getNavigationPaths(snowProfile.id);
+
+    const navPathMap: Record<string, typeof allNavPaths[0] | undefined> = {};
+    for (const np of allNavPaths) {
+      navPathMap[np.name] = np;
+    }
+
+    async function scrapeSnowNavPath(pathName: string, recordType: "incident" | "change" | "request", source: "personal" | "team" = "personal"): Promise<CachedSnowRecord[]> {
+      const navPath = navPathMap[pathName];
+      if (!navPath) {
+        emitEvent("cli", `[snow] Navigation path "${pathName}" not found`, "warn", { metadata: { command: "snow" } });
+        return [];
+      }
+      emitEvent("cli", `Scraping ServiceNow ${recordType}s via nav path: ${pathName}`, "info", { metadata: { command: "snow" } });
+      try {
+        const scrapeResult = await executeNavigationPath(updatedProfile, navPath);
+        const text = scrapeResult.content?.text || "";
+        const extractedText = Object.values(scrapeResult.extractedData).join("\n");
+        const allText = `${text}\n${extractedText}`;
+        return parseSnowListFromText(allText, recordType, baseUrl, source);
+      } catch (e: any) {
+        emitEvent("cli", `[snow] Nav path scrape failed: ${e.message}`, "warn", { metadata: { command: "snow" } });
+        return [];
+      }
+    }
+
+    async function persistSnowResults(records: CachedSnowRecord[], label: string): Promise<void> {
+      try {
+        const summary = `SNOW ${label}: ${records.length} records scraped`;
+        const rawOutput = JSON.stringify(records);
+        await storage.createAgentResult({
+          programName: "snow-scraper",
+          summary,
+          rawOutput,
+          status: "ok",
+        });
+      } catch (e: any) {
+        console.error(`[snow] Failed to persist results: ${e.message}`);
+      }
+    }
+
+    if (sub === "incidents" || sub === "inc") {
+      const cached = snowCache;
+      if (cached && !refresh) {
+        const incidents = cached.records.filter(r => r.type === "incident");
+        if (incidents.length > 0) {
+          const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
+          return ok(formatSnowList("INCIDENTS", incidents, age));
+        }
+      }
+      const records = await scrapeSnowNavPath("list-my-incidents", "incident");
+      mergeSnowCache(records, "incident");
+      if (records.length > 0) await persistSnowResults(records, "incidents");
+      if (records.length === 0) return ok(`=== SNOW INCIDENTS ===${nl}${nl}No incidents found or could not parse. Try: snow refresh`);
+      return ok(formatSnowList("INCIDENTS", records));
+    }
+
+    if (sub === "changes" || sub === "chg") {
+      const cached = snowCache;
+      if (cached && !refresh) {
+        const changes = cached.records.filter(r => r.type === "change");
+        if (changes.length > 0) {
+          const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
+          return ok(formatSnowList("CHANGE REQUESTS", changes, age));
+        }
+      }
+      const records = await scrapeSnowNavPath("list-my-changes", "change");
+      mergeSnowCache(records, "change");
+      if (records.length > 0) await persistSnowResults(records, "changes");
+      if (records.length === 0) return ok(`=== SNOW CHANGES ===${nl}${nl}No change requests found or could not parse. Try: snow refresh`);
+      return ok(formatSnowList("CHANGE REQUESTS", records));
+    }
+
+    if (sub === "requests" || sub === "req") {
+      const cached = snowCache;
+      if (cached && !refresh) {
+        const requests = cached.records.filter(r => r.type === "request");
+        if (requests.length > 0) {
+          const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
+          return ok(formatSnowList("SERVICE REQUESTS", requests, age));
+        }
+      }
+      const records = await scrapeSnowNavPath("list-my-requests", "request");
+      mergeSnowCache(records, "request");
+      if (records.length > 0) await persistSnowResults(records, "requests");
+      if (records.length === 0) return ok(`=== SNOW REQUESTS ===${nl}${nl}No requests found or could not parse. Try: snow refresh`);
+      return ok(formatSnowList("SERVICE REQUESTS", records));
+    }
+
+    if (sub === "detail") {
+      const recordNumber = args[1];
+      if (!recordNumber) return fail("[snow] Usage: snow detail INC0012345");
+      const cached = snowCache;
+      const cachedRecord = cached?.records.find(r => r.number.toLowerCase() === recordNumber.toLowerCase());
+      let tableName = "incident";
+      if (/^CHG/i.test(recordNumber)) tableName = "change_request";
+      else if (/^REQ|^RITM/i.test(recordNumber)) tableName = "sc_req_item";
+      const detailUrl = `${baseUrl}/nav_to.do?uri=${tableName}.do?sysparm_query=number=${recordNumber}`;
+
+      const detailNavPath = navPathMap["view-record-detail"];
+      emitEvent("cli", `Opening ServiceNow record: ${recordNumber}`, "info", { metadata: { command: "snow detail" } });
+
+      let detailText = "";
+      if (detailNavPath) {
+        try {
+          const scrapeResult = await executeNavigationPath(updatedProfile, detailNavPath, undefined, detailUrl);
+          detailText = scrapeResult.content?.text || "";
+          const extractedVals = Object.values(scrapeResult.extractedData).filter(v => v);
+          if (extractedVals.length > 0 && !detailText) detailText = extractedVals.join("\n");
+        } catch (e: any) {
+          emitEvent("cli", `[snow] detail nav path failed: ${e.message}`, "warn");
+        }
+      }
+
+      if (!detailText) {
+        const { smartFetch } = await import("./bridge-queue");
+        const result = await smartFetch(detailUrl, "dom", "cli-snow-detail", {
+          maxText: 40000,
+          selectors: { fields: '.form-group, .label_spacing, td.label' },
+        }, 60000);
+        if (result.error) return fail(`[snow] detail: ${result.error}`);
+        detailText = result.text || "";
+      }
+
+      const lines = [`=== ${recordNumber} ===`, ""];
+      if (cachedRecord) {
+        lines.push(`Short Description: ${cachedRecord.shortDescription}`);
+        lines.push(`State: ${cachedRecord.state}`);
+        lines.push(`Priority: ${cachedRecord.priority}`);
+        lines.push(`Assigned To: ${cachedRecord.assignedTo}`);
+        lines.push(`Group: ${cachedRecord.assignmentGroup}`);
+        lines.push(`Updated: ${cachedRecord.updatedOn}`);
+        lines.push("");
+      }
+      lines.push("--- Page Content ---", "");
+      lines.push(detailText.slice(0, 5000));
+      lines.push("", `Open in browser: ${detailUrl}`);
+      return ok(lines.join(nl));
+    }
+
+    if (sub === "queue") {
+      const cached = snowCache;
+      if (cached && !refresh) {
+        const groupItems = cached.records.filter(r => r.assignmentGroup);
+        if (groupItems.length > 0) {
+          const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
+          const groups = new Map<string, CachedSnowRecord[]>();
+          for (const r of groupItems) {
+            const g = r.assignmentGroup || "Unassigned";
+            if (!groups.has(g)) groups.set(g, []);
+            groups.get(g)!.push(r);
+          }
+          const lines = [`=== SNOW GROUP QUEUE === (cached ${age}s ago)`, ""];
+          Array.from(groups.entries()).forEach(([group, items]) => {
+            lines.push(`  ${group} (${items.length})`);
+            items.slice(0, 5).forEach(item => {
+              lines.push(`    ${item.number.padEnd(15)} ${item.assignedTo.padEnd(20).slice(0, 20)} ${item.shortDescription.slice(0, 40)} [${item.state}]`);
+            });
+          });
+          return ok(lines.join(nl));
+        }
+      }
+      const records = await scrapeSnowNavPath("list-group-queue", "incident", "team");
+      mergeSnowCache(records, "incident", "team");
+      if (records.length > 0) await persistSnowResults(records, "group-queue");
+      if (records.length === 0) return ok(`=== SNOW QUEUE ===${nl}${nl}No group queue items found.`);
+      const groups = new Map<string, CachedSnowRecord[]>();
+      for (const r of records) {
+        const g = r.assignmentGroup || "Unassigned";
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g)!.push(r);
+      }
+      const lines = [`=== SNOW GROUP QUEUE === (${records.length} items)`, ""];
+      Array.from(groups.entries()).forEach(([group, items]) => {
+        lines.push(`  ${group} (${items.length})`);
+        items.slice(0, 5).forEach(item => {
+          lines.push(`    ${item.number.padEnd(15)} ${item.assignedTo.padEnd(20).slice(0, 20)} ${item.shortDescription.slice(0, 40)} [${item.state}]`);
+        });
+      });
+      return ok(lines.join(nl));
+    }
+
+    if (sub === "refresh") {
+      emitEvent("cli", "Refreshing all ServiceNow data...", "info", { metadata: { command: "snow refresh" } });
+      const [incidents, changes, requests, queueItems] = await Promise.all([
+        scrapeSnowNavPath("list-my-incidents", "incident", "personal"),
+        scrapeSnowNavPath("list-my-changes", "change", "personal"),
+        scrapeSnowNavPath("list-my-requests", "request", "personal"),
+        scrapeSnowNavPath("list-group-queue", "incident", "team"),
+      ]);
+      const personalRecords = [...incidents, ...changes, ...requests];
+      const teamDeduped = queueItems.filter(qr => !personalRecords.some(pr => pr.number === qr.number));
+      const allRecords = [...personalRecords, ...teamDeduped];
+      snowCache = { records: allRecords, fetchedAt: Date.now() };
+      await persistSnowResults(allRecords, "refresh");
+      const lines = [
+        `=== SNOW REFRESH COMPLETE ===`, "",
+        `  My Incidents: ${incidents.length}`,
+        `  My Changes:   ${changes.length}`,
+        `  My Requests:  ${requests.length}`,
+        `  Team Queue:   ${teamDeduped.length}`,
+        `  Total:        ${allRecords.length}`,
+        "",
+        "Use: snow incidents | snow changes | snow requests | snow queue",
+      ];
+      return ok(lines.join(nl));
+    }
+
+    return fail(`[snow] unknown subcommand "${sub}"${nl}Usage: snow [incidents|changes|requests|detail <number>|queue|refresh]`);
   });
 
   registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--save] | citrix clean", async (args) => {

@@ -217,7 +217,13 @@ export async function executeNavigationPath(
   };
 
   try {
-    const steps = navPath.steps as NavigationStep[];
+    const rawSteps = navPath.steps as NavigationStep[];
+    const steps = rawSteps.map(s => {
+      if (s.target && s.target.includes("{baseUrl}") && profile.baseUrl) {
+        return { ...s, target: s.target.replace(/\{baseUrl\}/g, profile.baseUrl.replace(/\/+$/, "")) };
+      }
+      return s;
+    });
 
     const isResume = resumeFromStep !== undefined && resumeFromStep > 0;
     if (!isResume) {

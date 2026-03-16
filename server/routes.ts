@@ -637,6 +637,94 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/snow/records", async (_req, res) => {
+    try {
+      const { getSnowCache, setSnowCache } = await import("./cli-engine");
+      const cached = getSnowCache();
+      if (cached && cached.records.length > 0) {
+        return res.json({ records: cached.records, fetchedAt: cached.fetchedAt });
+      }
+      const persistedResults = await storage.getAgentResults("snow-scraper", 1);
+      if (persistedResults.length > 0 && persistedResults[0].rawOutput) {
+        try {
+          const records = JSON.parse(persistedResults[0].rawOutput);
+          if (Array.isArray(records) && records.length > 0) {
+            setSnowCache({ records, fetchedAt: persistedResults[0].createdAt?.getTime?.() || Date.now() });
+            return res.json({ records, fetchedAt: persistedResults[0].createdAt?.getTime?.() || Date.now() });
+          }
+        } catch {}
+      }
+      res.json({ records: [], fetchedAt: null });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  app.post("/api/snow/refresh", async (_req, res) => {
+    try {
+      const { executeChainRaw } = await import("./cli-engine");
+      const result = await executeChainRaw("snow refresh");
+      res.json({ success: result.exitCode === 0, output: result.stdout || result.stderr });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  app.get("/api/snow/queue", async (_req, res) => {
+    try {
+      const { getSnowCache, setSnowCache } = await import("./cli-engine");
+      let cached = getSnowCache();
+      if (!cached || cached.records.length === 0) {
+        const persistedResults = await storage.getAgentResults("snow-scraper", 1);
+        if (persistedResults.length > 0 && persistedResults[0].rawOutput) {
+          try {
+            const records = JSON.parse(persistedResults[0].rawOutput);
+            if (Array.isArray(records) && records.length > 0) {
+              cached = { records, fetchedAt: persistedResults[0].createdAt?.getTime?.() || Date.now() };
+              setSnowCache(cached);
+            }
+          } catch {}
+        }
+      }
+      if (!cached) return res.json({ myQueue: [], teamWorkload: [], agingRisk: [] });
+
+      const myQueue = cached.records
+        .filter(r => r.source === "personal" && r.state !== "Closed" && r.state !== "Resolved" && r.state !== "Canceled")
+        .sort((a, b) => {
+          const pA = parseInt(a.priority) || 5;
+          const pB = parseInt(b.priority) || 5;
+          return pA - pB;
+        });
+
+      const allRecords = cached.records;
+      const groups = new Map<string, number>();
+      const personLoad = new Map<string, number>();
+      for (const r of allRecords) {
+        const g = r.assignmentGroup || "Unassigned";
+        groups.set(g, (groups.get(g) || 0) + 1);
+        if (r.assignedTo) {
+          personLoad.set(r.assignedTo, (personLoad.get(r.assignedTo) || 0) + 1);
+        }
+      }
+      const teamWorkload = [
+        ...Array.from(groups.entries()).map(([group, count]) => ({ group, count, type: "group" as const })),
+        ...Array.from(personLoad.entries()).map(([group, count]) => ({ group: `  ${group}`, count, type: "person" as const })),
+      ].sort((a, b) => {
+        if (a.type !== b.type) return a.type === "group" ? -1 : 1;
+        return b.count - a.count;
+      });
+
+      const agingRisk = allRecords.filter(r => r.slaBreached);
+
+      res.json({ myQueue, teamWorkload, agingRisk, fetchedAt: cached.fetchedAt });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: msg });
+    }
+  });
+
   app.get("/api/site-profiles", async (_req, res) => {
     const profiles = await storage.getSiteProfiles();
     res.json(profiles);

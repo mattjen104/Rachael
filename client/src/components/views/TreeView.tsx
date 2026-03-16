@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { useTreeData, useToggleTask, useBridgeStatus, useMailInbox, useTeamsChats } from "@/hooks/use-org-data";
+import { useTreeData, useToggleTask, useBridgeStatus, useMailInbox, useTeamsChats, useSnowRecords } from "@/hooks/use-org-data";
 
 interface TreeViewProps {
   onNavigate?: (view: string, id?: number) => void;
@@ -62,6 +62,15 @@ type TreeNode = {
   id: number;
   name: string;
   href: string;
+} | {
+  type: "snow-item";
+  number: string;
+  shortDescription: string;
+  state: string;
+  priority: string;
+  recordType: "incident" | "change" | "request";
+  slaBreached: boolean;
+  url?: string;
 };
 
 export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
@@ -71,6 +80,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const bridgeConnected = bridgeStatus?.extension?.connected || false;
   const mailInbox = useMailInbox(bridgeConnected);
   const teamsChats = useTeamsChats();
+  const snowRecords = useSnowRecords();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["tasks", "programs"]));
   const containerRef = useRef<HTMLDivElement>(null);
@@ -215,6 +225,44 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter or run :teams" : bridgeHint, actionCmd: bridgeConnected ? "teams" : "bridge-status" });
       }
     }
+
+    const snowData = snowRecords.data?.records || [];
+    const snowIncidents = snowData.filter(r => r.type === "incident");
+    const snowChanges = snowData.filter(r => r.type === "change");
+    const snowRequests = snowData.filter(r => r.type === "request");
+    const snowTotal = snowData.length;
+
+    nodes.push({ type: "section", label: "SNOW (ServiceNow)", key: "snow", count: snowTotal || (bridgeConnected ? -1 : 0) });
+    if (expanded.has("snow")) {
+      if (snowTotal > 0) {
+        if (snowIncidents.length > 0) {
+          nodes.push({ type: "section", label: "  Incidents", key: "snow-incidents", count: snowIncidents.length });
+          if (expanded.has("snow-incidents")) {
+            for (const r of snowIncidents.slice(0, 15)) {
+              nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
+            }
+          }
+        }
+        if (snowChanges.length > 0) {
+          nodes.push({ type: "section", label: "  Changes", key: "snow-changes", count: snowChanges.length });
+          if (expanded.has("snow-changes")) {
+            for (const r of snowChanges.slice(0, 15)) {
+              nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
+            }
+          }
+        }
+        if (snowRequests.length > 0) {
+          nodes.push({ type: "section", label: "  Requests", key: "snow-requests", count: snowRequests.length });
+          if (expanded.has("snow-requests")) {
+            for (const r of snowRequests.slice(0, 15)) {
+              nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
+            }
+          }
+        }
+      } else {
+        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter or run :snow refresh" : "Bridge not connected", actionCmd: bridgeConnected ? "snow refresh" : "bridge-status" });
+      }
+    }
   }
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -272,6 +320,11 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
             mailInbox.refetch(); setMailFetched(true);
           } else if (node.key === "chat" && !chatFetched) {
             teamsChats.refetch(); setChatFetched(true);
+          } else if (node.key === "snow") {
+            if (onRunCommand && (!snowRecords.data?.records?.length)) {
+              onRunCommand("snow refresh");
+            }
+            snowRecords.refetch();
           }
         }
         else if (node?.type === "task") toggleTask.mutate(node.id);
@@ -288,6 +341,12 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           window.open(node.href, "_blank");
         }
         else if (node?.type === "chat") {
+        }
+        else if (node?.type === "snow-item" && node.url) {
+          window.open(node.url, "_blank");
+        }
+        else if (node?.type === "snow-item" && onRunCommand) {
+          onRunCommand(`snow detail ${node.number}`);
         }
         break;
     }
@@ -375,11 +434,15 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         } else if (node.type === "chat") {
           icon = node.unread ? ">" : " ";
           label = `${node.name.slice(0, 20).padEnd(20)}  ${node.lastMessage.slice(0, 35)}`;
+        } else if (node.type === "snow-item") {
+          icon = node.slaBreached ? "!" : "·";
+          label = `${node.number.padEnd(15)} ${node.shortDescription.slice(0, 40)}`;
+          extra = `${node.state}${node.priority ? ` ${node.priority}` : ""}`;
         }
 
         return (
           <div
-            key={`${node.type}-${"id" in node ? node.id : idx}`}
+            key={`${node.type}-${"id" in node ? node.id : "number" in node ? node.number : idx}`}
             data-idx={idx}
             data-testid={`tree-item-${node.type}-${"id" in node ? node.id : idx}`}
             className={`px-2 py-0.5 pl-4 cursor-pointer select-none flex items-center gap-1 ${
@@ -397,6 +460,12 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                   window.open(href, "_blank");
                 } else {
                   onRunCommand(`citrix launch ${node.name}`);
+                }
+              } else if (node.type === "snow-item") {
+                if (node.url) {
+                  window.open(node.url, "_blank");
+                } else if (onRunCommand) {
+                  onRunCommand(`snow detail ${node.number}`);
                 }
               }
             }}

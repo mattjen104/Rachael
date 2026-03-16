@@ -310,6 +310,63 @@ export function useTeamsChats() {
   });
 }
 
+export function useSnowRecords() {
+  return useQuery<{
+    records: Array<{
+      number: string;
+      shortDescription: string;
+      state: string;
+      priority: string;
+      assignedTo: string;
+      assignmentGroup: string;
+      updatedOn: string;
+      type: "incident" | "change" | "request";
+      slaBreached: boolean;
+      url?: string;
+    }>;
+    fetchedAt: number | null;
+  }>({
+    queryKey: ["/api/snow/records"],
+    refetchInterval: 120000,
+    retry: false,
+  });
+}
+
+export function useSnowQueue() {
+  return useQuery<{
+    myQueue: Array<{
+      number: string;
+      shortDescription: string;
+      state: string;
+      priority: string;
+      assignedTo: string;
+      assignmentGroup: string;
+      updatedOn: string;
+      type: "incident" | "change" | "request";
+      slaBreached: boolean;
+      url?: string;
+    }>;
+    teamWorkload: Array<{ group: string; count: number }>;
+    agingRisk: Array<{
+      number: string;
+      shortDescription: string;
+      state: string;
+      priority: string;
+      assignedTo: string;
+      assignmentGroup: string;
+      updatedOn: string;
+      type: "incident" | "change" | "request";
+      slaBreached: boolean;
+      url?: string;
+    }>;
+    fetchedAt: number | null;
+  }>({
+    queryKey: ["/api/snow/queue"],
+    refetchInterval: 120000,
+    retry: false,
+  });
+}
+
 export function useSiteProfiles() {
   return useQuery<SiteProfile[]>({ queryKey: ["/api/site-profiles"] });
 }
