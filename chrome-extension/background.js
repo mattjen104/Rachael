@@ -137,6 +137,28 @@ async function pollForJobs() {
   }
 }
 
+async function pollForSelector(tabId, selector, maxWaitMs) {
+  const interval = 1000;
+  const maxAttempts = Math.ceil(maxWaitMs / interval);
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => document.querySelectorAll(sel).length,
+        args: [selector],
+      });
+      const count = results?.[0]?.result || 0;
+      if (count > 0) {
+        await new Promise((r) => setTimeout(r, 1500));
+        return;
+      }
+    } catch {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}
+
 async function executeJob(job) {
   const { type, url, options } = job;
 
@@ -167,6 +189,8 @@ async function executeJob(job) {
     const maxText = options?.maxText || 15000;
     const includeHtml = options?.includeHtml || false;
     const maxHtml = options?.maxHtml || 50000;
+    const waitForSelector = hasSelectors ? Object.values(selectors)[0] : null;
+    const spaWaitMs = options?.spaWaitMs || (waitForSelector ? 12000 : 1500);
 
     const tab = await chrome.tabs.create({ url, active: false });
 
@@ -175,7 +199,11 @@ async function executeJob(job) {
         function listener(tabId, info) {
           if (tabId === tab.id && info.status === "complete") {
             cleanup();
-            setTimeout(resolve, 1500);
+            if (waitForSelector) {
+              pollForSelector(tab.id, waitForSelector, spaWaitMs).then(resolve).catch(resolve);
+            } else {
+              setTimeout(resolve, 1500);
+            }
           }
         }
         function cleanup() {
@@ -198,6 +226,7 @@ async function executeJob(job) {
             extracted[key] = Array.from(els).map((el) => ({
               text: (el.textContent || "").trim().substring(0, 1000),
               href: el.getAttribute("href") || undefined,
+              ariaLabel: el.getAttribute("aria-label") || undefined,
               src: el.getAttribute("src") || undefined,
             }));
           }

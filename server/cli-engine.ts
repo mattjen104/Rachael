@@ -316,12 +316,13 @@ function isNavNoise(s: string): boolean {
   return false;
 }
 
-function parseOutlookInbox(html: string, text: string, extracted?: Record<string, Array<{ text: string; href?: string }>>): CachedEmail[] {
+function parseOutlookInbox(html: string, text: string, extracted?: Record<string, Array<{ text: string; href?: string; ariaLabel?: string }>>): CachedEmail[] {
   const emails: CachedEmail[] = [];
 
   if (extracted?.rows && extracted.rows.length > 0) {
     for (const row of extracted.rows) {
-      const t = row.text?.trim();
+      const label = (row.ariaLabel || "").trim();
+      const t = (label || row.text || "").trim();
       if (!t || t.length < 10 || t.length > 800) continue;
       if (isNavNoise(t)) continue;
 
@@ -345,7 +346,7 @@ function parseOutlookInbox(html: string, text: string, extracted?: Record<string
           unread,
         });
       } else {
-        const parts = t.split(/\n/).map(p => p.trim()).filter(p => p.length > 0 && !isNavNoise(p));
+        const parts = t.split(/[,\n]/).map(p => p.trim()).filter(p => p.length > 2 && !isNavNoise(p));
         if (parts.length >= 2) {
           emails.push({
             from: parts[0].slice(0, 40),
@@ -1820,7 +1821,10 @@ ${fullHtml}`;
       const showRaw = args.includes("--raw");
       if (showRaw) {
         const rowCount = extracted?.rows?.length || 0;
-        const sampleRows = (extracted?.rows || []).slice(0, 8).map((r: any, i: number) => `  [${i}] ${(r.text || "").trim().slice(0, 120)}`).join(String.fromCharCode(10));
+        const sampleRows = (extracted?.rows || []).slice(0, 8).map((r: any, i: number) => {
+          const aria = r.ariaLabel ? `[aria] ${r.ariaLabel.trim().slice(0, 120)}` : `[text] ${(r.text || "").trim().slice(0, 120)}`;
+          return `  [${i}] ${aria}`;
+        }).join(String.fromCharCode(10));
         const rawLines = [
           `=== OUTLOOK RAW EXTRACTION ===`,
           `Text length: ${text.length} chars`,
