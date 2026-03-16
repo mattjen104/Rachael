@@ -534,25 +534,37 @@ export async function registerRoutes(
 
   app.get("/api/mail/inbox", async (_req, res) => {
     try {
-      const { getMailCache, setMailCache } = await import("./cli-engine");
+      const { getMailCache, setMailCache, parseOutlookInbox } = await import("./cli-engine");
+      const refresh = _req.query.refresh === "1";
       const cached = getMailCache();
+      if (cached && cached.emails.length > 0 && !refresh) {
+        return res.json(cached.emails.map((e, i) => ({ index: i, ...e })));
+      }
+
+      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+      if (isExtensionConnected()) {
+        const result = await smartFetch("https://outlook.office.com/mail/inbox", "dom", "api-mail-inbox", {
+          maxText: 60000,
+          selectors: {
+            rows: '[role="option"][aria-label], [role="listbox"] [role="option"], div[data-convid], tr[aria-label]',
+          },
+        }, 60000);
+        if (!result.error) {
+          const text = result.text || "";
+          const html = typeof result.body === "string" ? result.body : "";
+          const extracted = (result as any).extracted || {};
+          const emails = parseOutlookInbox(html || text, text, extracted);
+          if (emails.length > 0) {
+            setMailCache({ emails, fetchedAt: Date.now() });
+            return res.json(emails.map((e, i) => ({ index: i, ...e })));
+          }
+        }
+      }
+
       if (cached && cached.emails.length > 0) {
         return res.json(cached.emails.map((e, i) => ({ index: i, ...e })));
       }
-      const emails = await getOutlookEmails();
-      if (emails.length > 0) {
-        setMailCache({
-          emails: emails.map(e => ({
-            from: e.from || "",
-            subject: e.subject || "",
-            date: e.date || "",
-            preview: e.preview || "",
-            unread: e.unread || false,
-          })),
-          fetchedAt: Date.now(),
-        });
-      }
-      res.json(emails.map((e, i) => ({ index: i, ...e })));
+      res.json([]);
     } catch (e: unknown) {
       const { getMailCache } = await import("./cli-engine");
       const cached = getMailCache();

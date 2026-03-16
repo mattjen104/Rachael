@@ -326,7 +326,7 @@ function isNavNoise(s: string): boolean {
   return false;
 }
 
-function parseOutlookInbox(html: string, text: string, extracted?: Record<string, Array<{ text: string; href?: string; ariaLabel?: string }>>): CachedEmail[] {
+export function parseOutlookInbox(html: string, text: string, extracted?: Record<string, Array<{ text: string; href?: string; ariaLabel?: string }>>): CachedEmail[] {
   const emails: CachedEmail[] = [];
 
   if (extracted?.rows && extracted.rows.length > 0) {

@@ -292,11 +292,13 @@ export function useBridgeStatus() {
   });
 }
 
-export function useMailInbox() {
+export function useMailInbox(enabled = true) {
   return useQuery<Array<{ index: number; from: string; subject: string; preview: string; date: string; unread: boolean }>>({
     queryKey: ["/api/mail/inbox"],
-    refetchInterval: 60000,
+    enabled,
+    refetchInterval: 300000,
     retry: false,
+    staleTime: 120000,
   });
 }
 

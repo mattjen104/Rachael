@@ -63,13 +63,20 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const { data, isLoading } = useTreeData();
   const toggleTask = useToggleTask();
   const { data: bridgeStatus } = useBridgeStatus();
-  const mailInbox = useMailInbox();
+  const bridgeConnected = bridgeStatus?.extension?.connected || false;
+  const mailInbox = useMailInbox(bridgeConnected);
   const teamsChats = useTeamsChats();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["tasks", "programs"]));
   const containerRef = useRef<HTMLDivElement>(null);
   const [mailFetched, setMailFetched] = useState(false);
   const [chatFetched, setChatFetched] = useState(false);
+
+  useEffect(() => {
+    if (bridgeConnected && !expanded.has("mail")) {
+      setExpanded(prev => new Set([...prev, "mail"]));
+    }
+  }, [bridgeConnected]);
 
   const nodes: TreeNode[] = [];
 
@@ -133,21 +140,23 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       }
     }
 
-    const bridgeConnected = bridgeStatus?.extension?.connected || false;
     const emails = mailInbox.data || [];
     const chats = teamsChats.data || [];
     const bridgeHint = bridgeConnected
-      ? "Enter: fetch"
+      ? (mailInbox.isFetching ? "Loading inbox..." : "Enter: fetch")
       : "Not connected — check extension options";
 
-    nodes.push({ type: "section", label: "MAIL (Outlook)", key: "mail", count: emails.length || (bridgeConnected ? -1 : 0) });
+    const mailLabel = mailInbox.isFetching ? "MAIL (loading...)" : "MAIL (Outlook)";
+    nodes.push({ type: "section", label: mailLabel, key: "mail", count: emails.length || (bridgeConnected ? -1 : 0) });
     if (expanded.has("mail")) {
       if (emails.length > 0) {
-        for (const e of emails.slice(0, 15)) {
+        for (const e of emails.slice(0, 10)) {
           nodes.push({ type: "mail", index: e.index || 0, from: e.from, subject: e.subject, unread: e.unread, date: e.date || "" });
         }
+      } else if (mailInbox.isFetching) {
+        nodes.push({ type: "bridge-info", label: "Scraping inbox via bridge...", actionCmd: "" });
       } else {
-        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter or run :outlook" : bridgeHint, actionCmd: bridgeConnected ? "outlook" : "bridge-status" });
+        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter to fetch" : bridgeHint, actionCmd: bridgeConnected ? "outlook" : "bridge-status" });
       }
     }
 
@@ -214,7 +223,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
             else next.add(node.key);
             return next;
           });
-          if (node.key === "mail" && !mailFetched) {
+          if (node.key === "mail") {
             mailInbox.refetch(); setMailFetched(true);
           } else if (node.key === "chat" && !chatFetched) {
             teamsChats.refetch(); setChatFetched(true);
