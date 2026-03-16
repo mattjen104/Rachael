@@ -75,10 +75,14 @@ export function validateBridgeToken(token: string | undefined | null): boolean {
 }
 
 export function recordHeartbeat(meta?: { version?: string; jobsCompleted?: number; error?: string | null }): void {
+  const wasConnected = isExtensionConnected();
   extensionLastHeartbeat = Date.now();
   if (meta?.version) extensionVersion = meta.version;
   if (meta?.jobsCompleted !== undefined) extensionJobsCompleted = meta.jobsCompleted;
   if (meta?.error !== undefined) extensionLastError = meta.error;
+  if (!wasConnected) {
+    emitEvent("bridge", `Chrome extension bridge connected${meta?.version ? ` (v${meta.version})` : ""}`, "info");
+  }
 }
 
 export function isExtensionConnected(): boolean {
