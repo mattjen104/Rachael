@@ -534,8 +534,30 @@ export async function registerRoutes(
 
   app.get("/api/mail/inbox", async (_req, res) => {
     try {
+      const { getMailCache } = await import("./cli-engine");
+      const cached = getMailCache();
+      if (cached && cached.emails.length > 0) {
+        return res.json(cached.emails.map((e, i) => ({ index: i, ...e })));
+      }
       const emails = await getOutlookEmails();
       res.json(emails);
+    } catch (e: unknown) {
+      const { getMailCache } = await import("./cli-engine");
+      const cached = getMailCache();
+      if (cached && cached.emails.length > 0) {
+        return res.json(cached.emails.map((e, i) => ({ index: i, ...e })));
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  app.get("/api/mail/calendar", async (_req, res) => {
+    try {
+      const { getCalendarCache } = await import("./cli-engine");
+      const cached = getCalendarCache();
+      if (cached) return res.json(cached.events);
+      res.json([]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ error: msg });
@@ -545,6 +567,12 @@ export async function registerRoutes(
   app.get("/api/mail/:index", async (req, res) => {
     const idx = parseInt(req.params.index, 10);
     try {
+      const { getMailCache } = await import("./cli-engine");
+      const cached = getMailCache();
+      if (cached && idx >= 0 && idx < cached.emails.length) {
+        const e = cached.emails[idx];
+        return res.json({ from: e.from, to: "", subject: e.subject, body: e.preview, date: e.date });
+      }
       const email = await readOutlookEmail(idx);
       if (!email) return res.status(404).json({ message: "Email not found" });
       res.json(email);
@@ -556,9 +584,19 @@ export async function registerRoutes(
 
   app.get("/api/chat/list", async (_req, res) => {
     try {
+      const { getTeamsCache } = await import("./cli-engine");
+      const cached = getTeamsCache();
+      if (cached && cached.chats.length > 0) {
+        return res.json(cached.chats.map((c, i) => ({ index: i, ...c })));
+      }
       const chats = await getTeamsChats();
       res.json(chats);
     } catch (e: unknown) {
+      const { getTeamsCache } = await import("./cli-engine");
+      const cached = getTeamsCache();
+      if (cached && cached.chats.length > 0) {
+        return res.json(cached.chats.map((c, i) => ({ index: i, ...c })));
+      }
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ error: msg });
     }

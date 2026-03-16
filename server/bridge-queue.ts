@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { emitEvent } from "./event-bus";
 
-const BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu", ".reddit.com", "reddit.com"];
+const BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu", ".reddit.com", "reddit.com", ".live.com", "outlook.live.com", ".office.com", "teams.microsoft.com"];
 export function isBridgeOnlyDomain(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();

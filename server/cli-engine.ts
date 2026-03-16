@@ -169,7 +169,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -257,6 +257,224 @@ function present(result: CommandResult, totalStart: number): PresentedResult {
     truncated,
     originalLines,
   };
+}
+
+interface CachedEmail {
+  from: string;
+  subject: string;
+  date: string;
+  preview: string;
+  unread: boolean;
+}
+
+interface CachedCalEvent {
+  title: string;
+  date: string;
+  time: string;
+  location: string;
+}
+
+interface CachedChat {
+  name: string;
+  lastMessage: string;
+  time: string;
+  unread: boolean;
+}
+
+interface CachedChannel {
+  name: string;
+  team: string;
+}
+
+let mailCache: { emails: CachedEmail[]; fetchedAt: number } | null = null;
+let calendarCache: { events: CachedCalEvent[]; fetchedAt: number } | null = null;
+let teamsCache: { chats: CachedChat[]; fetchedAt: number } | null = null;
+
+export function getMailCache() { return mailCache; }
+export function setMailCache(c: typeof mailCache) { mailCache = c; }
+export function getCalendarCache() { return calendarCache; }
+export function setCalendarCache(c: typeof calendarCache) { calendarCache = c; }
+export function getTeamsCache() { return teamsCache; }
+export function setTeamsCache(c: typeof teamsCache) { teamsCache = c; }
+
+function parseOutlookInbox(html: string, text: string): CachedEmail[] {
+  const emails: CachedEmail[] = [];
+
+  const rowPatterns = [
+    /aria-label="([^"]*?(?:From|from)[^"]*?)"/g,
+    /class="[^"]*(?:customScrollBar|lvHighlightAllClass|hcFlexContainer)[^"]*"[^>]*>([\s\S]*?)(?=class="[^"]*(?:customScrollBar|lvHighlightAllClass|hcFlexContainer))/gi,
+    /data-convid="[^"]*"[\s\S]*?<span[^>]*>([^<]+)<\/span>/g,
+  ];
+
+  const ariaRe = /aria-label="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = ariaRe.exec(html)) !== null) {
+    const label = m[1];
+    if (!label.includes("mail") && !label.includes("Mail") &&
+        !label.includes("message") && !label.includes("Message") &&
+        !label.includes("email") && !label.includes("Email") &&
+        !label.includes("From") && !label.includes("from") &&
+        !label.includes("Subject") && !label.includes("subject") &&
+        !label.includes("Unread") && !label.includes("Read ")) continue;
+
+    if (label.length > 30 && label.length < 500) {
+      const fromMatch = label.match(/(?:From|from)\s*[:.]?\s*([^,]+)/);
+      const subjectMatch = label.match(/(?:Subject|subject)\s*[:.]?\s*([^,]+)/) || label.match(/,\s*([^,]{5,80})\s*,/);
+      const dateMatch = label.match(/(?:Received|received|Date|date)\s*[:.]?\s*([^,]+)/) || label.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]?\d{0,4})/);
+      const unread = /unread/i.test(label);
+
+      if (fromMatch || subjectMatch) {
+        emails.push({
+          from: (fromMatch?.[1] || "Unknown").trim().slice(0, 40),
+          subject: (subjectMatch?.[1] || label.slice(0, 60)).trim(),
+          date: (dateMatch?.[1] || "").trim().slice(0, 12),
+          preview: label.slice(0, 200),
+          unread,
+        });
+      }
+    }
+  }
+
+  if (emails.length === 0) {
+    const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 5);
+    const fromRe = /^([A-Z][a-z]+ [A-Z][a-z]+|[^\s@]+@[^\s@]+)$/;
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i];
+      if (fromRe.test(line) && lines[i + 1] && lines[i + 1].length > 5) {
+        emails.push({
+          from: line.slice(0, 40),
+          subject: lines[i + 1].slice(0, 80),
+          date: "",
+          preview: (lines[i + 2] || "").slice(0, 200),
+          unread: false,
+        });
+        i += 1;
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  return emails.filter(e => {
+    const key = `${e.from}|${e.subject}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseOutlookCalendar(html: string, text: string): CachedCalEvent[] {
+  const events: CachedCalEvent[] = [];
+
+  const ariaRe = /aria-label="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = ariaRe.exec(html)) !== null) {
+    const label = m[1];
+    if (label.length < 10 || label.length > 500) continue;
+
+    const timeMatch = label.match(/(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\s*(?:to|-|–)\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)/);
+    const dateMatch = label.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun)[^,]*,?\s*(?:\w+\s+\d{1,2}|\d{1,2}[\/\-]\d{1,2}))/i);
+    const locationMatch = label.match(/(?:Location|location)\s*[:.]?\s*([^,]+)/);
+
+    if (timeMatch || dateMatch) {
+      const titleCandidates = label.split(/[,.]/).filter(p => p.trim().length > 3 && !timeMatch?.[0]?.includes(p.trim()));
+      events.push({
+        title: (titleCandidates[0] || label.slice(0, 50)).trim(),
+        date: (dateMatch?.[1] || "").trim(),
+        time: timeMatch ? `${timeMatch[1]} - ${timeMatch[2]}` : "",
+        location: (locationMatch?.[1] || "").trim(),
+      });
+    }
+  }
+
+  if (events.length === 0) {
+    const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 3);
+    const timeRe = /(\d{1,2}:\d{2})\s*(?:AM|PM|am|pm)?/;
+    for (let i = 0; i < lines.length; i++) {
+      if (timeRe.test(lines[i]) && lines[i + 1]) {
+        events.push({
+          title: lines[i + 1].slice(0, 60),
+          date: "",
+          time: lines[i].slice(0, 20),
+          location: "",
+        });
+        i++;
+      }
+    }
+  }
+
+  return events;
+}
+
+function parseTeamsChats(html: string, text: string): CachedChat[] {
+  const chats: CachedChat[] = [];
+
+  const ariaRe = /aria-label="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = ariaRe.exec(html)) !== null) {
+    const label = m[1];
+    if (label.length < 10 || label.length > 500) continue;
+    if (!label.includes("chat") && !label.includes("Chat") &&
+        !label.includes("conversation") && !label.includes("message") &&
+        !label.includes("Message")) continue;
+
+    const nameMatch = label.match(/(?:Chat with|chat with|Conversation with)\s+([^,.]+)/i);
+    const unread = /unread/i.test(label) || /new message/i.test(label);
+
+    if (nameMatch) {
+      const msgParts = label.split(",").filter(p => !p.includes(nameMatch[1]) && p.trim().length > 3);
+      chats.push({
+        name: nameMatch[1].trim().slice(0, 40),
+        lastMessage: (msgParts[0] || "").trim().slice(0, 80),
+        time: "",
+        unread,
+      });
+    }
+  }
+
+  if (chats.length === 0) {
+    const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 3 && l.length < 100);
+    const nameRe = /^[A-Z][a-z]+ [A-Z][a-z]+$/;
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (nameRe.test(lines[i])) {
+        chats.push({
+          name: lines[i].slice(0, 40),
+          lastMessage: lines[i + 1].slice(0, 80),
+          time: "",
+          unread: false,
+        });
+        i++;
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  return chats.filter(c => {
+    if (seen.has(c.name)) return false;
+    seen.add(c.name);
+    return true;
+  });
+}
+
+function parseTeamsChannels(html: string, text: string): CachedChannel[] {
+  const channels: CachedChannel[] = [];
+
+  const ariaRe = /aria-label="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = ariaRe.exec(html)) !== null) {
+    const label = m[1];
+    if (label.includes("channel") || label.includes("Channel") || label.includes("Team")) {
+      const teamMatch = label.match(/(?:Team|team)\s*[:.]?\s*([^,]+)/);
+      const channelMatch = label.match(/(?:Channel|channel)\s*[:.]?\s*([^,]+)/);
+      if (channelMatch || label.length < 60) {
+        channels.push({
+          name: (channelMatch?.[1] || label).trim().slice(0, 40),
+          team: (teamMatch?.[1] || "").trim().slice(0, 30),
+        });
+      }
+    }
+  }
+
+  return channels;
 }
 
 function registerBuiltinCommands(): void {
@@ -1475,6 +1693,176 @@ ${fullHtml}`;
     }
 
     return ok(results.join("\n"));
+  });
+
+  registerCommand("outlook", "Browse Outlook inbox/calendar via bridge", "outlook [inbox|calendar|read <n>] [--limit N] [--refresh]", async (args) => {
+    const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+    if (!isExtensionConnected()) {
+      return fail("[outlook] Chrome extension bridge not connected. Outlook requires your real browser session.\nRun: bridge-status");
+    }
+    const sub = args[0] || "inbox";
+    const refresh = args.includes("--refresh");
+    const limitIdx = args.indexOf("--limit");
+    const limit = limitIdx >= 0 && args[limitIdx + 1] ? parseInt(args[limitIdx + 1], 10) : 20;
+
+    if (sub === "inbox") {
+      const cached = getMailCache();
+      if (cached && !refresh) {
+        const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
+        const emails = cached.emails.slice(0, limit);
+        const lines = [`=== OUTLOOK INBOX === (cached ${age}s ago, ${cached.emails.length} messages)`, ""];
+        emails.forEach((e, i) => {
+          const unread = e.unread ? "*" : " ";
+          const from = e.from.padEnd(25).slice(0, 25);
+          const date = e.date.padEnd(12).slice(0, 12);
+          lines.push(`${unread}${String(i + 1).padStart(3)}  ${date}  ${from}  ${e.subject.slice(0, 60)}`);
+        });
+        lines.push("", `Use: outlook read <n> | outlook --refresh | outlook calendar`);
+        return ok(lines.join("\n"));
+      }
+
+      emitEvent("cli", "Fetching Outlook inbox via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
+      const result = await smartFetch("https://outlook.live.com/mail/0/inbox", "dom", "cli-outlook", {
+        maxText: 40000,
+      }, 60000);
+      if (result.error) return fail(`[outlook] ${result.error}`);
+      const text = result.text || "";
+      const html = typeof result.body === "string" ? result.body : "";
+      const source = html || text;
+
+      const emails = parseOutlookInbox(source, text);
+      setMailCache({ emails, fetchedAt: Date.now() });
+
+      if (emails.length === 0) {
+        return ok(`=== OUTLOOK INBOX ===\n\nPage loaded (${text.length} chars) but could not parse emails.\nThis can happen if:\n- You're not logged into outlook.live.com in your browser\n- The page hasn't fully loaded\n\nTry: outlook --refresh\nOr:  bridge https://outlook.live.com/mail/0/inbox --dom  for raw extraction`);
+      }
+
+      const display = emails.slice(0, limit);
+      const lines = [`=== OUTLOOK INBOX === (${emails.length} messages)`, ""];
+      display.forEach((e, i) => {
+        const unread = e.unread ? "*" : " ";
+        const from = e.from.padEnd(25).slice(0, 25);
+        const date = e.date.padEnd(12).slice(0, 12);
+        lines.push(`${unread}${String(i + 1).padStart(3)}  ${date}  ${from}  ${e.subject.slice(0, 60)}`);
+      });
+      lines.push("", `Use: outlook read <n> | outlook --refresh | outlook calendar`);
+      return ok(lines.join("\n"));
+    }
+
+    if (sub === "calendar") {
+      emitEvent("cli", "Fetching Outlook calendar via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
+      const result = await smartFetch("https://outlook.live.com/calendar/0/view/week", "dom", "cli-outlook-cal", {
+        maxText: 30000,
+      }, 60000);
+      if (result.error) return fail(`[outlook] calendar: ${result.error}`);
+      const text = result.text || "";
+      const html = typeof result.body === "string" ? result.body : "";
+      const events = parseOutlookCalendar(html || text, text);
+      setCalendarCache({ events, fetchedAt: Date.now() });
+
+      if (events.length === 0) {
+        return ok(`=== OUTLOOK CALENDAR ===\n\nPage loaded (${text.length} chars) but could not parse events.\nTry: bridge https://outlook.live.com/calendar/0/view/week --dom`);
+      }
+
+      const lines = [`=== OUTLOOK CALENDAR === (${events.length} events)`, ""];
+      for (const ev of events) {
+        lines.push(`  ${ev.date.padEnd(12)} ${ev.time.padEnd(14)} ${ev.title.slice(0, 50)}`);
+        if (ev.location) lines.push(`${"".padEnd(28)} @ ${ev.location}`);
+      }
+      return ok(lines.join("\n"));
+    }
+
+    if (sub === "read") {
+      const n = parseInt(args[1], 10);
+      const cached = getMailCache();
+      if (!cached || cached.emails.length === 0) return fail("[outlook] No cached emails. Run: outlook inbox");
+      if (isNaN(n) || n < 1 || n > cached.emails.length) return fail(`[outlook] read: specify a number 1-${cached.emails.length}`);
+      const email = cached.emails[n - 1];
+      const lines = [
+        `From:    ${email.from}`,
+        `Subject: ${email.subject}`,
+        `Date:    ${email.date}`,
+        `Status:  ${email.unread ? "UNREAD" : "read"}`,
+        "",
+        email.preview || "(no preview available)",
+      ];
+      return ok(lines.join("\n"));
+    }
+
+    return fail(`[outlook] unknown subcommand "${sub}"\nUsage: outlook [inbox|calendar|read <n>] [--limit N] [--refresh]`);
+  });
+
+  registerCommand("teams", "Browse Microsoft Teams chats via bridge", "teams [chats|channels] [--refresh]", async (args) => {
+    const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+    if (!isExtensionConnected()) {
+      return fail("[teams] Chrome extension bridge not connected. Teams requires your real browser session.\nRun: bridge-status");
+    }
+    const sub = args[0] || "chats";
+    const refresh = args.includes("--refresh");
+
+    if (sub === "chats") {
+      const cached = getTeamsCache();
+      if (cached && !refresh) {
+        const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
+        const lines = [`=== TEAMS CHATS === (cached ${age}s ago, ${cached.chats.length} conversations)`, ""];
+        cached.chats.forEach((c, i) => {
+          const unread = c.unread ? "*" : " ";
+          const name = c.name.padEnd(30).slice(0, 30);
+          lines.push(`${unread}${String(i + 1).padStart(3)}  ${name}  ${c.lastMessage.slice(0, 50)}`);
+          if (c.time) lines.push(`${"".padEnd(6)} ${c.time}`);
+        });
+        lines.push("", `Use: teams --refresh | teams channels`);
+        return ok(lines.join("\n"));
+      }
+
+      emitEvent("cli", "Fetching Teams chats via bridge DOM extraction...", "info", { metadata: { command: "teams" } });
+      const result = await smartFetch("https://teams.microsoft.com/v2/", "dom", "cli-teams", {
+        maxText: 40000,
+      }, 90000);
+      if (result.error) return fail(`[teams] ${result.error}`);
+      const text = result.text || "";
+      const html = typeof result.body === "string" ? result.body : "";
+      const chats = parseTeamsChats(html || text, text);
+      setTeamsCache({ chats, fetchedAt: Date.now() });
+
+      if (chats.length === 0) {
+        return ok(`=== TEAMS CHATS ===\n\nPage loaded (${text.length} chars) but could not parse chats.\nThis can happen if:\n- You're not logged into Teams in your browser\n- The page hasn't fully loaded (Teams is slow)\n\nTry: teams --refresh\nOr:  bridge https://teams.microsoft.com/v2/ --dom --wait 15000`);
+      }
+
+      const lines = [`=== TEAMS CHATS === (${chats.length} conversations)`, ""];
+      chats.forEach((c, i) => {
+        const unread = c.unread ? "*" : " ";
+        const name = c.name.padEnd(30).slice(0, 30);
+        lines.push(`${unread}${String(i + 1).padStart(3)}  ${name}  ${c.lastMessage.slice(0, 50)}`);
+        if (c.time) lines.push(`${"".padEnd(6)} ${c.time}`);
+      });
+      lines.push("", `Use: teams --refresh | teams channels`);
+      return ok(lines.join("\n"));
+    }
+
+    if (sub === "channels") {
+      emitEvent("cli", "Fetching Teams channels via bridge...", "info", { metadata: { command: "teams" } });
+      const result = await smartFetch("https://teams.microsoft.com/v2/", "dom", "cli-teams-ch", {
+        maxText: 30000,
+      }, 90000);
+      if (result.error) return fail(`[teams] channels: ${result.error}`);
+      const text = result.text || "";
+      const html = typeof result.body === "string" ? result.body : "";
+      const channels = parseTeamsChannels(html || text, text);
+
+      if (channels.length === 0) {
+        return ok(`=== TEAMS CHANNELS ===\n\nPage loaded (${text.length} chars) but could not parse channels.\nTry: bridge https://teams.microsoft.com/v2/ --dom --wait 15000`);
+      }
+
+      const lines = [`=== TEAMS CHANNELS === (${channels.length} channels)`, ""];
+      channels.forEach((ch, i) => {
+        const team = ch.team ? `[${ch.team}]` : "";
+        lines.push(`  ${String(i + 1).padStart(3)}  ${ch.name.padEnd(25).slice(0, 25)} ${team}`);
+      });
+      return ok(lines.join("\n"));
+    }
+
+    return fail(`[teams] unknown subcommand "${sub}"\nUsage: teams [chats|channels] [--refresh]`);
   });
 
   registerCommand("agenda", "Show today's agenda", "agenda", async () => {

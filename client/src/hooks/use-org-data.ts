@@ -286,23 +286,25 @@ export function useSearch(query: string) {
 }
 
 export function useBridgeStatus() {
-  return useQuery<{ running: boolean; pageCount: number; pages: string[]; authState: string }>({
+  return useQuery<{ running: boolean; pageCount: number; pages: string[]; authState: string; extension?: { connected: boolean; lastSeen?: number; version?: string; jobsCompleted?: number; lastError?: string } }>({
     queryKey: ["/api/bridge/status"],
     refetchInterval: 10000,
   });
 }
 
 export function useMailInbox() {
-  return useQuery<Array<{ from: string; subject: string; preview: string; date: string; unread: boolean }>>({
+  return useQuery<Array<{ index: number; from: string; subject: string; preview: string; date: string; unread: boolean }>>({
     queryKey: ["/api/mail/inbox"],
-    enabled: false,
+    refetchInterval: 60000,
+    retry: false,
   });
 }
 
 export function useTeamsChats() {
-  return useQuery<Array<{ name: string; lastMessage: string; timestamp: string; unread: boolean }>>({
+  return useQuery<Array<{ index: number; name: string; lastMessage: string; timestamp: string; unread: boolean }>>({
     queryKey: ["/api/chat/list"],
-    enabled: false,
+    refetchInterval: 60000,
+    retry: false,
   });
 }
 

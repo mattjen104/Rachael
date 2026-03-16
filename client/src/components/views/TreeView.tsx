@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { useTreeData, useToggleTask, useBridgeStatus } from "@/hooks/use-org-data";
+import { useTreeData, useToggleTask, useBridgeStatus, useMailInbox, useTeamsChats } from "@/hooks/use-org-data";
 
 interface TreeViewProps {
   onNavigate?: (view: string, id?: number) => void;
@@ -42,15 +42,32 @@ type TreeNode = {
 } | {
   type: "bridge-info";
   label: string;
+} | {
+  type: "mail";
+  index: number;
+  from: string;
+  subject: string;
+  unread: boolean;
+  date: string;
+} | {
+  type: "chat";
+  index: number;
+  name: string;
+  lastMessage: string;
+  unread: boolean;
 };
 
 export default function TreeView({ onNavigate }: TreeViewProps) {
   const { data, isLoading } = useTreeData();
   const toggleTask = useToggleTask();
   const { data: bridgeStatus } = useBridgeStatus();
+  const mailInbox = useMailInbox();
+  const teamsChats = useTeamsChats();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["tasks", "programs"]));
   const containerRef = useRef<HTMLDivElement>(null);
+  const [mailFetched, setMailFetched] = useState(false);
+  const [chatFetched, setChatFetched] = useState(false);
 
   const nodes: TreeNode[] = [];
 
@@ -101,15 +118,30 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
       }
     }
 
-    const bridgeConnected = bridgeStatus?.running || false;
-    nodes.push({ type: "section", label: "MAIL (Outlook)", key: "mail", count: bridgeConnected ? -1 : 0 });
+    const bridgeConnected = bridgeStatus?.extension?.connected || bridgeStatus?.running || false;
+    const emails = mailInbox.data || [];
+    const chats = teamsChats.data || [];
+
+    nodes.push({ type: "section", label: "MAIL (Outlook)", key: "mail", count: emails.length || (bridgeConnected ? -1 : 0) });
     if (expanded.has("mail")) {
-      nodes.push({ type: "bridge-info", label: bridgeConnected ? "Bridge connected — use command palette to fetch" : "Bridge disconnected — launch via M-x" });
+      if (emails.length > 0) {
+        for (const e of emails.slice(0, 15)) {
+          nodes.push({ type: "mail", index: e.index || 0, from: e.from, subject: e.subject, unread: e.unread, date: e.date || "" });
+        }
+      } else {
+        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Run: outlook  to fetch inbox" : "Bridge offline — connect extension first" });
+      }
     }
 
-    nodes.push({ type: "section", label: "CHAT (Teams)", key: "chat", count: bridgeConnected ? -1 : 0 });
+    nodes.push({ type: "section", label: "CHAT (Teams)", key: "chat", count: chats.length || (bridgeConnected ? -1 : 0) });
     if (expanded.has("chat")) {
-      nodes.push({ type: "bridge-info", label: bridgeConnected ? "Bridge connected — use command palette to fetch" : "Bridge disconnected — launch via M-x" });
+      if (chats.length > 0) {
+        for (const c of chats.slice(0, 15)) {
+          nodes.push({ type: "chat", index: c.index || 0, name: c.name, lastMessage: c.lastMessage, unread: c.unread });
+        }
+      } else {
+        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Run: teams  to fetch chats" : "Bridge offline — connect extension first" });
+      }
     }
   }
 
@@ -226,6 +258,13 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
         } else if (node.type === "bridge-info") {
           icon = "ℹ";
           label = node.label;
+        } else if (node.type === "mail") {
+          icon = node.unread ? ">" : " ";
+          label = `${node.from.slice(0, 18).padEnd(18)}  ${node.subject.slice(0, 40)}`;
+          extra = node.date;
+        } else if (node.type === "chat") {
+          icon = node.unread ? ">" : " ";
+          label = `${node.name.slice(0, 20).padEnd(20)}  ${node.lastMessage.slice(0, 35)}`;
         }
 
         return (
