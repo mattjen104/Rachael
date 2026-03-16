@@ -1426,18 +1426,30 @@ ${fullHtml}`;
         if (email) {
           headers["Email"] = email;
         }
-        const resp = await fetch(`https://ntfy.sh/${channel}`, {
-          method: "POST",
-          headers,
-          body: ntfyLines.join("\n"),
-        });
-        if (resp.ok) {
+        let resp: Response | null = null;
+        const maxRetries = 3;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          resp = await fetch(`https://ntfy.sh/${channel}`, {
+            method: "POST",
+            headers,
+            body: ntfyLines.join("\n"),
+          });
+          if (resp.ok) break;
+          if (resp.status === 429 && attempt < maxRetries - 1) {
+            const waitSec = Math.pow(2, attempt + 1) * 15;
+            emitEvent("cli", `ntfy.sh rate limited (429), retrying in ${waitSec}s (attempt ${attempt + 2}/${maxRetries})`, "warn", { metadata: { command: "notify" } });
+            await new Promise(r => setTimeout(r, waitSec * 1000));
+          } else {
+            break;
+          }
+        }
+        if (resp && resp.ok) {
           results.push(`Sent to ntfy.sh/${channel}${email ? ` + email to ${email}` : ""}`);
           if (htmlUrl) results.push(`Briefing: ${htmlUrl}`);
           if (audioUrl) results.push(`Audio: ${audioUrl}`);
           emitEvent("cli", `Notification sent to ntfy.sh/${channel}${email ? ` + ${email}` : ""}`, "info", { metadata: { command: "notify" } });
         } else {
-          results.push(`ntfy.sh error: ${resp.status} ${resp.statusText}`);
+          results.push(`ntfy.sh error: ${resp?.status} ${resp?.statusText} (after ${maxRetries} attempts)`);
         }
       } catch (e: any) {
         results.push(`ntfy.sh error: ${e.message}`);

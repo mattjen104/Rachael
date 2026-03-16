@@ -708,12 +708,17 @@ async function tickRecipes(): Promise<void> {
       const { executeChainRaw } = await import("./cli-engine");
       const result = await executeChainRaw(recipe.command);
       const nextAfterRun = parseCronNextRun(cronExpr, now);
-      await storage.updateRecipeLastRun(recipe.id, now, nextAfterRun, (result.stdout || "").slice(0, 10000));
-      emitEvent("agent-runtime", `Recipe complete: ${recipe.name} (exit:${result.exitCode})`, result.exitCode === 0 ? "info" : "error", { metadata: { recipe: recipe.name, exitCode: result.exitCode } });
+      if (!nextAfterRun) {
+        console.error(`[agent-runtime] WARNING: parseCronNextRun returned null for "${cronExpr}" after ${now.toISOString()}, using 24h fallback`);
+      }
+      const safeNext = nextAfterRun || new Date(now.getTime() + 86400000);
+      await storage.updateRecipeLastRun(recipe.id, now, safeNext, (result.stdout || "").slice(0, 10000));
+      emitEvent("agent-runtime", `Recipe complete: ${recipe.name} (exit:${result.exitCode}), next: ${safeNext.toISOString()}`, result.exitCode === 0 ? "info" : "error", { metadata: { recipe: recipe.name, exitCode: result.exitCode } });
     } catch (e: any) {
       console.error(`[agent-runtime] Recipe "${recipe.name}" failed:`, e.message);
       const nextAfterErr = parseCronNextRun(cronExpr, now);
-      await storage.updateRecipeLastRun(recipe.id, now, nextAfterErr, "Error: " + (e.message || "").slice(0, 500));
+      const safeNext = nextAfterErr || new Date(now.getTime() + 86400000);
+      await storage.updateRecipeLastRun(recipe.id, now, safeNext, "Error: " + (e.message || "").slice(0, 500));
     }
   }
 }
