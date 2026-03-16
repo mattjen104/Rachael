@@ -297,58 +297,141 @@ export function setCalendarCache(c: typeof calendarCache) { calendarCache = c; }
 export function getTeamsCache() { return teamsCache; }
 export function setTeamsCache(c: typeof teamsCache) { teamsCache = c; }
 
-function parseOutlookInbox(html: string, text: string): CachedEmail[] {
+const OUTLOOK_NAV_NOISE = new Set([
+  "inbox", "sent items", "drafts", "deleted items", "junk email", "archive",
+  "conversation history", "conversation histo", "notes", "outbox", "rss feeds",
+  "clutter", "focused", "other", "all", "unread", "to me", "flagged",
+  "mentions", "attachments", "groups", "favorites", "folders",
+  "new mail", "new message", "search", "filter", "calendar", "people",
+  "to-do", "settings", "help", "feedback", "sign out", "my account",
+  "microsoft 365", "office 365", "outlook", "mail", "selected",
+]);
+
+function isNavNoise(s: string): boolean {
+  const lower = s.toLowerCase().trim();
+  if (OUTLOOK_NAV_NOISE.has(lower)) return true;
+  if (lower.length < 3) return true;
+  if (/^(new|reply|forward|delete|move|archive|flag|pin|snooze|categorize|mark as|undo|more)$/i.test(lower)) return true;
+  if (/^(home|view|message|insert|format|help|file|edit|tools|actions)$/i.test(lower)) return true;
+  return false;
+}
+
+function parseOutlookInbox(html: string, text: string, extracted?: Record<string, Array<{ text: string; href?: string }>>): CachedEmail[] {
   const emails: CachedEmail[] = [];
 
-  const rowPatterns = [
-    /aria-label="([^"]*?(?:From|from)[^"]*?)"/g,
-    /class="[^"]*(?:customScrollBar|lvHighlightAllClass|hcFlexContainer)[^"]*"[^>]*>([\s\S]*?)(?=class="[^"]*(?:customScrollBar|lvHighlightAllClass|hcFlexContainer))/gi,
-    /data-convid="[^"]*"[\s\S]*?<span[^>]*>([^<]+)<\/span>/g,
-  ];
+  if (extracted?.rows && extracted.rows.length > 0) {
+    for (const row of extracted.rows) {
+      const t = row.text?.trim();
+      if (!t || t.length < 10 || t.length > 800) continue;
+      if (isNavNoise(t)) continue;
+
+      const fromMatch = t.match(/(?:From|from|Sender|sender)\s*[:.]?\s*([^,\n]{2,50})/);
+      const subjectMatch = t.match(/(?:Subject|subject)\s*[:.]?\s*([^,\n]{2,100})/);
+      const unread = /\bunread\b/i.test(t);
+      const dateMatch = t.match(/(?:Received|received|Date|date|Sent|sent)\s*[:.]?\s*([^,\n]{4,30})/) ||
+                        t.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/) ||
+                        t.match(/((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*[\s,]+\w+\s+\d{1,2})/i) ||
+                        t.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+
+      if (fromMatch || subjectMatch) {
+        const from = (fromMatch?.[1] || "Unknown").trim();
+        const subject = (subjectMatch?.[1] || "").trim();
+        if (isNavNoise(from) || isNavNoise(subject)) continue;
+        emails.push({
+          from: from.slice(0, 40),
+          subject: (subject || t.slice(0, 60)).trim(),
+          date: (dateMatch?.[1] || "").trim().slice(0, 20),
+          preview: t.slice(0, 200),
+          unread,
+        });
+      } else {
+        const parts = t.split(/\n/).map(p => p.trim()).filter(p => p.length > 0 && !isNavNoise(p));
+        if (parts.length >= 2) {
+          emails.push({
+            from: parts[0].slice(0, 40),
+            subject: parts[1].slice(0, 80),
+            date: parts.length > 2 && /\d/.test(parts[parts.length - 1]) ? parts[parts.length - 1].slice(0, 20) : "",
+            preview: parts.slice(2).join(" ").slice(0, 200),
+            unread,
+          });
+        }
+      }
+    }
+    if (emails.length > 0) {
+      const seen = new Set<string>();
+      return emails.filter(e => {
+        const key = `${e.from}|${e.subject}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+  }
 
   const ariaRe = /aria-label="([^"]+)"/g;
   let m: RegExpExecArray | null;
   while ((m = ariaRe.exec(html)) !== null) {
     const label = m[1];
-    if (!label.includes("mail") && !label.includes("Mail") &&
-        !label.includes("message") && !label.includes("Message") &&
-        !label.includes("email") && !label.includes("Email") &&
-        !label.includes("From") && !label.includes("from") &&
-        !label.includes("Subject") && !label.includes("subject") &&
-        !label.includes("Unread") && !label.includes("Read ")) continue;
+    if (label.length < 20 || label.length > 800) continue;
 
-    if (label.length > 30 && label.length < 500) {
-      const fromMatch = label.match(/(?:From|from)\s*[:.]?\s*([^,]+)/);
-      const subjectMatch = label.match(/(?:Subject|subject)\s*[:.]?\s*([^,]+)/) || label.match(/,\s*([^,]{5,80})\s*,/);
-      const dateMatch = label.match(/(?:Received|received|Date|date)\s*[:.]?\s*([^,]+)/) || label.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]?\d{0,4})/);
-      const unread = /unread/i.test(label);
+    const hasEmailKeyword = /\b(from|sender|subject|received|unread|read|message|has attachment)/i.test(label);
+    const hasCommaSections = (label.match(/,/g) || []).length >= 2;
 
-      if (fromMatch || subjectMatch) {
-        emails.push({
-          from: (fromMatch?.[1] || "Unknown").trim().slice(0, 40),
-          subject: (subjectMatch?.[1] || label.slice(0, 60)).trim(),
-          date: (dateMatch?.[1] || "").trim().slice(0, 12),
-          preview: label.slice(0, 200),
-          unread,
-        });
-      }
+    if (!hasEmailKeyword && !hasCommaSections) continue;
+    if (isNavNoise(label)) continue;
+
+    const fromMatch = label.match(/(?:From|from|Sender|sender)\s*[:.]?\s*([^,\n]{2,50})/);
+    const subjectMatch = label.match(/(?:Subject|subject)\s*[:.]?\s*([^,\n]{2,100})/);
+    const dateMatch = label.match(/(?:Received|received|Date|date|Sent|sent)\s*[:.]?\s*([^,\n]{4,30})/) ||
+                      label.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/) ||
+                      label.match(/((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*[\s,]+\w+\s+\d{1,2})/i) ||
+                      label.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+    const unread = /\bunread\b/i.test(label);
+    const hasAttach = /\b(?:has attachment|attachment)/i.test(label);
+
+    if (fromMatch || subjectMatch) {
+      const from = (fromMatch?.[1] || "Unknown").trim();
+      const subject = (subjectMatch?.[1] || "").trim();
+      if (isNavNoise(from) || isNavNoise(subject)) continue;
+      emails.push({
+        from: from.slice(0, 40),
+        subject: (subject || label.slice(0, 60)).trim(),
+        date: (dateMatch?.[1] || "").trim().slice(0, 20),
+        preview: label.slice(0, 200),
+        unread,
+      });
     }
   }
 
   if (emails.length === 0) {
-    const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 5);
-    const fromRe = /^([A-Z][a-z]+ [A-Z][a-z]+|[^\s@]+@[^\s@]+)$/;
-    for (let i = 0; i < lines.length - 1; i++) {
-      const line = lines[i];
-      if (fromRe.test(line) && lines[i + 1] && lines[i + 1].length > 5) {
+    const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 3);
+
+    for (let i = 0; i < lines.length; i++) {
+      if (isNavNoise(lines[i])) continue;
+    }
+
+    const senderRe = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+|[^\s@]+@[^\s@]+\.[^\s@]+)$/;
+    const timeRe = /^\d{1,2}:\d{2}\s*(?:AM|PM)?$|^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$|^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i;
+    const filteredLines = lines.filter(l => !isNavNoise(l));
+
+    for (let i = 0; i < filteredLines.length - 1; i++) {
+      const line = filteredLines[i];
+      const nextLine = filteredLines[i + 1];
+
+      if (senderRe.test(line) && !isNavNoise(line) && nextLine.length > 5 && !isNavNoise(nextLine)) {
+        let date = "";
+        if (i + 2 < filteredLines.length && timeRe.test(filteredLines[i + 2])) {
+          date = filteredLines[i + 2].slice(0, 20);
+        }
+        const previewLine = date ? (filteredLines[i + 3] || "") : (filteredLines[i + 2] || "");
         emails.push({
           from: line.slice(0, 40),
-          subject: lines[i + 1].slice(0, 80),
-          date: "",
-          preview: (lines[i + 2] || "").slice(0, 200),
+          subject: nextLine.slice(0, 80),
+          date,
+          preview: previewLine.slice(0, 200),
           unread: false,
         });
-        i += 1;
+        i += (date ? 2 : 1);
       }
     }
   }
@@ -1723,18 +1806,42 @@ ${fullHtml}`;
 
       emitEvent("cli", "Fetching Outlook inbox via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
       const result = await smartFetch("https://outlook.office.com/mail/inbox", "dom", "cli-outlook", {
-        maxText: 40000,
+        maxText: 60000,
+        selectors: {
+          rows: '[role="option"][aria-label], [role="listbox"] [role="option"], div[data-convid], tr[aria-label]',
+        },
       }, 60000);
       if (result.error) return fail(`[outlook] ${result.error}`);
       const text = result.text || "";
       const html = typeof result.body === "string" ? result.body : "";
       const source = html || text;
+      const extracted = (result as any).extracted || {};
 
-      const emails = parseOutlookInbox(source, text);
+      const showRaw = args.includes("--raw");
+      if (showRaw) {
+        const rowCount = extracted?.rows?.length || 0;
+        const sampleRows = (extracted?.rows || []).slice(0, 8).map((r: any, i: number) => `  [${i}] ${(r.text || "").trim().slice(0, 120)}`).join(String.fromCharCode(10));
+        const rawLines = [
+          `=== OUTLOOK RAW EXTRACTION ===`,
+          `Text length: ${text.length} chars`,
+          `HTML length: ${html.length} chars`,
+          `Extracted rows: ${rowCount}`,
+          "",
+          "--- First 8 extracted rows ---",
+          sampleRows || "(none)",
+          "",
+          "--- First 2000 chars of text ---",
+          text.slice(0, 2000),
+        ];
+        return ok(rawLines.join(String.fromCharCode(10)));
+      }
+
+      const emails = parseOutlookInbox(source, text, extracted);
       setMailCache({ emails, fetchedAt: Date.now() });
 
       if (emails.length === 0) {
-        return ok(`=== OUTLOOK INBOX ===\n\nPage loaded (${text.length} chars) but could not parse emails.\nThis can happen if:\n- You're not logged into outlook.office.com in your browser\n- The page hasn't fully loaded\n\nTry: outlook --refresh\nOr:  bridge https://outlook.office.com/mail/inbox --dom  for raw extraction`);
+        const sampleText = text.slice(0, 500).split(/[\n\r]+/).filter(l => l.trim().length > 0).slice(0, 10).join(String.fromCharCode(10));
+        return ok(`=== OUTLOOK INBOX ===\n\nPage loaded (${text.length} chars) but could not parse emails.\nExtracted rows: ${extracted?.rows?.length || 0}\n\nSample text:\n${sampleText}\n\nTry: outlook --raw   for full debug output\nOr:  outlook --refresh`);
       }
 
       const display = emails.slice(0, limit);
