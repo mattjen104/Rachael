@@ -1821,15 +1821,19 @@ ${fullHtml}`;
       const showRaw = args.includes("--raw");
       if (showRaw) {
         const rowCount = extracted?.rows?.length || 0;
+        const debug = (result as any).debug || {};
         const sampleRows = (extracted?.rows || []).slice(0, 8).map((r: any, i: number) => {
           const aria = r.ariaLabel ? `[aria] ${r.ariaLabel.trim().slice(0, 120)}` : `[text] ${(r.text || "").trim().slice(0, 120)}`;
           return `  [${i}] ${aria}`;
         }).join(String.fromCharCode(10));
         const rawLines = [
           `=== OUTLOOK RAW EXTRACTION ===`,
+          `Final URL: ${(result as any).url || "?"}`,
+          `Page title: ${(result as any).title || "?"}`,
           `Text length: ${text.length} chars`,
           `HTML length: ${html.length} chars`,
           `Extracted rows: ${rowCount}`,
+          `Debug: iframes=${debug.iframeCount ?? "?"}, bodyChildren=${debug.bodyChildCount ?? "?"}, textLen=${debug.textLen ?? "?"}`,
           "",
           "--- First 8 extracted rows ---",
           sampleRows || "(none)",

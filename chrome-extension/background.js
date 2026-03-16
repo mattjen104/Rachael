@@ -69,7 +69,7 @@ async function getOrgCloudUrl() {
   return baseUrl;
 }
 
-const BRIDGE_VERSION = "2.1.0";
+const BRIDGE_VERSION = "2.2.0";
 const JOB_DELAY_MS = 1500;
 
 function bridgeHeaders(token) {
@@ -190,9 +190,9 @@ async function executeJob(job) {
     const includeHtml = options?.includeHtml || false;
     const maxHtml = options?.maxHtml || 50000;
     const waitForSelector = hasSelectors ? Object.values(selectors)[0] : null;
-    const spaWaitMs = options?.spaWaitMs || (waitForSelector ? 12000 : 1500);
+    const spaWaitMs = options?.spaWaitMs || (waitForSelector ? 15000 : 2000);
 
-    const tab = await chrome.tabs.create({ url, active: false });
+    const tab = await chrome.tabs.create({ url, active: true });
 
     try {
       await new Promise((resolve, reject) => {
@@ -202,7 +202,7 @@ async function executeJob(job) {
             if (waitForSelector) {
               pollForSelector(tab.id, waitForSelector, spaWaitMs).then(resolve).catch(resolve);
             } else {
-              setTimeout(resolve, 1500);
+              setTimeout(resolve, 2000);
             }
           }
         }
@@ -212,8 +212,8 @@ async function executeJob(job) {
         }
         const timeout = setTimeout(() => {
           cleanup();
-          reject(new Error("Tab load timed out after 30s"));
-        }, 30000);
+          resolve();
+        }, 45000);
         chrome.tabs.onUpdated.addListener(listener);
       });
 
@@ -233,8 +233,15 @@ async function executeJob(job) {
 
           const text = document.body?.innerText?.substring(0, maxT) || "";
           const html = inclHtml ? document.documentElement.outerHTML.substring(0, maxH) : undefined;
+          const iframeCount = document.querySelectorAll("iframe").length;
+          const finalUrl = location.href;
+          const title = document.title;
+          const bodyChildCount = document.body?.children?.length || 0;
 
-          return { text, html, extracted, url: location.href, title: document.title };
+          return {
+            text, html, extracted, url: finalUrl, title,
+            debug: { iframeCount, bodyChildCount, textLen: text.length, extractedKeys: Object.keys(extracted) }
+          };
         },
         args: [selectors, maxText, includeHtml, maxHtml],
       });
@@ -243,9 +250,19 @@ async function executeJob(job) {
       return {
         status: 200,
         url: data.url || url,
-        text: data.text,
+        text: data.text || "",
         html: data.html,
         extracted: data.extracted || {},
+        debug: data.debug || {},
+        title: data.title || "",
+      };
+    } catch (execErr) {
+      return {
+        status: 500,
+        url,
+        text: "",
+        extracted: {},
+        error: "Script execution failed: " + (execErr.message || String(execErr)),
       };
     } finally {
       try { await chrome.tabs.remove(tab.id); } catch {}
