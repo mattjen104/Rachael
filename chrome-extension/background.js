@@ -159,6 +159,37 @@ async function pollForSelector(tabId, selector, maxWaitMs) {
   }
 }
 
+async function findExistingTab(urlPattern) {
+  const tabs = await chrome.tabs.query({});
+  return tabs.find(t => t.url && t.url.includes(urlPattern)) || null;
+}
+
+async function pollForTextMatch(tabId, selector, matchText, maxWaitMs) {
+  const interval = 1000;
+  const maxAttempts = Math.ceil(maxWaitMs / interval);
+  const lower = matchText.toLowerCase();
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel, txt) => {
+          const els = Array.from(document.querySelectorAll(sel));
+          return els.some(el => {
+            const t = (el.textContent || "").trim().toLowerCase();
+            return t === txt || t.includes(txt);
+          });
+        },
+        args: [selector, lower],
+      });
+      if (results?.[0]?.result) return true;
+    } catch {
+      return false;
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  return false;
+}
+
 async function executeJob(job) {
   const { type, url, options } = job;
 
@@ -192,36 +223,57 @@ async function executeJob(job) {
     const waitForSelector = hasSelectors ? Object.values(selectors)[0] : null;
     const spaWaitMs = options?.spaWaitMs || (waitForSelector ? 15000 : 2000);
 
-    const tab = await chrome.tabs.create({ url, active: true });
+    const clickSelector = options?.clickSelector || null;
+    const clickIndex = options?.clickIndex || 0;
+    const clickMatchText = options?.clickMatchText || null;
+    const postClickWaitMs = options?.postClickWaitMs || 3000;
+    const postClickSelector = options?.postClickSelector || null;
+    const reuseTab = options?.reuseTab || false;
+
+    let tab = null;
+    let tabReused = false;
+
+    if (reuseTab) {
+      const hostname = new URL(url).hostname;
+      tab = await findExistingTab(hostname);
+    }
+
+    if (tab) {
+      tabReused = true;
+      await chrome.tabs.update(tab.id, { active: true });
+      await new Promise((r) => setTimeout(r, 1000));
+    } else {
+      tab = await chrome.tabs.create({ url, active: true });
+    }
 
     try {
-      await new Promise((resolve, reject) => {
-        function listener(tabId, info) {
-          if (tabId === tab.id && info.status === "complete") {
-            cleanup();
-            if (waitForSelector) {
-              pollForSelector(tab.id, waitForSelector, spaWaitMs).then(resolve).catch(resolve);
-            } else {
-              setTimeout(resolve, 2000);
+      if (!tabReused) {
+        await new Promise((resolve, reject) => {
+          function listener(tabId, info) {
+            if (tabId === tab.id && info.status === "complete") {
+              cleanup();
+              if (waitForSelector) {
+                pollForSelector(tab.id, waitForSelector, spaWaitMs).then(resolve).catch(resolve);
+              } else {
+                setTimeout(resolve, 2000);
+              }
             }
           }
-        }
-        function cleanup() {
-          clearTimeout(timeout);
-          chrome.tabs.onUpdated.removeListener(listener);
-        }
-        const timeout = setTimeout(() => {
-          cleanup();
-          resolve();
-        }, 45000);
-        chrome.tabs.onUpdated.addListener(listener);
-      });
+          function cleanup() {
+            clearTimeout(timeout);
+            chrome.tabs.onUpdated.removeListener(listener);
+          }
+          const timeout = setTimeout(() => {
+            cleanup();
+            resolve();
+          }, 45000);
+          chrome.tabs.onUpdated.addListener(listener);
+        });
+      }
 
-      const clickSelector = options?.clickSelector || null;
-      const clickIndex = options?.clickIndex || 0;
-      const clickMatchText = options?.clickMatchText || null;
-      const postClickWaitMs = options?.postClickWaitMs || 3000;
-      const postClickSelector = options?.postClickSelector || null;
+      if (clickSelector && clickMatchText) {
+        await pollForTextMatch(tab.id, clickSelector, clickMatchText, 15000);
+      }
 
       if (clickSelector) {
         await chrome.scripting.executeScript({
@@ -235,12 +287,19 @@ async function executeJob(job) {
                 const t = (el.textContent || "").trim().toLowerCase();
                 return t === lower || t.includes(lower);
               });
+              if (!target) {
+                target = els.find(el => {
+                  const t = (el.textContent || "").trim().toLowerCase();
+                  return t.split(/\s+/).some(w => lower.split(/\s+/).some(lw => w.includes(lw)));
+                });
+              }
             }
             if (!target) target = els[idx] || null;
             if (target) {
               target.scrollIntoView({ block: "center" });
               target.click();
             }
+            return !!target;
           },
           args: [clickSelector, clickIndex, clickMatchText],
         });

@@ -26,6 +26,7 @@ export interface BridgeJob {
     clickMatchText?: string;
     postClickWaitMs?: number;
     postClickSelector?: string;
+    reuseTab?: boolean;
   };
   submittedBy: string;
   submittedAt: number;
