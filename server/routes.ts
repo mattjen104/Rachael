@@ -468,15 +468,17 @@ export async function registerRoutes(
   });
 
   app.get("/api/tree", async (_req, res) => {
-    const [allTasks, allPrograms, allSkills, allNotes, allCaptures, allPages, allTranscripts] = await Promise.all([
+    const [allTasks, allPrograms, allSkills, allNotes, allCaptures, allPages] = await Promise.all([
       storage.getTasks(),
       storage.getPrograms(),
       storage.getSkills(),
       storage.getNotes(),
       storage.getCaptures(false),
       storage.getReaderPages(),
-      storage.getTranscripts(),
     ]);
+
+    let allTranscripts: any[] = [];
+    try { allTranscripts = await storage.getTranscripts(); } catch {}
 
     res.json({
       tasks: allTasks,
