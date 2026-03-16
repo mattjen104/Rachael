@@ -329,6 +329,44 @@ export default function Minibuffer({
     setSelectedIdx(0);
   }, [query, mode]);
 
+  const doSubmit = useCallback(() => {
+    if (mode === "shell" && query.trim() && !shellRunning) {
+      executeShellCommand(query.trim());
+      return;
+    }
+    if (mode === "command" && filteredCommands[selectedIdx]) {
+      filteredCommands[selectedIdx].action();
+    } else if (mode === "search" && searchResults[selectedIdx]) {
+      const r = searchResults[selectedIdx];
+      const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader" };
+      const targetView = viewMap[r.type] || "tree";
+      onNavigate(targetView, r.id);
+      onCommandExecuted(`Found: ${r.title}`);
+      onClose();
+    } else if (mode === "capture" && query.trim()) {
+      smartCapture.mutate(query.trim());
+      onCommandExecuted(`Captured: ${query.trim().slice(0, 30)}`);
+      onClose();
+    } else if (mode === "add-url" && query.trim()) {
+      createReaderPage.mutate(query.trim());
+      onCommandExecuted(`Saving: ${query.trim().slice(0, 30)}`);
+      onClose();
+    } else if (mode === "scrape-url" && query.trim()) {
+      if (pendingNavPathId) {
+        executeNavPath(pendingNavPathId, pendingNavPathLabel, query.trim());
+        setPendingNavPathId(null);
+        setPendingNavPathLabel("");
+      } else {
+        executeScraperUrl(query.trim());
+      }
+    }
+  }, [mode, filteredCommands, searchResults, selectedIdx, query, onClose, onCommandExecuted, smartCapture, createReaderPage, executeScraperUrl, executeShellCommand, shellRunning, executeNavPath, pendingNavPathId, pendingNavPathLabel]);
+
+  const handleFormSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    doSubmit();
+  }, [doSubmit]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const maxIdx = mode === "command" ? filteredCommands.length - 1 :
       mode === "search" ? searchResults.length - 1 : 0;
@@ -369,39 +407,10 @@ export default function Minibuffer({
         break;
       case "Enter":
         e.preventDefault();
-        if (mode === "shell" && query.trim() && !shellRunning) {
-          executeShellCommand(query.trim());
-          return;
-        }
-        if (mode === "command" && filteredCommands[selectedIdx]) {
-          filteredCommands[selectedIdx].action();
-        } else if (mode === "search" && searchResults[selectedIdx]) {
-          const r = searchResults[selectedIdx];
-          const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader" };
-          const targetView = viewMap[r.type] || "tree";
-          onNavigate(targetView, r.id);
-          onCommandExecuted(`Found: ${r.title}`);
-          onClose();
-        } else if (mode === "capture" && query.trim()) {
-          smartCapture.mutate(query.trim());
-          onCommandExecuted(`Captured: ${query.trim().slice(0, 30)}`);
-          onClose();
-        } else if (mode === "add-url" && query.trim()) {
-          createReaderPage.mutate(query.trim());
-          onCommandExecuted(`Saving: ${query.trim().slice(0, 30)}`);
-          onClose();
-        } else if (mode === "scrape-url" && query.trim()) {
-          if (pendingNavPathId) {
-            executeNavPath(pendingNavPathId, pendingNavPathLabel, query.trim());
-            setPendingNavPathId(null);
-            setPendingNavPathLabel("");
-          } else {
-            executeScraperUrl(query.trim());
-          }
-        }
+        doSubmit();
         break;
     }
-  }, [mode, filteredCommands, searchResults, selectedIdx, query, onClose, onCommandExecuted, smartCapture, createReaderPage, executeScraperUrl, executeShellCommand, shellRunning, shellHistory, historyIdx, executeNavPath, pendingNavPathId, pendingNavPathLabel]);
+  }, [mode, filteredCommands, searchResults, selectedIdx, onClose, shellHistory, historyIdx, doSubmit]);
 
   const modeLabel = mode === "command" ? "M-x" :
     mode === "search" ? "Search" :
@@ -418,7 +427,7 @@ export default function Minibuffer({
       data-testid="minibuffer"
     >
       <div className="w-full max-w-[380px] bg-background border border-border rounded shadow-lg font-mono text-xs">
-        <div className="flex items-center border-b border-border px-2 py-1">
+        <form onSubmit={handleFormSubmit} className="flex items-center border-b border-border px-2 py-1">
           <span className="text-muted-foreground mr-2 shrink-0">{modeLabel}:</span>
           <input
             ref={inputRef}
@@ -427,9 +436,10 @@ export default function Minibuffer({
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
+            autoComplete="off"
             placeholder={mode === "shell" ? "Type command (help for list)..." : mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" || mode === "scrape-url" ? "https://..." : "Type to filter..."}
           />
-        </div>
+        </form>
         <div ref={listRef} className="max-h-64 overflow-y-auto">
           {mode === "command" && filteredCommands.map((cmd, idx) => (
             <div
