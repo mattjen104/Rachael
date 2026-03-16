@@ -15,7 +15,7 @@ import { useCrtTheme } from "@/lib/crt-theme";
 export default function Workspace() {
   const [viewMode, setViewMode] = useState<ViewMode>("agenda");
   const [minibufferOpen, setMinibufferOpen] = useState(false);
-  const [minibufferInitialMode, setMinibufferInitialMode] = useState<"command" | "search" | "capture" | "add-url">("command");
+  const [minibufferInitialMode, setMinibufferInitialMode] = useState<"command" | "search" | "capture" | "add-url" | "shell">("command");
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<number | undefined>(undefined);
 
@@ -97,6 +97,13 @@ export default function Workspace() {
       if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setMinibufferInitialMode("capture");
+        setMinibufferOpen(true);
+        return;
+      }
+
+      if (e.key === ":" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setMinibufferInitialMode("shell");
         setMinibufferOpen(true);
         return;
       }

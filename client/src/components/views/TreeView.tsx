@@ -181,12 +181,29 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
       case "Enter":
         e.preventDefault();
         const node = nodes[selectedIdx];
-        if (node?.type === "task") toggleTask.mutate(node.id);
+        if (node?.type === "section") {
+          setExpanded(prev => {
+            const next = new Set(prev);
+            if (next.has(node.key)) next.delete(node.key);
+            else next.add(node.key);
+            return next;
+          });
+          if (node.key === "mail" && !mailFetched) {
+            mailInbox.refetch(); setMailFetched(true);
+          } else if (node.key === "chat" && !chatFetched) {
+            teamsChats.refetch(); setChatFetched(true);
+          }
+        }
+        else if (node?.type === "task") toggleTask.mutate(node.id);
         else if (node?.type === "program") onNavigate?.("programs", node.id);
         else if (node?.type === "reader") onNavigate?.("reader", node.id);
+        else if (node?.type === "note") onNavigate?.("tree", node.id);
+        else if (node?.type === "mail" || node?.type === "chat" || node?.type === "bridge-info") {
+          /* individual mail/chat items are display-only in tree */
+        }
         break;
     }
-  }, [nodes, selectedIdx, toggleTask, onNavigate, expanded]);
+  }, [nodes, selectedIdx, toggleTask, onNavigate, expanded, mailInbox, teamsChats, mailFetched, chatFetched]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);

@@ -22,7 +22,7 @@ interface MinibufferCommand {
 }
 
 interface MinibufferProps {
-  initialMode?: "command" | "search" | "capture" | "add-url";
+  initialMode?: "command" | "search" | "capture" | "add-url" | "shell";
   onClose: () => void;
   onSwitchView: (view: ViewMode) => void;
   onNavigate: (view: string, id?: number) => void;
@@ -40,10 +40,14 @@ export default function Minibuffer({
 }: MinibufferProps) {
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [mode, setMode] = useState<"command" | "search" | "capture" | "add-url" | "scrape-url" | "scraper-result">(initialMode);
+  const [mode, setMode] = useState<"command" | "search" | "capture" | "add-url" | "scrape-url" | "scraper-result" | "shell">(initialMode);
   const [scraperResult, setScraperResult] = useState<ScraperResultData | null>(null);
   const [pendingNavPathId, setPendingNavPathId] = useState<number | null>(null);
   const [pendingNavPathLabel, setPendingNavPathLabel] = useState("");
+  const [shellOutput, setShellOutput] = useState<string>("");
+  const [shellRunning, setShellRunning] = useState(false);
+  const [shellHistory, setShellHistory] = useState<string[]>([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -123,6 +127,29 @@ export default function Minibuffer({
     }
   }, [onCommandExecuted]);
 
+  const executeShellCommand = useCallback(async (cmd: string) => {
+    if (!cmd.trim()) return;
+    setShellRunning(true);
+    setShellOutput("");
+    setShellHistory(prev => {
+      const next = prev.filter(h => h !== cmd);
+      next.unshift(cmd);
+      return next.slice(0, 50);
+    });
+    setHistoryIdx(-1);
+    try {
+      const res = await apiRequest("POST", "/api/cli/run", { command: cmd });
+      const data: { output: string; exitCode: number; durationMs: number } = await res.json();
+      setShellOutput(data.output);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Command failed";
+      setShellOutput(`[error] ${msg}`);
+    } finally {
+      setShellRunning(false);
+      setQuery("");
+    }
+  }, []);
+
   const executeScraperUrl = useCallback(async (url: string) => {
     onCommandExecuted(`Scraping: ${url.slice(0, 40)}...`);
     try {
@@ -164,6 +191,11 @@ export default function Minibuffer({
       { id: "fetch-chats", label: "fetch-teams-chats", action: () => exec("Fetching chats...", () => { queryClient.invalidateQueries({ queryKey: ["/api/chat/list"] }); }) },
       { id: "cockpit-focus", label: "cockpit-focus-program", action: () => exec("Cockpit", () => onSwitchView("cockpit")) },
       { id: "cockpit-history", label: "cockpit-view-history", action: () => exec("Cockpit History", () => onSwitchView("cockpit")) },
+      { id: "shell", label: "shell", hint: ":", action: () => { setMode("shell"); setQuery(""); setSelectedIdx(0); setShellOutput(""); } },
+      { id: "run-outlook", label: "run: outlook", hint: "Fetch inbox via bridge", action: () => { setMode("shell"); setQuery("outlook"); setShellOutput(""); } },
+      { id: "run-outlook-cal", label: "run: outlook calendar", hint: "Fetch calendar via bridge", action: () => { setMode("shell"); setQuery("outlook calendar"); setShellOutput(""); } },
+      { id: "run-teams", label: "run: teams", hint: "Fetch Teams chats via bridge", action: () => { setMode("shell"); setQuery("teams"); setShellOutput(""); } },
+      { id: "run-bridge-status", label: "run: bridge-status", hint: "Check bridge connectivity", action: () => { setMode("shell"); setQuery("bridge-status"); setShellOutput(""); } },
     ];
 
     for (const prog of allPrograms) {
@@ -313,17 +345,38 @@ export default function Minibuffer({
         break;
       case "ArrowDown":
       case "Tab":
-        if (!e.shiftKey) {
-          e.preventDefault();
+        e.preventDefault();
+        if (mode === "shell" && e.key === "ArrowDown") {
+          if (historyIdx > 0) {
+            const nextIdx = historyIdx - 1;
+            setHistoryIdx(nextIdx);
+            setQuery(shellHistory[nextIdx]);
+          } else if (historyIdx === 0) {
+            setHistoryIdx(-1);
+            setQuery("");
+          }
+        } else if (!e.shiftKey) {
           setSelectedIdx(i => Math.min(i + 1, maxIdx));
         }
         break;
       case "ArrowUp":
         e.preventDefault();
-        setSelectedIdx(i => Math.max(i - 1, 0));
+        if (mode === "shell") {
+          if (shellHistory.length > 0) {
+            const nextIdx = Math.min(historyIdx + 1, shellHistory.length - 1);
+            setHistoryIdx(nextIdx);
+            setQuery(shellHistory[nextIdx]);
+          }
+        } else {
+          setSelectedIdx(i => Math.max(i - 1, 0));
+        }
         break;
       case "Enter":
         e.preventDefault();
+        if (mode === "shell" && query.trim() && !shellRunning) {
+          executeShellCommand(query.trim());
+          return;
+        }
         if (mode === "command" && filteredCommands[selectedIdx]) {
           filteredCommands[selectedIdx].action();
         } else if (mode === "search" && searchResults[selectedIdx]) {
@@ -352,12 +405,13 @@ export default function Minibuffer({
         }
         break;
     }
-  }, [mode, filteredCommands, searchResults, selectedIdx, query, onClose, onCommandExecuted, smartCapture, createReaderPage, executeScraperUrl, executeNavPath, pendingNavPathId, pendingNavPathLabel]);
+  }, [mode, filteredCommands, searchResults, selectedIdx, query, onClose, onCommandExecuted, smartCapture, createReaderPage, executeScraperUrl, executeShellCommand, shellRunning, shellHistory, historyIdx, executeNavPath, pendingNavPathId, pendingNavPathLabel]);
 
   const modeLabel = mode === "command" ? "M-x" :
     mode === "search" ? "Search" :
     mode === "capture" ? "Capture (t task / note)" :
     mode === "scraper-result" ? "Scraper Result" :
+    mode === "shell" ? ":" :
     mode === "scrape-url" ? (pendingNavPathId ? `URL for ${pendingNavPathLabel}` : "Scrape URL") :
     "URL";
 
@@ -377,7 +431,7 @@ export default function Minibuffer({
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" || mode === "scrape-url" ? "https://..." : "Type to filter..."}
+            placeholder={mode === "shell" ? "Type command (help for list)..." : mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" || mode === "scrape-url" ? "https://..." : "Type to filter..."}
           />
         </div>
         <div ref={listRef} className="max-h-64 overflow-y-auto">
@@ -424,6 +478,21 @@ export default function Minibuffer({
           {mode === "add-url" && query && (
             <div className="px-2 py-2 text-muted-foreground">
               Press Enter to save URL to Reader.
+            </div>
+          )}
+          {mode === "shell" && (
+            <div className="px-2 py-1 text-foreground" data-testid="shell-output">
+              {shellRunning && (
+                <div className="py-1 text-muted-foreground animate-pulse">Running...</div>
+              )}
+              {shellOutput && (
+                <div className="max-h-48 overflow-y-auto whitespace-pre-wrap text-[10px] leading-relaxed">{shellOutput}</div>
+              )}
+              {!shellRunning && !shellOutput && (
+                <div className="py-1 text-muted-foreground">
+                  Type a CLI command and press Enter. Try: help, bridge-status, outlook, teams
+                </div>
+              )}
             </div>
           )}
           {mode === "scrape-url" && query && (
