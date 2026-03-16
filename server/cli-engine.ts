@@ -2276,7 +2276,25 @@ ${fullHtml}`;
     return ok(lines.length > 0 ? lines.join("\n") : "Nothing on the agenda today.");
   });
 
-  registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--refresh] [--save]", async (args) => {
+  registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--save] | citrix clean", async (args) => {
+    const CITRIX_JUNK_SET = new Set(["open", "restart", "request", "cancel request", "add to favorites", "remove from favorites", "install", "more", "less", "cancel", "save", "refresh"]);
+    const CITRIX_CAT_HEADER_RE = /^\[App\]\s*(Epic Non-Production|Epic Production|Epic Training|Epic Utilities|MyChart|Troubleshooting|Uncategorized)\s*\(\d+\)$/i;
+
+    if (args[0] === "clean") {
+      const allNotes = await storage.getNotes();
+      const toDelete = allNotes.filter(n => {
+        if (!n.tags?.includes("apps")) return false;
+        const name = n.title.replace(/^\[App\]\s*/i, "").trim().toLowerCase();
+        if (CITRIX_JUNK_SET.has(name)) return true;
+        if (CITRIX_CAT_HEADER_RE.test(n.title)) return true;
+        return false;
+      });
+      for (const n of toDelete) {
+        await storage.deleteNote(n.id);
+      }
+      return ok(`Cleaned ${toDelete.length} junk/category items from APPS`);
+    }
+
     const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
     if (!isExtensionConnected()) {
       return fail("[citrix] Chrome extension bridge not connected. Citrix requires your real browser session.");
@@ -2304,9 +2322,14 @@ ${fullHtml}`;
     const apps: AppLink[] = [];
     const seen = new Set<string>();
 
+    const CITRIX_JUNK = new Set(["open", "restart", "request", "cancel request", "add to favorites", "remove from favorites", "install", "more", "less", "cancel", "save", "refresh"]);
+    const CITRIX_CAT_RE = /^(Epic Non-Production|Epic Production|Epic Training|Epic Utilities|MyChart|Troubleshooting|Uncategorized)\s*\(\d+\)$/i;
+
     const addApp = (name: string, href: string) => {
       const clean = cleanUnicode(name).trim();
       if (!clean || clean.length < 2 || clean.length > 100) return;
+      if (CITRIX_JUNK.has(clean.toLowerCase())) return;
+      if (CITRIX_CAT_RE.test(clean)) return;
       if (seen.has(clean.toLowerCase())) return;
       seen.add(clean.toLowerCase());
       apps.push({ name: clean, href: href || "" });

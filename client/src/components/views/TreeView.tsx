@@ -107,23 +107,53 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       }
     }
 
+    const CITRIX_JUNK = new Set(["open", "restart", "request", "cancel request", "add to favorites", "remove from favorites", "install", "more", "less"]);
+    const CITRIX_CAT_HEADER = /^\[App\]\s*(Epic Non-Production|Epic Production|Epic Training|Epic Utilities|MyChart|Troubleshooting|Uncategorized)\s*\(\d+\)$/i;
     const isApp = (n: any) => n.tags?.some((t: string) => t.toLowerCase() === "apps");
-    const appNotes = data.notes.filter(isApp);
+    const allAppNotes = data.notes.filter(isApp);
+    const appNotes = allAppNotes.filter(n => {
+      const name = n.title.replace(/^\[App\]\s*/i, "").trim().toLowerCase();
+      if (CITRIX_JUNK.has(name)) return false;
+      if (CITRIX_CAT_HEADER.test(n.title)) return false;
+      return true;
+    });
     const regularNotes = data.notes.filter((n: any) => !isApp(n));
 
-    const parseAppLink = (n: any): { name: string; href: string } => {
+    const parseAppLink = (n: any): { name: string; href: string; category: string } => {
       const linkMatch = (n.body || "").match(/\[([^\]]+)\]\(([^)]+)\)/);
-      if (linkMatch) return { name: linkMatch[1], href: linkMatch[2] };
-      const urlMatch = (n.body || "").match(/(https?:\/\/\S+)/);
-      return { name: n.title.replace(/^\[App\]\s*/i, ""), href: urlMatch?.[1] || "" };
+      const rawName = linkMatch ? linkMatch[1] : n.title.replace(/^\[App\]\s*/i, "");
+      const href = linkMatch ? linkMatch[2] : ((n.body || "").match(/(https?:\/\/\S+)/)?.[1] || "");
+      let category = "Apps";
+      if (/Epic Production|^PRD |^SUP /i.test(rawName)) category = "Production";
+      else if (/Epic Non-Production|^TST |^REL |^POC |^OLDTST |^PJX |^UAT |Staging/i.test(rawName)) category = "Non-Production";
+      else if (/Epic Training|^ACE\d|^MST |^PLY |^PREP |^REF |^EXAM |^FSC /i.test(rawName)) category = "Training";
+      else if (/MyChart/i.test(rawName)) category = "MyChart";
+      else if (/Epic Utilities|System Pulse/i.test(rawName)) category = "Utilities";
+      else if (/Troubleshoot|Tester|Testing/i.test(rawName)) category = "Troubleshooting";
+      else if (/CTX|Remote Desktop|BCA|ClinApps|Edge|Hyland|OnBase|Tableau|Kuiper|DemoOCX|EDocument/i.test(rawName)) category = "Desktop Apps";
+      return { name: rawName, href, category };
     };
+
+    const categorized = new Map<string, Array<{ id: number; name: string; href: string }>>();
+    const catOrder = ["Production", "Non-Production", "Training", "MyChart", "Desktop Apps", "Utilities", "Troubleshooting", "Apps"];
+    for (const n of appNotes) {
+      const app = parseAppLink(n);
+      if (!categorized.has(app.category)) categorized.set(app.category, []);
+      categorized.get(app.category)!.push({ id: n.id, name: app.name, href: app.href });
+    }
 
     nodes.push({ type: "section", label: "APPS (Citrix)", key: "apps", count: appNotes.length || (bridgeConnected ? -1 : 0) });
     if (expanded.has("apps")) {
       if (appNotes.length > 0) {
-        for (const n of appNotes) {
-          const app = parseAppLink(n);
-          nodes.push({ type: "appLink", id: n.id, name: app.name, href: app.href });
+        for (const cat of catOrder) {
+          const items = categorized.get(cat);
+          if (!items || items.length === 0) continue;
+          nodes.push({ type: "section", label: `  ${cat}`, key: `apps-${cat}`, count: items.length });
+          if (expanded.has(`apps-${cat}`)) {
+            for (const app of items) {
+              nodes.push({ type: "appLink", id: app.id, name: app.name, href: app.href });
+            }
+          }
         }
       } else {
         nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter to scrape CWP" : "Bridge not connected", actionCmd: bridgeConnected ? "citrix --save" : "bridge-status" });
