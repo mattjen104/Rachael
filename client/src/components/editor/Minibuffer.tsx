@@ -185,17 +185,13 @@ export default function Minibuffer({
       { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
       { id: "toggle-runtime", label: "toggle-runtime", hint: "R", action: () => exec("Runtime toggled", () => toggleRuntime.mutate()) },
       { id: "refresh", label: "refresh-all", hint: "r", action: () => exec("Refreshed", () => queryClient.invalidateQueries()) },
-      { id: "launch-bridge", label: "launch-browser-bridge", action: () => exec("Launching bridge...", () => { apiRequest("POST", "/api/bridge/launch"); }) },
-      { id: "close-bridge", label: "close-browser-bridge", action: () => exec("Closing bridge", () => { apiRequest("POST", "/api/bridge/close"); }) },
-      { id: "fetch-mail", label: "fetch-outlook-inbox", action: () => exec("Fetching inbox...", () => { queryClient.invalidateQueries({ queryKey: ["/api/mail/inbox"] }); }) },
-      { id: "fetch-chats", label: "fetch-teams-chats", action: () => exec("Fetching chats...", () => { queryClient.invalidateQueries({ queryKey: ["/api/chat/list"] }); }) },
+      { id: "bridge-status", label: "bridge-status", hint: "Check extension", action: () => { setMode("shell"); setQuery("bridge-status"); setShellOutput(""); executeShellCommand("bridge-status"); } },
+      { id: "fetch-mail", label: "fetch-outlook-inbox", hint: "Via bridge", action: () => { setMode("shell"); setQuery("outlook"); setShellOutput(""); executeShellCommand("outlook"); } },
+      { id: "fetch-chats", label: "fetch-teams-chats", hint: "Via bridge", action: () => { setMode("shell"); setQuery("teams"); setShellOutput(""); executeShellCommand("teams"); } },
+      { id: "fetch-calendar", label: "fetch-outlook-calendar", hint: "Via bridge", action: () => { setMode("shell"); setQuery("outlook calendar"); setShellOutput(""); executeShellCommand("outlook calendar"); } },
       { id: "cockpit-focus", label: "cockpit-focus-program", action: () => exec("Cockpit", () => onSwitchView("cockpit")) },
       { id: "cockpit-history", label: "cockpit-view-history", action: () => exec("Cockpit History", () => onSwitchView("cockpit")) },
       { id: "shell", label: "shell", hint: ":", action: () => { setMode("shell"); setQuery(""); setSelectedIdx(0); setShellOutput(""); } },
-      { id: "run-outlook", label: "run: outlook", hint: "Fetch inbox via bridge", action: () => { setMode("shell"); setQuery("outlook"); setShellOutput(""); } },
-      { id: "run-outlook-cal", label: "run: outlook calendar", hint: "Fetch calendar via bridge", action: () => { setMode("shell"); setQuery("outlook calendar"); setShellOutput(""); } },
-      { id: "run-teams", label: "run: teams", hint: "Fetch Teams chats via bridge", action: () => { setMode("shell"); setQuery("teams"); setShellOutput(""); } },
-      { id: "run-bridge-status", label: "run: bridge-status", hint: "Check bridge connectivity", action: () => { setMode("shell"); setQuery("bridge-status"); setShellOutput(""); } },
     ];
 
     for (const prog of allPrograms) {
@@ -290,7 +286,7 @@ export default function Minibuffer({
     }
 
     return cmds;
-  }, [exec, onSwitchView, onCycleTheme, toggleRuntime, allPrograms, pendingProposals, allTasks, allSiteProfiles, allNavPaths, scraperResult, triggerProgram, toggleProgram, resolveProposal, toggleTaskDone, rescheduleTask, executeNavPath, executeScraperUrl, pendingNavPathId]);
+  }, [exec, onSwitchView, onCycleTheme, toggleRuntime, allPrograms, pendingProposals, allTasks, allSiteProfiles, allNavPaths, scraperResult, triggerProgram, toggleProgram, resolveProposal, toggleTaskDone, rescheduleTask, executeNavPath, executeScraperUrl, executeShellCommand, pendingNavPathId]);
 
   const filteredCommands = useMemo(() => {
     if (mode !== "command") return [];
