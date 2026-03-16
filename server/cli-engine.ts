@@ -1722,7 +1722,7 @@ ${fullHtml}`;
       }
 
       emitEvent("cli", "Fetching Outlook inbox via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
-      const result = await smartFetch("https://outlook.live.com/mail/0/inbox", "dom", "cli-outlook", {
+      const result = await smartFetch("https://outlook.office.com/mail/inbox", "dom", "cli-outlook", {
         maxText: 40000,
       }, 60000);
       if (result.error) return fail(`[outlook] ${result.error}`);
@@ -1734,7 +1734,7 @@ ${fullHtml}`;
       setMailCache({ emails, fetchedAt: Date.now() });
 
       if (emails.length === 0) {
-        return ok(`=== OUTLOOK INBOX ===\n\nPage loaded (${text.length} chars) but could not parse emails.\nThis can happen if:\n- You're not logged into outlook.live.com in your browser\n- The page hasn't fully loaded\n\nTry: outlook --refresh\nOr:  bridge https://outlook.live.com/mail/0/inbox --dom  for raw extraction`);
+        return ok(`=== OUTLOOK INBOX ===\n\nPage loaded (${text.length} chars) but could not parse emails.\nThis can happen if:\n- You're not logged into outlook.office.com in your browser\n- The page hasn't fully loaded\n\nTry: outlook --refresh\nOr:  bridge https://outlook.office.com/mail/inbox --dom  for raw extraction`);
       }
 
       const display = emails.slice(0, limit);
@@ -1751,7 +1751,7 @@ ${fullHtml}`;
 
     if (sub === "calendar") {
       emitEvent("cli", "Fetching Outlook calendar via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
-      const result = await smartFetch("https://outlook.live.com/calendar/0/view/week", "dom", "cli-outlook-cal", {
+      const result = await smartFetch("https://outlook.office.com/calendar/view/week", "dom", "cli-outlook-cal", {
         maxText: 30000,
       }, 60000);
       if (result.error) return fail(`[outlook] calendar: ${result.error}`);
@@ -1761,7 +1761,7 @@ ${fullHtml}`;
       setCalendarCache({ events, fetchedAt: Date.now() });
 
       if (events.length === 0) {
-        return ok(`=== OUTLOOK CALENDAR ===\n\nPage loaded (${text.length} chars) but could not parse events.\nTry: bridge https://outlook.live.com/calendar/0/view/week --dom`);
+        return ok(`=== OUTLOOK CALENDAR ===\n\nPage loaded (${text.length} chars) but could not parse events.\nTry: bridge https://outlook.office.com/calendar/view/week --dom`);
       }
 
       const lines = [`=== OUTLOOK CALENDAR === (${events.length} events)`, ""];
