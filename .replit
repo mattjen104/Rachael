@@ -46,3 +46,8 @@ mockupState = "FULLSTACK"
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 120000
+
+[userenv]
+
+[userenv.shared]
+BRIDGE_TOKEN = "46c6eeeb-8404-40cb-9b09-fb379ab4d3c6"

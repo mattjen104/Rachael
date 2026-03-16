@@ -52,7 +52,7 @@ const HEARTBEAT_STALE_MS = 90_000;
 const VALID_TYPES = new Set(["fetch", "dom"]);
 const VALID_SCHEMES = new Set(["http:", "https:"]);
 
-let bridgeToken: string | null = null;
+let bridgeToken: string | null = process.env.BRIDGE_TOKEN || null;
 let extensionLastHeartbeat: number | null = null;
 let extensionJobsCompleted = 0;
 let extensionVersion: string | null = null;
@@ -60,7 +60,7 @@ let extensionLastError: string | null = null;
 
 export function getBridgeToken(): string {
   if (!bridgeToken) {
-    bridgeToken = randomUUID();
+    bridgeToken = process.env.BRIDGE_TOKEN || randomUUID();
   }
   return bridgeToken;
 }

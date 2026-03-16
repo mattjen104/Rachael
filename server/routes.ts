@@ -1115,6 +1115,10 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  app.get("/api/bridge/ext/health", (_req, res) => {
+    res.json({ ok: true, service: "orgcloud-bridge" });
+  });
+
   app.get("/api/bridge/ext/queue", bridgeAuth, (_req, res) => {
     res.json(getQueueStatus());
   });
