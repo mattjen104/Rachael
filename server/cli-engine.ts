@@ -2621,6 +2621,7 @@ ${fullHtml}`;
         clickSelector: `a, button, [class*="app"], [class*="App"], [role="listitem"], [class*="store"] span, [class*="Store"] span`,
         clickMatchText: appName,
         postClickWaitMs: 5000,
+        autoOpenDownload: true,
       }, 45000);
       if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
       return ok(`Launched "${appName}" via Citrix portal`);

@@ -27,6 +27,7 @@ export interface BridgeJob {
     postClickWaitMs?: number;
     postClickSelector?: string;
     reuseTab?: boolean;
+    autoOpenDownload?: boolean;
   };
   submittedBy: string;
   submittedAt: number;

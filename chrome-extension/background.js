@@ -263,6 +263,35 @@ async function executeJob(job) {
       }
 
       if (clickSelector) {
+        const autoOpenDownload = options?.autoOpenDownload || false;
+        let downloadWatcher = null;
+
+        if (autoOpenDownload) {
+          downloadWatcher = new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              chrome.downloads.onChanged.removeListener(onChanged);
+              resolve(false);
+            }, 15000);
+
+            function onChanged(delta) {
+              if (delta.state && delta.state.current === "complete") {
+                chrome.downloads.search({ id: delta.id }, (items) => {
+                  if (items && items.length > 0) {
+                    const fn = items[0].filename || "";
+                    if (fn.endsWith(".ica") || fn.endsWith(".ICA")) {
+                      clearTimeout(timeout);
+                      chrome.downloads.onChanged.removeListener(onChanged);
+                      chrome.downloads.open(delta.id);
+                      resolve(true);
+                    }
+                  }
+                });
+              }
+            }
+            chrome.downloads.onChanged.addListener(onChanged);
+          });
+        }
+
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: (sel, idx, matchText) => {
@@ -290,7 +319,10 @@ async function executeJob(job) {
           },
           args: [clickSelector, clickIndex, clickMatchText],
         });
-        if (postClickSelector) {
+
+        if (downloadWatcher) {
+          await downloadWatcher;
+        } else if (postClickSelector) {
           await pollForSelector(tab.id, postClickSelector, postClickWaitMs);
         } else {
           await new Promise((r) => setTimeout(r, postClickWaitMs));
