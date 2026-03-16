@@ -7,6 +7,7 @@ import TreeView from "@/components/views/TreeView";
 import ProgramsView from "@/components/views/ProgramsView";
 import ResultsView from "@/components/views/ResultsView";
 import ReaderView from "@/components/views/ReaderView";
+import TranscriptsView from "@/components/views/TranscriptsView";
 import CockpitView from "@/components/views/CockpitView";
 import SnowView from "@/components/views/SnowView";
 import Minibuffer from "@/components/editor/Minibuffer";
@@ -123,10 +124,10 @@ export default function Workspace() {
         return;
       }
 
-      if (e.key >= "1" && e.key <= "7" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key >= "1" && e.key <= "8" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (viewMode === "cockpit") return;
         e.preventDefault();
-        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader", "cockpit", "snow"];
+        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader", "transcripts", "cockpit", "snow"];
         setViewMode(views[parseInt(e.key) - 1]);
         return;
       }
@@ -145,6 +146,7 @@ export default function Workspace() {
         {viewMode === "programs" && <ProgramsView onNavigate={handleNavigate} />}
         {viewMode === "results" && <ResultsView selectedResultId={selectedItemId} />}
         {viewMode === "reader" && <ReaderView selectedPageId={selectedItemId} />}
+        {viewMode === "transcripts" && <TranscriptsView selectedTranscriptId={selectedItemId} />}
         {viewMode === "cockpit" && <CockpitView />}
         {viewMode === "snow" && <SnowView />}
       </div>

@@ -24,6 +24,8 @@ All data lives in Postgres tables:
 - `site_profiles` — Configurable site scraping profiles (URL patterns, selectors, actions, defaultPermission)
 - `navigation_paths` — Ordered step sequences for scraping (tied to site profiles, permissionLevel)
 - `audit_log` — Records all human/agent actions with timestamps, permission levels, and results
+- `transcripts` — Meeting audio transcripts (platform, sourceUrl, durationSeconds, rawText, segments as JSON, status, recordingType)
+- `action_permissions` — Per-action permission overrides for navigation paths
 
 ## Control Bus & Permissions
 
@@ -32,7 +34,7 @@ All data lives in Postgres tables:
 - **Takeover Points** — When agent hits an "approval" action, it emits a takeover point visible in Cockpit stream; human can confirm, reject, or take over
 - **Audit Log** — All actions (human and agent) logged with actor, action, permission level, result, timestamp
 
-## Six-View Architecture
+## Seven-View Architecture
 
 Narrow tab bar at top, full-height views below:
 
@@ -41,7 +43,8 @@ Narrow tab bar at top, full-height views below:
 3. **Programs View** (3:PRG) — List of all programs with enable/disable, trigger, runtime status. Runtime ON/OFF toggle.
 4. **Results View** (4:RES) — Chronological agent outputs. Tab to expand full output.
 5. **Reader View** (5:RDR) — Saved web pages. Enter to read, Escape to go back.
-6. **Cockpit View** (6:CPT) — Shared control cockpit. Activity stream, audit log, and permission editor. Tab to toggle control mode (human/agent).
+6. **Transcripts View** (6:TRS) — Meeting audio transcription. Record from microphone or tab capture (Teams, Zoom, etc). Transcripts with timestamped segments, platform badges (TEAMS/ZOOM/MEET/OTHER), and recording type (TAB/MIC).
+7. **Cockpit View** (7:CKP) — Shared control cockpit. Activity stream, audit log, and permission editor. Tab to toggle control mode (human/agent).
 
 ## Keyboard Navigation
 

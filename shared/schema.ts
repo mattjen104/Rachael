@@ -331,6 +331,36 @@ export const insertAuditLogSchema = z.object({
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLog.$inferSelect;
 
+export const transcripts = pgTable("transcripts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  title: text("title").notNull().default(""),
+  platform: text("platform").notNull().default("other"),
+  sourceUrl: text("source_url"),
+  durationSeconds: integer("duration_seconds"),
+  rawText: text("raw_text").notNull().default(""),
+  segments: jsonb("segments").$type<Array<{ start: number; end: number; text: string }>>().default([]),
+  status: text("status").notNull().default("recording"),
+  recordingType: text("recording_type").notNull().default("tab"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertTranscriptSchema = z.object({
+  title: z.string().default(""),
+  platform: z.string().default("other"),
+  sourceUrl: z.string().nullable().optional(),
+  durationSeconds: z.number().nullable().optional(),
+  rawText: z.string().default(""),
+  segments: z.array(z.object({
+    start: z.number(),
+    end: z.number(),
+    text: z.string(),
+  })).default([]),
+  status: z.string().default("recording"),
+  recordingType: z.string().default("tab"),
+});
+export type InsertTranscript = z.infer<typeof insertTranscriptSchema>;
+export type Transcript = typeof transcripts.$inferSelect;
+
 export const actionPermissions = pgTable("action_permissions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   navPathId: integer("nav_path_id").notNull().references(() => navigationPaths.id, { onDelete: "cascade" }),

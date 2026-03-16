@@ -11,7 +11,7 @@ export function isBridgeOnlyDomain(url: string): boolean {
 
 export interface BridgeJob {
   id: string;
-  type: "fetch" | "dom";
+  type: "fetch" | "dom" | "audio";
   url: string;
   options?: {
     headers?: Record<string, string>;

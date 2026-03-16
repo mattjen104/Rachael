@@ -16,6 +16,16 @@
     <p>Set your OrgCloud Space URL in settings.</p>
     <button id="open-settings-btn">⚙ Open Settings</button>
   </div>
+  <div id="recording-bar" style="display:none;">
+    <span id="rec-indicator">●</span>
+    <span id="rec-label">Recording</span>
+    <span id="rec-tab-info"></span>
+    <span id="rec-duration">0:00</span>
+    <button id="rec-stop-btn">■ Stop</button>
+  </div>
+  <div id="rec-controls" style="display:none;">
+    <button id="rec-tab-btn" title="Record tab audio">🔊 Record Tab</button>
+  </div>
   <iframe id="app-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" allow="clipboard-read; clipboard-write" tabindex="0"></iframe>
   <script src="sidepanel.js"></script>
 </body>

@@ -183,7 +183,8 @@ export default function Minibuffer({
       { id: "switch-programs", label: "switch-to-programs", hint: "3", action: () => exec("Programs", () => onSwitchView("programs")) },
       { id: "switch-results", label: "switch-to-results", hint: "4", action: () => exec("Results", () => onSwitchView("results")) },
       { id: "switch-reader", label: "switch-to-reader", hint: "5", action: () => exec("Reader", () => onSwitchView("reader")) },
-      { id: "switch-cockpit", label: "switch-to-cockpit", hint: "6", action: () => exec("Cockpit", () => onSwitchView("cockpit")) },
+      { id: "switch-transcripts", label: "switch-to-transcripts", hint: "6", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
+      { id: "switch-cockpit", label: "switch-to-cockpit", hint: "7", action: () => exec("Cockpit", () => onSwitchView("cockpit")) },
       { id: "toggle-control", label: "toggle-control-mode", hint: "Tab", action: () => exec("Control toggled", async () => { await apiRequest("POST", "/api/control/toggle"); queryClient.invalidateQueries({ queryKey: ["/api/control"] }); }) },
       { id: "view-permissions", label: "edit-permissions", action: () => { onNavigate("cockpit"); window.dispatchEvent(new CustomEvent("cockpit-tab", { detail: "permissions" })); onCommandExecuted("Permissions"); onClose(); } },
       { id: "view-audit-log", label: "view-audit-log", action: () => { onNavigate("cockpit"); window.dispatchEvent(new CustomEvent("cockpit-tab", { detail: "audit" })); onCommandExecuted("Audit Log"); onClose(); } },
@@ -199,6 +200,20 @@ export default function Minibuffer({
       { id: "fetch-mail", label: "fetch-outlook-inbox", hint: "Via bridge", action: () => { setMode("shell"); setQuery("outlook"); setShellOutput(""); executeShellCommand("outlook"); } },
       { id: "fetch-chats", label: "fetch-teams-chats", hint: "Via bridge", action: () => { setMode("shell"); setQuery("teams"); setShellOutput(""); executeShellCommand("teams"); } },
       { id: "fetch-calendar", label: "fetch-outlook-calendar", hint: "Via bridge", action: () => { setMode("shell"); setQuery("outlook calendar"); setShellOutput(""); executeShellCommand("outlook calendar"); } },
+      { id: "transcripts", label: "transcripts", hint: "View transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
+      { id: "meetings", label: "meetings", hint: "View meeting transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
+      { id: "record-start", label: "record-start", hint: "Start mic recording", action: () => {
+        onSwitchView("transcripts");
+        setTimeout(() => window.dispatchEvent(new CustomEvent("transcripts:record", { detail: "start" })), 100);
+        onCommandExecuted("Recording started");
+        onClose();
+      }},
+      { id: "record-stop", label: "record-stop", hint: "Stop mic recording", action: () => {
+        onSwitchView("transcripts");
+        setTimeout(() => window.dispatchEvent(new CustomEvent("transcripts:record", { detail: "stop" })), 100);
+        onCommandExecuted("Recording stopped");
+        onClose();
+      }},
       { id: "cockpit-focus", label: "cockpit-focus-program", action: () => exec("Cockpit", () => onSwitchView("cockpit")) },
       { id: "cockpit-history", label: "cockpit-view-history", action: () => exec("Cockpit History", () => onSwitchView("cockpit")) },
       { id: "shell", label: "shell", hint: ":", action: () => { setMode("shell"); setQuery(""); setSelectedIdx(0); setShellOutput(""); } },
@@ -348,7 +363,7 @@ export default function Minibuffer({
       filteredCommands[selectedIdx].action();
     } else if (mode === "search" && searchResults[selectedIdx]) {
       const r = searchResults[selectedIdx];
-      const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader" };
+      const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader", transcript: "transcripts" };
       const targetView = viewMap[r.type] || "tree";
       onNavigate(targetView, r.id);
       onCommandExecuted(`Found: ${r.title}`);
@@ -472,7 +487,7 @@ export default function Minibuffer({
                 idx === selectedIdx ? "bg-primary/20 text-primary" : "text-foreground"
               }`}
               onClick={() => {
-                const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader" };
+                const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader", transcript: "transcripts" };
                 onNavigate(viewMap[r.type] || "tree", r.id);
                 onCommandExecuted(`Found: ${r.title}`);
                 onClose();

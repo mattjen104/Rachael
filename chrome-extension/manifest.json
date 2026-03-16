@@ -6,6 +6,8 @@
   "permissions": [
     "activeTab",
     "tabs",
+    "tabCapture",
+    "offscreen",
     "scripting",
     "storage",
     "sidePanel",

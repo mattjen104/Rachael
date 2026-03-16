@@ -13,6 +13,7 @@ import {
   type AuditLog, type InsertAuditLog, auditLog,
   type ActionPermission, actionPermissions,
   type Recipe, type InsertRecipe, recipes,
+  type Transcript, type InsertTranscript, transcripts,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql } from "drizzle-orm";
@@ -105,6 +106,12 @@ export interface IStorage {
   deleteRecipe(id: number): Promise<void>;
   updateRecipeLastRun(id: number, lastRun: Date, nextRun: Date | null, output: string): Promise<void>;
   toggleRecipeEnabled(id: number): Promise<Recipe | undefined>;
+
+  getTranscripts(): Promise<Transcript[]>;
+  getTranscript(id: number): Promise<Transcript | undefined>;
+  createTranscript(t: InsertTranscript): Promise<Transcript>;
+  updateTranscript(id: number, data: Partial<InsertTranscript>): Promise<Transcript | undefined>;
+  deleteTranscript(id: number): Promise<void>;
 
   searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>>;
 }
@@ -435,6 +442,25 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async getTranscripts(): Promise<Transcript[]> {
+    return db.select().from(transcripts).orderBy(desc(transcripts.createdAt));
+  }
+  async getTranscript(id: number): Promise<Transcript | undefined> {
+    const [t] = await db.select().from(transcripts).where(eq(transcripts.id, id));
+    return t;
+  }
+  async createTranscript(t: InsertTranscript): Promise<Transcript> {
+    const [created] = await db.insert(transcripts).values(t).returning();
+    return created;
+  }
+  async updateTranscript(id: number, data: Partial<InsertTranscript>): Promise<Transcript | undefined> {
+    const [updated] = await db.update(transcripts).set(data).where(eq(transcripts.id, id)).returning();
+    return updated;
+  }
+  async deleteTranscript(id: number): Promise<void> {
+    await db.delete(transcripts).where(eq(transcripts.id, id));
+  }
+
   async searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>> {
     const q = `%${query}%`;
     const results: Array<{ type: string; id: number; title: string; snippet: string }> = [];
@@ -486,6 +512,13 @@ export class DatabaseStorage implements IStorage {
     ).limit(10);
     for (const p of matchedPages) {
       results.push({ type: "reader_page", id: p.id, title: p.title || p.url, snippet: p.domain || p.url });
+    }
+
+    const matchedTranscripts = await db.select().from(transcripts).where(
+      or(ilike(transcripts.title, q), ilike(transcripts.rawText, q), ilike(transcripts.platform, q))
+    ).limit(10);
+    for (const t of matchedTranscripts) {
+      results.push({ type: "transcript", id: t.id, title: t.title || `${t.platform} recording`, snippet: t.rawText.slice(0, 100) });
     }
 
     return results;

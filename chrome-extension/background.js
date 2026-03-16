@@ -36,19 +36,6 @@ chrome.action.onClicked.addListener(async (tab) => {
   } catch (e) {}
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "sidepanel-ready") {
-    if (pendingContext) {
-      sendResponse({ action: "trigger-capture", context: pendingContext });
-      pendingContext = null;
-    } else {
-      sendResponse(null);
-    }
-  }
-  if (message.action === "get-bridge-status") {
-    sendResponse({ running: bridgeRunning, lastPoll: bridgeLastPoll, jobsCompleted: bridgeJobsCompleted, error: bridgeLastError });
-  }
-});
 
 let bridgeRunning = false;
 let bridgeLastPoll = null;
@@ -362,6 +349,14 @@ async function executeJob(job) {
     }
   }
 
+  if (type === "audio") {
+    return {
+      status: 200,
+      url,
+      message: "Audio jobs are handled via the /api/bridge/ext/audio endpoint directly by the offscreen document, not through the job queue.",
+    };
+  }
+
   throw new Error(`Unknown job type: ${type}`);
 }
 
@@ -398,5 +393,93 @@ chrome.storage.onChanged.addListener((changes, area) => {
     } else {
       stopBridge();
     }
+  }
+});
+
+let recordingState = { active: false, sessionId: null, tabId: null, recordingType: null, uploading: false, done: false, tabTitle: null, tabUrl: null };
+
+async function ensureOffscreenDocument() {
+  const existing = await chrome.offscreen.hasDocument();
+  if (!existing) {
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["USER_MEDIA"],
+      justification: "Recording tab audio for transcription",
+    });
+  }
+}
+
+async function startTabRecording(tabId) {
+  if (recordingState.active) throw new Error("Already recording");
+
+  const tab = await chrome.tabs.get(tabId);
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+
+  await ensureOffscreenDocument();
+
+  chrome.runtime.sendMessage({
+    action: "start-offscreen-recording",
+    streamId,
+    tabUrl: tab.url || "",
+    tabTitle: tab.title || "",
+    recordingType: "tab",
+  });
+
+  recordingState.active = true;
+  recordingState.tabId = tabId;
+  recordingState.recordingType = "tab";
+  recordingState.tabTitle = tab.title || null;
+  recordingState.tabUrl = tab.url || null;
+}
+
+async function stopRecording() {
+  if (!recordingState.active) throw new Error("Not recording");
+  chrome.runtime.sendMessage({ action: "stop-offscreen-recording" });
+  recordingState.active = false;
+  recordingState.uploading = true;
+  recordingState.recordingType = null;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "sidepanel-ready") {
+    if (pendingContext) {
+      sendResponse({ action: "trigger-capture", context: pendingContext });
+      pendingContext = null;
+    } else {
+      sendResponse(null);
+    }
+    return;
+  }
+  if (message.action === "get-bridge-status") {
+    sendResponse({ running: bridgeRunning, lastPoll: bridgeLastPoll, jobsCompleted: bridgeJobsCompleted, error: bridgeLastError });
+    return;
+  }
+  if (message.action === "get-recording-state") {
+    sendResponse({ active: recordingState.active, sessionId: recordingState.sessionId, tabId: recordingState.tabId, recordingType: recordingState.recordingType, uploading: recordingState.uploading, done: recordingState.done, tabTitle: recordingState.tabTitle, tabUrl: recordingState.tabUrl });
+    return;
+  }
+  if (message.action === "start-tab-recording") {
+    startTabRecording(message.tabId).then(() => sendResponse({ ok: true })).catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+  if (message.action === "stop-recording") {
+    stopRecording().then(() => sendResponse({ ok: true })).catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+  if (message.action === "recording-session-started") {
+    recordingState.sessionId = message.sessionId;
+    return;
+  }
+  if (message.action === "recording-stopped") {
+    recordingState.active = false;
+    recordingState.uploading = false;
+    recordingState.done = true;
+    recordingState.sessionId = null;
+    recordingState.tabId = null;
+    recordingState.recordingType = null;
+    recordingState.tabTitle = null;
+    recordingState.tabUrl = null;
+    setTimeout(() => { recordingState.done = false; }, 5000);
+    return;
   }
 });

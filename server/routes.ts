@@ -15,6 +15,8 @@ import { getControlState, getControlMode, toggleControlMode, setControlMode, get
 import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
 import { insertRecipeSchema } from "@shared/schema";
 import { claimJobsTracked, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken, recordHeartbeat, isExtensionConnected, smartFetch } from "./bridge-queue";
+import { startRecordingSession, addAudioChunk, stopRecordingSession, getActiveRecordingSessions, transcribeUploadedAudio } from "./transcription-service";
+import multer from "multer";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -466,13 +468,14 @@ export async function registerRoutes(
   });
 
   app.get("/api/tree", async (_req, res) => {
-    const [allTasks, allPrograms, allSkills, allNotes, allCaptures, allPages] = await Promise.all([
+    const [allTasks, allPrograms, allSkills, allNotes, allCaptures, allPages, allTranscripts] = await Promise.all([
       storage.getTasks(),
       storage.getPrograms(),
       storage.getSkills(),
       storage.getNotes(),
       storage.getCaptures(false),
       storage.getReaderPages(),
+      storage.getTranscripts(),
     ]);
 
     res.json({
@@ -482,6 +485,7 @@ export async function registerRoutes(
       notes: allNotes,
       captures: allCaptures,
       reader: allPages,
+      transcripts: allTranscripts,
     });
   });
 
@@ -1286,6 +1290,109 @@ export async function registerRoutes(
       res.json({ jobId });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
+    }
+  });
+
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+
+  app.get("/api/transcripts", async (_req, res) => {
+    const all = await storage.getTranscripts();
+    res.json(all);
+  });
+
+  app.get("/api/transcripts/active", (_req, res) => {
+    res.json(getActiveRecordingSessions());
+  });
+
+  app.get("/api/transcripts/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const t = await storage.getTranscript(id);
+    if (!t) return res.status(404).json({ message: "Transcript not found" });
+    res.json(t);
+  });
+
+  app.delete("/api/transcripts/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deleteTranscript(id);
+    res.status(204).send();
+  });
+
+  const apiKeyAuth: import("express").RequestHandler = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const apiKey = process.env.OPENCLAW_API_KEY;
+    if (apiKey && (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.slice(7) !== apiKey)) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    next();
+  };
+
+  app.post("/api/transcripts/record/start", apiKeyAuth, async (req, res) => {
+    const { sourceUrl, tabTitle, recordingType } = req.body;
+    try {
+      const result = await startRecordingSession(sourceUrl || "", tabTitle || "", recordingType || "tab");
+      res.json(result);
+    } catch (e: unknown) {
+      res.status(500).json({ message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/api/transcripts/record/:sessionId/chunk", apiKeyAuth, upload.single("audio"), async (req, res) => {
+    const sessionId = req.params.sessionId as string;
+    try {
+      const buffer = req.file?.buffer;
+      if (!buffer) return res.status(400).json({ message: "No audio data" });
+      await addAudioChunk(sessionId, buffer);
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      res.status(400).json({ message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/api/transcripts/record/:sessionId/stop", apiKeyAuth, async (req, res) => {
+    const sessionId = req.params.sessionId as string;
+    try {
+      const result = await stopRecordingSession(sessionId);
+      res.json(result);
+    } catch (e: unknown) {
+      res.status(400).json({ message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/api/bridge/ext/audio", bridgeAuth, upload.single("audio"), async (req, res) => {
+    const { sessionId, action, sourceUrl, tabTitle } = req.body;
+    try {
+      if (action === "start") {
+        const result = await startRecordingSession(sourceUrl || "", tabTitle || "", "tab");
+        return res.json(result);
+      }
+      if (action === "chunk" && sessionId) {
+        const buffer = req.file?.buffer;
+        if (!buffer) return res.status(400).json({ message: "No audio data" });
+        await addAudioChunk(sessionId, buffer);
+        return res.json({ ok: true });
+      }
+      if (action === "stop" && sessionId) {
+        const result = await stopRecordingSession(sessionId);
+        return res.json(result);
+      }
+      res.status(400).json({ message: "Invalid action" });
+    } catch (e: unknown) {
+      res.status(400).json({ message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/api/transcripts/upload", apiKeyAuth, upload.single("audio"), async (req, res) => {
+    try {
+      const buffer = req.file?.buffer;
+      if (!buffer) return res.status(400).json({ message: "No audio file" });
+      const sourceUrl = req.body.sourceUrl || "";
+      const title = req.body.title || "";
+      const recordingType = req.body.recordingType || "manual";
+      const result = await transcribeUploadedAudio(buffer, sourceUrl, title, recordingType);
+      res.json(result);
+    } catch (e: unknown) {
+      res.status(500).json({ message: e instanceof Error ? e.message : String(e) });
     }
   });
 

@@ -168,3 +168,112 @@ chrome.runtime.sendMessage({ action: "sidepanel-ready" }, (response) => {
     sendCaptureToApp(response.context);
   }
 });
+
+const recordingBar = document.getElementById("recording-bar");
+const recControls = document.getElementById("rec-controls");
+const recIndicator = document.getElementById("rec-indicator");
+const recLabel = document.getElementById("rec-label");
+const recTabInfo = document.getElementById("rec-tab-info");
+const recDuration = document.getElementById("rec-duration");
+const recStopBtn = document.getElementById("rec-stop-btn");
+const recTabBtn = document.getElementById("rec-tab-btn");
+
+let recTimer = null;
+let recStartTime = null;
+
+function formatRecDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+function updateRecordingUI(state) {
+  if (state.active) {
+    recordingBar.style.display = "flex";
+    recControls.style.display = "none";
+    recStopBtn.style.display = "";
+    recIndicator.style.animation = "pulse 1s infinite";
+    recLabel.textContent = state.recordingType === "tab" ? "Recording tab" : "Recording";
+    if (state.tabTitle) {
+      recTabInfo.textContent = state.tabTitle.substring(0, 30);
+      recTabInfo.title = state.tabUrl || state.tabTitle;
+    } else {
+      recTabInfo.textContent = "";
+    }
+    if (!recTimer) {
+      recStartTime = Date.now();
+      recTimer = setInterval(() => {
+        recDuration.textContent = formatRecDuration(Date.now() - recStartTime);
+      }, 1000);
+    }
+  } else if (state.uploading) {
+    recordingBar.style.display = "flex";
+    recControls.style.display = "none";
+    recStopBtn.style.display = "none";
+    recIndicator.style.animation = "none";
+    recLabel.textContent = "Uploading...";
+    if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  } else if (state.done) {
+    recordingBar.style.display = "flex";
+    recControls.style.display = "none";
+    recStopBtn.style.display = "none";
+    recIndicator.style.animation = "none";
+    recIndicator.textContent = "✓";
+    recLabel.textContent = "Transcription complete";
+    if (recTimer) { clearInterval(recTimer); recTimer = null; }
+    setTimeout(() => {
+      recIndicator.textContent = "●";
+      updateRecordingUI({ active: false });
+    }, 3000);
+  } else {
+    recordingBar.style.display = "none";
+    recControls.style.display = apiUrl ? "flex" : "none";
+    if (recTimer) {
+      clearInterval(recTimer);
+      recTimer = null;
+    }
+    recDuration.textContent = "0:00";
+  }
+}
+
+function pollRecordingState() {
+  chrome.runtime.sendMessage({ action: "get-recording-state" }, (state) => {
+    if (chrome.runtime.lastError) return;
+    if (state) updateRecordingUI(state);
+  });
+}
+
+recTabBtn.addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) return;
+  chrome.runtime.sendMessage({ action: "start-tab-recording", tabId: tab.id }, (response) => {
+    if (chrome.runtime.lastError) return;
+    if (response && response.error) {
+      console.error("Failed to start recording:", response.error);
+      return;
+    }
+    pollRecordingState();
+  });
+});
+
+recStopBtn.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ action: "stop-recording" }, (response) => {
+    if (chrome.runtime.lastError) return;
+    updateRecordingUI({ active: false });
+  });
+});
+
+setInterval(pollRecordingState, 3000);
+
+chrome.storage.sync.get(["orgcloudUrl"], (result) => {
+  if (result.orgcloudUrl) {
+    recControls.style.display = "flex";
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.orgcloudUrl) {
+    recControls.style.display = changes.orgcloudUrl.newValue ? "flex" : "none";
+  }
+});
