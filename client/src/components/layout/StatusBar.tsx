@@ -1,6 +1,6 @@
 import React from "react";
 import type { ViewMode } from "./Sidebar";
-import { useRuntime, useControlState } from "@/hooks/use-org-data";
+import { useRuntime, useControlState, useBridgeStatus } from "@/hooks/use-org-data";
 
 interface StatusBarProps {
   viewMode: ViewMode;
@@ -11,9 +11,11 @@ interface StatusBarProps {
 export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: StatusBarProps) {
   const { data: runtime } = useRuntime();
   const { data: control } = useControlState();
+  const { data: bridgeStatus } = useBridgeStatus();
 
   const controlMode = control?.mode || "human";
   const pendingCount = control?.pendingTakeoverPoints?.length || 0;
+  const bridgeConnected = bridgeStatus?.extension?.connected || false;
 
   return (
     <div
@@ -39,6 +41,9 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
           </span>
         )}
         <span className="text-primary font-bold">{viewMode.toUpperCase()}</span>
+        <span className={bridgeConnected ? "text-green-500" : "text-muted-foreground/50"} data-testid="status-bridge" title={bridgeConnected ? "Bridge connected" : "Bridge offline"}>
+          {bridgeConnected ? "⚡" : "⚡"}
+        </span>
         {lastCommand && <span className="text-muted-foreground">— {lastCommand}</span>}
       </div>
       <div className="flex items-center gap-2">

@@ -3,6 +3,7 @@ import { useTreeData, useToggleTask, useBridgeStatus, useMailInbox, useTeamsChat
 
 interface TreeViewProps {
   onNavigate?: (view: string, id?: number) => void;
+  onRunCommand?: (cmd: string) => void;
 }
 
 type TreeNode = {
@@ -42,6 +43,7 @@ type TreeNode = {
 } | {
   type: "bridge-info";
   label: string;
+  actionCmd?: string;
 } | {
   type: "mail";
   index: number;
@@ -57,7 +59,7 @@ type TreeNode = {
   unread: boolean;
 };
 
-export default function TreeView({ onNavigate }: TreeViewProps) {
+export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const { data, isLoading } = useTreeData();
   const toggleTask = useToggleTask();
   const { data: bridgeStatus } = useBridgeStatus();
@@ -118,9 +120,12 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
       }
     }
 
-    const bridgeConnected = bridgeStatus?.extension?.connected || bridgeStatus?.running || false;
+    const bridgeConnected = bridgeStatus?.extension?.connected || false;
     const emails = mailInbox.data || [];
     const chats = teamsChats.data || [];
+    const bridgeHint = bridgeConnected
+      ? "Enter: fetch"
+      : "Not connected — check extension options";
 
     nodes.push({ type: "section", label: "MAIL (Outlook)", key: "mail", count: emails.length || (bridgeConnected ? -1 : 0) });
     if (expanded.has("mail")) {
@@ -129,7 +134,7 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
           nodes.push({ type: "mail", index: e.index || 0, from: e.from, subject: e.subject, unread: e.unread, date: e.date || "" });
         }
       } else {
-        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Run: outlook  to fetch inbox" : "Bridge offline — connect extension first" });
+        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter or run :outlook" : bridgeHint, actionCmd: bridgeConnected ? "outlook" : "bridge-status" });
       }
     }
 
@@ -140,7 +145,7 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
           nodes.push({ type: "chat", index: c.index || 0, name: c.name, lastMessage: c.lastMessage, unread: c.unread });
         }
       } else {
-        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Run: teams  to fetch chats" : "Bridge offline — connect extension first" });
+        nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter or run :teams" : bridgeHint, actionCmd: bridgeConnected ? "teams" : "bridge-status" });
       }
     }
   }
@@ -198,12 +203,14 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
         else if (node?.type === "program") onNavigate?.("programs", node.id);
         else if (node?.type === "reader") onNavigate?.("reader", node.id);
         else if (node?.type === "note") onNavigate?.("tree", node.id);
-        else if (node?.type === "mail" || node?.type === "chat" || node?.type === "bridge-info") {
-          /* individual mail/chat items are display-only in tree */
+        else if (node?.type === "bridge-info" && node.actionCmd && onRunCommand) {
+          onRunCommand(node.actionCmd);
+        }
+        else if (node?.type === "mail" || node?.type === "chat") {
         }
         break;
     }
-  }, [nodes, selectedIdx, toggleTask, onNavigate, expanded, mailInbox, teamsChats, mailFetched, chatFetched]);
+  }, [nodes, selectedIdx, toggleTask, onNavigate, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -292,7 +299,12 @@ export default function TreeView({ onNavigate }: TreeViewProps) {
             className={`px-2 py-0.5 pl-4 cursor-pointer select-none flex items-center gap-1 ${
               sel ? "bg-primary/20" : ""
             } ${node.type === "task" && node.status === "DONE" ? "text-muted-foreground line-through" : ""}`}
-            onClick={() => setSelectedIdx(idx)}
+            onClick={() => {
+              setSelectedIdx(idx);
+              if (node.type === "bridge-info" && node.actionCmd && onRunCommand) {
+                onRunCommand(node.actionCmd);
+              }
+            }}
           >
             <span className="w-4 shrink-0 text-center">{icon}</span>
             <span className="truncate flex-1">{label}</span>

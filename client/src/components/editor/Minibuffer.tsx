@@ -23,6 +23,7 @@ interface MinibufferCommand {
 
 interface MinibufferProps {
   initialMode?: "command" | "search" | "capture" | "add-url" | "shell";
+  initialShellCmd?: string | null;
   onClose: () => void;
   onSwitchView: (view: ViewMode) => void;
   onNavigate: (view: string, id?: number) => void;
@@ -32,6 +33,7 @@ interface MinibufferProps {
 
 export default function Minibuffer({
   initialMode = "command",
+  initialShellCmd = null,
   onClose,
   onSwitchView,
   onNavigate,
@@ -65,6 +67,14 @@ export default function Minibuffer({
   useEffect(() => {
     inputRef.current?.focus();
   }, [mode]);
+
+  useEffect(() => {
+    if (initialShellCmd && initialMode === "shell") {
+      setQuery(initialShellCmd);
+      setShellOutput("");
+      executeShellCommand(initialShellCmd);
+    }
+  }, []);
 
   const exec = useCallback((label: string, fn: () => void) => {
     fn();

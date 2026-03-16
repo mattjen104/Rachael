@@ -18,6 +18,7 @@ export default function Workspace() {
   const [minibufferInitialMode, setMinibufferInitialMode] = useState<"command" | "search" | "capture" | "add-url" | "shell">("command");
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<number | undefined>(undefined);
+  const [pendingShellCmd, setPendingShellCmd] = useState<string | null>(null);
 
   const { cycleTheme } = useCrtTheme();
   const smartCapture = useSmartCapture();
@@ -36,6 +37,12 @@ export default function Workspace() {
   const handleNavigate = useCallback((view: string, id?: number) => {
     setViewMode(view as ViewMode);
     setSelectedItemId(id);
+  }, []);
+
+  const handleRunCommand = useCallback((cmd: string) => {
+    setPendingShellCmd(cmd);
+    setMinibufferInitialMode("shell");
+    setMinibufferOpen(true);
   }, []);
 
   useEffect(() => {
@@ -133,7 +140,7 @@ export default function Workspace() {
 
       <div className="flex-1 overflow-hidden">
         {viewMode === "agenda" && <AgendaView onNavigate={handleNavigate} />}
-        {viewMode === "tree" && <TreeView onNavigate={handleNavigate} />}
+        {viewMode === "tree" && <TreeView onNavigate={handleNavigate} onRunCommand={handleRunCommand} />}
         {viewMode === "programs" && <ProgramsView onNavigate={handleNavigate} />}
         {viewMode === "results" && <ResultsView selectedResultId={selectedItemId} />}
         {viewMode === "reader" && <ReaderView selectedPageId={selectedItemId} />}
@@ -149,7 +156,8 @@ export default function Workspace() {
       {minibufferOpen && (
         <Minibuffer
           initialMode={minibufferInitialMode}
-          onClose={() => setMinibufferOpen(false)}
+          initialShellCmd={pendingShellCmd}
+          onClose={() => { setMinibufferOpen(false); setPendingShellCmd(null); }}
           onSwitchView={setViewMode}
           onNavigate={handleNavigate}
           onCycleTheme={cycleTheme}
