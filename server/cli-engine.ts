@@ -169,7 +169,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -2106,6 +2106,118 @@ ${fullHtml}`;
       for (const r of briefings) lines.push(`  [${r.programName}] ${r.summary.slice(0, 70)}`);
     }
     return ok(lines.length > 0 ? lines.join("\n") : "Nothing on the agenda today.");
+  });
+
+  registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--refresh] [--save]", async (args) => {
+    const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+    if (!isExtensionConnected()) {
+      return fail("[citrix] Chrome extension bridge not connected. Citrix requires your real browser session.");
+    }
+    const save = args.includes("--save");
+    emitEvent("cli", "Scraping Citrix workspace portal via bridge...", "info", { metadata: { command: "citrix" } });
+
+    const result = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix", {
+      maxText: 60000,
+      selectors: {
+        apps: '[class*="app"] a, [class*="App"] a, [data-testid*="app"] a, .storeapp-icon a, .store-app a, a[href*="launch"], a[href*="app"], [class*="resource"] a, [role="listitem"] a, .citrix-resource a, button[class*="app"], [class*="appCard"] a, [class*="tile"] a, a[class*="launch"], [class*="StoreApp"] a',
+        allLinks: 'a[href]',
+        headings: 'h1, h2, h3, h4, [class*="title"], [class*="Title"], [class*="name"], [class*="Name"]',
+      },
+    }, 60000);
+
+    if (result.error) return fail(`[citrix] ${result.error}`);
+    const text = result.text || "";
+    const extracted = (result as any).extracted || {};
+    const debug = (result as any).debug || {};
+    const finalUrl = (result as any).url || "?";
+    const title = (result as any).title || "?";
+
+    interface AppLink { name: string; href: string }
+    const apps: AppLink[] = [];
+    const seen = new Set<string>();
+
+    const addApp = (name: string, href: string) => {
+      const clean = cleanUnicode(name).trim();
+      if (!clean || clean.length < 2 || clean.length > 100) return;
+      if (seen.has(clean.toLowerCase())) return;
+      seen.add(clean.toLowerCase());
+      apps.push({ name: clean, href: href || "" });
+    };
+
+    if (extracted.apps && extracted.apps.length > 0) {
+      for (const a of extracted.apps) {
+        addApp(a.text || "", a.href || "");
+      }
+    }
+
+    if (apps.length === 0 && extracted.allLinks) {
+      for (const link of extracted.allLinks) {
+        const t = (link.text || "").trim();
+        const h = link.href || "";
+        if (t.length >= 2 && t.length <= 80 && !isNavNoise(t)) {
+          if (h.includes("launch") || h.includes("app") || h.includes("resource") || h.includes("citrix")) {
+            addApp(t, h);
+          }
+        }
+      }
+    }
+
+    if (apps.length === 0 && extracted.allLinks) {
+      for (const link of extracted.allLinks) {
+        const t = (link.text || "").trim();
+        if (t.length >= 3 && t.length <= 80 && !isNavNoise(t) && !/^(sign|log|home|back|help|privacy|terms|copyright|cookie)/i.test(t)) {
+          addApp(t, link.href || "");
+        }
+      }
+    }
+
+    const nl = String.fromCharCode(10);
+    if (apps.length === 0) {
+      const sampleText = text.slice(0, 1500).split(/[\n\r]+/).filter(l => l.trim().length > 0).slice(0, 15).join(nl);
+      const linkCount = extracted.allLinks?.length || 0;
+      const headingsSample = (extracted.headings || []).slice(0, 10).map((h: any) => `  ${(h.text || "").trim().slice(0, 80)}`).join(nl);
+      return ok([
+        `=== CITRIX PORTAL ===`,
+        `Final URL: ${finalUrl}`,
+        `Page title: ${title}`,
+        `Text: ${text.length} chars, Links: ${linkCount}, iframes: ${debug.iframeCount ?? "?"}`,
+        "",
+        "--- Headings ---",
+        headingsSample || "(none)",
+        "",
+        "--- Sample text ---",
+        sampleText || "(empty page)",
+        "",
+        "Could not auto-detect apps. Try: citrix --save  to save raw links to KB",
+      ].join(nl));
+    }
+
+    const lines = [`=== CITRIX APPS === (${apps.length} applications)`, ""];
+    apps.forEach((a, i) => {
+      const link = a.href ? ` -> ${a.href}` : "";
+      lines.push(`  ${String(i + 1).padStart(3)}  ${a.name}${link}`);
+    });
+
+    if (save) {
+      const body = [
+        `# Citrix Workspace Apps (cwp.ucsd.edu)`,
+        "",
+        `Scraped: ${new Date().toISOString().slice(0, 16)}`,
+        `Source: ${finalUrl}`,
+        "",
+        ...apps.map(a => a.href ? `- [${a.name}](${a.href})` : `- ${a.name}`),
+      ].join(nl);
+      await storage.createNote({
+        title: "[Wiki] Citrix Workspace Apps",
+        body,
+        tags: ["wiki", "citrix", "apps", "ucsd"],
+      });
+      lines.push("", "Saved to knowledge base with tags: wiki, citrix, apps, ucsd");
+    } else {
+      lines.push("", "Use: citrix --save  to save to knowledge base");
+    }
+
+    return ok(lines.join(nl));
   });
 }
 

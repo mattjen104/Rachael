@@ -95,9 +95,22 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       }
     }
 
-    nodes.push({ type: "section", label: "NOTES", key: "notes", count: data.notes.length });
+    const isWiki = (n: any) => n.tags?.some((t: string) => t.toLowerCase() === "wiki");
+    const wikiNotes = data.notes.filter(isWiki);
+    const regularNotes = data.notes.filter((n: any) => !isWiki(n));
+
+    if (wikiNotes.length > 0) {
+      nodes.push({ type: "section", label: "WIKI", key: "wiki", count: wikiNotes.length });
+      if (expanded.has("wiki")) {
+        for (const n of wikiNotes) {
+          nodes.push({ type: "note", id: n.id, title: n.title.replace(/^\[Wiki\]\s*/i, "") });
+        }
+      }
+    }
+
+    nodes.push({ type: "section", label: "NOTES", key: "notes", count: regularNotes.length });
     if (expanded.has("notes")) {
-      for (const n of data.notes) {
+      for (const n of regularNotes) {
         nodes.push({ type: "note", id: n.id, title: n.title });
       }
     }
