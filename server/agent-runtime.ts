@@ -214,7 +214,7 @@ const __bridgePort = process.env.__BRIDGE_PORT || "5000";
 const __bridgeToken = process.env.__BRIDGE_TOKEN || "";
 const __apiKey = process.env.__API_KEY || "";
 
-const __BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu"];
+const __BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu", ".reddit.com", "reddit.com"];
 function __isBridgeOnly(targetUrl: string): boolean {
   try {
     const host = new URL(targetUrl).hostname.toLowerCase();

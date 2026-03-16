@@ -140,7 +140,7 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 All programs have hardened inline TypeScript code (no LLM-only programs remaining):
 - hn-pulse — HN top stories via Firebase API
 - openrouter-model-scout — Tests free model availability on OpenRouter
-- research-radar (meta) — Aggregates HN + GitHub trending (via bridge) + Lobsters + Lemmy (c/machinelearning, c/artificial_intelligence) + Reddit r/MachineLearning (via bridge) + ArXiv CS.AI, synthesizes via Claude
+- research-radar (meta) — Aggregates HN + GitHub trending (via bridge) + Lobsters + Lemmy (c/machinelearning, c/artificial_intelligence) + Reddit r/MachineLearning, r/LocalLLaMA, r/homelab, r/selfhosted (all via bridge) + ArXiv CS.AI, synthesizes via Claude
 - hn-deep-digest — Deep discussion digest: fetches 15 comment threads per story (3 levels), Claude summarizes debate substance, key arguments, tensions
 - github-trending — GitHub trending repos (via bridge)
 - estate-car-finder — SoCal Craigslist estate/low-mile car scanner across 4 regions (via bridge)
@@ -205,7 +205,7 @@ Database-driven scraping system replacing hardcoded adapters:
 - **Serial execution**: Extension processes jobs sequentially with 1.5s delay between them to avoid anti-bot detection
 - **DOM job type**: Opens a real background tab, waits for JS rendering, injects content script for extraction (not just static HTML parsing)
 - **CLI commands**: `bridge <url>` (smart fetch), `bridge-status` (unified status), `bridge-token` (get token for extension setup), `cwp` (UCSD Citrix Workspace browser)
-- **Bridge-only domains**: `galaxy.epic.com` and `*.ucsd.edu` — these never fall back to direct server-side fetch to avoid automated detection. Enforced in both server-side `smartFetch`, inline program `bridgeFetch`/`smartFetch`, and CLI `bridge --direct` (blocked). List defined in `bridge-queue.ts` (server) and `agent-runtime.ts` (inline wrapper).
+- **Bridge-only domains**: `galaxy.epic.com`, `*.ucsd.edu`, `reddit.com`/`*.reddit.com` — these never fall back to direct server-side fetch to avoid automated detection. Enforced in both server-side `smartFetch`, inline program `bridgeFetch`/`smartFetch`, and CLI `bridge --direct` (blocked). List defined in `bridge-queue.ts` (server) and `agent-runtime.ts` (inline wrapper).
 - **Job types**: `fetch` (raw HTTP via browser cookies) and `dom` (real tab injection with CSS selector extraction, full JS rendering)
 - **API routes**: `/api/bridge/status` (unified Playwright + extension + queue), `/api/bridge/ext/token` (auth-gated), `/api/bridge/ext/jobs`, `/api/bridge/ext/results`, `/api/bridge/ext/queue`, `/api/bridge/ext/submit`
 - **Extension files**: `background.js` (polling + tab-based execution), `options.html/js` (URL + token config), `manifest.json` (MV3, `<all_urls>`)
