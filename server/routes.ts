@@ -534,13 +534,25 @@ export async function registerRoutes(
 
   app.get("/api/mail/inbox", async (_req, res) => {
     try {
-      const { getMailCache } = await import("./cli-engine");
+      const { getMailCache, setMailCache } = await import("./cli-engine");
       const cached = getMailCache();
       if (cached && cached.emails.length > 0) {
         return res.json(cached.emails.map((e, i) => ({ index: i, ...e })));
       }
       const emails = await getOutlookEmails();
-      res.json(emails);
+      if (emails.length > 0) {
+        setMailCache({
+          emails: emails.map(e => ({
+            from: e.from || "",
+            subject: e.subject || "",
+            date: e.date || "",
+            preview: e.preview || "",
+            unread: e.unread || false,
+          })),
+          fetchedAt: Date.now(),
+        });
+      }
+      res.json(emails.map((e, i) => ({ index: i, ...e })));
     } catch (e: unknown) {
       const { getMailCache } = await import("./cli-engine");
       const cached = getMailCache();

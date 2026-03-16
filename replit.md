@@ -53,7 +53,7 @@ Narrow tab bar at top, full-height views below:
 - `1-6` — Switch views directly
 - `Space` or `Alt-x` — Open command palette (M-x)
 - `/` — Open command palette in search mode
-- `c` — Open command palette for capture
+- `c` — Open command palette for capture (or capture selected mail in TreeView)
 - `r` (in Programs) — Trigger selected program
 - `R` (in Programs) — Toggle runtime ON/OFF
 
@@ -73,7 +73,7 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - **Branch suppression**: When `&&`/`||` skips a segment, downstream `|` pipes in the same branch are also skipped
 - **Two-layer output**: `executeChainRaw()` returns raw stdout/stderr/exitCode (for pipes, recipes, internal use); `executeChain()` wraps with presentation (truncation, exit codes, duration)
 - **Progressive discovery**: `command --help` for usage, error messages point to correct commands
-- **30+ built-in commands**: help, programs, results, tasks, notes, captures, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe, bridge, bridge-status, bridge-token, notify, standup
+- **30+ built-in commands**: help, programs, results, tasks, notes, captures, capture, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe, bridge, bridge-status, bridge-token, notify, standup, outlook
 - **Cockpit events**: CLI commands emit events to the cockpit activity stream (recipe save/run/approve, memory store/forget, scrape)
 - **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`
 
@@ -99,6 +99,17 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - `memory search <query>` — Search persistent context + agent results
 - `memory recent [N]` — Last N memory entries
 - `memory forget <pattern>` — Remove matching entries
+
+## Knowledge Base & Capture (server/cli-engine.ts)
+
+Data flows into the KB as markdown notes stored in the `notes` table:
+- `capture mail <n|n,n|all> [--tag TAG]` — Save scraped emails as markdown notes
+- `capture calendar [--tag TAG]` — Save calendar events as markdown notes
+- `capture text <content>` — Save arbitrary text as a note
+- **TreeView shortcut**: Press `c` on a selected mail item to capture it
+- **Command palette**: Open with Space/Alt-x, type `capture mail 1,2,3`
+- Notes are tagged by source (email, outlook, calendar) for easy filtering
+- All KB content is searchable via `search <query>`
 
 ## Scraper CLI (server/cli-engine.ts)
 

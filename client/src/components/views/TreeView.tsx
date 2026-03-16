@@ -171,6 +171,14 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         e.preventDefault();
         setSelectedIdx(nodes.length - 1);
         break;
+      case "c": {
+        const cNode = nodes[selectedIdx];
+        if (cNode?.type === "mail" && onRunCommand) {
+          e.preventDefault();
+          onRunCommand(`capture mail ${cNode.index + 1}`);
+        }
+        break;
+      }
       case "Tab":
         e.preventDefault();
         const cur = nodes[selectedIdx];
@@ -206,7 +214,10 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "bridge-info" && node.actionCmd && onRunCommand) {
           onRunCommand(node.actionCmd);
         }
-        else if (node?.type === "mail" || node?.type === "chat") {
+        else if (node?.type === "mail" && onRunCommand) {
+          onRunCommand(`outlook read ${node.index + 1}`);
+        }
+        else if (node?.type === "chat") {
         }
         break;
     }
@@ -225,8 +236,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
 
   return (
     <div ref={containerRef} className="flex flex-col h-full overflow-y-auto font-mono text-xs" data-testid="tree-view">
-      <div className="px-2 py-1 text-muted-foreground border-b border-border sticky top-0 bg-background z-10">
-        TREE — All Data
+      <div className="px-2 py-1 text-muted-foreground border-b border-border sticky top-0 bg-background z-10 flex justify-between">
+        <span>TREE -- All Data</span>
+        <span className="text-[10px]">Enter:open  c:capture  j/k:nav</span>
       </div>
       {nodes.map((node, idx) => {
         const sel = idx === selectedIdx;
@@ -303,6 +315,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
               setSelectedIdx(idx);
               if (node.type === "bridge-info" && node.actionCmd && onRunCommand) {
                 onRunCommand(node.actionCmd);
+              } else if (node.type === "mail" && onRunCommand) {
+                onRunCommand(`outlook read ${node.index + 1}`);
               }
             }}
           >

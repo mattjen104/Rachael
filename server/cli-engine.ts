@@ -297,6 +297,16 @@ export function setCalendarCache(c: typeof calendarCache) { calendarCache = c; }
 export function getTeamsCache() { return teamsCache; }
 export function setTeamsCache(c: typeof teamsCache) { teamsCache = c; }
 
+function cleanUnicode(s: string): string {
+  return s
+    .replace(/[\u{FE00}-\u{FE0F}]/gu, "")
+    .replace(/[\u{200B}-\u{200F}\u{FEFF}\u{00AD}\u{2028}\u{2029}]/gu, "")
+    .replace(/[\u{E000}-\u{F8FF}\u{F0000}-\u{FFFFD}]/gu, "")
+    .replace(/[\u{D800}-\u{DFFF}]/gu, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .trim();
+}
+
 const OUTLOOK_NAV_NOISE = new Set([
   "inbox", "sent items", "drafts", "deleted items", "junk email", "archive",
   "conversation history", "conversation histo", "notes", "outbox", "rss feeds",
@@ -335,18 +345,18 @@ function parseOutlookInbox(html: string, text: string, extracted?: Record<string
                         t.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
 
       if (fromMatch || subjectMatch) {
-        const from = (fromMatch?.[1] || "Unknown").trim();
-        const subject = (subjectMatch?.[1] || "").trim();
+        const from = cleanUnicode(fromMatch?.[1] || "Unknown");
+        const subject = cleanUnicode(subjectMatch?.[1] || "");
         if (isNavNoise(from) || isNavNoise(subject)) continue;
         emails.push({
           from: from.slice(0, 40),
-          subject: (subject || t.slice(0, 60)).trim(),
-          date: (dateMatch?.[1] || "").trim().slice(0, 20),
-          preview: t.slice(0, 200),
+          subject: (subject || cleanUnicode(t).slice(0, 60)).trim(),
+          date: cleanUnicode(dateMatch?.[1] || "").slice(0, 20),
+          preview: cleanUnicode(t).slice(0, 200),
           unread,
         });
       } else {
-        const parts = t.split(/[,\n]/).map(p => p.trim()).filter(p => p.length > 2 && !isNavNoise(p));
+        const parts = t.split(/[,\n]/).map(p => cleanUnicode(p)).filter(p => p.length > 2 && !isNavNoise(p));
         if (parts.length >= 2) {
           emails.push({
             from: parts[0].slice(0, 40),
@@ -391,25 +401,21 @@ function parseOutlookInbox(html: string, text: string, extracted?: Record<string
     const hasAttach = /\b(?:has attachment|attachment)/i.test(label);
 
     if (fromMatch || subjectMatch) {
-      const from = (fromMatch?.[1] || "Unknown").trim();
-      const subject = (subjectMatch?.[1] || "").trim();
+      const from = cleanUnicode(fromMatch?.[1] || "Unknown");
+      const subject = cleanUnicode(subjectMatch?.[1] || "");
       if (isNavNoise(from) || isNavNoise(subject)) continue;
       emails.push({
         from: from.slice(0, 40),
-        subject: (subject || label.slice(0, 60)).trim(),
-        date: (dateMatch?.[1] || "").trim().slice(0, 20),
-        preview: label.slice(0, 200),
+        subject: (subject || cleanUnicode(label).slice(0, 60)).trim(),
+        date: cleanUnicode(dateMatch?.[1] || "").slice(0, 20),
+        preview: cleanUnicode(label).slice(0, 200),
         unread,
       });
     }
   }
 
   if (emails.length === 0) {
-    const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 3);
-
-    for (let i = 0; i < lines.length; i++) {
-      if (isNavNoise(lines[i])) continue;
-    }
+    const lines = text.split(/[\n\r]+/).map(l => cleanUnicode(l)).filter(l => l.length > 3);
 
     const senderRe = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+|[^\s@]+@[^\s@]+\.[^\s@]+)$/;
     const timeRe = /^\d{1,2}:\d{2}\s*(?:AM|PM)?$|^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$|^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i;
@@ -681,6 +687,92 @@ function registerBuiltinCommands(): void {
       return `[${ts}] ${c.type.padEnd(6)} ${c.content.slice(0, 80)}`;
     });
     return ok(lines.join("\n"));
+  });
+
+  registerCommand("capture", "Capture data to knowledge base as markdown note", "capture mail <n|n,n|all> [--tag TAG] | capture calendar [--tag TAG] | capture text <content>", async (args) => {
+    const sub = args[0];
+    if (!sub) return fail("[capture] usage: capture mail <n|all> | capture calendar | capture text <content>");
+
+    const tagIdx = args.indexOf("--tag");
+    const tags: string[] = tagIdx >= 0 && args[tagIdx + 1] ? [args[tagIdx + 1]] : [];
+    const cleanArgs = args.filter((_, i) => i !== tagIdx && (tagIdx < 0 || i !== tagIdx + 1));
+
+    if (sub === "mail") {
+      const cached = getMailCache();
+      if (!cached || cached.emails.length === 0) return fail("[capture] No cached emails. Run: outlook first");
+
+      const target = cleanArgs[1];
+      if (!target) return fail("[capture] usage: capture mail <n|all> [--tag TAG]");
+
+      let toCapture: { email: CachedEmail; idx: number }[] = [];
+      if (target === "all") {
+        toCapture = cached.emails.map((e, i) => ({ email: e, idx: i }));
+      } else {
+        const nums = target.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+        for (const n of nums) {
+          if (n >= 1 && n <= cached.emails.length) {
+            toCapture.push({ email: cached.emails[n - 1], idx: n - 1 });
+          }
+        }
+      }
+
+      if (toCapture.length === 0) return fail(`[capture] No valid emails to capture. Specify 1-${cached.emails.length} or "all"`);
+
+      const results: string[] = [];
+      const baseTags = ["email", "outlook", ...tags];
+      for (const { email, idx } of toCapture) {
+        const body = [
+          `# ${email.subject || "(no subject)"}`,
+          "",
+          `- **From:** ${email.from}`,
+          `- **Date:** ${email.date || "unknown"}`,
+          `- **Status:** ${email.unread ? "unread" : "read"}`,
+          "",
+          "## Preview",
+          "",
+          email.preview || "(no preview)",
+        ].join(String.fromCharCode(10));
+
+        await storage.createNote({
+          title: `[Email] ${email.subject || "(no subject)"} - ${email.from}`,
+          body,
+          tags: baseTags,
+        });
+        results.push(`  #${idx + 1} ${email.from}: ${email.subject?.slice(0, 50)}`);
+      }
+      return ok(`Captured ${results.length} email(s) to knowledge base:${String.fromCharCode(10)}${results.join(String.fromCharCode(10))}`);
+    }
+
+    if (sub === "text") {
+      const content = cleanArgs.slice(1).join(" ");
+      if (!content) return fail("[capture] usage: capture text <content>");
+      await storage.createNote({
+        title: content.slice(0, 80),
+        body: content,
+        tags: ["capture", ...tags],
+      });
+      return ok(`Captured to knowledge base: "${content.slice(0, 60)}"`);
+    }
+
+    if (sub === "calendar") {
+      const calCache = getCalendarCache();
+      if (!calCache || calCache.events.length === 0) return fail("[capture] No cached calendar. Run: outlook calendar first");
+      const body = [
+        "# Calendar Events",
+        "",
+        `Captured: ${new Date().toISOString().slice(0, 16)}`,
+        "",
+        ...calCache.events.map(ev => `- **${ev.date} ${ev.time}** ${ev.title}${ev.location ? ` @ ${ev.location}` : ""}`),
+      ].join(String.fromCharCode(10));
+      await storage.createNote({
+        title: `[Calendar] ${new Date().toISOString().slice(0, 10)} - ${calCache.events.length} events`,
+        body,
+        tags: ["calendar", "outlook", ...tags],
+      });
+      return ok(`Captured ${calCache.events.length} calendar events to knowledge base.`);
+    }
+
+    return fail(`[capture] unknown source "${sub}". Use: mail, text, or calendar`);
   });
 
   registerCommand("search", "Search across all data", "search <query>", async (args) => {
@@ -1894,12 +1986,20 @@ ${fullHtml}`;
       if (isNaN(n) || n < 1 || n > cached.emails.length) return fail(`[outlook] read: specify a number 1-${cached.emails.length}`);
       const email = cached.emails[n - 1];
       const lines = [
+        `=== EMAIL #${n} ===`,
+        "",
         `From:    ${email.from}`,
         `Subject: ${email.subject}`,
         `Date:    ${email.date}`,
         `Status:  ${email.unread ? "UNREAD" : "read"}`,
         "",
+        "--- Preview ---",
+        "",
         email.preview || "(no preview available)",
+        "",
+        `--- Actions ---`,
+        `capture mail ${n}          Save to knowledge base`,
+        `capture mail ${n} --tag work  Save with tag`,
       ];
       return ok(lines.join("\n"));
     }
