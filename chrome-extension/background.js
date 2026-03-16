@@ -227,7 +227,10 @@ async function executeJob(job) {
           target: { tabId: tab.id },
           func: (sel, idx) => {
             const els = document.querySelectorAll(sel);
-            if (els[idx]) els[idx].click();
+            if (els[idx]) {
+              els[idx].scrollIntoView({ block: "center" });
+              els[idx].click();
+            }
           },
           args: [clickSelector, clickIndex],
         });

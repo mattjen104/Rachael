@@ -327,6 +327,99 @@ function isNavNoise(s: string): boolean {
   return false;
 }
 
+function stripOutlookPageChrome(rawText: string, emailSubject?: string): string {
+  const lines = rawText.split(/\n/);
+  const filtered: string[] = [];
+  let inNavSection = true;
+  let foundContent = false;
+
+  const navPatterns = [
+    /^Outlook$/i,
+    /^File$/i,
+    /^Navigation pane$/i,
+    /^Favorites$/i,
+    /^Focused$/i,
+    /^Other$/i,
+    /^Pinned$/i,
+    /^Today$/i,
+    /^Yesterday$/i,
+    /^Last week$/i,
+    /^Last month$/i,
+    /^Older$/i,
+    /^\s*Inbox\s*$/i,
+    /^\s*Drafts\s*$/i,
+    /^\s*Sent Items?\s*$/i,
+    /^\s*Deleted Items?\s*$/i,
+    /^\s*Archive\s*$/i,
+    /^\s*Junk Email\s*$/i,
+    /^\s*Notes\s*$/i,
+    /^\s*RSS Feeds?\s*$/i,
+    /^\s*Conversation History\s*$/i,
+    /^\s*selected\s*$/i,
+    /^\d+\s*(unread|items?)\s*$/i,
+    /^[a-zA-Z.]+@[a-zA-Z.]+\.(edu|com|org)\s*$/,
+    /^Select an item to read$/i,
+    /^Nothing is selected$/i,
+    /^\s*(IT|HR|Admin)\s*$/i,
+  ];
+
+  const inboxItemPattern = /^[A-Z][a-z]+,\s+[A-Z][a-z]+/;
+  const timePattern = /^\d{1,2}:\d{2}\s*(AM|PM)\s*$/i;
+  const dateOnlyPattern = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}:\d{2}\s*(AM|PM)\s*$/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    if (navPatterns.some(p => p.test(line))) continue;
+    if (timePattern.test(line)) continue;
+    if (dateOnlyPattern.test(line)) continue;
+
+    if (inNavSection) {
+      if (emailSubject && line.includes(emailSubject.split(";")[0]?.trim() || "___NOMATCH___")) {
+        inNavSection = false;
+        foundContent = true;
+      }
+      if (/^(From|To|Cc|Sent|Date|Subject):/i.test(line)) {
+        inNavSection = false;
+        foundContent = true;
+      }
+      if (!foundContent) {
+        const isInboxPreview = (
+          line.length > 80 &&
+          !line.startsWith("From:") &&
+          !line.startsWith("To:") &&
+          i + 1 < lines.length
+        );
+        const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : "";
+        if (isInboxPreview && (timePattern.test(nextLine) || dateOnlyPattern.test(nextLine))) {
+          continue;
+        }
+        if (inboxItemPattern.test(line) && line.length < 80) continue;
+      }
+    }
+
+    if (foundContent || !inNavSection) {
+      filtered.push(lines[i]);
+    }
+  }
+
+  if (filtered.length < 3) {
+    const simple: string[] = [];
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) continue;
+      if (navPatterns.some(p => p.test(t))) continue;
+      if (timePattern.test(t)) continue;
+      if (/^\d+\s*(unread|items?)$/i.test(t)) continue;
+      simple.push(line);
+    }
+    return simple.join(String.fromCharCode(10)).trim();
+  }
+
+  return filtered.join(String.fromCharCode(10)).trim();
+}
+
 export function parseOutlookInbox(html: string, text: string, extracted?: Record<string, Array<{ text: string; href?: string; ariaLabel?: string }>>): CachedEmail[] {
   const emails: CachedEmail[] = [];
 
@@ -1993,33 +2086,44 @@ ${fullHtml}`;
       if (fetchBody && isExtensionConnected()) {
         emitEvent("cli", `Opening email #${n}: ${email.subject?.slice(0, 40)}...`, "info", { metadata: { command: "outlook read" } });
         const readResult = await smartFetch("https://outlook.office.com/mail/inbox", "dom", "cli-outlook-read", {
-          maxText: 30000,
+          maxText: 40000,
           spaWaitMs: 15000,
           clickSelector: '[role="option"][aria-label], [role="listbox"] [role="option"], div[data-convid], tr[aria-label]',
           clickIndex: n - 1,
           postClickWaitMs: 5000,
-          postClickSelector: '[role="document"], [class*="ReadingPane"], [class*="readingPane"], [aria-label*="Message body"], div[class*="body"]',
+          postClickSelector: '[role="document"], [data-app-section="ReadingPaneContainerV2"], [class*="ReadingPane"], [aria-label*="Message body"]',
           selectors: {
-            messageBody: '[role="document"], [class*="ReadingPane"] [role="region"], div[aria-label*="Message body"], [class*="ItemBody"], [class*="body"] [role="document"]',
-            messageHeaders: '[class*="DetailHeader"], [class*="fromContainer"], [class*="SubjectLine"]',
+            readingPane: '[data-app-section="ReadingPaneContainerV2"], [class*="ReadingPaneContainer"], [id*="ReadingPane"]',
+            messageBody: '[role="document"], div[aria-label*="Message body"], [class*="uniqueBody"], [class*="ItemBody"]',
+            conversationItems: '[role="document"] [role="separator"] ~ *, [data-app-section*="ConversationReadingPane"] > div',
           },
         }, 60000);
 
         if (!readResult.error) {
           const extracted = (readResult as any).extracted || {};
-          const bodyEls = extracted.messageBody || [];
-          const headerEls = extracted.messageHeaders || [];
           let bodyText = "";
-          for (const el of bodyEls) {
+
+          const readingPaneEls = extracted.readingPane || [];
+          for (const el of readingPaneEls) {
             const t = cleanUnicode((el.text || "").trim());
             if (t.length > bodyText.length) bodyText = t;
           }
 
-          if (!bodyText) {
+          if (!bodyText || bodyText.length < 50) {
+            const bodyEls = extracted.messageBody || [];
+            for (const el of bodyEls) {
+              const t = cleanUnicode((el.text || "").trim());
+              if (t.length > bodyText.length) bodyText = t;
+            }
+          }
+
+          if (!bodyText || bodyText.length < 50) {
             bodyText = cleanUnicode((readResult.text || "").trim());
           }
 
-          if (bodyText.length > 100) {
+          bodyText = stripOutlookPageChrome(bodyText, email.subject);
+
+          if (bodyText.length > 50) {
             const bodySnippet = bodyText.length > 5000 ? bodyText.slice(0, 5000) + nl + "... (truncated)" : bodyText;
 
             email.fullBody = bodyText;
