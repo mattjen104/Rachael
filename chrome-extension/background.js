@@ -497,11 +497,25 @@ async function executeJob(job) {
               debug.steps.push("matched:" + debug.matchedApp);
 
               const launchId = match.id || match.Id;
-              const launchUrl = match.launchurl || match.LaunchUrl || match.launchUrl;
+              const rawLaunchUrl = match.launchurl || match.LaunchUrl || match.launchUrl;
 
-              if (launchUrl) {
-                debug.steps.push("navigating:" + launchUrl.substring(0, 80));
-                const launchResp = await fetch(baseUrl + launchUrl, { method: "GET", headers, credentials: "include" });
+              let launchUrlFull = "";
+              if (rawLaunchUrl) {
+                if (rawLaunchUrl.startsWith("http")) {
+                  launchUrlFull = rawLaunchUrl;
+                } else if (rawLaunchUrl.startsWith("/")) {
+                  launchUrlFull = baseUrl + rawLaunchUrl;
+                } else if (usedPath) {
+                  const apiBase = usedPath.replace(/\/Resources\/.*$/, "").replace(/\/resources\/.*$/, "");
+                  launchUrlFull = baseUrl + apiBase + "/" + rawLaunchUrl;
+                } else {
+                  launchUrlFull = baseUrl + "/" + rawLaunchUrl;
+                }
+              }
+
+              if (launchUrlFull) {
+                debug.steps.push("launch-url:" + launchUrlFull.substring(0, 120));
+                const launchResp = await fetch(launchUrlFull, { method: "GET", headers, credentials: "include" });
                 if (launchResp.ok) {
                   const contentType = launchResp.headers.get("content-type") || "";
                   if (contentType.includes("application/x-ica") || contentType.includes("octet-stream")) {
@@ -524,8 +538,11 @@ async function executeJob(job) {
                 }
               }
 
+              const apiBase = usedPath ? usedPath.replace(/\/Resources\/.*$/, "").replace(/\/resources\/.*$/, "") : "";
               const launchPaths = [
+                ...(apiBase ? [apiBase + "/Resources/LaunchIca/" + launchId] : []),
                 "/Citrix/StoreWeb/Resources/LaunchIca/" + launchId,
+                "/Citrix/CWPSFWeb/Resources/LaunchIca/" + launchId,
                 "/Citrix/Store/resources/v2/" + launchId + "/launch",
               ];
               for (const lp of launchPaths) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OrgCloud Bridge",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Personal browser bridge for OrgCloud — scrapes any site you're logged into",
   "permissions": [
     "activeTab",
