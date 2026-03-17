@@ -207,6 +207,10 @@ export default function Minibuffer({
       { id: "fetch-mail", label: "fetch-outlook-inbox", hint: "Via bridge", action: () => { setMode("shell"); setQuery("outlook"); setShellOutput(""); executeShellCommand("outlook"); } },
       { id: "fetch-chats", label: "fetch-teams-chats", hint: "Via bridge", action: () => { setMode("shell"); setQuery("teams"); setShellOutput(""); executeShellCommand("teams"); } },
       { id: "fetch-calendar", label: "fetch-outlook-calendar", hint: "Via bridge", action: () => { setMode("shell"); setQuery("outlook calendar"); setShellOutput(""); executeShellCommand("outlook calendar"); } },
+      { id: "citrix-workspace", label: "citrix-workspace", hint: "Launch all Citrix apps", action: () => { setMode("shell"); setQuery("citrix workspace"); setShellOutput(""); executeShellCommand("citrix workspace"); } },
+      { id: "citrix-launch", label: "citrix-launch", hint: "Launch single Citrix app", action: () => { setMode("shell"); setQuery("citrix launch "); setShellOutput(""); } },
+      { id: "citrix-workspace-list", label: "citrix-workspace-list", hint: "Show configured apps", action: () => { setMode("shell"); setQuery("citrix workspace list"); setShellOutput(""); executeShellCommand("citrix workspace list"); } },
+      { id: "citrix-keepalive", label: "citrix-keepalive-status", hint: "Check keepalive", action: () => { setMode("shell"); setQuery("citrix keepalive"); setShellOutput(""); executeShellCommand("citrix keepalive"); } },
       { id: "transcripts", label: "transcripts", hint: "View transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "meetings", label: "meetings", hint: "View meeting transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "record-start", label: "record-start", hint: "Start mic recording", action: () => {
