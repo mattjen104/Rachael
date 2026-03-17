@@ -1987,7 +1987,19 @@ ${fullHtml}`;
       try {
         const ntfyLines: string[] = [];
         if (htmlUrl) {
-          ntfyLines.push("Your morning briefing is ready.");
+          const plainText = htmlBody
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+            .replace(/<h[1-3][^>]*>/gi, "\n\n## ")
+            .replace(/<\/h[1-3]>/gi, " ##\n")
+            .replace(/<li[^>]*>/gi, "\n- ")
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<p[^>]*>/gi, "\n")
+            .replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi, "$2 ($1)")
+            .replace(/<[^>]+>/g, "")
+            .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          ntfyLines.push(plainText.slice(0, 4000));
         } else {
           ntfyLines.push(message.slice(0, 4000));
         }
