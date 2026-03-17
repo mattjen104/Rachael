@@ -549,73 +549,70 @@ async function executeJob(job) {
         lastClickDebug = apiDebug;
 
         if (apiDebug.icaDataUrl) {
-          console.log("[bridge] downloading ICA via data URL...");
+          console.log("[bridge] writing ICA to page for native download...");
           try {
-            let dlOpenResolve;
-            const dlOpenPromise = new Promise(r => { dlOpenResolve = r; });
+            const icaContent = atob(apiDebug.icaDataUrl.split(",")[1] || "");
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: (icaText, appName) => {
+                const blob = new Blob([icaText], { type: "application/x-ica" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = (appName || "launch") + ".ica";
+                a.style.display = "none";
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }, 1000);
+              },
+              args: [icaContent, apiDebug.matchedApp || "launch"],
+            });
+            apiDebug.steps.push("blob-download-triggered");
 
-            function onCreated(item) {
-              console.log("[bridge] download created:", item.id, item.filename, item.state);
-            }
-            chrome.downloads.onCreated.addListener(onCreated);
-
-            function onChanged(delta) {
-              console.log("[bridge] download changed:", JSON.stringify(delta));
-              if (delta.state && delta.state.current === "complete") {
-                chrome.downloads.onChanged.removeListener(onChanged);
-                chrome.downloads.onCreated.removeListener(onCreated);
-                console.log("[bridge] download complete, calling open() for id:", delta.id);
-                try {
-                  chrome.downloads.open(delta.id);
-                  console.log("[bridge] open() called successfully");
-                  apiDebug.steps.push("opened:" + delta.id);
-                } catch (openErr) {
-                  console.log("[bridge] open() threw:", openErr.message);
-                  apiDebug.steps.push("open-threw:" + (openErr.message || "").substring(0, 60));
+            let opened = false;
+            await new Promise((resolve) => {
+              const dlTimeout = setTimeout(() => {
+                chrome.downloads.onChanged.removeListener(onDl);
+                apiDebug.steps.push("dl-watch-timeout");
+                resolve();
+              }, 15000);
+              function onDl(delta) {
+                if (delta.state && delta.state.current === "complete") {
+                  chrome.downloads.search({ id: delta.id }, (items) => {
+                    if (items && items.length > 0) {
+                      const fn = items[0].filename || "";
+                      console.log("[bridge] download complete:", fn);
+                      if (fn.endsWith(".ica") || fn.endsWith(".ICA")) {
+                        clearTimeout(dlTimeout);
+                        chrome.downloads.onChanged.removeListener(onDl);
+                        apiDebug.steps.push("ica-dl-complete:" + fn.substring(fn.lastIndexOf("/") + 1));
+                        chrome.downloads.open(delta.id, () => {
+                          if (chrome.runtime.lastError) {
+                            apiDebug.steps.push("open-err:" + (chrome.runtime.lastError.message || "").substring(0, 60));
+                            console.log("[bridge] open() error:", chrome.runtime.lastError.message);
+                          } else {
+                            apiDebug.steps.push("open-ok");
+                            console.log("[bridge] open() succeeded");
+                          }
+                          opened = true;
+                          resolve();
+                        });
+                      }
+                    }
+                  });
                 }
-                if (chrome.runtime.lastError) {
-                  console.log("[bridge] open() lastError:", chrome.runtime.lastError.message);
-                  apiDebug.steps.push("open-lastErr:" + (chrome.runtime.lastError.message || "").substring(0, 60));
-                }
-                dlOpenResolve();
-              } else if (delta.state && delta.state.current === "interrupted") {
-                chrome.downloads.onChanged.removeListener(onChanged);
-                chrome.downloads.onCreated.removeListener(onCreated);
-                console.log("[bridge] download interrupted:", JSON.stringify(delta));
-                apiDebug.steps.push("dl-interrupted");
-                dlOpenResolve();
               }
-            }
-            chrome.downloads.onChanged.addListener(onChanged);
-
-            const dlId = await new Promise((resolve, reject) => {
-              chrome.downloads.download({
-                url: apiDebug.icaDataUrl,
-                filename: (apiDebug.matchedApp || "launch").replace(/[^a-zA-Z0-9 _-]/g, "") + ".ica",
-              }, (downloadId) => {
-                if (chrome.runtime.lastError) {
-                  console.log("[bridge] download() error:", chrome.runtime.lastError.message);
-                  reject(new Error(chrome.runtime.lastError.message));
-                } else {
-                  console.log("[bridge] download() started, id:", downloadId);
-                  apiDebug.steps.push("dl-started:" + downloadId);
-                  resolve(downloadId);
-                }
-              });
+              chrome.downloads.onChanged.addListener(onDl);
             });
 
-            const timeout = setTimeout(() => {
-              chrome.downloads.onChanged.removeListener(onChanged);
-              chrome.downloads.onCreated.removeListener(onCreated);
-              console.log("[bridge] download open timeout (15s)");
-              apiDebug.steps.push("dl-timeout");
-              dlOpenResolve();
-            }, 15000);
-
-            await dlOpenPromise;
-            clearTimeout(timeout);
+            if (!opened) {
+              apiDebug.steps.push("open-fallback-show");
+            }
           } catch (e) {
-            console.log("[bridge] download pipeline error:", e.message);
+            console.log("[bridge] ICA pipeline error:", e.message);
             apiDebug.steps.push("dl-err:" + (e.message || "").substring(0, 60));
           }
           delete apiDebug.icaDataUrl;
