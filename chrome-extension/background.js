@@ -102,7 +102,9 @@ async function pollForJobs() {
       const job = jobs[i];
       if (i > 0) await sleep(JOB_DELAY_MS);
       try {
+        console.log(`[bridge] executing job ${job.id}: ${job.type} ${job.url} opts=${JSON.stringify(job.options || {})}`);
         const result = await executeJob(job);
+        console.log(`[bridge] job ${job.id} complete, status=${result.status}, error=${result.error || "none"}`);
         await fetch(`${baseUrl}/api/bridge/ext/results`, {
           method: "POST",
           headers: bridgeHeaders(token),
@@ -228,7 +230,8 @@ async function executeJob(job) {
     if (tab) {
       tabReused = true;
       await chrome.tabs.update(tab.id, { active: true });
-      await new Promise((r) => setTimeout(r, 1000));
+      console.log(`[bridge] reused existing tab ${tab.id} for ${url}`);
+      await new Promise((r) => setTimeout(r, 2000));
     } else {
       tab = await chrome.tabs.create({ url, active: true });
     }
@@ -242,7 +245,7 @@ async function executeJob(job) {
               if (waitForSelector) {
                 pollForSelector(tab.id, waitForSelector, spaWaitMs).then(resolve).catch(resolve);
               } else {
-                setTimeout(resolve, 2000);
+                setTimeout(resolve, spaWaitMs);
               }
             }
           }
@@ -260,7 +263,9 @@ async function executeJob(job) {
 
       if (clickSelector && clickMatchText) {
         const pollTimeout = options?.pollTimeoutMs || 15000;
-        await pollForTextMatch(tab.id, clickSelector, clickMatchText, pollTimeout);
+        console.log(`[bridge] polling for text "${clickMatchText}" with selector "${clickSelector}" (timeout=${pollTimeout}ms)`);
+        const found = await pollForTextMatch(tab.id, clickSelector, clickMatchText, pollTimeout);
+        console.log(`[bridge] pollForTextMatch result: ${found}`);
       }
 
       if (clickSelector) {
@@ -270,6 +275,7 @@ async function executeJob(job) {
         if (autoOpenDownload) {
           downloadWatcher = new Promise((resolve) => {
             const timeout = setTimeout(() => {
+              console.log("[bridge] download watcher timed out (30s)");
               chrome.downloads.onChanged.removeListener(onChanged);
               resolve(false);
             }, 30000);
@@ -279,10 +285,12 @@ async function executeJob(job) {
                 chrome.downloads.search({ id: delta.id }, (items) => {
                   if (items && items.length > 0) {
                     const fn = items[0].filename || "";
+                    console.log(`[bridge] download complete: ${fn}`);
                     if (fn.endsWith(".ica") || fn.endsWith(".ICA")) {
                       clearTimeout(timeout);
                       chrome.downloads.onChanged.removeListener(onChanged);
                       chrome.downloads.open(delta.id);
+                      console.log("[bridge] opened ICA file");
                       resolve(true);
                     }
                   }
@@ -293,10 +301,27 @@ async function executeJob(job) {
           });
         }
 
-        await chrome.scripting.executeScript({
+        console.log(`[bridge] executing click script for selector="${clickSelector}" matchText="${clickMatchText}"`);
+        const clickResults = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: (sel, idx, matchText) => {
             const els = Array.from(document.querySelectorAll(sel));
+            const debugInfo = {
+              totalElements: els.length,
+              sampleTexts: els.slice(0, 10).map(el => ({
+                tag: el.tagName,
+                text: (el.textContent || "").trim().substring(0, 80),
+                cls: el.className?.toString?.()?.substring(0, 60) || "",
+                href: el.getAttribute("href") || "",
+              })),
+              matched: false,
+              matchedTag: "",
+              matchedText: "",
+              matchedClass: "",
+              pageUrl: location.href,
+              pageTitle: document.title,
+            };
+
             let target = null;
             if (matchText) {
               const lower = matchText.toLowerCase();
@@ -313,13 +338,34 @@ async function executeJob(job) {
             }
             if (!target) target = els[idx] || null;
             if (target) {
+              debugInfo.matched = true;
+              debugInfo.matchedTag = target.tagName;
+              debugInfo.matchedText = (target.textContent || "").trim().substring(0, 100);
+              debugInfo.matchedClass = target.className?.toString?.()?.substring(0, 80) || "";
               target.scrollIntoView({ block: "center" });
-              target.click();
+              const rect = target.getBoundingClientRect();
+              const cx = rect.left + rect.width / 2;
+              const cy = rect.top + rect.height / 2;
+              ["mousedown", "mouseup", "click"].forEach(evtType => {
+                target.dispatchEvent(new MouseEvent(evtType, {
+                  bubbles: true, cancelable: true, view: window,
+                  clientX: cx, clientY: cy,
+                }));
+              });
+              if (target.tagName === "A" || target.closest("a")) {
+                const link = target.tagName === "A" ? target : target.closest("a");
+                if (link && link.href) {
+                  debugInfo.linkHref = link.href;
+                }
+              }
             }
-            return !!target;
+            return debugInfo;
           },
           args: [clickSelector, clickIndex, clickMatchText],
         });
+
+        const clickDebug = clickResults?.[0]?.result || {};
+        console.log("[bridge] click result:", JSON.stringify(clickDebug, null, 2));
 
         if (downloadWatcher) {
           await downloadWatcher;
