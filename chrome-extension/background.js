@@ -57,7 +57,7 @@ async function getOrgCloudUrl() {
   return baseUrl;
 }
 
-const BRIDGE_VERSION = "2.2.0";
+const BRIDGE_VERSION = chrome.runtime.getManifest().version;
 const JOB_DELAY_MS = 1500;
 
 function bridgeHeaders(token) {
@@ -510,118 +510,31 @@ async function executeJob(job) {
 
               const launchUrlFull = resolveUrl(rawLaunchUrl);
 
-              let jsLaunched = false;
-              if (typeof window.CTXS !== "undefined" && window.CTXS) {
-                debug.steps.push("ctxs-found");
-                try {
-                  const ctxs = window.CTXS;
-                  if (ctxs.ExtensionAPI && typeof ctxs.ExtensionAPI.openApplication === "function") {
-                    debug.steps.push("ctxs-openApplication");
-                    ctxs.ExtensionAPI.openApplication(debug.matchedApp);
-                    jsLaunched = true;
-                  } else if (ctxs.ResourcesController && typeof ctxs.ResourcesController.startResource === "function") {
-                    debug.steps.push("ctxs-startResource");
-                    ctxs.ResourcesController.startResource(match);
-                    jsLaunched = true;
+              if (launchUrlFull) {
+                debug.steps.push("fetch-ica:" + launchUrlFull.substring(0, 120));
+                const launchResp = await fetch(launchUrlFull, { method: "GET", headers, credentials: "include" });
+                if (launchResp.ok) {
+                  const contentType = launchResp.headers.get("content-type") || "";
+                  if (contentType.includes("application/x-ica") || contentType.includes("octet-stream") || launchUrlFull.endsWith(".ica")) {
+                    const blob = await launchResp.blob();
+                    const reader = new FileReader();
+                    const dataUrl = await new Promise((resolve) => {
+                      reader.onloadend = () => resolve(reader.result);
+                      reader.readAsDataURL(blob);
+                    });
+                    debug.steps.push("ica-ok:" + blob.size + "B,ct:" + contentType.substring(0, 30));
+                    debug.method = "api-fetch";
+                    debug.launchUrlFull = launchUrlFull;
+                    debug.icaDataUrl = dataUrl;
+                    return debug;
                   }
-                  if (!jsLaunched && ctxs.Store) {
-                    const allRes = ctxs.Store.allResources ? ctxs.Store.allResources() : (ctxs.Store._allResources || []);
-                    const target = allRes.find(r => (r.name || r.Name || "") === debug.matchedApp);
-                    if (target && typeof target.launch === "function") {
-                      debug.steps.push("ctxs-resource-launch");
-                      target.launch();
-                      jsLaunched = true;
-                    } else {
-                      debug.steps.push("ctxs-store-resources:" + allRes.length);
-                    }
-                  }
-                } catch (e) {
-                  debug.steps.push("ctxs-err:" + (e.message || "").substring(0, 40));
-                }
-              } else {
-                debug.steps.push("no-ctxs-global");
-              }
-
-              if (jsLaunched) {
-                debug.method = "ctxs-js";
-                await new Promise(r => setTimeout(r, 2000));
-                return debug;
-              }
-
-              function robustClick(el) {
-                el.scrollIntoView({ block: "center" });
-                el.focus();
-                el.click();
-                const rect = el.getBoundingClientRect();
-                const cx = rect.left + rect.width / 2;
-                const cy = rect.top + rect.height / 2;
-                ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(evtType => {
-                  const Ctor = evtType.startsWith("pointer") ? PointerEvent : MouseEvent;
-                  el.dispatchEvent(new Ctor(evtType, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 }));
-                });
-              }
-
-              const matchedName = debug.matchedApp.toLowerCase();
-              const allLinks = document.querySelectorAll("a, [onclick], [data-type], .storeapp, .store-app, li, [role='button']");
-              let appTile = null;
-              for (const el of allLinks) {
-                const t = (el.textContent || "").trim().toLowerCase();
-                if (t === matchedName || (t.length < matchedName.length * 3 && t.includes(matchedName))) {
-                  appTile = el;
-                  break;
-                }
-              }
-              if (!appTile) {
-                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-                let nd;
-                while ((nd = walker.nextNode())) {
-                  const t = (nd.textContent || "").trim().toLowerCase();
-                  if (t === matchedName) {
-                    appTile = nd.parentElement;
-                    break;
-                  }
-                }
-              }
-
-              if (appTile) {
-                debug.steps.push("dom-tile-found:" + appTile.tagName + "." + (appTile.className || "").toString().substring(0, 30));
-                robustClick(appTile);
-                debug.steps.push("clicked-tile");
-                debug.method = "api+dom-click";
-
-                await new Promise(r => setTimeout(r, 2000));
-
-                let openBtn = null;
-                const allBtns = document.querySelectorAll("button, a, [role='button'], .storeapp-open, .storeapp-launch");
-                for (const b of allBtns) {
-                  const t = (b.textContent || "").trim().toLowerCase();
-                  if (t === "open" || t === "launch" || t === "start" || t === "connect") {
-                    if (b.offsetParent !== null) {
-                      openBtn = b;
-                      break;
-                    }
-                  }
-                }
-                if (openBtn) {
-                  debug.steps.push("clicked-open:" + openBtn.tagName + "." + (openBtn.className || "").toString().substring(0, 30));
-                  robustClick(openBtn);
+                  debug.steps.push("unexpected-ct:" + contentType.substring(0, 40));
                 } else {
-                  debug.steps.push("no-open-btn, looking for detail links");
-                  const detailLinks = document.querySelectorAll(".storeapp-details a, .app-details a, .appInfoOpen, a[href*='LaunchIca'], a[href*='launch']");
-                  for (const dl of detailLinks) {
-                    const href = dl.href || dl.getAttribute("href") || "";
-                    if (href.includes("Launch") || href.includes("launch") || dl.classList.contains("appInfoOpen")) {
-                      debug.steps.push("clicked-detail:" + dl.tagName + " href:" + href.substring(0, 60));
-                      robustClick(dl);
-                      break;
-                    }
-                  }
+                  debug.steps.push("fetch-status:" + launchResp.status);
                 }
-                return debug;
               }
 
-              debug.steps.push("no-tile-found");
-              debug.error = "App tile not found in DOM";
+              debug.error = "Could not fetch ICA file";
               return debug;
             } catch (e) {
               debug.error = (e.message || String(e)).substring(0, 200);
@@ -635,7 +548,78 @@ async function executeJob(job) {
         console.log("[bridge] citrix API result:", JSON.stringify(apiDebug, null, 2));
         lastClickDebug = apiDebug;
 
-        if (downloadWatcher) {
+        if (apiDebug.icaDataUrl) {
+          console.log("[bridge] downloading ICA via data URL...");
+          try {
+            let dlOpenResolve;
+            const dlOpenPromise = new Promise(r => { dlOpenResolve = r; });
+
+            function onCreated(item) {
+              console.log("[bridge] download created:", item.id, item.filename, item.state);
+            }
+            chrome.downloads.onCreated.addListener(onCreated);
+
+            function onChanged(delta) {
+              console.log("[bridge] download changed:", JSON.stringify(delta));
+              if (delta.state && delta.state.current === "complete") {
+                chrome.downloads.onChanged.removeListener(onChanged);
+                chrome.downloads.onCreated.removeListener(onCreated);
+                console.log("[bridge] download complete, calling open() for id:", delta.id);
+                try {
+                  chrome.downloads.open(delta.id);
+                  console.log("[bridge] open() called successfully");
+                  apiDebug.steps.push("opened:" + delta.id);
+                } catch (openErr) {
+                  console.log("[bridge] open() threw:", openErr.message);
+                  apiDebug.steps.push("open-threw:" + (openErr.message || "").substring(0, 60));
+                }
+                if (chrome.runtime.lastError) {
+                  console.log("[bridge] open() lastError:", chrome.runtime.lastError.message);
+                  apiDebug.steps.push("open-lastErr:" + (chrome.runtime.lastError.message || "").substring(0, 60));
+                }
+                dlOpenResolve();
+              } else if (delta.state && delta.state.current === "interrupted") {
+                chrome.downloads.onChanged.removeListener(onChanged);
+                chrome.downloads.onCreated.removeListener(onCreated);
+                console.log("[bridge] download interrupted:", JSON.stringify(delta));
+                apiDebug.steps.push("dl-interrupted");
+                dlOpenResolve();
+              }
+            }
+            chrome.downloads.onChanged.addListener(onChanged);
+
+            const dlId = await new Promise((resolve, reject) => {
+              chrome.downloads.download({
+                url: apiDebug.icaDataUrl,
+                filename: (apiDebug.matchedApp || "launch").replace(/[^a-zA-Z0-9 _-]/g, "") + ".ica",
+              }, (downloadId) => {
+                if (chrome.runtime.lastError) {
+                  console.log("[bridge] download() error:", chrome.runtime.lastError.message);
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                  console.log("[bridge] download() started, id:", downloadId);
+                  apiDebug.steps.push("dl-started:" + downloadId);
+                  resolve(downloadId);
+                }
+              });
+            });
+
+            const timeout = setTimeout(() => {
+              chrome.downloads.onChanged.removeListener(onChanged);
+              chrome.downloads.onCreated.removeListener(onCreated);
+              console.log("[bridge] download open timeout (15s)");
+              apiDebug.steps.push("dl-timeout");
+              dlOpenResolve();
+            }, 15000);
+
+            await dlOpenPromise;
+            clearTimeout(timeout);
+          } catch (e) {
+            console.log("[bridge] download pipeline error:", e.message);
+            apiDebug.steps.push("dl-err:" + (e.message || "").substring(0, 60));
+          }
+          delete apiDebug.icaDataUrl;
+        } else if (downloadWatcher) {
           await downloadWatcher;
         } else {
           await new Promise((r) => setTimeout(r, 3000));
