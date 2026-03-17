@@ -2737,8 +2737,18 @@ ${fullHtml}`;
     if (args[0] === "workspace") {
       const nl = String.fromCharCode(10);
       const configKey = "citrix_workspace_apps";
-      const cfg = await storage.getAgentConfig(configKey);
+      let cfg: any;
+      try {
+        cfg = await storage.getAgentConfig(configKey);
+      } catch (e: any) {
+        return fail(`[citrix] Config lookup error: ${e.message}`);
+      }
       const raw = cfg?.value || null;
+      if (args[1] === "debug") {
+        const allCfg = await storage.getAgentConfigs();
+        const keys = allCfg.map(c => `${c.key}=${c.value.slice(0, 40)}`).join(nl);
+        return ok(`cfg=${JSON.stringify(cfg)}${nl}raw=${raw}${nl}allKeys:${nl}${keys}`);
+      }
       if (args[1] === "set") {
         const appList = args.slice(2).join(" ").split(",").map(s => s.trim()).filter(Boolean);
         if (!appList.length) return fail("[citrix] Usage: citrix workspace set App1, App2, App3");
