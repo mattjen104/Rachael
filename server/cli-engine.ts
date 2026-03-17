@@ -2728,13 +2728,29 @@ ${fullHtml}`;
       if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
       const debugTitle = (launchResult as any).title || "(no title)";
       const cd = (launchResult as any).clickDebug;
-      const clickInfo = cd ? `strategy=${cd.strategy} matched=${cd.matched} tag=${cd.matchedTag} class="${cd.matchedClass}" text="${cd.matchedText?.substring(0, 60)}" chain="${cd.ancestorChain}" allApps=${cd.allAppTexts?.length || 0}` : "no-click-debug";
-      emitEvent("cli", `Citrix launch debug: page="${debugTitle}" ${clickInfo}`, "info", { metadata: { command: "citrix" } });
+      if (cd) {
+        const parts = [
+          `strategy=${cd.strategy}`,
+          `matched=${cd.matched}`,
+          `tag=${cd.matchedTag}`,
+          `class="${cd.matchedClass}"`,
+          `id="${cd.matchedId}"`,
+          `text="${(cd.matchedText || "").substring(0, 50)}"`,
+          `chain="${cd.ancestorChain}"`,
+          cd.launchUrl ? `launchUrl="${cd.launchUrl}"` : "",
+          cd.dataLaunchAttr ? `data="${cd.dataLaunchAttr}"` : "",
+          cd.clickedParents ? `parents=[${cd.clickedParents.join(",")}]` : "",
+          cd.navigatedToLaunchUrl ? "NAVIGATED" : "",
+          `dataAttrs=${JSON.stringify(cd.dataAttrs || {})}`,
+        ].filter(Boolean).join(" ");
+        emitEvent("cli", `Citrix click debug: ${parts}`, "info", { metadata: { command: "citrix" } });
+      }
       if (cd && !cd.matched) {
         const appTexts = (cd.allAppTexts || []).map((a: any) => a.text).join(", ");
-        return fail(`[citrix launch] Could not find "${appName}" on CWP page (title="${debugTitle}"). Found elements: [${appTexts.substring(0, 300)}]`);
+        return fail(`[citrix launch] Could not find "${appName}" on page "${debugTitle}". Visible: [${appTexts.substring(0, 300)}]`);
       }
-      return ok(`Launched "${appName}" via Citrix portal (${cd?.strategy || "unknown"}, clicked ${cd?.matchedTag || "?"}.${cd?.matchedClass?.split(" ")[0] || ""})`);
+      const extra = cd ? ` [${cd.strategy}, ${cd.matchedTag}.${(cd.matchedClass || "").split(" ")[0]}${cd.clickedParents ? " + parents:" + cd.clickedParents.join(",") : ""}${cd.navigatedToLaunchUrl ? " +nav" : ""}]` : "";
+      return ok(`Launched "${appName}" via Citrix portal${extra}`);
     }
 
     if (args[0] === "clean") {

@@ -321,10 +321,12 @@ async function executeJob(job) {
 
             function robustClick(el) {
               el.scrollIntoView({ block: "center" });
+              el.focus();
+              el.click();
               const rect = el.getBoundingClientRect();
               const cx = rect.left + rect.width / 2;
               const cy = rect.top + rect.height / 2;
-              ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(evtType => {
+              ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick"].forEach(evtType => {
                 const Ctor = evtType.startsWith("pointer") ? PointerEvent : MouseEvent;
                 el.dispatchEvent(new Ctor(evtType, {
                   bubbles: true, cancelable: true, view: window,
@@ -411,13 +413,59 @@ async function executeJob(job) {
               debugInfo.matchedText = (target.textContent || "").trim().substring(0, 100);
               debugInfo.matchedClass = target.className?.toString?.()?.substring(0, 80) || "";
               debugInfo.matchedId = target.id || "";
-              robustClick(target);
-              if (target.tagName !== "A" && target.tagName !== "BUTTON") {
-                const parent = target.closest("a, button, [role='button'], [onclick]");
-                if (parent && parent !== target) {
-                  debugInfo.alsoClickedParent = parent.tagName + "." + (parent.className?.toString?.()?.split(" ")[0] || "");
-                  robustClick(parent);
+
+              const allDataAttrs = {};
+              if (target.dataset) {
+                for (const k of Object.keys(target.dataset)) {
+                  allDataAttrs[k] = (target.dataset[k] || "").substring(0, 100);
                 }
+              }
+              debugInfo.dataAttrs = allDataAttrs;
+
+              let launchUrl = "";
+              let el = target;
+              while (el && el !== document.body) {
+                if (el.tagName === "A" && el.href && el.href !== "#" && !el.href.endsWith("#")) {
+                  launchUrl = el.href;
+                  break;
+                }
+                if (el.dataset) {
+                  for (const k of Object.keys(el.dataset)) {
+                    const v = el.dataset[k] || "";
+                    if (/launch|ica|resource|url/i.test(k) && v) {
+                      debugInfo.dataLaunchAttr = `${k}=${v}`;
+                    }
+                  }
+                }
+                el = el.parentElement;
+              }
+              debugInfo.launchUrl = launchUrl;
+
+              robustClick(target);
+
+              const clickedParents = [];
+              let p = target.parentElement;
+              let depth = 0;
+              while (p && p !== document.body && depth < 6) {
+                const pTag = p.tagName;
+                const pCls = p.className?.toString?.()?.split(" ")[0] || "";
+                if (pTag === "A" || pTag === "BUTTON" || pTag === "DIV" || pTag === "LI" || pTag === "SPAN") {
+                  if (p.onclick || p.hasAttribute("onclick") || p.getAttribute("tabindex") !== null ||
+                      p.getAttribute("role") === "button" || p.getAttribute("role") === "listitem" ||
+                      (p.className && /app|resource|tile|store|launch|icon/i.test(p.className.toString())) ||
+                      pTag === "A" || pTag === "BUTTON") {
+                    robustClick(p);
+                    clickedParents.push(pTag + "." + pCls);
+                  }
+                }
+                p = p.parentElement;
+                depth++;
+              }
+              if (clickedParents.length) debugInfo.clickedParents = clickedParents;
+
+              if (launchUrl && launchUrl.startsWith("http")) {
+                debugInfo.navigatedToLaunchUrl = true;
+                window.open(launchUrl, "_self");
               }
             }
             return debugInfo;
