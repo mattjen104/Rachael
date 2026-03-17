@@ -34,17 +34,19 @@ All data lives in Postgres tables:
 - **Takeover Points** — When agent hits an "approval" action, it emits a takeover point visible in Cockpit stream; human can confirm, reject, or take over
 - **Audit Log** — All actions (human and agent) logged with actor, action, permission level, result, timestamp
 
-## Seven-View Architecture
+## Nine-View Architecture
 
 Narrow tab bar at top, full-height views below:
 
 1. **Agenda View** (1:AGD) — Default. Overdue tasks, today's tasks, upcoming, latest agent briefings. Sections fold/unfold with Tab.
-2. **Tree View** (2:TRE) — Everything in one hierarchy: tasks, programs, skills, notes, inbox, reader pages. Tab to fold sections.
+2. **Tree View** (2:TRE) — Everything in one hierarchy: tasks, programs, skills, notes, inbox, reader pages, APPS (Citrix by category), MAIL, CHAT, SNOW. Tab to fold sections.
 3. **Programs View** (3:PRG) — List of all programs with enable/disable, trigger, runtime status. Runtime ON/OFF toggle.
 4. **Results View** (4:RES) — Chronological agent outputs. Tab to expand full output.
 5. **Reader View** (5:RDR) — Saved web pages. Enter to read, Escape to go back.
 6. **Transcripts View** (6:TRS) — Meeting audio transcription. Record from microphone or tab capture (Teams, Zoom, etc). Transcripts with timestamped segments, platform badges (TEAMS/ZOOM/MEET/OTHER), and recording type (TAB/MIC).
 7. **Cockpit View** (7:CKP) — Shared control cockpit. Activity stream, audit log, and permission editor. Tab to toggle control mode (human/agent).
+8. **Snow View** (8:SNW) — ServiceNow dashboard. Incidents, changes, requests with SLA indicators. Bridge-powered scraping.
+9. **Voice View** (9:VOX) — Voice command center. Press [V] to activate browser mic, speak natural language commands. Uses Web Speech API for recognition, maps to CLI commands, shows results inline. Works on Google TV with Bluetooth keyboard.
 
 ## Keyboard Navigation
 
@@ -120,6 +122,12 @@ Data flows into the KB as markdown notes stored in the `notes` table:
 - `scrape profile <name>` — Run a named site profile's default navigation path
 - `scrape path <id>` — Run a specific navigation path by ID
 - Output is pipeable text (title, extracted data, body text)
+
+## Voice Command Webhooks (server/routes.ts)
+
+- `POST /api/voice-cmd` — Natural language voice command endpoint (Google Home / IFTTT). Accepts `{text, source}`, maps to CLI commands via keyword matching, executes, and optionally sends ntfy notification with result. Supports: inbox/email, agenda, snow, standup, tasks, teams, citrix, memo/remember, search/find, notify. Unrecognized text saved as capture.
+- `POST /api/memo` — Simple memo webhook. Accepts `{text, source, tags}`, saves as note tagged `memo`+`voice`. Compatible with IFTTT `value1`/`value2` fields.
+- Both endpoints require `Authorization: Bearer <OPENCLAW_API_KEY>` header.
 
 ## Notifications (server/cli-engine.ts)
 

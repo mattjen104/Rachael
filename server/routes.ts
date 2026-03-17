@@ -1427,6 +1427,74 @@ export async function registerRoutes(
     res.send(`<!DOCTYPE html><html><head><title>Briefings</title><style>body{background:#0a0a0a;color:#00ff41;font-family:'IBM Plex Mono',monospace;padding:2em}a{color:#00ff41}a:hover{color:#fff}</style></head><body><h1>Briefing Archive</h1><ul>${links}</ul></body></html>`);
   });
 
+  app.post("/api/voice-cmd", apiKeyAuth, async (req, res) => {
+    try {
+      const raw = req.body.text || req.body.value1 || req.body.command || "";
+      const source = req.body.source || req.body.value2 || "google-home";
+      if (!raw.trim()) {
+        res.status(400).json({ message: "No command provided" });
+        return;
+      }
+
+      const VOICE_MAP: Array<{ keywords: string[]; cmd: string; label: string }> = [
+        { keywords: ["inbox", "email", "mail", "outlook"], cmd: "outlook", label: "Checking inbox" },
+        { keywords: ["agenda", "schedule", "today", "briefing", "morning"], cmd: "agenda", label: "Getting agenda" },
+        { keywords: ["snow", "servicenow", "tickets", "incidents"], cmd: "snow refresh", label: "Refreshing ServiceNow" },
+        { keywords: ["standup", "stand up", "summary", "yesterday"], cmd: "standup", label: "Running standup" },
+        { keywords: ["runtime", "programs", "agents"], cmd: "programs", label: "Listing programs" },
+        { keywords: ["tasks", "todo", "to do"], cmd: "tasks", label: "Listing tasks" },
+        { keywords: ["search"], cmd: "", label: "Searching" },
+        { keywords: ["citrix", "apps", "cwp"], cmd: "citrix", label: "Listing Citrix apps" },
+        { keywords: ["teams", "chat", "chats"], cmd: "teams", label: "Fetching Teams chats" },
+        { keywords: ["notify", "alert", "ping"], cmd: "", label: "Sending notification" },
+      ];
+
+      const lower = raw.toLowerCase().trim();
+      let cliCmd = "";
+      let label = "Running command";
+
+      if (lower.startsWith("memo ") || lower.startsWith("save memo ") || lower.startsWith("remember ")) {
+        const memoText = lower.replace(/^(save memo|memo|remember)\s+/i, "").trim();
+        cliCmd = `capture "${memoText.replace(/"/g, '\\"')}"`;
+        label = "Saving memo";
+      } else if (lower.startsWith("search ") || lower.startsWith("find ")) {
+        const query = lower.replace(/^(search|find)\s+/i, "").trim();
+        cliCmd = `search ${query}`;
+        label = "Searching";
+      } else if (lower.startsWith("notify ") || lower.startsWith("alert ") || lower.startsWith("ping ")) {
+        const msg = lower.replace(/^(notify|alert|ping)\s+/i, "").trim();
+        cliCmd = `notify ${msg}`;
+        label = "Sending notification";
+      } else {
+        for (const mapping of VOICE_MAP) {
+          if (mapping.keywords.some(kw => lower.includes(kw))) {
+            cliCmd = mapping.cmd;
+            label = mapping.label;
+            break;
+          }
+        }
+      }
+
+      if (!cliCmd) {
+        cliCmd = `capture "${raw.replace(/"/g, '\\"')}"`;
+        label = "Saved as memo (unrecognized command)";
+      }
+
+      const result = await executeChain(cliCmd);
+
+      const shouldNotify = req.body.notify !== false;
+      if (shouldNotify) {
+        try {
+          await executeChain(`notify "${label}: done"`);
+        } catch {}
+      }
+
+      res.json({ ok: true, command: cliCmd, label, output: result.output, exitCode: result.exitCode, source });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  });
+
   app.post("/api/memo", apiKeyAuth, async (req, res) => {
     try {
       const text = req.body.text || req.body.memo || req.body.value1 || "";
