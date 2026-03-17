@@ -519,10 +519,16 @@ async function executeJob(job) {
                 if (launchResp.ok) {
                   const contentType = launchResp.headers.get("content-type") || "";
                   if (contentType.includes("application/x-ica") || contentType.includes("octet-stream")) {
-                    debug.steps.push("ica-response-ok");
+                    const blob = await launchResp.blob();
+                    const reader = new FileReader();
+                    const dataUrl = await new Promise((resolve) => {
+                      reader.onloadend = () => resolve(reader.result);
+                      reader.readAsDataURL(blob);
+                    });
+                    debug.steps.push("ica-fetched:" + blob.size + "B");
                     debug.method = "api-direct";
                     debug.launchUrlFull = launchUrlFull;
-                    window.location.href = launchUrlFull;
+                    debug.icaDataUrl = dataUrl;
                     return debug;
                   }
                   debug.steps.push("unexpected-content:" + contentType);
@@ -605,9 +611,44 @@ async function executeJob(job) {
         console.log("[bridge] citrix API result:", JSON.stringify(apiDebug, null, 2));
         lastClickDebug = apiDebug;
 
-        if (downloadWatcher && apiDebug.launchUrlFull) {
-          console.log("[bridge] waiting for ICA download from page navigation...");
-          await downloadWatcher;
+        if (apiDebug.icaDataUrl) {
+          console.log("[bridge] downloading ICA via data URL and auto-opening...");
+          try {
+            const dlId = await new Promise((resolve, reject) => {
+              chrome.downloads.download({
+                url: apiDebug.icaDataUrl,
+                filename: (apiDebug.matchedApp || "launch").replace(/[^a-zA-Z0-9 _-]/g, "") + ".ica",
+              }, (downloadId) => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                  console.log("[bridge] ICA download started, id:", downloadId);
+                  resolve(downloadId);
+                }
+              });
+            });
+            await new Promise((resolve) => {
+              const openTimeout = setTimeout(() => {
+                chrome.downloads.onChanged.removeListener(onOpen);
+                resolve();
+              }, 10000);
+              function onOpen(delta) {
+                if (delta.id === dlId && delta.state && delta.state.current === "complete") {
+                  clearTimeout(openTimeout);
+                  chrome.downloads.onChanged.removeListener(onOpen);
+                  chrome.downloads.open(dlId);
+                  console.log("[bridge] auto-opened ICA file");
+                  apiDebug.steps.push("auto-opened");
+                  resolve();
+                }
+              }
+              chrome.downloads.onChanged.addListener(onOpen);
+            });
+          } catch (e) {
+            console.log("[bridge] ICA download/open error:", e.message);
+            apiDebug.steps.push("dl-error:" + (e.message || "").substring(0, 60));
+          }
+          delete apiDebug.icaDataUrl;
         } else if (downloadWatcher) {
           await downloadWatcher;
         } else {
