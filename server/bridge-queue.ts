@@ -28,6 +28,7 @@ export interface BridgeJob {
     postClickSelector?: string;
     reuseTab?: boolean;
     autoOpenDownload?: boolean;
+    pollTimeoutMs?: number;
   };
   submittedBy: string;
   submittedAt: number;

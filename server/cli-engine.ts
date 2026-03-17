@@ -2718,11 +2718,12 @@ ${fullHtml}`;
       const launchResult = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
         maxText: 5000,
         reuseTab: true,
-        clickSelector: `a, button, [class*="app"], [class*="App"], [role="listitem"], [class*="store"] span, [class*="Store"] span`,
+        clickSelector: `.storeapp-icon, .store-app, [class*="appCard"], [class*="StoreApp"], [class*="resource-tile"], [class*="app-tile"], .citrix-resource, a[href*="launch"], [role="listitem"], [class*="app"] a, [class*="App"] a, a, button`,
         clickMatchText: appName,
-        postClickWaitMs: 5000,
+        postClickWaitMs: 8000,
         autoOpenDownload: true,
-      }, 45000);
+        pollTimeoutMs: 30000,
+      }, 60000);
       if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
       return ok(`Launched "${appName}" via Citrix portal`);
     }

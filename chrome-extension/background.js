@@ -140,7 +140,7 @@ async function pollForSelector(tabId, selector, maxWaitMs) {
         return;
       }
     } catch {
-      return;
+      /* tab may be navigating or on cross-origin page — keep polling */
     }
     await new Promise((r) => setTimeout(r, interval));
   }
@@ -152,7 +152,7 @@ async function findExistingTab(urlPattern) {
 }
 
 async function pollForTextMatch(tabId, selector, matchText, maxWaitMs) {
-  const interval = 1000;
+  const interval = 1500;
   const maxAttempts = Math.ceil(maxWaitMs / interval);
   const lower = matchText.toLowerCase();
   for (let i = 0; i < maxAttempts; i++) {
@@ -170,7 +170,7 @@ async function pollForTextMatch(tabId, selector, matchText, maxWaitMs) {
       });
       if (results?.[0]?.result) return true;
     } catch {
-      return false;
+      /* tab may be on SSO redirect page — keep polling */
     }
     await new Promise((r) => setTimeout(r, interval));
   }
@@ -259,7 +259,8 @@ async function executeJob(job) {
       }
 
       if (clickSelector && clickMatchText) {
-        await pollForTextMatch(tab.id, clickSelector, clickMatchText, 15000);
+        const pollTimeout = options?.pollTimeoutMs || 15000;
+        await pollForTextMatch(tab.id, clickSelector, clickMatchText, pollTimeout);
       }
 
       if (clickSelector) {
@@ -271,7 +272,7 @@ async function executeJob(job) {
             const timeout = setTimeout(() => {
               chrome.downloads.onChanged.removeListener(onChanged);
               resolve(false);
-            }, 15000);
+            }, 30000);
 
             function onChanged(delta) {
               if (delta.state && delta.state.current === "complete") {
@@ -377,7 +378,10 @@ async function executeJob(job) {
         error: "Script execution failed: " + (execErr.message || String(execErr)),
       };
     } finally {
-      try { await chrome.tabs.remove(tab.id); } catch {}
+      const keepOpen = options?.autoOpenDownload || options?.reuseTab;
+      if (!keepOpen) {
+        try { await chrome.tabs.remove(tab.id); } catch {}
+      }
     }
   }
 
