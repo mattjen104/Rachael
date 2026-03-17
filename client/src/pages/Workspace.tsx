@@ -12,6 +12,7 @@ import CockpitView from "@/components/views/CockpitView";
 import SnowView from "@/components/views/SnowView";
 import VoiceView from "@/components/views/VoiceView";
 import Minibuffer from "@/components/editor/Minibuffer";
+import NotificationToast from "@/components/layout/NotificationToast";
 import { useSmartCapture } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
 import { useTvMode } from "@/hooks/use-tv-mode";
@@ -154,6 +155,8 @@ export default function Workspace() {
         {viewMode === "snow" && <SnowView />}
         {viewMode === "voice" && <VoiceView />}
       </div>
+
+      <NotificationToast />
 
       <StatusBar
         viewMode={viewMode}

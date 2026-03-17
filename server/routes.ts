@@ -18,6 +18,37 @@ import { claimJobsTracked, resolveResult, getQueueStatus, submitJob, waitForResu
 import { startRecordingSession, addAudioChunk, stopRecordingSession, getActiveRecordingSessions, transcribeUploadedAudio } from "./transcription-service";
 import multer from "multer";
 
+interface AppNotification {
+  id: string;
+  timestamp: number;
+  label: string;
+  output: string;
+  source: string;
+  command: string;
+  read: boolean;
+}
+
+const notifications: AppNotification[] = [];
+const MAX_NOTIFICATIONS = 100;
+let notifCounter = 0;
+
+function addNotification(label: string, output: string, source: string, command: string): AppNotification {
+  const n: AppNotification = {
+    id: `notif-${Date.now()}-${++notifCounter}`,
+    timestamp: Date.now(),
+    label,
+    output,
+    source,
+    command,
+    read: false,
+  };
+  notifications.push(n);
+  if (notifications.length > MAX_NOTIFICATIONS) {
+    notifications.splice(0, notifications.length - MAX_NOTIFICATIONS);
+  }
+  return n;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -1480,7 +1511,13 @@ export async function registerRoutes(
         label = "Saved as memo (unrecognized command)";
       }
 
+      recordAction("agent", `voice-cmd: ${label}`, cliCmd, "autonomous", "executing", `source=${source}, raw="${raw}"`);
       const result = await executeChain(cliCmd);
+
+      const truncOut = (result.output || "").slice(0, 200);
+      recordAction("agent", `voice-cmd: ${label}`, cliCmd, "autonomous", result.exitCode === 0 ? "success" : "error", truncOut);
+
+      addNotification(label, truncOut, source, cliCmd);
 
       const shouldNotify = req.body.notify !== false;
       if (shouldNotify) {
@@ -1508,6 +1545,7 @@ export async function registerRoutes(
       const title = `[Memo] ${text.slice(0, 60)}`;
       const body = `${text}${String.fromCharCode(10)}${String.fromCharCode(10)}---${String.fromCharCode(10)}_Captured via ${source} at ${timestamp}_`;
       const note = await storage.createNote({ title, body, tags: Array.isArray(tags) ? tags : [tags] });
+      addNotification("Memo saved", text.slice(0, 200), source, "memo");
       res.json({ ok: true, id: note.id, title: note.title });
     } catch (e: unknown) {
       res.status(500).json({ message: (e as Error).message });
@@ -1518,6 +1556,23 @@ export async function registerRoutes(
     const notes = await storage.getNotes();
     const memos = notes.filter(n => n.tags?.includes("memo")).slice(0, 20);
     res.json(memos);
+  });
+
+  app.get("/api/notifications", (_req, res) => {
+    const since = parseInt(String(_req.query.since || "0"), 10);
+    const items = since ? notifications.filter(n => n.timestamp > since) : notifications.slice(-20);
+    res.json({ notifications: items, total: notifications.length });
+  });
+
+  app.post("/api/notifications/:id/read", (_req, res) => {
+    const n = notifications.find(x => x.id === _req.params.id);
+    if (n) n.read = true;
+    res.json({ ok: true });
+  });
+
+  app.post("/api/notifications/read-all", (_req, res) => {
+    notifications.forEach(n => n.read = true);
+    res.json({ ok: true });
   });
 
   return httpServer;
