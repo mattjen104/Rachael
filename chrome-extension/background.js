@@ -510,6 +510,44 @@ async function executeJob(job) {
 
               const launchUrlFull = resolveUrl(rawLaunchUrl);
 
+              let jsLaunched = false;
+              if (typeof window.CTXS !== "undefined" && window.CTXS) {
+                debug.steps.push("ctxs-found");
+                try {
+                  const ctxs = window.CTXS;
+                  if (ctxs.ExtensionAPI && typeof ctxs.ExtensionAPI.openApplication === "function") {
+                    debug.steps.push("ctxs-openApplication");
+                    ctxs.ExtensionAPI.openApplication(debug.matchedApp);
+                    jsLaunched = true;
+                  } else if (ctxs.ResourcesController && typeof ctxs.ResourcesController.startResource === "function") {
+                    debug.steps.push("ctxs-startResource");
+                    ctxs.ResourcesController.startResource(match);
+                    jsLaunched = true;
+                  }
+                  if (!jsLaunched && ctxs.Store) {
+                    const allRes = ctxs.Store.allResources ? ctxs.Store.allResources() : (ctxs.Store._allResources || []);
+                    const target = allRes.find(r => (r.name || r.Name || "") === debug.matchedApp);
+                    if (target && typeof target.launch === "function") {
+                      debug.steps.push("ctxs-resource-launch");
+                      target.launch();
+                      jsLaunched = true;
+                    } else {
+                      debug.steps.push("ctxs-store-resources:" + allRes.length);
+                    }
+                  }
+                } catch (e) {
+                  debug.steps.push("ctxs-err:" + (e.message || "").substring(0, 40));
+                }
+              } else {
+                debug.steps.push("no-ctxs-global");
+              }
+
+              if (jsLaunched) {
+                debug.method = "ctxs-js";
+                await new Promise(r => setTimeout(r, 2000));
+                return debug;
+              }
+
               function robustClick(el) {
                 el.scrollIntoView({ block: "center" });
                 el.focus();
@@ -524,72 +562,66 @@ async function executeJob(job) {
               }
 
               const matchedName = debug.matchedApp.toLowerCase();
-              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-              let node;
+              const allLinks = document.querySelectorAll("a, [onclick], [data-type], .storeapp, .store-app, li, [role='button']");
               let appTile = null;
-              while ((node = walker.nextNode())) {
-                const t = (node.textContent || "").trim().toLowerCase();
+              for (const el of allLinks) {
+                const t = (el.textContent || "").trim().toLowerCase();
                 if (t === matchedName || (t.length < matchedName.length * 3 && t.includes(matchedName))) {
-                  let el = node.parentElement;
-                  while (el && el !== document.body) {
-                    if (el.classList.contains("storeapp") || el.tagName === "LI" || el.classList.contains("store-app") || el.getAttribute("data-type") || el.classList.contains("app")) {
-                      appTile = el;
-                      break;
-                    }
-                    el = el.parentElement;
-                  }
-                  if (!appTile) appTile = node.parentElement;
+                  appTile = el;
                   break;
+                }
+              }
+              if (!appTile) {
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+                let nd;
+                while ((nd = walker.nextNode())) {
+                  const t = (nd.textContent || "").trim().toLowerCase();
+                  if (t === matchedName) {
+                    appTile = nd.parentElement;
+                    break;
+                  }
                 }
               }
 
               if (appTile) {
-                debug.steps.push("dom-tile-found");
+                debug.steps.push("dom-tile-found:" + appTile.tagName + "." + (appTile.className || "").toString().substring(0, 30));
                 robustClick(appTile);
                 debug.steps.push("clicked-tile");
                 debug.method = "api+dom-click";
 
-                await new Promise(r => setTimeout(r, 1500));
+                await new Promise(r => setTimeout(r, 2000));
 
                 let openBtn = null;
-                const allBtns = document.querySelectorAll("button, a[role='button'], [role='button'], a.storeapp-open, a.storeapp-launch, .open, .launch");
+                const allBtns = document.querySelectorAll("button, a, [role='button'], .storeapp-open, .storeapp-launch");
                 for (const b of allBtns) {
                   const t = (b.textContent || "").trim().toLowerCase();
                   if (t === "open" || t === "launch" || t === "start" || t === "connect") {
-                    openBtn = b;
-                    break;
+                    if (b.offsetParent !== null) {
+                      openBtn = b;
+                      break;
+                    }
                   }
                 }
                 if (openBtn) {
-                  debug.steps.push("clicked-open:" + openBtn.tagName);
+                  debug.steps.push("clicked-open:" + openBtn.tagName + "." + (openBtn.className || "").toString().substring(0, 30));
                   robustClick(openBtn);
+                } else {
+                  debug.steps.push("no-open-btn, looking for detail links");
+                  const detailLinks = document.querySelectorAll(".storeapp-details a, .app-details a, .appInfoOpen, a[href*='LaunchIca'], a[href*='launch']");
+                  for (const dl of detailLinks) {
+                    const href = dl.href || dl.getAttribute("href") || "";
+                    if (href.includes("Launch") || href.includes("launch") || dl.classList.contains("appInfoOpen")) {
+                      debug.steps.push("clicked-detail:" + dl.tagName + " href:" + href.substring(0, 60));
+                      robustClick(dl);
+                      break;
+                    }
+                  }
                 }
                 return debug;
               }
 
-              if (launchUrlFull) {
-                debug.steps.push("no-tile-found, form-fallback:" + launchUrlFull.substring(0, 100));
-                const iframe = document.createElement("iframe");
-                iframe.name = "citrix_launch_frame";
-                iframe.style.display = "none";
-                document.body.appendChild(iframe);
-                const form = document.createElement("form");
-                form.method = "GET";
-                form.action = launchUrlFull;
-                form.target = "citrix_launch_frame";
-                form.style.display = "none";
-                document.body.appendChild(form);
-                form.submit();
-                debug.steps.push("form-submitted");
-                debug.method = "form-fallback";
-                debug.launchUrlFull = launchUrlFull;
-                await new Promise((r) => setTimeout(r, 2000));
-                try { document.body.removeChild(iframe); } catch(e) {}
-                try { document.body.removeChild(form); } catch(e) {}
-                return debug;
-              }
-
-              debug.error = "No tile or launch URL found";
+              debug.steps.push("no-tile-found");
+              debug.error = "App tile not found in DOM";
               return debug;
             } catch (e) {
               debug.error = (e.message || String(e)).substring(0, 200);

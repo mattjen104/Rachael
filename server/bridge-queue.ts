@@ -135,6 +135,11 @@ export function claimJobs(): BridgeJob[] {
   }
 
   const claimed = pendingJobs.splice(0, pendingJobs.length);
+  claimed.sort((a, b) => {
+    const aP = a.submittedBy?.includes("citrix") ? 0 : 1;
+    const bP = b.submittedBy?.includes("citrix") ? 0 : 1;
+    return aP - bP;
+  });
   return claimed;
 }
 
