@@ -1427,5 +1427,30 @@ export async function registerRoutes(
     res.send(`<!DOCTYPE html><html><head><title>Briefings</title><style>body{background:#0a0a0a;color:#00ff41;font-family:'IBM Plex Mono',monospace;padding:2em}a{color:#00ff41}a:hover{color:#fff}</style></head><body><h1>Briefing Archive</h1><ul>${links}</ul></body></html>`);
   });
 
+  app.post("/api/memo", apiKeyAuth, async (req, res) => {
+    try {
+      const text = req.body.text || req.body.memo || req.body.value1 || "";
+      const source = req.body.source || req.body.value2 || "voice";
+      const tags = req.body.tags || ["memo", "voice"];
+      if (!text.trim()) {
+        res.status(400).json({ message: "No text provided" });
+        return;
+      }
+      const timestamp = new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+      const title = `[Memo] ${text.slice(0, 60)}`;
+      const body = `${text}${String.fromCharCode(10)}${String.fromCharCode(10)}---${String.fromCharCode(10)}_Captured via ${source} at ${timestamp}_`;
+      const note = await storage.createNote({ title, body, tags: Array.isArray(tags) ? tags : [tags] });
+      res.json({ ok: true, id: note.id, title: note.title });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  });
+
+  app.get("/api/memo", apiKeyAuth, async (_req, res) => {
+    const notes = await storage.getNotes();
+    const memos = notes.filter(n => n.tags?.includes("memo")).slice(0, 20);
+    res.json(memos);
+  });
+
   return httpServer;
 }
