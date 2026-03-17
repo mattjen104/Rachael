@@ -138,10 +138,15 @@ Data flows into the KB as markdown notes stored in the `notes` table:
 
 ## Morning Standup (server/cli-engine.ts)
 
-- `standup` — Compiles yesterday's program runs, errors, recipes fired, overdue tasks, new memory
+- `standup` — Two-tier morning briefing:
+  - **Tier 1** (LLM-generated): TLDR, highlights, per-agent sections, needs-attention — synthesized by Claude Sonnet
+  - **Tier 2** (data-driven): Full Source Feed with all items from Reddit (16 subs), HN, GitHub Trending, ArXiv CS.AI, Lobsters, Lemmy — rendered directly from structured JSON embedded in research-radar output via `<!--STRUCTURED_DATA_START/END-->` markers
+  - Voice script appended as `<!--VOICE_SCRIPT_START/END-->` for TTS
+  - All URLs sanitized via `safeUrl()` (https-only), HTML-escaped with quote protection
 - `standup --days N` — Look back N days instead of 1
-- Saved recipe: `morning-standup` = `standup --days 1 | notify` (daily schedule)
-- Currently configured to send to ntfy.sh/orgcloud-standup
+- `standup --raw` — Plain text version (no LLM, no Tier 2)
+- Saved recipe: `morning-briefing` = `standup --days 1 | notify` (cron `0 13 * * *` = 6am PT)
+- `rawOutput` limit: 100K chars (increased from 50K to fit structured data)
 
 ## Agent Runtime
 

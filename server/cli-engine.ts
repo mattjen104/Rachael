@@ -1599,6 +1599,7 @@ function registerBuiltinCommands(): void {
     const recipesRun = allRecipes.filter(r => r.lastRun && r.lastRun >= since);
 
     const agentReports: string[] = [];
+    let radarStructuredData: any = null;
     const grouped = new Map<string, typeof successResults>();
     for (const r of successResults) {
       if (!grouped.has(r.programName)) grouped.set(r.programName, []);
@@ -1607,7 +1608,15 @@ function registerBuiltinCommands(): void {
     for (const [name, runs] of grouped) {
       const prog = programs.find(p => p.name === name);
       const latest = runs[0];
-      const output = (latest.rawOutput || latest.summary).slice(0, 4000);
+      let fullOutput = latest.rawOutput || latest.summary || "";
+      if (name === "research-radar") {
+        const sdMatch = fullOutput.match(/<!--STRUCTURED_DATA_START-->\n([\s\S]*?)\n<!--STRUCTURED_DATA_END-->/);
+        if (sdMatch) {
+          try { radarStructuredData = JSON.parse(sdMatch[1]); } catch {}
+          fullOutput = fullOutput.replace(/\n<!--STRUCTURED_DATA_START-->[\s\S]*<!--STRUCTURED_DATA_END-->/, "").trim();
+        }
+      }
+      const output = fullOutput.slice(0, 8000);
       agentReports.push(`AGENT: ${name}\nRUNS: ${runs.length}\nOUTPUT:\n${output}\n`);
     }
 
@@ -1709,11 +1718,90 @@ Write the HTML briefing now.`;
       emitEvent("cli", `Standup briefing generated (${result.tokensUsed} tokens, model: ${standupModel})`, "info", { metadata: { command: "standup" } });
       let html = result.content.trim();
       html = html.replace(/^```html?\s*/i, "").replace(/```\s*$/, "").trim();
+
+      let sourceSectionsHtml = "";
+      if (radarStructuredData) {
+        const esc = (s: string) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+        const safeUrl = (u: string) => { const s = (u || "").trim(); return /^https?:\/\//i.test(s) ? esc(s) : "#"; };
+        const sd = radarStructuredData;
+        const sectionStyle = `style="margin:24px 0 8px;font-size:15px;color:#00ff41;border-top:1px solid #333;padding-top:12px"`;
+        const subStyle = `style="margin:12px 0 4px;font-size:13px;color:#4fc3f7"`;
+        const itemStyle = `style="margin:2px 0;font-size:12px;color:#ccc;line-height:1.5"`;
+        const linkStyle = `style="color:#4fc3f7;text-decoration:none"`;
+        const scoreStyle = `style="color:#888;font-size:11px"`;
+        const commentStyle = `style="color:#999;font-size:11px;margin-left:16px;font-style:italic"`;
+        const dividerHtml = `<div style="margin:32px 0 16px;border-top:2px solid #00ff41;padding-top:8px"><h2 style="margin:0;font-size:16px;color:#00ff41">FULL SOURCE FEED</h2><p style="margin:4px 0 0;font-size:11px;color:#888">Everything collected, in native ranking order. Click through to explore.</p></div>`;
+        sourceSectionsHtml += dividerHtml;
+
+        if (sd.reddit?.bySub && Object.keys(sd.reddit.bySub).length > 0) {
+          const mode = sd.reddit.mode || "rss";
+          sourceSectionsHtml += `<h3 ${sectionStyle}>REDDIT <span ${scoreStyle}>(via ${esc(mode)}, ${Object.keys(sd.reddit.bySub).length} subs)</span></h3>`;
+          for (const [sub, items] of Object.entries(sd.reddit.bySub) as [string, any[]][]) {
+            sourceSectionsHtml += `<h4 ${subStyle}><a href="https://www.reddit.com/r/${esc(sub)}/hot/" ${linkStyle}>r/${esc(sub)}</a></h4><ul style="margin:0;padding-left:16px">`;
+            for (const item of (items || []).slice(0, 10)) {
+              const scoreStr = item.score > 0 ? ` <span ${scoreStyle}>(${item.score} pts)</span>` : "";
+              sourceSectionsHtml += `<li ${itemStyle}><a href="${safeUrl(item.url)}" ${linkStyle}>${esc(item.title || "")}</a>${scoreStr}</li>`;
+              if (item.topComment) {
+                sourceSectionsHtml += `<div ${commentStyle}>"${esc((item.topComment || "").slice(0, 200))}"</div>`;
+              }
+            }
+            sourceSectionsHtml += `</ul>`;
+          }
+        }
+
+        if (sd.hn?.length) {
+          sourceSectionsHtml += `<h3 ${sectionStyle}>HACKER NEWS <span ${scoreStyle}>(${sd.hn.length} stories)</span></h3><ul style="margin:0;padding-left:16px">`;
+          for (const item of sd.hn.slice(0, 12)) {
+            const desc = (item.description || "").trim();
+            const commentsUrl = desc.startsWith("http") ? desc : desc.replace(/^Comments:\s*/i, "").trim();
+            sourceSectionsHtml += `<li ${itemStyle}><a href="${safeUrl(item.url)}" ${linkStyle}>${esc(item.title || "")}</a> <span ${scoreStyle}>(${item.score || 0} pts)</span>`;
+            if (/^https?:\/\//i.test(commentsUrl)) sourceSectionsHtml += ` <a href="${safeUrl(commentsUrl)}" ${linkStyle}>[comments]</a>`;
+            sourceSectionsHtml += `</li>`;
+          }
+          sourceSectionsHtml += `</ul>`;
+        }
+
+        if (sd.github?.length) {
+          sourceSectionsHtml += `<h3 ${sectionStyle}>GITHUB TRENDING</h3><ul style="margin:0;padding-left:16px">`;
+          for (const item of sd.github.slice(0, 10)) {
+            const langTag = item.lang ? `[${esc(item.lang)}] ` : "";
+            sourceSectionsHtml += `<li ${itemStyle}>${langTag}<a href="${safeUrl(item.url)}" ${linkStyle}>${esc(item.title || "")}</a></li>`;
+          }
+          sourceSectionsHtml += `</ul>`;
+        }
+
+        if (sd.arxiv?.length) {
+          sourceSectionsHtml += `<h3 ${sectionStyle}>ARXIV CS.AI</h3><ul style="margin:0;padding-left:16px">`;
+          for (const item of sd.arxiv.slice(0, 10)) {
+            sourceSectionsHtml += `<li ${itemStyle}><a href="${safeUrl(item.url)}" ${linkStyle}>${esc(item.title || "")}</a></li>`;
+          }
+          sourceSectionsHtml += `</ul>`;
+        }
+
+        if (sd.lobsters?.length) {
+          sourceSectionsHtml += `<h3 ${sectionStyle}>LOBSTERS <span ${scoreStyle}>(${sd.lobsters.length} items)</span></h3><ul style="margin:0;padding-left:16px">`;
+          for (const item of sd.lobsters.slice(0, 10)) {
+            const tagsStr = (item.tags || []).length ? ` <span ${scoreStyle}>[${esc((item.tags || []).join(", "))}]</span>` : "";
+            sourceSectionsHtml += `<li ${itemStyle}><a href="${safeUrl(item.url)}" ${linkStyle}>${esc(item.title || "")}</a> <span ${scoreStyle}>(${item.score || 0} pts)</span>${tagsStr}</li>`;
+          }
+          sourceSectionsHtml += `</ul>`;
+        }
+
+        const lemmyItems = [...(sd.lemmy?.machinelearning || []), ...(sd.lemmy?.artificial_intelligence || [])];
+        if (lemmyItems.length) {
+          sourceSectionsHtml += `<h3 ${sectionStyle}>LEMMY</h3><ul style="margin:0;padding-left:16px">`;
+          for (const item of lemmyItems.slice(0, 8)) {
+            sourceSectionsHtml += `<li ${itemStyle}><a href="${safeUrl(item.url)}" ${linkStyle}>${esc(item.title || "")}</a> <span ${scoreStyle}>(${item.score || 0} pts, c/${esc(item.sub || "")})</span></li>`;
+          }
+          sourceSectionsHtml += `</ul>`;
+        }
+      }
+
       const header = `<div style="font-family:'IBM Plex Mono',monospace;max-width:680px;margin:0 auto;color:#e0e0e0;background:#0a0a0a;padding:24px;border:1px solid #333">` +
         `<h1 style="margin:0 0 4px;font-size:18px;color:#00ff41">MORNING BRIEFING</h1>` +
         `<p style="margin:0 0 16px;font-size:12px;color:#888">${today}</p>`;
       const footer = `</div>`;
-      const fullHtml = header + html + footer;
+      const fullHtml = header + html + sourceSectionsHtml + footer;
 
       let voiceScript = "";
       try {

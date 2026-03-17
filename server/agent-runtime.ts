@@ -592,7 +592,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         model: modelUsed,
         tokensUsed,
         iteration: ps.iteration,
-        rawOutput: output.slice(0, 50000),
+        rawOutput: output.slice(0, 100000),
         status: "ok",
       });
     } catch (e) {
