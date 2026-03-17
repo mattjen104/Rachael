@@ -1298,6 +1298,12 @@ export async function registerRoutes(
   app.post("/api/bridge/ext/results", bridgeAuth, (req, res) => {
     const { jobId, ...result } = req.body;
     if (!jobId) return res.status(400).json({ error: "jobId required" });
+    const resultKeys = Object.keys(result);
+    const hasClick = "clickDebug" in result;
+    console.log(`[bridge-result] jobId=${jobId} keys=[${resultKeys.join(",")}] hasClickDebug=${hasClick} title=${(result as any).title || "(none)"}`);
+    if (hasClick) {
+      console.log(`[bridge-result] clickDebug=${JSON.stringify((result as any).clickDebug).substring(0, 500)}`);
+    }
     resolveResult(jobId, { ...result, jobId, completedAt: Date.now(), source: "extension" });
     res.json({ ok: true });
   });
