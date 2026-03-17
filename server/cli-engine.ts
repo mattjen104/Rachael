@@ -2722,7 +2722,7 @@ ${fullHtml}`;
         citrixApiLaunch: appName,
         autoOpenDownload: true,
         pollTimeoutMs: 15000,
-      }, 30000);
+      }, 60000);
       if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
       const cd = (launchResult as any).clickDebug;
       if (cd) {

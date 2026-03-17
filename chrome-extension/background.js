@@ -316,11 +316,57 @@ async function executeJob(job) {
               headers["X-Citrix-IsUsingHTTPS"] = "Yes";
 
               const baseUrl = location.origin;
-              const storePaths = [
+
+              let configPaths = [];
+              try {
+                if (window.CTXS && window.CTXS.Store) {
+                  const storeUrl = window.CTXS.Store.StoreUrl || window.CTXS.Store.storeUrl || "";
+                  if (storeUrl) configPaths.push(storeUrl.replace(/\/$/, "") + "/resources/v2");
+                  debug.steps.push("CTXS.Store=" + storeUrl);
+                }
+                if (window.CTXS && window.CTXS.Configuration) {
+                  const webUrl = window.CTXS.Configuration.webUIUrl || window.CTXS.Configuration.storeUrl || "";
+                  if (webUrl) configPaths.push(webUrl.replace(/\/$/, "") + "/Resources/List");
+                  debug.steps.push("CTXS.Config=" + webUrl);
+                }
+              } catch (e) { debug.steps.push("ctxs-err"); }
+
+              try {
+                const scripts = document.querySelectorAll("script");
+                for (const sc of scripts) {
+                  const src = sc.src || "";
+                  const match = src.match(/\/(Citrix\/[^\/]+Web)\//i) || src.match(/\/(Citrix\/[^\/]+)\//i);
+                  if (match) {
+                    const base = "/" + match[1];
+                    configPaths.push(base + "/Resources/List");
+                    configPaths.push(base + "/Resources/LaunchIca");
+                    debug.steps.push("script-base:" + base);
+                    break;
+                  }
+                }
+              } catch (e) {}
+
+              try {
+                const links = document.querySelectorAll("link[href*='Citrix'], script[src*='Citrix']");
+                for (const l of links) {
+                  const u = l.href || l.src || "";
+                  const m = u.match(/\/(Citrix\/[^\/]+)\//i);
+                  if (m) {
+                    configPaths.push("/" + m[1] + "/Resources/List");
+                    debug.steps.push("link-base:/" + m[1]);
+                    break;
+                  }
+                }
+              } catch (e) {}
+
+              const storePaths = [...new Set([
+                ...configPaths,
                 "/Citrix/StoreWeb/Resources/List",
                 "/Citrix/Store/resources/v2",
                 "/Citrix/PNAgent/Resources/List",
-              ];
+                "/Citrix/CWPWeb/Resources/List",
+                "/Citrix/cwpWeb/Resources/List",
+              ])];
 
               let resources = null;
               let usedPath = null;
@@ -409,8 +455,18 @@ async function executeJob(job) {
                     }
                   }
                   if (openBtn) {
-                    robustClick(openBtn);
+                    const openHref = openBtn.href || openBtn.getAttribute("href") || "";
                     debug.steps.push("clicked-open:" + openBtn.tagName + "." + (openBtn.className || "").toString().split(" ")[0]);
+                    if (openHref && openHref !== "#" && !openHref.endsWith("#") && openHref.startsWith("http")) {
+                      debug.steps.push("open-href:" + openHref.substring(0, 80));
+                      window.location.href = openHref;
+                    } else {
+                      robustClick(openBtn);
+                      if (openHref && openHref !== "#") {
+                        debug.steps.push("open-href-rel:" + openHref.substring(0, 80));
+                        try { window.location.href = location.origin + (openHref.startsWith("/") ? "" : "/") + openHref; } catch(e) {}
+                      }
+                    }
                   } else {
                     debug.steps.push("no-open-btn");
                     const btns = Array.from(document.querySelectorAll("button, a")).slice(0, 8).map(b => (b.textContent || "").trim().substring(0, 20));
