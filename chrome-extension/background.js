@@ -635,6 +635,29 @@ async function executeJob(job) {
         if (apiDebug.icaDataUrl) {
           console.log("[bridge] downloading ICA via data URL and auto-opening...");
           try {
+            let pendingDlId = null;
+            let opened = false;
+            const openPromise = new Promise((resolve) => {
+              const openTimeout = setTimeout(() => {
+                chrome.downloads.onChanged.removeListener(onOpen);
+                console.log("[bridge] ICA open timeout after 10s");
+                apiDebug.steps.push("open-timeout");
+                resolve();
+              }, 10000);
+              function onOpen(delta) {
+                if (pendingDlId !== null && delta.id === pendingDlId && delta.state && delta.state.current === "complete") {
+                  clearTimeout(openTimeout);
+                  chrome.downloads.onChanged.removeListener(onOpen);
+                  chrome.downloads.open(pendingDlId);
+                  opened = true;
+                  console.log("[bridge] auto-opened ICA file, dlId:", pendingDlId);
+                  apiDebug.steps.push("auto-opened");
+                  resolve();
+                }
+              }
+              chrome.downloads.onChanged.addListener(onOpen);
+            });
+
             const dlId = await new Promise((resolve, reject) => {
               chrome.downloads.download({
                 url: apiDebug.icaDataUrl,
@@ -648,23 +671,16 @@ async function executeJob(job) {
                 }
               });
             });
-            await new Promise((resolve) => {
-              const openTimeout = setTimeout(() => {
-                chrome.downloads.onChanged.removeListener(onOpen);
-                resolve();
-              }, 10000);
-              function onOpen(delta) {
-                if (delta.id === dlId && delta.state && delta.state.current === "complete") {
-                  clearTimeout(openTimeout);
-                  chrome.downloads.onChanged.removeListener(onOpen);
-                  chrome.downloads.open(dlId);
-                  console.log("[bridge] auto-opened ICA file");
-                  apiDebug.steps.push("auto-opened");
-                  resolve();
-                }
-              }
-              chrome.downloads.onChanged.addListener(onOpen);
-            });
+            pendingDlId = dlId;
+
+            const searchResults = await chrome.downloads.search({ id: dlId });
+            if (searchResults.length > 0 && searchResults[0].state === "complete" && !opened) {
+              console.log("[bridge] ICA already complete, opening immediately");
+              chrome.downloads.open(dlId);
+              apiDebug.steps.push("auto-opened-immediate");
+            } else {
+              await openPromise;
+            }
           } catch (e) {
             console.log("[bridge] ICA download/open error:", e.message);
             apiDebug.steps.push("dl-error:" + (e.message || "").substring(0, 60));
