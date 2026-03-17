@@ -2718,13 +2718,13 @@ ${fullHtml}`;
       const launchResult = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
         maxText: 5000,
         reuseTab: true,
-        spaWaitMs: 8000,
-        clickSelector: `.storeapp-icon, .store-app, [class*="appCard"], [class*="StoreApp"], [class*="resource-tile"], [class*="app-tile"], .citrix-resource, [role="listitem"], [class*="app"] a, [class*="App"] a, a[href*="launch"], a[href*="LaunchApp"], img[alt], span[title]`,
+        spaWaitMs: 4000,
+        clickSelector: `.storeapp-name, .storeapp-icon, .storeapp, .store-app, [class*="appCard"], [class*="StoreApp"], [class*="resource-tile"], [class*="app-tile"], .citrix-resource, [role="listitem"], [class*="app"] a, [class*="App"] a, a[href*="launch"], a[href*="LaunchApp"], img[alt], span[title]`,
         clickMatchText: appName,
-        postClickWaitMs: 10000,
+        postClickWaitMs: 3000,
         autoOpenDownload: true,
-        pollTimeoutMs: 30000,
-      }, 75000);
+        pollTimeoutMs: 20000,
+      }, 45000);
       if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
       const resultKeys = Object.keys(launchResult).join(",");
       emitEvent("cli", `Citrix result keys: [${resultKeys}]`, "info", { metadata: { command: "citrix" } });
@@ -2756,7 +2756,8 @@ ${fullHtml}`;
         emitEvent("cli", `Citrix: no clickDebug in result (extension may need reload)`, "warn", { metadata: { command: "citrix" } });
         return ok(`Launched "${appName}" via Citrix portal (no click debug — reload extension)`);
       }
-      const extra = ` [${cd.strategy}, ${cd.matchedTag}.${(cd.matchedClass || "").split(" ")[0]}${cd.clickedParents ? " + parents:" + cd.clickedParents.join(",") : ""}${cd.navigatedToLaunchUrl ? " +nav" : ""}]`;
+      const openInfo = cd.openBtnFound ? ` open=${cd.openBtnTag}.${(cd.openBtnClass || "").split(" ")[0]}` : " no-open-btn";
+      const extra = ` [${cd.strategy}, ${cd.clickedTile || cd.matchedTag}${openInfo}]`;
       return ok(`Launched "${appName}" via Citrix portal${extra}`);
     }
 

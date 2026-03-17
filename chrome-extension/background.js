@@ -305,7 +305,7 @@ async function executeJob(job) {
         console.log(`[bridge] executing click script for selector="${clickSelector}" matchText="${clickMatchText}"`);
         const clickResults = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: (sel, idx, matchText) => {
+          func: async (sel, idx, matchText) => {
             const debugInfo = {
               pageUrl: location.href,
               pageTitle: document.title,
@@ -441,29 +441,66 @@ async function executeJob(job) {
               }
               debugInfo.launchUrl = launchUrl;
 
-              robustClick(target);
+              const appTile = target.closest(".storeapp, [class*='app-tile'], [class*='resource-tile'], li") || target;
+              robustClick(appTile);
+              debugInfo.clickedTile = appTile.tagName + "." + (appTile.className?.toString?.()?.split(" ")[0] || "");
 
-              const clickedParents = [];
-              let p = target.parentElement;
-              let depth = 0;
-              while (p && p !== document.body && depth < 6) {
-                const pTag = p.tagName;
-                const pCls = p.className?.toString?.()?.split(" ")[0] || "";
-                if (pTag === "A" || pTag === "BUTTON" || pTag === "DIV" || pTag === "LI" || pTag === "SPAN") {
-                  if (p.onclick || p.hasAttribute("onclick") || p.getAttribute("tabindex") !== null ||
-                      p.getAttribute("role") === "button" || p.getAttribute("role") === "listitem" ||
-                      (p.className && /app|resource|tile|store|launch|icon/i.test(p.className.toString())) ||
-                      pTag === "A" || pTag === "BUTTON") {
-                    robustClick(p);
-                    clickedParents.push(pTag + "." + pCls);
+              await new Promise(r => setTimeout(r, 1500));
+
+              const openBtnSelectors = [
+                "button.storeapp-open", "button.storeapp-launch",
+                "[class*='open']", "[class*='launch']", "[class*='Open']", "[class*='Launch']",
+                "button[id*='open']", "button[id*='launch']",
+                "a.storeapp-open", "a.storeapp-launch",
+              ];
+              let openBtn = null;
+              for (const s of openBtnSelectors) {
+                const candidates = document.querySelectorAll(s);
+                for (const c of candidates) {
+                  const t = (c.textContent || "").trim().toLowerCase();
+                  if (t === "open" || t === "launch" || t === "start" || t === "connect") {
+                    openBtn = c;
+                    break;
                   }
                 }
-                p = p.parentElement;
-                depth++;
+                if (openBtn) break;
               }
-              if (clickedParents.length) debugInfo.clickedParents = clickedParents;
+              if (!openBtn) {
+                const allBtns = document.querySelectorAll("button, a[role='button'], input[type='button'], [role='button']");
+                for (const b of allBtns) {
+                  const t = (b.textContent || "").trim().toLowerCase();
+                  if (t === "open" || t === "launch" || t === "start" || t === "connect") {
+                    openBtn = b;
+                    break;
+                  }
+                }
+              }
+              if (!openBtn) {
+                const allEls2 = document.querySelectorAll("a, button, span, div");
+                for (const e of allEls2) {
+                  const t = (e.textContent || "").trim().toLowerCase();
+                  if (t === "open" && (e.tagName === "A" || e.tagName === "BUTTON" || e.onclick || e.hasAttribute("onclick") || e.getAttribute("tabindex") !== null)) {
+                    openBtn = e;
+                    break;
+                  }
+                }
+              }
 
-              if (launchUrl && launchUrl.startsWith("http")) {
+              if (openBtn) {
+                debugInfo.openBtnFound = true;
+                debugInfo.openBtnTag = openBtn.tagName;
+                debugInfo.openBtnClass = openBtn.className?.toString?.()?.substring(0, 80) || "";
+                debugInfo.openBtnText = (openBtn.textContent || "").trim().substring(0, 30);
+                robustClick(openBtn);
+              } else {
+                debugInfo.openBtnFound = false;
+                const visibleBtns = Array.from(document.querySelectorAll("button, a[role='button'], [role='button']")).slice(0, 10).map(b => ({
+                  tag: b.tagName, text: (b.textContent || "").trim().substring(0, 40), cls: (b.className?.toString?.() || "").substring(0, 40)
+                }));
+                debugInfo.visibleButtons = visibleBtns;
+              }
+
+              if (launchUrl && launchUrl.startsWith("http") && !openBtn) {
                 debugInfo.navigatedToLaunchUrl = true;
                 window.open(launchUrl, "_self");
               }
