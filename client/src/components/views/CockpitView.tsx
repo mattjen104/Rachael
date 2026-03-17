@@ -341,6 +341,7 @@ export default function CockpitView() {
                     <div
                       key={event.id}
                       data-idx={eventIdx}
+                      data-selected={sel}
                       data-testid={`cockpit-event-${event.id}`}
                       className={`px-2 py-0.5 cursor-pointer select-none flex items-center gap-1 ${
                         sel ? "bg-primary/20" : ""

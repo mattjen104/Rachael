@@ -227,3 +227,146 @@
   box-shadow: 0 0 6px rgba(var(--crt-glow), 0.05),
               inset 0 0 4px rgba(var(--crt-glow), 0.02);
 }
+
+.tv-mode body {
+  font-size: 26px;
+  line-height: 1.5;
+}
+
+.tv-mode ::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.tv-mode ::-webkit-scrollbar-thumb {
+  border-radius: 7px;
+}
+
+.tv-mode .tv-focus-ring:focus,
+.tv-mode .tv-focus-ring[data-selected="true"] {
+  outline: 3px solid hsl(var(--primary));
+  outline-offset: 2px;
+  box-shadow: 0 0 12px rgba(var(--crt-glow), 0.4),
+              0 0 24px rgba(var(--crt-glow), 0.2);
+}
+
+.tv-mode .tv-item-highlight[data-selected="true"],
+.tv-mode .tv-item-highlight:focus {
+  background: hsl(var(--primary) / 0.2);
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+  box-shadow: 0 0 8px rgba(var(--crt-glow), 0.3);
+}
+
+.tv-mode .crt-overlay::before {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+}
+
+.tv-mode .phosphor-glow {
+  text-shadow: 0 0 6px rgba(var(--crt-glow), 0.35),
+               0 0 12px rgba(var(--crt-glow), 0.18);
+}
+
+.tv-mode .phosphor-glow-bright {
+  text-shadow: 0 0 8px rgba(var(--crt-glow), 0.5),
+               0 0 16px rgba(var(--crt-glow), 0.3),
+               0 0 3px var(--crt-bright);
+}
+
+.tv-mode .crt-glow-bar {
+  height: 6px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(var(--crt-glow), 0.04),
+    transparent
+  );
+}
+
+.tv-mode .crt-noise-overlay {
+  opacity: 0.015;
+  background-size: 120px 120px;
+}
+
+.tv-mode [data-testid="agenda-view"],
+.tv-mode [data-testid="tree-view"],
+.tv-mode [data-testid="programs-view"],
+.tv-mode [data-testid="results-view"],
+.tv-mode [data-testid="reader-view"],
+.tv-mode [data-testid="reader-content"],
+.tv-mode [data-testid="transcripts-view"],
+.tv-mode [data-testid="transcript-detail"],
+.tv-mode [data-testid="cockpit-view"],
+.tv-mode [data-testid="cockpit-navigation"],
+.tv-mode [data-testid="snow-view"] {
+  font-size: 22px;
+  line-height: 1.6;
+}
+
+.tv-mode [data-testid="agenda-view"] > div[data-idx],
+.tv-mode [data-testid="tree-view"] > div[data-idx],
+.tv-mode [data-testid="programs-view"] div[data-idx],
+.tv-mode [data-testid="results-view"] div[data-idx],
+.tv-mode [data-testid="reader-view"] div[data-idx],
+.tv-mode [data-testid="transcripts-view"] [data-testid^="transcript-item-"],
+.tv-mode [data-testid="cockpit-view"] div[data-idx],
+.tv-mode [data-testid="snow-view"] [data-testid^="snow-record-"],
+.tv-mode [data-testid="snow-view"] [data-testid^="snow-sla-"],
+.tv-mode [data-testid="snow-view"] [data-testid^="snow-group-"] {
+  padding: 10px 16px;
+  font-size: 22px;
+}
+
+.tv-mode [data-selected="true"] {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+  box-shadow: 0 0 10px rgba(var(--crt-glow), 0.3);
+}
+
+.tv-mode [data-testid="agenda-view"] .text-\[10px\],
+.tv-mode [data-testid="tree-view"] .text-\[10px\],
+.tv-mode [data-testid="programs-view"] .text-\[10px\],
+.tv-mode [data-testid="results-view"] .text-\[10px\],
+.tv-mode [data-testid="reader-view"] .text-\[10px\],
+.tv-mode [data-testid="reader-content"] .text-\[10px\],
+.tv-mode [data-testid="transcripts-view"] .text-\[10px\],
+.tv-mode [data-testid="transcript-detail"] .text-\[10px\],
+.tv-mode [data-testid="cockpit-view"] .text-\[10px\],
+.tv-mode [data-testid="cockpit-navigation"] .text-\[10px\],
+.tv-mode [data-testid="snow-view"] .text-\[10px\] {
+  font-size: 18px !important;
+}
+
+.tv-mode [data-testid="agenda-view"] .text-\[9px\],
+.tv-mode [data-testid="tree-view"] .text-\[9px\],
+.tv-mode [data-testid="programs-view"] .text-\[9px\],
+.tv-mode [data-testid="results-view"] .text-\[9px\],
+.tv-mode [data-testid="reader-view"] .text-\[9px\],
+.tv-mode [data-testid="transcripts-view"] .text-\[9px\],
+.tv-mode [data-testid="transcript-detail"] .text-\[9px\],
+.tv-mode [data-testid="cockpit-view"] .text-\[9px\],
+.tv-mode [data-testid="snow-view"] .text-\[9px\] {
+  font-size: 16px !important;
+}
+
+.tv-mode [data-testid="agenda-view"] .text-\[11px\],
+.tv-mode [data-testid="transcripts-view"] .text-\[11px\],
+.tv-mode [data-testid="cockpit-view"] .text-\[11px\] {
+  font-size: 20px !important;
+}
+
+.tv-mode [data-testid="result-detail"] .text-\[10px\],
+.tv-mode [data-testid^="result-detail-"] {
+  font-size: 18px !important;
+}
+
+.tv-mode [data-testid^="program-detail-"] {
+  font-size: 20px !important;
+  padding: 10px 16px;
+}

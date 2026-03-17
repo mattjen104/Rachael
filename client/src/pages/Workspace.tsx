@@ -13,6 +13,7 @@ import SnowView from "@/components/views/SnowView";
 import Minibuffer from "@/components/editor/Minibuffer";
 import { useSmartCapture } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
+import { useTvMode } from "@/hooks/use-tv-mode";
 
 export default function Workspace() {
   const [viewMode, setViewMode] = useState<ViewMode>("agenda");
@@ -23,6 +24,7 @@ export default function Workspace() {
   const [pendingShellCmd, setPendingShellCmd] = useState<string | null>(null);
 
   const { cycleTheme } = useCrtTheme();
+  const { isTvMode } = useTvMode();
   const smartCapture = useSmartCapture();
 
   const handleCommandExecuted = useCallback((label: string) => {
@@ -137,7 +139,7 @@ export default function Workspace() {
   }, [minibufferOpen, viewMode]);
 
   return (
-    <div className="flex flex-col h-screen w-full max-w-[500px] mx-auto bg-background text-foreground overflow-hidden" data-testid="workspace">
+    <div className={`flex flex-col h-screen w-full mx-auto bg-background text-foreground overflow-hidden ${isTvMode ? "max-w-full px-4" : "max-w-[500px]"}`} data-testid="workspace">
       <Sidebar current={viewMode} onSwitch={setViewMode} />
 
       <div className="flex-1 overflow-hidden">

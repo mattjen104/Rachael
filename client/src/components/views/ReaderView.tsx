@@ -121,6 +121,7 @@ export default function ReaderView({ selectedPageId }: ReaderViewProps) {
             key={page.id}
             data-idx={idx}
             data-testid={`reader-item-${page.id}`}
+            data-selected={sel}
             className={`px-2 py-0.5 cursor-pointer select-none flex items-center gap-1 ${sel ? "bg-primary/20" : ""}`}
             onClick={() => { setSelectedIdx(idx); setReadingId(page.id); }}
           >

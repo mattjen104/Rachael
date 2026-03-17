@@ -378,6 +378,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
               key={`s-${node.key}`}
               data-idx={idx}
               data-testid={`tree-section-${node.key}`}
+              data-selected={sel}
               className={`px-2 py-1 cursor-pointer select-none font-bold ${sel ? "bg-primary/20 text-primary" : "text-muted-foreground"}`}
               onClick={() => {
                 setSelectedIdx(idx);
@@ -444,6 +445,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           <div
             key={`${node.type}-${"id" in node ? node.id : "number" in node ? node.number : idx}`}
             data-idx={idx}
+            data-selected={sel}
             data-testid={`tree-item-${node.type}-${"id" in node ? node.id : idx}`}
             className={`px-2 py-0.5 pl-4 cursor-pointer select-none flex items-center gap-1 ${
               sel ? "bg-primary/20" : ""

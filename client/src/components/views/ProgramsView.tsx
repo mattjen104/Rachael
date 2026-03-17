@@ -99,6 +99,7 @@ export default function ProgramsView({ onNavigate }: ProgramsViewProps) {
           <div key={prog.id}>
             <div
               data-idx={idx}
+              data-selected={sel}
               data-testid={`program-item-${prog.id}`}
               className={`px-2 py-1 cursor-pointer select-none flex items-center gap-1 ${
                 sel ? "bg-primary/20" : ""

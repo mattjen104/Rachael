@@ -302,6 +302,7 @@ export default function TranscriptsView({ selectedTranscriptId }: TranscriptsVie
               <div
                 key={t.id}
                 data-testid={`transcript-item-${t.id}`}
+                data-selected={idx === selectedIdx}
                 className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-border/50 ${
                   idx === selectedIdx ? "bg-primary/10 text-primary" : "hover:bg-muted/30"
                 }`}

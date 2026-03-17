@@ -77,6 +77,7 @@ export default function ResultsView({ selectedResultId }: ResultsViewProps) {
           <div key={r.id}>
             <div
               data-idx={idx}
+              data-selected={sel}
               data-testid={`result-row-${r.id}`}
               className={`px-2 py-0.5 cursor-pointer select-none flex items-center gap-1 ${
                 sel ? "bg-primary/20" : ""

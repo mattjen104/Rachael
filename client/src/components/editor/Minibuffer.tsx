@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { useSearch, useSmartCapture, useToggleRuntime, useCreateReaderPage, usePrograms, useProposals, useTasks, useSiteProfiles, useNavigationPaths } from "@/hooks/use-org-data";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ViewMode } from "@/components/layout/Sidebar";
+import { useTvMode } from "@/hooks/use-tv-mode";
 
 interface ScraperResultData {
   success: boolean;
@@ -52,6 +53,7 @@ export default function Minibuffer({
   const [historyIdx, setHistoryIdx] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const { isTvMode, setTvMode } = useTvMode();
 
   const searchQuery = mode === "search" ? query : "";
   const { data: searchResults = [] } = useSearch(searchQuery);
@@ -195,6 +197,11 @@ export default function Minibuffer({
       { id: "scrape-url", label: "scrape-url", hint: "Scrape any URL", action: () => { setMode("scrape-url"); setQuery(""); setSelectedIdx(0); } },
       { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
       { id: "toggle-runtime", label: "toggle-runtime", hint: "R", action: () => exec("Runtime toggled", () => toggleRuntime.mutate()) },
+      { id: "toggle-tv-mode", label: "toggle-tv-mode", hint: "TV", action: () => {
+        setTvMode(!isTvMode);
+        onCommandExecuted("TV mode toggled");
+        onClose();
+      } },
       { id: "refresh", label: "refresh-all", hint: "r", action: () => exec("Refreshed", () => queryClient.invalidateQueries()) },
       { id: "bridge-status", label: "bridge-status", hint: "Check extension", action: () => { setMode("shell"); setQuery("bridge-status"); setShellOutput(""); executeShellCommand("bridge-status"); } },
       { id: "fetch-mail", label: "fetch-outlook-inbox", hint: "Via bridge", action: () => { setMode("shell"); setQuery("outlook"); setShellOutput(""); executeShellCommand("outlook"); } },
@@ -311,7 +318,7 @@ export default function Minibuffer({
     }
 
     return cmds;
-  }, [exec, onSwitchView, onCycleTheme, toggleRuntime, allPrograms, pendingProposals, allTasks, allSiteProfiles, allNavPaths, scraperResult, triggerProgram, toggleProgram, resolveProposal, toggleTaskDone, rescheduleTask, executeNavPath, executeScraperUrl, executeShellCommand, pendingNavPathId]);
+  }, [exec, onSwitchView, onCycleTheme, toggleRuntime, allPrograms, pendingProposals, allTasks, allSiteProfiles, allNavPaths, scraperResult, triggerProgram, toggleProgram, resolveProposal, toggleTaskDone, rescheduleTask, executeNavPath, executeScraperUrl, executeShellCommand, pendingNavPathId, isTvMode, setTvMode]);
 
   const filteredCommands = useMemo(() => {
     if (mode !== "command") return [];
@@ -447,17 +454,21 @@ export default function Minibuffer({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[20%]"
+      className={`fixed inset-0 z-50 flex items-start justify-center ${isTvMode ? "pt-[10%]" : "pt-[20%]"}`}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       data-testid="minibuffer"
     >
-      <div className="w-full max-w-[380px] bg-background border border-border rounded shadow-lg font-mono text-xs">
-        <form onSubmit={handleFormSubmit} className="flex items-center border-b border-border px-2 py-1">
-          <span className="text-muted-foreground mr-2 shrink-0">{modeLabel}:</span>
+      <div className={`w-full bg-background border border-border rounded shadow-lg font-mono ${
+        isTvMode ? "max-w-[800px] text-[22px]" : "max-w-[380px] text-xs"
+      }`}>
+        <form onSubmit={handleFormSubmit} className={`flex items-center border-b border-border ${
+          isTvMode ? "px-4 py-3" : "px-2 py-1"
+        }`}>
+          <span className={`text-muted-foreground shrink-0 ${isTvMode ? "mr-3" : "mr-2"}`}>{modeLabel}:</span>
           <input
             ref={inputRef}
             data-testid="minibuffer-input"
-            className="flex-1 bg-transparent outline-none text-primary"
+            className={`flex-1 bg-transparent outline-none text-primary ${isTvMode ? "text-[22px]" : ""}`}
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -465,27 +476,33 @@ export default function Minibuffer({
             placeholder={mode === "shell" ? "Type command (help for list)..." : mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" || mode === "scrape-url" ? "https://..." : "Type to filter..."}
           />
         </form>
-        <div ref={listRef} className="max-h-64 overflow-y-auto">
+        <div ref={listRef} className={`overflow-y-auto ${isTvMode ? "max-h-[500px]" : "max-h-64"}`}>
           {mode === "command" && filteredCommands.map((cmd, idx) => (
             <div
               key={cmd.id}
               data-testid={`cmd-${cmd.id}`}
-              className={`px-2 py-1 cursor-pointer flex justify-between items-center ${
+              className={`cursor-pointer flex justify-between items-center tv-item-highlight ${
+                isTvMode ? "px-4 py-3" : "px-2 py-1"
+              } ${
                 idx === selectedIdx ? "bg-primary/20 text-primary" : "text-foreground"
               }`}
+              data-selected={idx === selectedIdx}
               onClick={() => cmd.action()}
               onMouseEnter={() => setSelectedIdx(idx)}
             >
               <span>{cmd.label}</span>
-              {cmd.hint && <span className="text-muted-foreground text-[10px]">{cmd.hint}</span>}
+              {cmd.hint && <span className={`text-muted-foreground ${isTvMode ? "text-[18px]" : "text-[10px]"}`}>{cmd.hint}</span>}
             </div>
           ))}
           {mode === "search" && searchResults.map((r, idx) => (
             <div
               key={`${r.type}-${r.id}`}
-              className={`px-2 py-1 cursor-pointer flex items-center gap-1 ${
+              className={`cursor-pointer flex items-center tv-item-highlight ${
+                isTvMode ? "px-4 py-3 gap-3" : "px-2 py-1 gap-1"
+              } ${
                 idx === selectedIdx ? "bg-primary/20 text-primary" : "text-foreground"
               }`}
+              data-selected={idx === selectedIdx}
               onClick={() => {
                 const viewMap: Record<string, string> = { task: "tree", program: "programs", skill: "tree", note: "tree", capture: "tree", result: "results", reader_page: "reader", transcript: "transcripts" };
                 onNavigate(viewMap[r.type] || "tree", r.id);
@@ -494,7 +511,7 @@ export default function Minibuffer({
               }}
               onMouseEnter={() => setSelectedIdx(idx)}
             >
-              <span className="text-muted-foreground w-10 shrink-0 text-[10px]">{r.type}</span>
+              <span className={`text-muted-foreground shrink-0 ${isTvMode ? "w-24 text-[18px]" : "w-10 text-[10px]"}`}>{r.type}</span>
               <span className="truncate">{r.title}</span>
             </div>
           ))}

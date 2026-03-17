@@ -1,6 +1,7 @@
 import React from "react";
 import type { ViewMode } from "./Sidebar";
 import { useRuntime, useControlState, useBridgeStatus } from "@/hooks/use-org-data";
+import { useTvMode } from "@/hooks/use-tv-mode";
 
 interface StatusBarProps {
   viewMode: ViewMode;
@@ -12,6 +13,7 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
   const { data: runtime } = useRuntime();
   const { data: control } = useControlState();
   const { data: bridgeStatus } = useBridgeStatus();
+  const { isTvMode } = useTvMode();
 
   const controlMode = control?.mode || "human";
   const pendingCount = control?.pendingTakeoverPoints?.length || 0;
@@ -19,16 +21,20 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
 
   return (
     <div
-      className="flex items-center justify-between border-t border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground bg-background shrink-0 cursor-pointer select-none"
+      className={`flex items-center justify-between border-t border-border bg-background shrink-0 cursor-pointer select-none font-mono text-muted-foreground ${
+        isTvMode ? "px-4 py-2 text-[20px]" : "px-2 py-0.5 text-[10px]"
+      }`}
       data-testid="status-bar"
       onClick={onOpenMinibuffer}
     >
-      <div className="flex items-center gap-2">
+      <div className={`flex items-center ${isTvMode ? "gap-4" : "gap-2"}`}>
         <span className={runtime?.active ? "text-green-500" : "text-red-500"}>
           {runtime?.active ? "●" : "○"}
         </span>
         <span
-          className={`px-1 py-0 font-bold text-[9px] rounded ${
+          className={`font-bold rounded ${
+            isTvMode ? "px-2 py-0.5 text-[18px]" : "px-1 py-0 text-[9px]"
+          } ${
             controlMode === "agent" ? "bg-blue-500/20 text-blue-400" : "bg-orange-500/20 text-orange-400"
           }`}
           data-testid="status-control-mode"
@@ -46,7 +52,7 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
         </span>
         {lastCommand && <span className="text-muted-foreground">— {lastCommand}</span>}
       </div>
-      <div className="flex items-center gap-2">
+      <div className={`flex items-center ${isTvMode ? "gap-4" : "gap-2"}`}>
         <span>M-x / Space</span>
         <span>Tab:control</span>
         <span>6:cockpit</span>

@@ -110,6 +110,7 @@ export default function AgendaView({ onNavigate }: AgendaViewProps) {
             <div
               key={`section-${item.key}`}
               data-idx={idx}
+              data-selected={isSelected}
               data-testid={`section-${item.key}`}
               className={`px-2 py-1 cursor-pointer select-none font-bold ${
                 isSelected ? "bg-primary/20 text-primary" : "text-muted-foreground"
@@ -136,6 +137,7 @@ export default function AgendaView({ onNavigate }: AgendaViewProps) {
             <div
               key={`task-${t.id}`}
               data-idx={idx}
+              data-selected={isSelected}
               data-testid={`task-item-${t.id}`}
               className={`px-2 py-0.5 cursor-pointer select-none flex items-center gap-1 ${
                 isSelected ? "bg-primary/20" : ""
@@ -158,6 +160,7 @@ export default function AgendaView({ onNavigate }: AgendaViewProps) {
             <div
               key={`result-${r.id}`}
               data-idx={idx}
+              data-selected={isSelected}
               data-testid={`result-item-${r.id}`}
               className={`px-2 py-0.5 cursor-pointer select-none flex items-center gap-1 ${
                 isSelected ? "bg-primary/20" : ""

@@ -202,11 +202,24 @@ Database-driven scraping system replacing hardcoded adapters:
 
 - `client/src/pages/Workspace.tsx` — Main workspace with view switching, keyboard handler
 - `client/src/hooks/use-org-data.ts` — React Query hooks for all API endpoints
+- `client/src/hooks/use-tv-mode.tsx` — TV mode context provider (Google TV / 10-foot UI)
 - `client/src/components/views/` — AgendaView, TreeView, ProgramsView, ResultsView, ReaderView
-- `client/src/components/layout/Sidebar.tsx` — Top tab bar
-- `client/src/components/layout/StatusBar.tsx` — Bottom status bar with runtime indicator
-- `client/src/components/editor/Minibuffer.tsx` — Command palette
+- `client/src/components/layout/Sidebar.tsx` — Top tab bar (TV-aware: full labels in TV mode)
+- `client/src/components/layout/StatusBar.tsx` — Bottom status bar with runtime indicator (TV-scaled)
+- `client/src/components/editor/Minibuffer.tsx` — Command palette (TV-scaled)
+- `client/src/components/tv/TvShortcutOverlay.tsx` — First-run keyboard shortcut guide for TV mode
 - `client/src/lib/crt-theme.tsx` — CRT phosphor theme provider
+
+## TV Mode (Google TV Integration)
+
+- Activate via `?tv=1` query parameter or `toggle-tv-mode` command in palette
+- Persisted in localStorage (`orgcloud-tv-mode`), auto-activates on subsequent loads
+- Scales base font to 26px, increases all padding/spacing/targets for 10-foot viewing
+- Removes 500px max-width constraint, fills full 1920px TV screen
+- Sidebar shows full view names (Agenda, Tree, etc.) instead of 3-letter abbreviations
+- CRT scanline/glow effects tuned for TV-sized rendering (wider scanlines, adjusted glow)
+- First-run overlay shows keyboard shortcuts, dismissed with any key
+- CSS class `.tv-mode` on `<html>` drives all TV styling via CSS overrides
 
 ## Chrome Extension Bridge (chrome-extension/ + server/bridge-queue.ts)
 
