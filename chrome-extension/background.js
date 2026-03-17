@@ -498,18 +498,45 @@ async function executeJob(job) {
 
               const launchId = match.id || match.Id;
               const rawLaunchUrl = match.launchurl || match.LaunchUrl || match.launchUrl;
+              const sfBase = usedPath ? usedPath.replace(/\/Resources\/.*$/, "").replace(/\/resources\/.*$/, "") : "";
 
-              let launchUrlFull = "";
-              if (rawLaunchUrl) {
-                if (rawLaunchUrl.startsWith("http")) {
-                  launchUrlFull = rawLaunchUrl;
-                } else if (rawLaunchUrl.startsWith("/")) {
-                  launchUrlFull = baseUrl + rawLaunchUrl;
-                } else if (usedPath) {
-                  const apiBase = usedPath.replace(/\/Resources\/.*$/, "").replace(/\/resources\/.*$/, "");
-                  launchUrlFull = baseUrl + apiBase + "/" + rawLaunchUrl;
-                } else {
-                  launchUrlFull = baseUrl + "/" + rawLaunchUrl;
+              function resolveUrl(raw) {
+                if (!raw) return "";
+                if (raw.startsWith("http")) return raw;
+                if (raw.startsWith("/")) return baseUrl + raw;
+                if (sfBase) return baseUrl + sfBase + "/" + raw;
+                return baseUrl + "/" + raw;
+              }
+
+              const launchUrlFull = resolveUrl(rawLaunchUrl);
+
+              const html5LaunchPaths = [
+                ...(sfBase ? [sfBase + "/Resources/LaunchHtml5/" + launchId] : []),
+                ...(sfBase ? [sfBase + "/Resources/Launch/" + launchId + "?launchScheme=html5"] : []),
+              ];
+              for (const h5p of html5LaunchPaths) {
+                try {
+                  debug.steps.push("html5-try:" + h5p);
+                  const h5r = await fetch(baseUrl + h5p, { method: "POST", headers, credentials: "include", body: "format=json" });
+                  if (h5r.ok) {
+                    const h5data = await h5r.json().catch(() => null);
+                    if (h5data && (h5data.launchUrl || h5data.LaunchUrl || h5data.pollUrl || h5data.status === "success")) {
+                      const h5url = h5data.launchUrl || h5data.LaunchUrl || "";
+                      debug.steps.push("html5-ok");
+                      debug.method = "html5";
+                      if (h5url) {
+                        const fullH5 = h5url.startsWith("http") ? h5url : baseUrl + h5url;
+                        window.open(fullH5, "_blank");
+                        debug.steps.push("html5-opened:" + fullH5.substring(0, 80));
+                      }
+                      return debug;
+                    }
+                    debug.steps.push("html5-no-url");
+                  } else {
+                    debug.steps.push("html5-status:" + h5r.status);
+                  }
+                } catch (e) {
+                  debug.steps.push("html5-err:" + (e.message || "").substring(0, 30));
                 }
               }
 
@@ -537,12 +564,9 @@ async function executeJob(job) {
                 }
               }
 
-              const apiBase = usedPath ? usedPath.replace(/\/Resources\/.*$/, "").replace(/\/resources\/.*$/, "") : "";
               const launchPaths = [
-                ...(apiBase ? [apiBase + "/Resources/LaunchIca/" + launchId] : []),
-                "/Citrix/StoreWeb/Resources/LaunchIca/" + launchId,
+                ...(sfBase ? [sfBase + "/Resources/LaunchIca/" + launchId] : []),
                 "/Citrix/CWPSFWeb/Resources/LaunchIca/" + launchId,
-                "/Citrix/Store/resources/v2/" + launchId + "/launch",
               ];
               for (const lp of launchPaths) {
                 try {
@@ -552,39 +576,36 @@ async function executeJob(job) {
                     const ct = lr.headers.get("content-type") || "";
                     if (ct.includes("application/x-ica") || ct.includes("octet-stream")) {
                       const blob = await lr.blob();
-                      const blobUrl = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = blobUrl;
-                      a.download = (debug.matchedApp || "launch") + ".ica";
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      URL.revokeObjectURL(blobUrl);
-                      debug.steps.push("ica-downloaded");
+                      const reader = new FileReader();
+                      const dataUrl = await new Promise((resolve) => {
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
+                      });
+                      debug.steps.push("ica-fetched-fallback:" + blob.size + "B");
                       debug.method = "api-launch";
+                      debug.launchUrlFull = baseUrl + lp;
+                      debug.icaDataUrl = dataUrl;
                       return debug;
                     }
                     const data = await lr.json().catch(() => null);
                     if (data && (data.launchUrl || data.LaunchUrl || data.ICAFileContents)) {
                       const icaUrl = data.launchUrl || data.LaunchUrl;
                       if (icaUrl) {
-                        window.location.href = icaUrl.startsWith("http") ? icaUrl : baseUrl + icaUrl;
-                        debug.steps.push("redirected-to-ica");
+                        debug.launchUrlFull = icaUrl.startsWith("http") ? icaUrl : baseUrl + icaUrl;
+                        debug.steps.push("redirect-ica-url");
                         debug.method = "api-redirect";
                         return debug;
                       }
                       if (data.ICAFileContents) {
                         const blob = new Blob([data.ICAFileContents], { type: "application/x-ica" });
-                        const blobUrl = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = blobUrl;
-                        a.download = (debug.matchedApp || "launch") + ".ica";
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(blobUrl);
-                        debug.steps.push("ica-from-contents");
+                        const reader = new FileReader();
+                        const dataUrl = await new Promise((resolve) => {
+                          reader.onloadend = () => resolve(reader.result);
+                          reader.readAsDataURL(blob);
+                        });
+                        debug.steps.push("ica-from-contents:" + blob.size + "B");
                         debug.method = "api-contents";
+                        debug.icaDataUrl = dataUrl;
                         return debug;
                       }
                     }
