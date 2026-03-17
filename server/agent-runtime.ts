@@ -684,6 +684,40 @@ async function tick(): Promise<void> {
   } catch (err) {
     console.error("[agent-runtime] Recipe tick error:", err);
   }
+
+  try {
+    await tickCitrixKeepalive();
+  } catch (err) {
+    // silent
+  }
+}
+
+let lastCitrixKeepalive = 0;
+const CITRIX_KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000;
+
+async function tickCitrixKeepalive(): Promise<void> {
+  const now = Date.now();
+  if (now - lastCitrixKeepalive < CITRIX_KEEPALIVE_INTERVAL_MS) return;
+
+  const cfg = await storage.getAgentConfig("citrix_keepalive");
+  if (cfg?.value !== "true") return;
+
+  const { isExtensionConnected, smartFetch } = await import("./bridge-queue");
+  if (!isExtensionConnected()) return;
+
+  lastCitrixKeepalive = now;
+  console.log("[citrix-keepalive] pinging StoreFront session...");
+
+  try {
+    await smartFetch("https://cwp.ucsd.edu", "dom", "citrix-keepalive", {
+      maxText: 500,
+      reuseTab: true,
+      spaWaitMs: 1000,
+    }, 30000);
+    console.log("[citrix-keepalive] session refreshed");
+  } catch (e: any) {
+    console.log("[citrix-keepalive] ping failed:", e.message);
+  }
 }
 
 const recipeLastChecked = new Map<number, Date>();

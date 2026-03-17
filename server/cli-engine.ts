@@ -2734,6 +2734,74 @@ ${fullHtml}`;
       return ok(`Launched "${matched}" via Citrix [${method}]`);
     }
 
+    if (args[0] === "workspace") {
+      const nl = String.fromCharCode(10);
+      const configKey = "citrix_workspace_apps";
+      const cfg = await storage.getAgentConfig(configKey);
+      const raw = cfg?.value || null;
+      if (args[1] === "set") {
+        const appList = args.slice(2).join(" ").split(",").map(s => s.trim()).filter(Boolean);
+        if (!appList.length) return fail("[citrix] Usage: citrix workspace set App1, App2, App3");
+        await storage.setAgentConfig(configKey, JSON.stringify(appList), "citrix");
+        return ok(`Workspace apps set: ${appList.join(", ")}`);
+      }
+      if (args[1] === "list") {
+        const apps = raw ? JSON.parse(raw) : [];
+        if (!apps.length) return ok(`No workspace apps configured.${nl}Use: citrix workspace set App1, App2, App3`);
+        return ok(`Workspace apps:${nl}${apps.map((a: string, i: number) => `  ${i + 1}. ${a}`).join(nl)}`);
+      }
+      const apps: string[] = raw ? JSON.parse(raw) : [];
+      if (!apps.length) {
+        return fail(`[citrix] No workspace apps configured.${nl}Use: citrix workspace set SUP Text Access, PRD Hyperspace${nl}Then: citrix workspace`);
+      }
+      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+      if (!isExtensionConnected()) {
+        return fail("[citrix] Bridge not connected.");
+      }
+      const results: string[] = [];
+      const delayBetween = 8000;
+      for (let i = 0; i < apps.length; i++) {
+        const appName = apps[i];
+        emitEvent("cli", `Launching ${i + 1}/${apps.length}: ${appName}`, "info", { metadata: { command: "citrix" } });
+        try {
+          const lr = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
+            maxText: 2000,
+            reuseTab: true,
+            spaWaitMs: 2000,
+            citrixApiLaunch: appName,
+            autoOpenDownload: true,
+            pollTimeoutMs: 15000,
+          }, 60000);
+          const cd = (lr as any).clickDebug;
+          if (lr.error || cd?.error) {
+            results.push(`  [-] ${appName}: ${lr.error || cd?.error}`);
+          } else {
+            results.push(`  [+] ${appName}: launched [${cd?.method || "ok"}]`);
+          }
+        } catch (e: any) {
+          results.push(`  [-] ${appName}: ${e.message}`);
+        }
+        if (i < apps.length - 1) {
+          await new Promise(r => setTimeout(r, delayBetween));
+        }
+      }
+      return ok(`Workspace launch (${apps.length} apps):${nl}${results.join(nl)}`);
+    }
+
+    if (args[0] === "keepalive") {
+      const nl = String.fromCharCode(10);
+      if (args[1] === "on") {
+        await storage.setAgentConfig("citrix_keepalive", "true", "citrix");
+        return ok(`Citrix keepalive enabled. Sessions will be refreshed every 10 minutes.${nl}The keepalive pings the StoreFront portal to prevent idle timeout.`);
+      }
+      if (args[1] === "off") {
+        await storage.setAgentConfig("citrix_keepalive", "false", "citrix");
+        return ok("Citrix keepalive disabled.");
+      }
+      const cfg = await storage.getAgentConfig("citrix_keepalive");
+      return ok(`Citrix keepalive is ${cfg?.value === "true" ? "ON" : "OFF"}.${nl}Usage: citrix keepalive on|off`);
+    }
+
     if (args[0] === "clean") {
       const allNotes = await storage.getNotes();
       const toDelete = allNotes.filter(n => {
