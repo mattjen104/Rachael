@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useTreeData, useToggleTask, useBridgeStatus, useMailInbox, useTeamsChats, useSnowRecords } from "@/hooks/use-org-data";
+import { apiRequest } from "@/lib/queryClient";
 
 interface TreeViewProps {
   onNavigate?: (view: string, id?: number) => void;
@@ -86,6 +87,20 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [mailFetched, setMailFetched] = useState(false);
   const [chatFetched, setChatFetched] = useState(false);
+  const [launchingApp, setLaunchingApp] = useState<string | null>(null);
+
+  const launchCitrixApp = useCallback(async (appName: string) => {
+    setLaunchingApp(appName);
+    try {
+      const res = await apiRequest("POST", "/api/cli/run", { command: `citrix launch ${appName}` });
+      const data: { output: string } = await res.json();
+      setLaunchingApp(null);
+      return data.output;
+    } catch (e: any) {
+      setLaunchingApp(null);
+      return `[error] ${e.message || "Launch failed"}`;
+    }
+  }, []);
 
   useEffect(() => {
     if (bridgeConnected && !expanded.has("mail")) {
@@ -337,8 +352,13 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "mail" && onRunCommand) {
           onRunCommand(`outlook read ${node.index + 1}`);
         }
-        else if (node?.type === "appLink" && node.href) {
-          window.open(node.href, "_blank");
+        else if (node?.type === "appLink") {
+          const href = node.href && node.href !== "#" ? node.href : "";
+          if (href && href.startsWith("http")) {
+            window.open(href, "_blank");
+          } else {
+            launchCitrixApp(node.name);
+          }
         }
         else if (node?.type === "chat") {
         }
@@ -350,7 +370,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         }
         break;
     }
-  }, [nodes, selectedIdx, toggleTask, onNavigate, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched]);
+  }, [nodes, selectedIdx, toggleTask, onNavigate, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched, launchCitrixApp]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -422,8 +442,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           label = node.title.slice(0, 50);
           extra = node.domain || "";
         } else if (node.type === "appLink") {
-          icon = "→";
-          label = node.name;
+          const isLaunching = launchingApp === node.name;
+          icon = isLaunching ? "~" : "→";
+          label = isLaunching ? `${node.name} [launching...]` : node.name;
           extra = node.href ? "↗" : "";
         } else if (node.type === "bridge-info") {
           icon = "ℹ";
@@ -456,12 +477,12 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 onRunCommand(node.actionCmd);
               } else if (node.type === "mail" && onRunCommand) {
                 onRunCommand(`outlook read ${node.index + 1}`);
-              } else if (node.type === "appLink" && onRunCommand) {
+              } else if (node.type === "appLink") {
                 const href = node.href && node.href !== "#" ? node.href : "";
                 if (href && href.startsWith("http")) {
                   window.open(href, "_blank");
                 } else {
-                  onRunCommand(`citrix launch ${node.name}`);
+                  launchCitrixApp(node.name);
                 }
               } else if (node.type === "snow-item") {
                 if (node.url) {

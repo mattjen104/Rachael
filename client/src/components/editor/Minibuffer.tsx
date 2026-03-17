@@ -76,7 +76,7 @@ export default function Minibuffer({
       setShellOutput("");
       executeShellCommand(initialShellCmd);
     }
-  }, []);
+  }, [initialShellCmd, initialMode]);
 
   const exec = useCallback((label: string, fn: () => void) => {
     fn();
