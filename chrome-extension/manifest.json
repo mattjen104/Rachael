@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OrgCloud Bridge",
-  "version": "4.5.0",
+  "version": "5.0.0",
   "description": "Personal browser bridge for OrgCloud — scrapes any site you're logged into",
   "permissions": [
     "activeTab",
@@ -13,7 +13,8 @@
     "sidePanel",
     "alarms",
     "downloads",
-    "downloads.open"
+    "downloads.open",
+    "notifications"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {

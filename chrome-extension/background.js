@@ -59,6 +59,16 @@ async function getOrgCloudUrl() {
 
 const BRIDGE_VERSION = chrome.runtime.getManifest().version;
 const JOB_DELAY_MS = 1500;
+let pendingIcaOpen = null;
+
+chrome.notifications.onClicked.addListener((notifId) => {
+  if (notifId === "ica-launch" && pendingIcaOpen !== null) {
+    console.log("[bridge] notification clicked, opening ICA download:", pendingIcaOpen);
+    chrome.downloads.open(pendingIcaOpen);
+    chrome.notifications.clear("ica-launch");
+    pendingIcaOpen = null;
+  }
+});
 
 function bridgeHeaders(token) {
   const h = {
@@ -572,7 +582,6 @@ async function executeJob(job) {
             });
             apiDebug.dlResult = "blob-triggered";
 
-            let opened = false;
             await new Promise((resolve) => {
               const dlTimeout = setTimeout(() => {
                 chrome.downloads.onChanged.removeListener(onDl);
@@ -580,24 +589,24 @@ async function executeJob(job) {
                 resolve();
               }, 15000);
               function onDl(delta) {
-                console.log("[bridge] dl-event:", JSON.stringify(delta));
                 if (delta.state && delta.state.current === "complete") {
                   chrome.downloads.search({ id: delta.id }, (items) => {
                     const fn = (items && items[0] && items[0].filename) || "";
-                    console.log("[bridge] dl-complete:", fn);
                     if (fn.endsWith(".ica") || fn.endsWith(".ICA")) {
                       clearTimeout(dlTimeout);
                       chrome.downloads.onChanged.removeListener(onDl);
-                      apiDebug.dlResult = "ica-complete:" + fn.split(/[\/\\]/).pop();
-                      chrome.downloads.open(delta.id, () => {
-                        if (chrome.runtime.lastError) {
-                          apiDebug.dlResult += "|open-ERR:" + chrome.runtime.lastError.message;
-                          console.log("[bridge] open-err:", chrome.runtime.lastError.message);
-                        } else {
-                          apiDebug.dlResult += "|open-OK";
-                          console.log("[bridge] open-ok");
-                        }
-                        opened = true;
+                      const shortFn = fn.split(/[\/\\]/).pop();
+                      apiDebug.dlResult = "ica-complete:" + shortFn;
+                      pendingIcaOpen = delta.id;
+                      chrome.notifications.create("ica-launch", {
+                        type: "basic",
+                        iconUrl: "icon48.png",
+                        title: "Citrix Ready",
+                        message: "Click here to launch " + (apiDebug.matchedApp || "app"),
+                        priority: 2,
+                        requireInteraction: true,
+                      }, () => {
+                        apiDebug.dlResult += "|notified";
                         resolve();
                       });
                     }
@@ -606,10 +615,6 @@ async function executeJob(job) {
               }
               chrome.downloads.onChanged.addListener(onDl);
             });
-
-            if (!opened) {
-              apiDebug.dlResult = (apiDebug.dlResult || "") + "|not-opened";
-            }
           } catch (e) {
             console.log("[bridge] ICA pipeline error:", e.message);
             apiDebug.steps.push("dl-err:" + (e.message || "").substring(0, 60));
