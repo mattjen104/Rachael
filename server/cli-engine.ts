@@ -2726,7 +2726,10 @@ ${fullHtml}`;
         pollTimeoutMs: 30000,
       }, 75000);
       if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
+      const resultKeys = Object.keys(launchResult).join(",");
+      emitEvent("cli", `Citrix result keys: [${resultKeys}]`, "info", { metadata: { command: "citrix" } });
       const debugTitle = (launchResult as any).title || "(no title)";
+      emitEvent("cli", `Citrix page title: "${debugTitle}"`, "info", { metadata: { command: "citrix" } });
       const cd = (launchResult as any).clickDebug;
       if (cd) {
         const parts = [
@@ -2749,7 +2752,11 @@ ${fullHtml}`;
         const appTexts = (cd.allAppTexts || []).map((a: any) => a.text).join(", ");
         return fail(`[citrix launch] Could not find "${appName}" on page "${debugTitle}". Visible: [${appTexts.substring(0, 300)}]`);
       }
-      const extra = cd ? ` [${cd.strategy}, ${cd.matchedTag}.${(cd.matchedClass || "").split(" ")[0]}${cd.clickedParents ? " + parents:" + cd.clickedParents.join(",") : ""}${cd.navigatedToLaunchUrl ? " +nav" : ""}]` : "";
+      if (!cd) {
+        emitEvent("cli", `Citrix: no clickDebug in result (extension may need reload)`, "warn", { metadata: { command: "citrix" } });
+        return ok(`Launched "${appName}" via Citrix portal (no click debug — reload extension)`);
+      }
+      const extra = ` [${cd.strategy}, ${cd.matchedTag}.${(cd.matchedClass || "").split(" ")[0]}${cd.clickedParents ? " + parents:" + cd.clickedParents.join(",") : ""}${cd.navigatedToLaunchUrl ? " +nav" : ""}]`;
       return ok(`Launched "${appName}" via Citrix portal${extra}`);
     }
 

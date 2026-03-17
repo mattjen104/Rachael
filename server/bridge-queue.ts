@@ -48,6 +48,9 @@ export interface BridgeResult {
   error?: string;
   completedAt: number;
   source?: "extension" | "playwright" | "direct";
+  title?: string;
+  clickDebug?: any;
+  debug?: any;
 }
 
 const pendingJobs: BridgeJob[] = [];
