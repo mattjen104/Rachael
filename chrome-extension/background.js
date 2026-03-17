@@ -1,6 +1,7 @@
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 let pendingContext = null;
+let lastClickDebug = null;
 
 async function getPageContext(tabId) {
   try {
@@ -305,57 +306,117 @@ async function executeJob(job) {
         const clickResults = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: (sel, idx, matchText) => {
-            const els = Array.from(document.querySelectorAll(sel));
             const debugInfo = {
-              totalElements: els.length,
-              sampleTexts: els.slice(0, 10).map(el => ({
-                tag: el.tagName,
-                text: (el.textContent || "").trim().substring(0, 80),
-                cls: el.className?.toString?.()?.substring(0, 60) || "",
-                href: el.getAttribute("href") || "",
-              })),
+              pageUrl: location.href,
+              pageTitle: document.title,
+              strategy: "none",
               matched: false,
               matchedTag: "",
               matchedText: "",
               matchedClass: "",
-              pageUrl: location.href,
-              pageTitle: document.title,
+              matchedId: "",
+              ancestorChain: "",
+              allAppTexts: [],
             };
 
+            function robustClick(el) {
+              el.scrollIntoView({ block: "center" });
+              const rect = el.getBoundingClientRect();
+              const cx = rect.left + rect.width / 2;
+              const cy = rect.top + rect.height / 2;
+              ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(evtType => {
+                const Ctor = evtType.startsWith("pointer") ? PointerEvent : MouseEvent;
+                el.dispatchEvent(new Ctor(evtType, {
+                  bubbles: true, cancelable: true, view: window,
+                  clientX: cx, clientY: cy, button: 0,
+                }));
+              });
+              if (el.tagName === "A" && el.href) {
+                debugInfo.linkHref = el.href;
+              }
+            }
+
+            function findByWalkingDOM(searchText) {
+              const lower = searchText.toLowerCase();
+              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+              let node;
+              while ((node = walker.nextNode())) {
+                const t = (node.textContent || "").trim().toLowerCase();
+                if (t === lower || (t.length < lower.length * 3 && t.includes(lower))) {
+                  let el = node.parentElement;
+                  const chain = [];
+                  while (el && el !== document.body) {
+                    chain.push(el.tagName + (el.className ? "." + el.className.toString().split(" ")[0] : ""));
+                    const tag = el.tagName;
+                    if (tag === "A" || tag === "BUTTON" ||
+                        el.getAttribute("role") === "button" ||
+                        el.getAttribute("role") === "listitem" ||
+                        el.onclick || el.hasAttribute("onclick") ||
+                        el.getAttribute("tabindex") !== null ||
+                        (el.className && /app|resource|tile|store|launch/i.test(el.className.toString()))) {
+                      debugInfo.ancestorChain = chain.join(" > ");
+                      return el;
+                    }
+                    el = el.parentElement;
+                  }
+                  if (node.parentElement) {
+                    debugInfo.ancestorChain = chain.join(" > ");
+                    return node.parentElement;
+                  }
+                }
+              }
+              return null;
+            }
+
+            const lower = (matchText || "").toLowerCase();
+            const allEls = Array.from(document.querySelectorAll(sel));
+            debugInfo.allAppTexts = allEls.slice(0, 15).map(el => ({
+              tag: el.tagName,
+              text: (el.textContent || "").trim().substring(0, 60),
+              cls: (el.className?.toString?.() || "").substring(0, 40),
+              id: el.id || "",
+            }));
+
             let target = null;
+
             if (matchText) {
-              const lower = matchText.toLowerCase();
-              target = els.find(el => {
+              target = findByWalkingDOM(matchText);
+              if (target) {
+                debugInfo.strategy = "dom-walk";
+              }
+            }
+
+            if (!target && matchText) {
+              target = allEls.find(el => {
                 const t = (el.textContent || "").trim().toLowerCase();
                 return t === lower || t.includes(lower);
               });
-              if (!target) {
-                target = els.find(el => {
-                  const t = (el.textContent || "").trim().toLowerCase();
-                  return t.split(/\s+/).some(w => lower.split(/\s+/).some(lw => w.includes(lw)));
-                });
-              }
+              if (target) debugInfo.strategy = "selector-exact";
             }
-            if (!target) target = els[idx] || null;
+
+            if (!target && matchText) {
+              target = allEls.find(el => {
+                const t = (el.textContent || "").trim().toLowerCase();
+                return t.split(/\s+/).some(w => lower.split(/\s+/).some(lw => w.includes(lw)));
+              });
+              if (target) debugInfo.strategy = "selector-fuzzy";
+            }
+
+            if (!target) target = allEls[idx] || null;
+            if (target && !debugInfo.strategy) debugInfo.strategy = "selector-index";
+
             if (target) {
               debugInfo.matched = true;
               debugInfo.matchedTag = target.tagName;
               debugInfo.matchedText = (target.textContent || "").trim().substring(0, 100);
               debugInfo.matchedClass = target.className?.toString?.()?.substring(0, 80) || "";
-              target.scrollIntoView({ block: "center" });
-              const rect = target.getBoundingClientRect();
-              const cx = rect.left + rect.width / 2;
-              const cy = rect.top + rect.height / 2;
-              ["mousedown", "mouseup", "click"].forEach(evtType => {
-                target.dispatchEvent(new MouseEvent(evtType, {
-                  bubbles: true, cancelable: true, view: window,
-                  clientX: cx, clientY: cy,
-                }));
-              });
-              if (target.tagName === "A" || target.closest("a")) {
-                const link = target.tagName === "A" ? target : target.closest("a");
-                if (link && link.href) {
-                  debugInfo.linkHref = link.href;
+              debugInfo.matchedId = target.id || "";
+              robustClick(target);
+              if (target.tagName !== "A" && target.tagName !== "BUTTON") {
+                const parent = target.closest("a, button, [role='button'], [onclick]");
+                if (parent && parent !== target) {
+                  debugInfo.alsoClickedParent = parent.tagName + "." + (parent.className?.toString?.()?.split(" ")[0] || "");
+                  robustClick(parent);
                 }
               }
             }
@@ -366,6 +427,7 @@ async function executeJob(job) {
 
         const clickDebug = clickResults?.[0]?.result || {};
         console.log("[bridge] click result:", JSON.stringify(clickDebug, null, 2));
+        lastClickDebug = clickDebug;
 
         if (downloadWatcher) {
           await downloadWatcher;
@@ -413,6 +475,7 @@ async function executeJob(job) {
         html: data.html,
         extracted: data.extracted || {},
         debug: data.debug || {},
+        clickDebug: lastClickDebug || undefined,
         title: data.title || "",
       };
     } catch (execErr) {
