@@ -510,13 +510,69 @@ async function executeJob(job) {
 
               const launchUrlFull = resolveUrl(rawLaunchUrl);
 
+              function robustClick(el) {
+                el.scrollIntoView({ block: "center" });
+                el.focus();
+                el.click();
+                const rect = el.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+                ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(evtType => {
+                  const Ctor = evtType.startsWith("pointer") ? PointerEvent : MouseEvent;
+                  el.dispatchEvent(new Ctor(evtType, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 }));
+                });
+              }
+
+              const matchedName = debug.matchedApp.toLowerCase();
+              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+              let node;
+              let appTile = null;
+              while ((node = walker.nextNode())) {
+                const t = (node.textContent || "").trim().toLowerCase();
+                if (t === matchedName || (t.length < matchedName.length * 3 && t.includes(matchedName))) {
+                  let el = node.parentElement;
+                  while (el && el !== document.body) {
+                    if (el.classList.contains("storeapp") || el.tagName === "LI" || el.classList.contains("store-app") || el.getAttribute("data-type") || el.classList.contains("app")) {
+                      appTile = el;
+                      break;
+                    }
+                    el = el.parentElement;
+                  }
+                  if (!appTile) appTile = node.parentElement;
+                  break;
+                }
+              }
+
+              if (appTile) {
+                debug.steps.push("dom-tile-found");
+                robustClick(appTile);
+                debug.steps.push("clicked-tile");
+                debug.method = "api+dom-click";
+
+                await new Promise(r => setTimeout(r, 1500));
+
+                let openBtn = null;
+                const allBtns = document.querySelectorAll("button, a[role='button'], [role='button'], a.storeapp-open, a.storeapp-launch, .open, .launch");
+                for (const b of allBtns) {
+                  const t = (b.textContent || "").trim().toLowerCase();
+                  if (t === "open" || t === "launch" || t === "start" || t === "connect") {
+                    openBtn = b;
+                    break;
+                  }
+                }
+                if (openBtn) {
+                  debug.steps.push("clicked-open:" + openBtn.tagName);
+                  robustClick(openBtn);
+                }
+                return debug;
+              }
+
               if (launchUrlFull) {
-                debug.steps.push("form-post:" + launchUrlFull.substring(0, 120));
+                debug.steps.push("no-tile-found, form-fallback:" + launchUrlFull.substring(0, 100));
                 const iframe = document.createElement("iframe");
                 iframe.name = "citrix_launch_frame";
                 iframe.style.display = "none";
                 document.body.appendChild(iframe);
-
                 const form = document.createElement("form");
                 form.method = "GET";
                 form.action = launchUrlFull;
@@ -524,18 +580,16 @@ async function executeJob(job) {
                 form.style.display = "none";
                 document.body.appendChild(form);
                 form.submit();
-
                 debug.steps.push("form-submitted");
-                debug.method = "form-post";
+                debug.method = "form-fallback";
                 debug.launchUrlFull = launchUrlFull;
-
                 await new Promise((r) => setTimeout(r, 2000));
                 try { document.body.removeChild(iframe); } catch(e) {}
                 try { document.body.removeChild(form); } catch(e) {}
                 return debug;
               }
 
-              debug.error = "No launch URL found";
+              debug.error = "No tile or launch URL found";
               return debug;
             } catch (e) {
               debug.error = (e.message || String(e)).substring(0, 200);
