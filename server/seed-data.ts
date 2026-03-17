@@ -94,37 +94,149 @@ async function execute() {
       type: "meta",
       schedule: "daily",
       cronExpression: "30 23 * * *",
-      instructions: "Unified research radar — aggregates HN, GitHub trending, Lobsters, Lemmy (c/machinelearning), ArXiv CS.AI, and synthesizes via LLM into: (a) what's new and important, (b) concrete experiments to try, (c) how people are exploiting/jailbreaking LLMs, (d) improvement proposals for the system itself. Output is both a readable briefing and structured proposals.",
-      config: { TASK_TYPE: "research", COST_TIER: "premium", METRIC: "proposals_made", DIRECTION: "higher", OUTPUT_TYPE: "proposal", TIMEOUT: "300" },
+      instructions: "Expanded research radar — aggregates HN, GitHub trending, Lobsters, Lemmy, ArXiv CS.AI, and 12+ Reddit AI/LLM/OpenClaw subreddits (with top comments). Two-stage LLM pipeline: Claude Sonnet filters for relevance, then synthesizes briefing with actionable intel. Hardened scraping with retries, rate limiting, and graceful degradation.",
+      config: { TASK_TYPE: "research", COST_TIER: "premium", METRIC: "proposals_made", DIRECTION: "higher", OUTPUT_TYPE: "proposal", TIMEOUT: "600" },
       costTier: "premium",
       tags: ["program", "meta"],
       code: `const NL = String.fromCharCode(10);
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
-const MODEL = "anthropic/claude-sonnet-4";
+const FILTER_MODEL = "anthropic/claude-sonnet-4";
+const SYNTH_MODEL = "anthropic/claude-sonnet-4";
+const UA = "OrgCloud/2.0 (research-radar; +https://orgcloud.dev)";
 
-async function callLLM(prompt: string): Promise<string> {
+const SUBREDDITS = [
+  "LocalLLaMA", "MachineLearning", "artificial", "OpenAI",
+  "ClaudeAI", "Anthropic", "LLMDevs", "singularity",
+  "ollama", "LangChain", "StableDiffusion", "comfyui",
+  "SelfHosted", "OpenClaw", "agi", "ArtificialInteligence"
+];
+
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+function parseRetryAfter(val: string | null): number {
+  if (!val) return 5000;
+  const n = parseInt(val, 10);
+  if (!isNaN(n)) return Math.min(n, 30) * 1000;
+  const d = Date.parse(val);
+  if (!isNaN(d)) return Math.min(Math.max(d - Date.now(), 1000), 30000);
+  return 5000;
+}
+
+async function retryFetch(url: string, opts: any = {}, retries = 2): Promise<Response> {
+  opts.headers = Object.assign({ "User-Agent": UA }, opts.headers || {});
+  opts.signal = opts.signal || AbortSignal.timeout(15000);
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const r = await fetch(url, opts);
+      if (r.status === 429) {
+        await sleep(parseRetryAfter(r.headers.get("retry-after")));
+        continue;
+      }
+      if (r.ok) return r;
+      if (i < retries) { await sleep(2000 * (i + 1)); continue; }
+      throw new Error("HTTP " + r.status);
+    } catch (e: any) {
+      if (i === retries) throw e;
+      await sleep(2000 * (i + 1));
+    }
+  }
+  throw new Error("retries exhausted");
+}
+
+async function callLLM(prompt: string, model: string, maxTokens = 3000): Promise<{ok: boolean; text: string}> {
   try {
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2000, temperature: 0.7 }),
+      body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0.4 }),
+      signal: AbortSignal.timeout(120000),
     });
     const d = await r.json();
     const text = d.choices?.[0]?.message?.content?.trim();
-    if (text) return text;
-  } catch {}
-  return "[model unavailable]";
+    if (text) return { ok: true, text };
+    return { ok: false, text: "[model error: " + JSON.stringify(d.error || "no content").slice(0, 100) + "]" };
+  } catch (e: any) { return { ok: false, text: "[model unavailable: " + (e.message || "").slice(0, 80) + "]" }; }
+}
+
+const MAX_COMMENTS_PER_SUB = 3;
+
+async function fetchRedditSub(sub: string): Promise<Array<{title: string; score: number; url: string; selftext: string; topComment: string; sub: string}>> {
+  try {
+    await sleep(1500);
+    const r = await retryFetch("https://www.reddit.com/r/" + sub + "/hot.json?limit=10&raw_json=1", {
+      headers: { "Accept": "application/json" }
+    });
+    const d = await r.json();
+    const posts = (d.data?.children || [])
+      .filter((c: any) => c.data && !c.data.stickied && c.data.score >= 10)
+      .slice(0, 6);
+    const results: Array<{title: string; score: number; url: string; selftext: string; topComment: string; sub: string}> = [];
+    let commentsFetched = 0;
+    for (const p of posts) {
+      const pd = p.data;
+      let topComment = "";
+      if (commentsFetched < MAX_COMMENTS_PER_SUB) {
+        try {
+          await sleep(1200);
+          const cr = await retryFetch("https://www.reddit.com/r/" + sub + "/comments/" + pd.id + ".json?limit=1&sort=top&raw_json=1", {
+            headers: { "Accept": "application/json" }
+          }, 1);
+          const cd = await cr.json();
+          const comments = cd[1]?.data?.children || [];
+          const first = comments.find((c: any) => c.kind === "t1");
+          if (first?.data?.body) {
+            topComment = first.data.body.slice(0, 500);
+            commentsFetched++;
+          }
+        } catch {}
+      }
+      results.push({
+        title: pd.title || "",
+        score: pd.score || 0,
+        url: pd.url || "",
+        selftext: (pd.selftext || "").slice(0, 300),
+        topComment,
+        sub,
+      });
+    }
+    return results;
+  } catch { return []; }
+}
+
+async function fetchAllReddit(): Promise<{text: string; status: string}> {
+  const allPosts: Array<{title: string; score: number; url: string; selftext: string; topComment: string; sub: string}> = [];
+  const failed: string[] = [];
+  for (const sub of SUBREDDITS) {
+    const posts = await fetchRedditSub(sub);
+    if (posts.length === 0) failed.push(sub);
+    allPosts.push(...posts);
+  }
+  allPosts.sort((a, b) => b.score - a.score);
+  const lines: string[] = [];
+  for (const p of allPosts.slice(0, 40)) {
+    let entry = "r/" + p.sub + " | " + p.title + " (" + p.score + " pts)";
+    if (p.selftext) entry += NL + "  Post: " + p.selftext.slice(0, 200);
+    if (p.topComment) entry += NL + "  Top comment: " + p.topComment.slice(0, 300);
+    lines.push(entry);
+  }
+  const status = failed.length > 0 ? "partial (" + failed.length + " failed: " + failed.join(",") + ")" : "ok";
+  return {
+    text: "REDDIT AI/LLM (" + allPosts.length + " posts from " + (SUBREDDITS.length - failed.length) + "/" + SUBREDDITS.length + " subs):" + NL + lines.join(NL + NL),
+    status,
+  };
 }
 
 async function fetchHN(): Promise<string> {
-  const topIds = await fetch("https://hacker-news.firebaseio.com/v0/topstories.json").then(r => r.json());
-  const stories: string[] = [];
-  for (const id of topIds.slice(0, 20)) {
-    const s = await fetch("https://hacker-news.firebaseio.com/v0/item/" + id + ".json").then(r => r.json());
-    if (s && s.score >= 50) stories.push(s.title + " (" + s.score + " pts)");
-    if (stories.length >= 10) break;
-  }
-  return "HN Top:" + NL + stories.join(NL);
+  try {
+    const topIds = await retryFetch("https://hacker-news.firebaseio.com/v0/topstories.json").then(r => r.json());
+    const stories: string[] = [];
+    for (const id of topIds.slice(0, 25)) {
+      const s = await retryFetch("https://hacker-news.firebaseio.com/v0/item/" + id + ".json").then(r => r.json());
+      if (s && s.score >= 50) stories.push(s.title + " (" + s.score + " pts)");
+      if (stories.length >= 12) break;
+    }
+    return "HN Top:" + NL + stories.join(NL);
+  } catch { return "HN: [fetch failed]"; }
 }
 
 async function fetchGitHub(): Promise<string> {
@@ -132,13 +244,13 @@ async function fetchGitHub(): Promise<string> {
   const repos: string[] = [];
   for (const lang of langs) {
     try {
-      const r = await fetch("https://github.com/trending/" + lang + "?since=daily", {
-        headers: { "User-Agent": "OrgCloud/1.0", "Accept": "text/html" }
+      const r = await retryFetch("https://github.com/trending/" + lang + "?since=daily", {
+        headers: { "Accept": "text/html" }
       });
       const html = await r.text();
       const re = /class="Box-row"[\\s\\S]*?href="\\/([^"]+)"/g;
       let m;
-      while ((m = re.exec(html)) !== null && repos.length < 5) {
+      while ((m = re.exec(html)) !== null && repos.length < 6) {
         repos.push("[" + lang + "] " + m[1].replace(/\\/\\s/g, "/"));
       }
     } catch {}
@@ -148,24 +260,18 @@ async function fetchGitHub(): Promise<string> {
 
 async function fetchLobsters(): Promise<string> {
   try {
-    const r = await fetch("https://lobste.rs/hottest.json", { signal: AbortSignal.timeout(10000) });
+    const r = await retryFetch("https://lobste.rs/hottest.json");
     const d = await r.json();
-    const items = d.slice(0, 10)
-      .filter((p: any) => p.score >= 5)
-      .map((p: any) => p.title + " (" + p.score + " pts, " + (p.tags || []).join(",") + ")");
-    return "Lobsters Hot:" + NL + items.join(NL);
+    return "Lobsters Hot:" + NL + d.slice(0, 10).filter((p: any) => p.score >= 5)
+      .map((p: any) => p.title + " (" + p.score + " pts, " + (p.tags || []).join(",") + ")").join(NL);
   } catch { return "Lobsters: [fetch failed]"; }
 }
 
 async function fetchLemmy(community: string): Promise<string> {
   try {
-    const r = await fetch("https://lemmy.world/api/v3/post/list?sort=Hot&limit=10&community_name=" + community, {
-      signal: AbortSignal.timeout(10000)
-    });
+    const r = await retryFetch("https://lemmy.world/api/v3/post/list?sort=Hot&limit=10&community_name=" + community);
     const d = await r.json();
-    const posts = (d.posts || [])
-      .filter((p: any) => p.counts.score >= 3)
-      .slice(0, 5)
+    const posts = (d.posts || []).filter((p: any) => p.counts.score >= 3).slice(0, 5)
       .map((p: any) => p.post.name + " (" + p.counts.score + " pts)");
     return "Lemmy c/" + community + ":" + NL + (posts.length ? posts.join(NL) : "[no recent hot posts]");
   } catch { return "Lemmy c/" + community + ": [fetch failed]"; }
@@ -173,12 +279,12 @@ async function fetchLemmy(community: string): Promise<string> {
 
 async function fetchArxiv(): Promise<string> {
   try {
-    const r = await fetch("https://rss.arxiv.org/rss/cs.AI", { signal: AbortSignal.timeout(10000) });
+    const r = await retryFetch("https://rss.arxiv.org/rss/cs.AI");
     const xml = await r.text();
     const titles: string[] = [];
     const re = /<item>[\\s\\S]*?<title>([^<]+)<\\/title>/g;
     let m;
-    while ((m = re.exec(xml)) !== null && titles.length < 8) {
+    while ((m = re.exec(xml)) !== null && titles.length < 10) {
       const t = m[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
       if (!t.includes("updates on arXiv")) titles.push(t.trim());
     }
@@ -187,22 +293,55 @@ async function fetchArxiv(): Promise<string> {
 }
 
 async function execute() {
-  const [hn, gh, lobsters, lemmyML, lemmyAI, arxiv] = await Promise.all([
+  const [redditResult, hn, gh, lobsters, lemmyML, lemmyAI, arxiv] = await Promise.all([
+    fetchAllReddit(),
     fetchHN(), fetchGitHub(), fetchLobsters(),
     fetchLemmy("machinelearning"), fetchLemmy("artificial_intelligence"),
     fetchArxiv(),
   ]);
-  const communityAll = [lobsters, lemmyML, lemmyAI].join(NL + NL);
-  const briefing = await callLLM(
-    "You are a research radar for an AI/LLM-focused developer. Synthesize these sources into a briefing:" + NL + NL +
-    hn + NL + NL + gh + NL + NL + communityAll + NL + NL + arxiv + NL + NL +
-    "Produce:" + NL +
-    "1. WHAT'S NEW: Top 3 developments worth knowing" + NL +
-    "2. EXPERIMENTS: 2 concrete things to try" + NL +
-    "3. LLM EXPLOITATION: Any notable jailbreaks, prompt injection techniques, or security concerns" + NL +
-    "4. SYSTEM PROPOSALS: 1-2 improvements for an automated research agent system" + NL + NL +
-    "Be concise and actionable."
+
+  const allSources = [hn, gh, lobsters, lemmyML, lemmyAI, arxiv, redditResult.text].join(NL + NL);
+
+  const filterResult = await callLLM(
+    "You are a research relevance filter for an AI engineer who builds:" + NL +
+    "- Autonomous agent systems (planning, tool use, memory)" + NL +
+    "- Local LLM deployment (ollama, llama.cpp, quantization)" + NL +
+    "- Browser automation and scraping" + NL +
+    "- Voice/speech interfaces" + NL +
+    "- Knowledge management and org-mode-style tools" + NL +
+    "- OpenClaw (AI governance, proposals, voting)" + NL + NL +
+    "From this raw feed, select ONLY the 15-20 most relevant items. For each, preserve the source, title, score, and top comment if available. Drop anything generic, off-topic, political hot takes, memes, or low-signal." + NL + NL +
+    "RAW FEED:" + NL + allSources + NL + NL +
+    "Output ONLY the filtered items, one per line, preserving original formatting. No commentary.",
+    FILTER_MODEL, 3000
   );
+
+  const synthInput = filterResult.ok ? filterResult.text : allSources.slice(0, 6000);
+
+  const briefingResult = await callLLM(
+    "You are a senior research analyst for an AI/LLM-focused developer. Synthesize these curated items into an actionable briefing:" + NL + NL +
+    synthInput + NL + NL +
+    "Produce these sections:" + NL +
+    "1. WHAT'S NEW: Top 5 developments worth knowing (include why each matters)" + NL +
+    "2. COMMUNITY PULSE: What the Reddit AI community is excited/worried about (cite specific subs and top comments)" + NL +
+    "3. EXPERIMENTS: 3 concrete things to try this week with links or repo names" + NL +
+    "4. LOCAL LLM WATCH: Any new models, quantizations, or deployment techniques" + NL +
+    "5. LLM EXPLOITATION: Notable jailbreaks, prompt injection, security concerns" + NL +
+    "6. SYSTEM PROPOSALS: 2 improvements for an automated agent/research system" + NL + NL +
+    "Be concise, specific, and actionable. Include Reddit community sentiment where relevant.",
+    SYNTH_MODEL, 4000
+  );
+
+  const briefing = briefingResult.text;
+  const sourceCount = {
+    reddit: (redditResult.text.match(/r\\//g) || []).length,
+    hn: (hn.match(/pts\\)/g) || []).length,
+    arxiv: (arxiv.match(/\\n/g) || []).length,
+    github: (gh.match(/\\[/g) || []).length,
+  };
+  const statusLine = "reddit:" + sourceCount.reddit + "(" + redditResult.status + ") hn:" + sourceCount.hn + " arxiv:" + sourceCount.arxiv + " gh:" + sourceCount.github;
+  const llmStatus = (filterResult.ok ? "filter:ok" : "filter:FAIL") + " " + (briefingResult.ok ? "synth:ok" : "synth:FAIL");
+  const metricStr = statusLine + " | " + llmStatus;
 
   const proposals: Array<{section: string; diff: string; reason: string}> = [];
   const re = /\\d+\\.\\s*([^:]+):\\s*([\\s\\S]*?)(?=\\d+\\.|$)/g;
@@ -211,7 +350,7 @@ async function execute() {
     proposals.push({ section: m[1].trim(), diff: "", reason: m[2].trim().slice(0, 500) });
   }
 
-  return { summary: briefing, metric: String(proposals.length || 1), proposals };
+  return { summary: briefing + NL + NL + "--- Sources: " + metricStr, metric: metricStr, proposals };
 }`,
       codeLang: "typescript",
     },
