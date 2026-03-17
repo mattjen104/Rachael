@@ -511,7 +511,7 @@ async function executeJob(job) {
               const launchUrlFull = resolveUrl(rawLaunchUrl);
 
               if (launchUrlFull) {
-                debug.steps.push("fetch-ica:" + launchUrlFull.substring(0, 120));
+                debug.steps.push("fetch-ica");
                 const launchResp = await fetch(launchUrlFull, { method: "GET", headers, credentials: "include" });
                 if (launchResp.ok) {
                   const contentType = launchResp.headers.get("content-type") || "";
@@ -522,19 +522,19 @@ async function executeJob(job) {
                       reader.onloadend = () => resolve(reader.result);
                       reader.readAsDataURL(blob);
                     });
-                    debug.steps.push("ica-ok:" + blob.size + "B,ct:" + contentType.substring(0, 30));
+                    debug.steps.push("ica:" + blob.size + "B");
                     debug.method = "api-fetch";
                     debug.launchUrlFull = launchUrlFull;
                     debug.icaDataUrl = dataUrl;
                     return debug;
                   }
-                  debug.steps.push("unexpected-ct:" + contentType.substring(0, 40));
+                  debug.steps.push("bad-ct:" + contentType.substring(0, 20));
                 } else {
-                  debug.steps.push("fetch-status:" + launchResp.status);
+                  debug.steps.push("http:" + launchResp.status);
                 }
               }
 
-              debug.error = "Could not fetch ICA file";
+              debug.error = "No ICA";
               return debug;
             } catch (e) {
               debug.error = (e.message || String(e)).substring(0, 200);
@@ -570,37 +570,36 @@ async function executeJob(job) {
               },
               args: [icaContent, apiDebug.matchedApp || "launch"],
             });
-            apiDebug.steps.push("blob-download-triggered");
+            apiDebug.dlResult = "blob-triggered";
 
             let opened = false;
             await new Promise((resolve) => {
               const dlTimeout = setTimeout(() => {
                 chrome.downloads.onChanged.removeListener(onDl);
-                apiDebug.steps.push("dl-watch-timeout");
+                apiDebug.dlResult = "timeout-15s";
                 resolve();
               }, 15000);
               function onDl(delta) {
+                console.log("[bridge] dl-event:", JSON.stringify(delta));
                 if (delta.state && delta.state.current === "complete") {
                   chrome.downloads.search({ id: delta.id }, (items) => {
-                    if (items && items.length > 0) {
-                      const fn = items[0].filename || "";
-                      console.log("[bridge] download complete:", fn);
-                      if (fn.endsWith(".ica") || fn.endsWith(".ICA")) {
-                        clearTimeout(dlTimeout);
-                        chrome.downloads.onChanged.removeListener(onDl);
-                        apiDebug.steps.push("ica-dl-complete:" + fn.substring(fn.lastIndexOf("/") + 1));
-                        chrome.downloads.open(delta.id, () => {
-                          if (chrome.runtime.lastError) {
-                            apiDebug.steps.push("open-err:" + (chrome.runtime.lastError.message || "").substring(0, 60));
-                            console.log("[bridge] open() error:", chrome.runtime.lastError.message);
-                          } else {
-                            apiDebug.steps.push("open-ok");
-                            console.log("[bridge] open() succeeded");
-                          }
-                          opened = true;
-                          resolve();
-                        });
-                      }
+                    const fn = (items && items[0] && items[0].filename) || "";
+                    console.log("[bridge] dl-complete:", fn);
+                    if (fn.endsWith(".ica") || fn.endsWith(".ICA")) {
+                      clearTimeout(dlTimeout);
+                      chrome.downloads.onChanged.removeListener(onDl);
+                      apiDebug.dlResult = "ica-complete:" + fn.split(/[\/\\]/).pop();
+                      chrome.downloads.open(delta.id, () => {
+                        if (chrome.runtime.lastError) {
+                          apiDebug.dlResult += "|open-ERR:" + chrome.runtime.lastError.message;
+                          console.log("[bridge] open-err:", chrome.runtime.lastError.message);
+                        } else {
+                          apiDebug.dlResult += "|open-OK";
+                          console.log("[bridge] open-ok");
+                        }
+                        opened = true;
+                        resolve();
+                      });
                     }
                   });
                 }
@@ -609,7 +608,7 @@ async function executeJob(job) {
             });
 
             if (!opened) {
-              apiDebug.steps.push("open-fallback-show");
+              apiDebug.dlResult = (apiDebug.dlResult || "") + "|not-opened";
             }
           } catch (e) {
             console.log("[bridge] ICA pipeline error:", e.message);

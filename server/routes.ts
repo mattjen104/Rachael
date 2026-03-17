@@ -1302,7 +1302,9 @@ export async function registerRoutes(
     const hasClick = "clickDebug" in result;
     console.log(`[bridge-result] jobId=${jobId} keys=[${resultKeys.join(",")}] hasClickDebug=${hasClick} title=${(result as any).title || "(none)"}`);
     if (hasClick) {
-      console.log(`[bridge-result] clickDebug=${JSON.stringify((result as any).clickDebug).substring(0, 500)}`);
+      const cd = (result as any).clickDebug || {};
+      const summary = { method: cd.method, steps: cd.steps, dlResult: cd.dlResult, error: cd.error, matchedApp: cd.matchedApp };
+      console.log(`[bridge-result] clickDebug=${JSON.stringify(summary)}`);
     }
     resolveResult(jobId, { ...result, jobId, completedAt: Date.now(), source: "extension" });
     res.json({ ok: true });
