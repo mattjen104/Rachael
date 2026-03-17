@@ -262,6 +262,312 @@ async function executeJob(job) {
         });
       }
 
+      const citrixApiLaunch = options?.citrixApiLaunch || null;
+      if (citrixApiLaunch) {
+        console.log(`[bridge] Citrix API launch for "${citrixApiLaunch}"`);
+        const autoOpenDownload = options?.autoOpenDownload || false;
+        let downloadWatcher = null;
+        if (autoOpenDownload) {
+          downloadWatcher = new Promise((resolve) => {
+            const dlTimeout = setTimeout(() => {
+              console.log("[bridge] citrix download watcher timed out (15s)");
+              chrome.downloads.onChanged.removeListener(onDlChanged);
+              resolve(false);
+            }, 15000);
+            function onDlChanged(delta) {
+              if (delta.state && delta.state.current === "complete") {
+                chrome.downloads.search({ id: delta.id }, (items) => {
+                  if (items && items.length > 0) {
+                    const fn = items[0].filename || "";
+                    console.log(`[bridge] citrix download complete: ${fn}`);
+                    if (fn.endsWith(".ica") || fn.endsWith(".ICA")) {
+                      clearTimeout(dlTimeout);
+                      chrome.downloads.onChanged.removeListener(onDlChanged);
+                      chrome.downloads.open(delta.id);
+                      console.log("[bridge] opened ICA file");
+                      resolve(true);
+                    }
+                  }
+                });
+              }
+            }
+            chrome.downloads.onChanged.addListener(onDlChanged);
+          });
+        }
+
+        const apiResults = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: async (appName) => {
+            const debug = { method: "api", steps: [], error: null, matchedApp: null };
+            try {
+              const csrfToken = document.cookie.split(";").map(c => c.trim()).find(c => c.startsWith("CsrfToken=") || c.startsWith("CtxsAuthId="));
+              const csrf = csrfToken ? csrfToken.split("=").slice(1).join("=") : "";
+              debug.steps.push("csrf:" + (csrf ? "found" : "missing"));
+
+              const metaEl = document.querySelector("meta[name='_ctxstokenname']");
+              const metaTokenName = metaEl ? metaEl.getAttribute("content") : null;
+              const metaValEl = metaTokenName ? document.querySelector("meta[name='" + metaTokenName + "']") : null;
+              const metaCsrf = metaValEl ? metaValEl.getAttribute("content") : null;
+              if (metaCsrf) debug.steps.push("meta-csrf:found");
+
+              const headers = { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" };
+              if (csrf) headers["Csrf-Token"] = csrf;
+              if (metaCsrf && metaTokenName) headers[metaTokenName] = metaCsrf;
+              headers["X-Citrix-IsUsingHTTPS"] = "Yes";
+
+              const baseUrl = location.origin;
+              const storePaths = [
+                "/Citrix/StoreWeb/Resources/List",
+                "/Citrix/Store/resources/v2",
+                "/Citrix/PNAgent/Resources/List",
+              ];
+
+              let resources = null;
+              let usedPath = null;
+              for (const p of storePaths) {
+                try {
+                  debug.steps.push("try:" + p);
+                  const r = await fetch(baseUrl + p, { method: "POST", headers, credentials: "include", body: "format=json&resourceDetails=Full" });
+                  if (r.ok) {
+                    const data = await r.json();
+                    const list = data.resources || data.Resources || (Array.isArray(data) ? data : null);
+                    if (list && list.length > 0) {
+                      resources = list;
+                      usedPath = p;
+                      debug.steps.push("found:" + list.length + " resources");
+                      break;
+                    }
+                  } else {
+                    debug.steps.push("status:" + r.status);
+                  }
+                } catch (e) {
+                  debug.steps.push("err:" + (e.message || "").substring(0, 40));
+                }
+              }
+
+              if (!resources) {
+                debug.steps.push("no-api-resources, trying DOM fallback");
+                const lower = appName.toLowerCase();
+
+                function robustClick(el) {
+                  el.scrollIntoView({ block: "center" });
+                  el.focus();
+                  el.click();
+                  const rect = el.getBoundingClientRect();
+                  const cx = rect.left + rect.width / 2;
+                  const cy = rect.top + rect.height / 2;
+                  ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick"].forEach(evtType => {
+                    const Ctor = evtType.startsWith("pointer") ? PointerEvent : MouseEvent;
+                    el.dispatchEvent(new Ctor(evtType, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 }));
+                  });
+                }
+
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+                let node;
+                let appTile = null;
+                while ((node = walker.nextNode())) {
+                  const t = (node.textContent || "").trim().toLowerCase();
+                  if (t === lower || (t.length < lower.length * 3 && t.includes(lower))) {
+                    let el = node.parentElement;
+                    while (el && el !== document.body) {
+                      if (el.classList.contains("storeapp") || el.tagName === "LI" || el.classList.contains("store-app")) {
+                        appTile = el;
+                        break;
+                      }
+                      el = el.parentElement;
+                    }
+                    if (!appTile) appTile = node.parentElement;
+                    break;
+                  }
+                }
+
+                if (appTile) {
+                  debug.method = "dom-click";
+                  debug.matchedApp = (appTile.querySelector(".storeapp-name") || appTile).textContent.trim().substring(0, 60);
+                  robustClick(appTile);
+                  debug.steps.push("clicked-tile");
+
+                  await new Promise(r => setTimeout(r, 1500));
+
+                  let openBtn = null;
+                  const allBtns = document.querySelectorAll("button, a[role='button'], [role='button'], a.storeapp-open, a.storeapp-launch");
+                  for (const b of allBtns) {
+                    const t = (b.textContent || "").trim().toLowerCase();
+                    if (t === "open" || t === "launch" || t === "start" || t === "connect") {
+                      openBtn = b;
+                      break;
+                    }
+                  }
+                  if (!openBtn) {
+                    const spans = document.querySelectorAll("a, button, span");
+                    for (const s of spans) {
+                      const t = (s.textContent || "").trim().toLowerCase();
+                      if (t === "open" && (s.tagName === "A" || s.tagName === "BUTTON" || s.onclick || s.getAttribute("tabindex") !== null)) {
+                        openBtn = s;
+                        break;
+                      }
+                    }
+                  }
+                  if (openBtn) {
+                    robustClick(openBtn);
+                    debug.steps.push("clicked-open:" + openBtn.tagName + "." + (openBtn.className || "").toString().split(" ")[0]);
+                  } else {
+                    debug.steps.push("no-open-btn");
+                    const btns = Array.from(document.querySelectorAll("button, a")).slice(0, 8).map(b => (b.textContent || "").trim().substring(0, 20));
+                    debug.visibleButtons = btns;
+                  }
+                } else {
+                  debug.error = "App not found in DOM: " + appName;
+                  debug.steps.push("not-found");
+                }
+                return debug;
+              }
+
+              const lower = appName.toLowerCase();
+              const match = resources.find(r => {
+                const name = (r.name || r.Name || r.title || "").toLowerCase();
+                return name === lower || name.includes(lower);
+              });
+
+              if (!match) {
+                const names = resources.slice(0, 20).map(r => r.name || r.Name || r.title || "?");
+                debug.error = "App not found in resource list";
+                debug.availableApps = names;
+                return debug;
+              }
+
+              debug.matchedApp = match.name || match.Name || match.title;
+              debug.resourceId = match.id || match.Id || match.launchurl;
+              debug.steps.push("matched:" + debug.matchedApp);
+
+              const launchId = match.id || match.Id;
+              const launchUrl = match.launchurl || match.LaunchUrl || match.launchUrl;
+
+              if (launchUrl) {
+                debug.steps.push("navigating:" + launchUrl.substring(0, 80));
+                const launchResp = await fetch(baseUrl + launchUrl, { method: "GET", headers, credentials: "include" });
+                if (launchResp.ok) {
+                  const contentType = launchResp.headers.get("content-type") || "";
+                  if (contentType.includes("application/x-ica") || contentType.includes("octet-stream")) {
+                    const blob = await launchResp.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = blobUrl;
+                    a.download = (debug.matchedApp || "launch") + ".ica";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(blobUrl);
+                    debug.steps.push("ica-downloaded");
+                    debug.method = "api-direct";
+                    return debug;
+                  }
+                  debug.steps.push("unexpected-content:" + contentType);
+                } else {
+                  debug.steps.push("launch-failed:" + launchResp.status);
+                }
+              }
+
+              const launchPaths = [
+                "/Citrix/StoreWeb/Resources/LaunchIca/" + launchId,
+                "/Citrix/Store/resources/v2/" + launchId + "/launch",
+              ];
+              for (const lp of launchPaths) {
+                try {
+                  debug.steps.push("launch-try:" + lp);
+                  const lr = await fetch(baseUrl + lp, { method: "POST", headers, credentials: "include", body: "format=json" });
+                  if (lr.ok) {
+                    const ct = lr.headers.get("content-type") || "";
+                    if (ct.includes("application/x-ica") || ct.includes("octet-stream")) {
+                      const blob = await lr.blob();
+                      const blobUrl = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = blobUrl;
+                      a.download = (debug.matchedApp || "launch") + ".ica";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(blobUrl);
+                      debug.steps.push("ica-downloaded");
+                      debug.method = "api-launch";
+                      return debug;
+                    }
+                    const data = await lr.json().catch(() => null);
+                    if (data && (data.launchUrl || data.LaunchUrl || data.ICAFileContents)) {
+                      const icaUrl = data.launchUrl || data.LaunchUrl;
+                      if (icaUrl) {
+                        window.location.href = icaUrl.startsWith("http") ? icaUrl : baseUrl + icaUrl;
+                        debug.steps.push("redirected-to-ica");
+                        debug.method = "api-redirect";
+                        return debug;
+                      }
+                      if (data.ICAFileContents) {
+                        const blob = new Blob([data.ICAFileContents], { type: "application/x-ica" });
+                        const blobUrl = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = blobUrl;
+                        a.download = (debug.matchedApp || "launch") + ".ica";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(blobUrl);
+                        debug.steps.push("ica-from-contents");
+                        debug.method = "api-contents";
+                        return debug;
+                      }
+                    }
+                    debug.steps.push("launch-unexpected");
+                  } else {
+                    debug.steps.push("launch-status:" + lr.status);
+                  }
+                } catch (e) {
+                  debug.steps.push("launch-err:" + (e.message || "").substring(0, 40));
+                }
+              }
+
+              debug.error = "Could not trigger ICA download via API";
+              return debug;
+            } catch (e) {
+              debug.error = (e.message || String(e)).substring(0, 200);
+              return debug;
+            }
+          },
+          args: [citrixApiLaunch],
+        });
+
+        const apiDebug = apiResults?.[0]?.result || {};
+        console.log("[bridge] citrix API result:", JSON.stringify(apiDebug, null, 2));
+        lastClickDebug = apiDebug;
+
+        if (downloadWatcher) {
+          await downloadWatcher;
+        } else {
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (maxText) => {
+            return {
+              url: location.href,
+              title: document.title,
+              text: document.body?.innerText?.substring(0, maxText) || "",
+            };
+          },
+          args: [maxText],
+        });
+
+        const data = results?.[0]?.result || {};
+        return {
+          status: 200,
+          url: data.url || url,
+          text: data.text || "",
+          extracted: {},
+          clickDebug: lastClickDebug || undefined,
+          title: data.title || "",
+        };
+      }
+
       if (clickSelector && clickMatchText) {
         const pollTimeout = options?.pollTimeoutMs || 15000;
         console.log(`[bridge] polling for text "${clickMatchText}" with selector "${clickSelector}" (timeout=${pollTimeout}ms)`);

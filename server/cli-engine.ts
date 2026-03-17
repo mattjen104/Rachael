@@ -2716,49 +2716,22 @@ ${fullHtml}`;
       }
       emitEvent("cli", `Launching Citrix app: ${appName}`, "info", { metadata: { command: "citrix" } });
       const launchResult = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
-        maxText: 5000,
+        maxText: 2000,
         reuseTab: true,
-        spaWaitMs: 4000,
-        clickSelector: `.storeapp-name, .storeapp-icon, .storeapp, .store-app, [class*="appCard"], [class*="StoreApp"], [class*="resource-tile"], [class*="app-tile"], .citrix-resource, [role="listitem"], [class*="app"] a, [class*="App"] a, a[href*="launch"], a[href*="LaunchApp"], img[alt], span[title]`,
-        clickMatchText: appName,
-        postClickWaitMs: 3000,
+        spaWaitMs: 2000,
+        citrixApiLaunch: appName,
         autoOpenDownload: true,
-        pollTimeoutMs: 20000,
-      }, 45000);
+        pollTimeoutMs: 15000,
+      }, 30000);
       if (launchResult.error) return fail(`[citrix launch] ${launchResult.error}`);
-      const resultKeys = Object.keys(launchResult).join(",");
-      emitEvent("cli", `Citrix result keys: [${resultKeys}]`, "info", { metadata: { command: "citrix" } });
-      const debugTitle = (launchResult as any).title || "(no title)";
-      emitEvent("cli", `Citrix page title: "${debugTitle}"`, "info", { metadata: { command: "citrix" } });
       const cd = (launchResult as any).clickDebug;
       if (cd) {
-        const parts = [
-          `strategy=${cd.strategy}`,
-          `matched=${cd.matched}`,
-          `tag=${cd.matchedTag}`,
-          `class="${cd.matchedClass}"`,
-          `id="${cd.matchedId}"`,
-          `text="${(cd.matchedText || "").substring(0, 50)}"`,
-          `chain="${cd.ancestorChain}"`,
-          cd.launchUrl ? `launchUrl="${cd.launchUrl}"` : "",
-          cd.dataLaunchAttr ? `data="${cd.dataLaunchAttr}"` : "",
-          cd.clickedParents ? `parents=[${cd.clickedParents.join(",")}]` : "",
-          cd.navigatedToLaunchUrl ? "NAVIGATED" : "",
-          `dataAttrs=${JSON.stringify(cd.dataAttrs || {})}`,
-        ].filter(Boolean).join(" ");
-        emitEvent("cli", `Citrix click debug: ${parts}`, "info", { metadata: { command: "citrix" } });
+        emitEvent("cli", `Citrix launch debug: ${JSON.stringify(cd).substring(0, 500)}`, "info", { metadata: { command: "citrix" } });
       }
-      if (cd && !cd.matched) {
-        const appTexts = (cd.allAppTexts || []).map((a: any) => a.text).join(", ");
-        return fail(`[citrix launch] Could not find "${appName}" on page "${debugTitle}". Visible: [${appTexts.substring(0, 300)}]`);
-      }
-      if (!cd) {
-        emitEvent("cli", `Citrix: no clickDebug in result (extension may need reload)`, "warn", { metadata: { command: "citrix" } });
-        return ok(`Launched "${appName}" via Citrix portal (no click debug — reload extension)`);
-      }
-      const openInfo = cd.openBtnFound ? ` open=${cd.openBtnTag}.${(cd.openBtnClass || "").split(" ")[0]}` : " no-open-btn";
-      const extra = ` [${cd.strategy}, ${cd.clickedTile || cd.matchedTag}${openInfo}]`;
-      return ok(`Launched "${appName}" via Citrix portal${extra}`);
+      if (cd?.error) return fail(`[citrix launch] ${cd.error}`);
+      const method = cd?.method || "unknown";
+      const matched = cd?.matchedApp || appName;
+      return ok(`Launched "${matched}" via Citrix [${method}]`);
     }
 
     if (args[0] === "clean") {
