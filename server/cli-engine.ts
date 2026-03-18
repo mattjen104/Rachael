@@ -2762,54 +2762,27 @@ ${fullHtml}`;
       if (!apps.length) {
         return fail(`[citrix] No workspace apps configured.${nl}Use: citrix workspace set SUP Text Access, PRD Hyperspace${nl}Then: citrix workspace`);
       }
-      const { isExtensionConnected, smartFetch } = await import("./bridge-queue");
+      const { isExtensionConnected, submitJob } = await import("./bridge-queue");
       if (!isExtensionConnected()) {
         return fail("[citrix] Bridge not connected.");
       }
-      const hyperdrive: string[] = [];
-      const textAccess: string[] = [];
-      for (const a of apps) {
-        if (a.toLowerCase().includes("text access")) {
-          textAccess.push(a);
-        } else {
-          hyperdrive.push(a);
-        }
-      }
       const results: string[] = [];
-      const launchApp = async (appName: string) => {
-        emitEvent("cli", `Launching: ${appName}`, "info", { metadata: { command: "citrix" } });
+      for (const appName of apps) {
         try {
-          const lr = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
+          submitJob("dom", "https://cwp.ucsd.edu", "cli-citrix-workspace", {
             maxText: 2000,
             reuseTab: true,
             spaWaitMs: 2000,
             citrixApiLaunch: appName,
             autoOpenDownload: true,
             pollTimeoutMs: 15000,
-          }, 60000);
-          const cd = (lr as any).clickDebug;
-          if (lr.error || cd?.error) {
-            results.push(`  [-] ${appName}: ${lr.error || cd?.error}`);
-          } else {
-            results.push(`  [+] ${appName}: launched`);
-          }
+          });
+          results.push(`  [+] ${appName}: queued`);
         } catch (e: any) {
           results.push(`  [-] ${appName}: ${e.message}`);
         }
-      };
-      for (let i = 0; i < hyperdrive.length; i++) {
-        await launchApp(hyperdrive[i]);
-        if (i < hyperdrive.length - 1) await new Promise(r => setTimeout(r, 3000));
       }
-      if (textAccess.length > 0 && hyperdrive.length > 0) {
-        emitEvent("cli", `Hyperdrive apps launched. Waiting 30s for you to log in before opening Text Access...`, "info", { metadata: { command: "citrix" } });
-        await new Promise(r => setTimeout(r, 30000));
-      }
-      for (let i = 0; i < textAccess.length; i++) {
-        await launchApp(textAccess[i]);
-        if (i < textAccess.length - 1) await new Promise(r => setTimeout(r, 3000));
-      }
-      return ok(`Workspace launch complete:${nl}${results.join(nl)}`);
+      return ok(`Workspace: ${apps.length} apps queued${nl}${results.join(nl)}`);
     }
 
     if (args[0] === "keepalive") {
