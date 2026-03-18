@@ -693,7 +693,7 @@ async function tick(): Promise<void> {
 }
 
 let lastCitrixKeepalive = 0;
-const CITRIX_KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000;
+const CITRIX_KEEPALIVE_INTERVAL_MS = 30 * 1000;
 
 async function tickCitrixKeepalive(): Promise<void> {
   const now = Date.now();

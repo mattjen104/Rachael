@@ -2799,7 +2799,7 @@ ${fullHtml}`;
       const nl = String.fromCharCode(10);
       if (args[1] === "on") {
         await storage.setAgentConfig("citrix_keepalive", "true", "citrix");
-        return ok(`Citrix keepalive enabled. Sessions will be refreshed every 10 minutes.${nl}The keepalive pings the StoreFront portal to prevent idle timeout.`);
+        return ok(`Citrix keepalive enabled. Portal pinged every 30 seconds to prevent idle timeout.`);
       }
       if (args[1] === "off") {
         await storage.setAgentConfig("citrix_keepalive", "false", "citrix");
