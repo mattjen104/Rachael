@@ -2737,17 +2737,17 @@ ${fullHtml}`;
     if (args[0] === "workspace") {
       const nl = String.fromCharCode(10);
       const configKey = "citrix_workspace_apps";
-      let cfg: any;
+      let raw: string | null = null;
       try {
-        cfg = await storage.getAgentConfig(configKey);
-      } catch (e: any) {
-        return fail(`[citrix] Config lookup error: ${e.message}`);
-      }
-      const raw = cfg?.value || null;
-      if (args[1] === "debug") {
-        const allCfg = await storage.getAgentConfigs();
-        const keys = allCfg.map(c => `${c.key}=${c.value.slice(0, 40)}`).join(nl);
-        return ok(`cfg=${JSON.stringify(cfg)}${nl}raw=${raw}${nl}allKeys:${nl}${keys}`);
+        const cfg = await storage.getAgentConfig(configKey);
+        raw = cfg?.value || null;
+      } catch {}
+      if (!raw) {
+        try {
+          const { pool } = await import("./db");
+          const dbRes = await pool.query("SELECT value FROM agent_config WHERE key = $1", [configKey]);
+          if (dbRes.rows.length > 0) raw = dbRes.rows[0].value;
+        } catch {}
       }
       if (args[1] === "set") {
         const appList = args.slice(2).join(" ").split(",").map(s => s.trim()).filter(Boolean);
