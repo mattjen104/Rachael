@@ -498,6 +498,45 @@ export async function registerRoutes(
     res.json({ active });
   });
 
+  app.post("/api/epic/activities", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const { environment, activities } = req.body;
+    if (!environment || !Array.isArray(activities)) {
+      return res.status(400).json({ error: "Missing environment or activities" });
+    }
+    const env = environment.toUpperCase();
+    const key = `epic_activities_${env.toLowerCase()}`;
+    const existing = await storage.getAgentConfig(key);
+    let current: any[] = [];
+    if (existing?.value) {
+      try { current = JSON.parse(existing.value); } catch {}
+    }
+    const seen = new Set(current.map((a: any) => `${a.name}|${a.category || ""}|${a.parent || ""}`));
+    for (const a of activities) {
+      const k = `${a.name}|${a.category || ""}|${a.parent || ""}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        current.push(a);
+      }
+    }
+    await storage.setAgentConfig(key, JSON.stringify(current), "epic");
+    res.json({ ok: true, environment: env, count: current.length });
+  });
+
+  app.get("/api/epic/activities/:env", async (req, res) => {
+    const env = req.params.env.toUpperCase();
+    const key = `epic_activities_${env.toLowerCase()}`;
+    const cfg = await storage.getAgentConfig(key);
+    let activities: any[] = [];
+    if (cfg?.value) {
+      try { activities = JSON.parse(cfg.value); } catch {}
+    }
+    res.json({ environment: env, activities, count: activities.length });
+  });
+
   app.get("/api/tree", async (_req, res) => {
     const [allTasks, allPrograms, allSkills, allNotes, allCaptures, allPages] = await Promise.all([
       storage.getTasks(),
@@ -511,6 +550,17 @@ export async function registerRoutes(
     let allTranscripts: any[] = [];
     try { allTranscripts = await storage.getTranscripts(); } catch {}
 
+    const epicActivities: Record<string, any[]> = {};
+    for (const env of ["sup", "poc", "tst"]) {
+      try {
+        const cfg = await storage.getAgentConfig(`epic_activities_${env}`);
+        if (cfg?.value) {
+          const parsed = JSON.parse(cfg.value);
+          if (Array.isArray(parsed) && parsed.length > 0) epicActivities[env.toUpperCase()] = parsed;
+        }
+      } catch {}
+    }
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -519,6 +569,7 @@ export async function registerRoutes(
       captures: allCaptures,
       reader: allPages,
       transcripts: allTranscripts,
+      epicActivities,
     });
   });
 

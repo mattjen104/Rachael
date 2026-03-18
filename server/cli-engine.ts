@@ -169,7 +169,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -2934,6 +2934,66 @@ ${fullHtml}`;
     }
 
     return ok(lines.join(nl));
+  });
+
+  registerCommand("epic", "Epic Hyperspace activity tools", "epic [activities <env>|clear <env>|scan]", async (args) => {
+    const nl = String.fromCharCode(10);
+    if (args[0] === "activities") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const key = `epic_activities_${env.toLowerCase()}`;
+      const cfg = await storage.getAgentConfig(key);
+      let acts: any[] = [];
+      if (cfg?.value) {
+        try { acts = JSON.parse(cfg.value); } catch {}
+      }
+      if (!acts.length) return ok(`No activities cataloged for ${env}.${nl}Run: python tools/epic_scan.py ${env}  on your desktop`);
+      const cats = new Map<string, string[]>();
+      for (const a of acts) {
+        const cat = a.parent || a.category || "General";
+        if (!cats.has(cat)) cats.set(cat, []);
+        cats.get(cat)!.push(a.name);
+      }
+      const lines = [`=== EPIC ${env} ACTIVITIES === (${acts.length} total)`, ""];
+      for (const [cat, items] of cats) {
+        lines.push(`  ${cat} (${items.length})`);
+        for (const name of items.slice(0, 10)) {
+          lines.push(`    - ${name}`);
+        }
+        if (items.length > 10) lines.push(`    ... and ${items.length - 10} more`);
+      }
+      return ok(lines.join(nl));
+    }
+    if (args[0] === "clear") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const key = `epic_activities_${env.toLowerCase()}`;
+      await storage.setAgentConfig(key, "[]", "epic");
+      return ok(`Cleared activities for ${env}`);
+    }
+    if (args[0] === "scan") {
+      return ok([
+        "Epic Hyperspace Activity Scanner",
+        "================================",
+        "Run on your Windows desktop:",
+        "",
+        "  1. pip install pyautogui pillow requests pygetwindow",
+        "  2. set OPENROUTER_API_KEY=your-key",
+        "  3. python epic_scan.py SUP",
+        "",
+        "The script will:",
+        "  - Find your Hyperspace window",
+        "  - Screenshot menus and buttons",
+        "  - Use Claude vision to identify activities",
+        "  - Post results to OrgCloud TreeView",
+        "",
+        "Environments: SUP, POC, TST",
+      ].join(nl));
+    }
+    return ok([
+      "Epic commands:",
+      "  epic activities <env>  - Show cataloged activities",
+      "  epic clear <env>       - Clear activities for environment",
+      "  epic scan              - How to run the desktop scanner",
+    ].join(nl));
   });
 }
 

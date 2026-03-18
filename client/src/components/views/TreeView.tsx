@@ -185,6 +185,35 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       }
     }
 
+    const epicActs = (data as any).epicActivities || {};
+    const epicEnvs = Object.keys(epicActs);
+    if (epicEnvs.length > 0) {
+      const totalActs = epicEnvs.reduce((sum, env) => sum + (epicActs[env]?.length || 0), 0);
+      nodes.push({ type: "section", label: "EPIC (Activities)", key: "epic", count: totalActs });
+      if (expanded.has("epic")) {
+        for (const env of epicEnvs) {
+          const acts: any[] = epicActs[env] || [];
+          nodes.push({ type: "section", label: `  ${env}`, key: `epic-${env}`, count: acts.length });
+          if (expanded.has(`epic-${env}`)) {
+            const cats = new Map<string, any[]>();
+            for (const a of acts) {
+              const cat = a.parent || a.category || "General";
+              if (!cats.has(cat)) cats.set(cat, []);
+              cats.get(cat)!.push(a);
+            }
+            for (const [cat, items] of cats) {
+              nodes.push({ type: "section", label: `    ${cat}`, key: `epic-${env}-${cat}`, count: items.length });
+              if (expanded.has(`epic-${env}-${cat}`)) {
+                for (const item of items) {
+                  nodes.push({ type: "epicActivity", name: item.name, actType: item.type || "activity", env, category: cat });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     nodes.push({ type: "section", label: "NOTES", key: "notes", count: regularNotes.length });
     if (expanded.has("notes")) {
       for (const n of regularNotes) {
@@ -446,6 +475,10 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           icon = isLaunching ? "~" : "→";
           label = isLaunching ? `${node.name} [launching...]` : node.name;
           extra = node.href ? "↗" : "";
+        } else if (node.type === "epicActivity") {
+          icon = "·";
+          label = node.name;
+          extra = node.actType || "";
         } else if (node.type === "bridge-info") {
           icon = "ℹ";
           label = node.label;

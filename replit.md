@@ -254,6 +254,26 @@ Database-driven scraping system replacing hardcoded adapters:
 - **Extension files**: `background.js` (polling + tab-based execution), `options.html/js` (URL + token config), `manifest.json` (MV3, `<all_urls>`)
 - **Polling interval**: Chrome alarms at 30s minimum; extension polls every ~30s when active
 
+## Epic Hyperspace Activity Scanner (tools/epic_scan.py)
+
+- **Desktop Python script** that explores Hyperspace menus via screenshots + Claude vision (OpenRouter)
+- Uses `pyautogui` + `pygetwindow` to find/screenshot Hyperspace windows, `Pillow` for image processing
+- Sends screenshots to Claude via OpenRouter to identify menu items, buttons, tabs, activities
+- Posts discovered activities to OrgCloud API: `POST /api/epic/activities` (auth: Bearer bridge token)
+- Activities stored in `agent_config` as `epic_activities_sup`, `epic_activities_poc`, `epic_activities_tst`
+- TreeView displays activities under EPIC (Activities) section, grouped by environment then category
+- CLI commands: `epic activities <env>`, `epic clear <env>`, `epic scan` (setup instructions)
+- API: `GET /api/epic/activities/:env` (read), `POST /api/epic/activities` (write, merges with existing)
+
+## Citrix Workspace Launcher
+
+- `citrix workspace` queues all 6 apps for simultaneous launch via Chrome extension bridge
+- Default apps: SUP Hyperdrive, POC Hyperdrive, TST Hyperdrive, SUP Text Access, POC Text Access, TST Text Access
+- Uses `submitJob` for instant fire-and-forget queuing (no sequential delays)
+- Correct StoreFront API path: `/Citrix/CWPSFWeb/Resources/List` (238 resources)
+- `citrix keepalive on/off` pings portal every 10 min to prevent session timeout
+- Desktop path for .ica files: `C:/Users/mjensen/OneDrive - University of California, San Diego Health/Desktop`
+
 ## Preserved Utilities
 
 - `skills/resilient-fetch.ts`, `skills/fuzzy-match.ts`, `skills/reddit-toolkit.ts`, `skills/craigslist-toolkit.ts`, `skills/archive-toolkit.ts`
