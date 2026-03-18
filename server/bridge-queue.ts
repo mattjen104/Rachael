@@ -62,7 +62,7 @@ const RESULT_TTL_MS = 10 * 60 * 1000;
 const HEARTBEAT_STALE_MS = 90_000;
 
 const VALID_TYPES = new Set(["fetch", "dom"]);
-const VALID_SCHEMES = new Set(["http:", "https:"]);
+const VALID_SCHEMES = new Set(["http:", "https:", "file:"]);
 
 let bridgeToken: string | null = process.env.BRIDGE_TOKEN || null;
 let extensionLastHeartbeat: number | null = null;
