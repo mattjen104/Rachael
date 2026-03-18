@@ -2737,7 +2737,7 @@ ${fullHtml}`;
     if (args[0] === "workspace") {
       const nl = String.fromCharCode(10);
       const configKey = "citrix_workspace_apps";
-      const DEFAULT_WORKSPACE_APPS = ["SUP Text Access", "SUP Hyperdrive", "POC Text Access", "POC Hyperdrive", "TST Text Access", "TST Hyperdrive"];
+      const DEFAULT_WORKSPACE_APPS = ["SUP Hyperdrive", "POC Hyperdrive", "TST Hyperdrive", "SUP Text Access", "POC Text Access", "TST Text Access"];
       let raw: string | null = null;
       try {
         const cfg = await storage.getAgentConfig(configKey);
@@ -2766,7 +2766,7 @@ ${fullHtml}`;
         return fail("[citrix] Bridge not connected.");
       }
       const results: string[] = [];
-      const delayBetween = 8000;
+      const delayBetween = 4000;
       for (let i = 0; i < apps.length; i++) {
         const appName = apps[i];
         emitEvent("cli", `Launching ${i + 1}/${apps.length}: ${appName}`, "info", { metadata: { command: "citrix" } });
