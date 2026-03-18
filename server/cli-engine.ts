@@ -2762,38 +2762,28 @@ ${fullHtml}`;
       if (!apps.length) {
         return fail(`[citrix] No workspace apps configured.${nl}Use: citrix workspace set SUP Text Access, PRD Hyperspace${nl}Then: citrix workspace`);
       }
-      const { isExtensionConnected, smartFetch } = await import("./bridge-queue");
+      const { isExtensionConnected, submitJob } = await import("./bridge-queue");
       if (!isExtensionConnected()) {
         return fail("[citrix] Bridge not connected.");
       }
       const results: string[] = [];
-      const delayBetween = 4000;
       for (let i = 0; i < apps.length; i++) {
         const appName = apps[i];
-        emitEvent("cli", `Launching ${i + 1}/${apps.length}: ${appName}`, "info", { metadata: { command: "citrix" } });
         try {
-          const lr = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
+          submitJob("dom", "https://cwp.ucsd.edu", "cli-citrix-workspace", {
             maxText: 2000,
             reuseTab: true,
             spaWaitMs: 2000,
             citrixApiLaunch: appName,
             autoOpenDownload: true,
             pollTimeoutMs: 15000,
-          }, 60000);
-          const cd = (lr as any).clickDebug;
-          if (lr.error || cd?.error) {
-            results.push(`  [-] ${appName}: ${lr.error || cd?.error}`);
-          } else {
-            results.push(`  [+] ${appName}: launched [${cd?.method || "ok"}]`);
-          }
+          });
+          results.push(`  [+] ${appName}: queued`);
         } catch (e: any) {
           results.push(`  [-] ${appName}: ${e.message}`);
         }
-        if (i < apps.length - 1) {
-          await new Promise(r => setTimeout(r, delayBetween));
-        }
       }
-      return ok(`Workspace launch (${apps.length} apps):${nl}${results.join(nl)}`);
+      return ok(`Workspace: ${apps.length} apps queued for launch${nl}${results.join(nl)}${nl}Extension will launch them sequentially.`);
     }
 
     if (args[0] === "keepalive") {
