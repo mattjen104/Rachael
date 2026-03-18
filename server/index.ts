@@ -93,7 +93,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const { initRuntime } = await import("./agent-runtime");
   await registerRoutes(httpServer, app);
+  initRuntime();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
