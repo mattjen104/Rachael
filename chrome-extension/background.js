@@ -371,6 +371,7 @@ async function executeJob(job) {
 
               const storePaths = [...new Set([
                 ...configPaths,
+                "/Citrix/CWPSFWeb/Resources/List",
                 "/Citrix/StoreWeb/Resources/List",
                 "/Citrix/Store/resources/v2",
                 "/Citrix/PNAgent/Resources/List",
