@@ -2737,28 +2737,14 @@ ${fullHtml}`;
     if (args[0] === "workspace") {
       const nl = String.fromCharCode(10);
       const configKey = "citrix_workspace_apps";
+      const DEFAULT_WORKSPACE_APPS = ["SUP Text Access", "SUP Hyperdrive", "POC Text Access", "POC Hyperdrive", "TST Text Access", "TST Hyperdrive"];
       let raw: string | null = null;
-      let debugInfo = "";
       try {
         const cfg = await storage.getAgentConfig(configKey);
-        debugInfo += `drizzle:${cfg ? "found" : "null"};`;
         raw = cfg?.value || null;
-      } catch (e: any) {
-        debugInfo += `drizzle-err:${e.message};`;
-      }
+      } catch {}
       if (!raw) {
-        try {
-          const { pool } = await import("./db");
-          const dbRes = await pool.query("SELECT value FROM agent_config WHERE key = $1", [configKey]);
-          debugInfo += `sql:rows=${dbRes.rows.length};`;
-          if (dbRes.rows.length > 0) raw = dbRes.rows[0].value;
-        } catch (e: any) {
-          debugInfo += `sql-err:${e.message};`;
-        }
-      }
-      if (!raw) {
-        debugInfo += `final:null`;
-        console.error(`[citrix-workspace-debug] ${debugInfo}`);
+        raw = JSON.stringify(DEFAULT_WORKSPACE_APPS);
       }
       if (args[1] === "set") {
         const appList = args.slice(2).join(" ").split(",").map(s => s.trim()).filter(Boolean);
