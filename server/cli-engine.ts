@@ -3075,16 +3075,175 @@ ${fullHtml}`;
         "  epic status",
       ].join(nl));
     }
+    if (args[0] === "tree") {
+      const nl2 = nl;
+      if (args[1] === "--refresh") {
+        const env = (args[2] || "SUP").toUpperCase();
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "tree-scan", env }),
+          });
+          const data = await resp.json() as any;
+          if (data.ok) return ok(`Tree re-scan requested for ${env}. Command ID: ${data.commandId}${nl2}Desktop agent will perform pywinauto scan.`);
+          return fail(`[epic] Failed to send scan command`);
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      const env = (args[1] || "SUP").toUpperCase();
+      const trees: Record<string, any> = {};
+      for (const client of ["hyperspace", "text"]) {
+        const key = `epic_tree_${env.toLowerCase()}_${client}`;
+        const cfg = await storage.getAgentConfig(key);
+        if (cfg?.value) {
+          try { trees[client] = JSON.parse(cfg.value); } catch {}
+        }
+      }
+      if (Object.keys(trees).length === 0) {
+        return ok(`No navigation tree stored for ${env}.${nl2}Run: python epic_tree.py hyperspace ${env}  on desktop`);
+      }
+      function printTree(node: any, indent: string, lines: string[], maxLines: number): void {
+        for (const child of (node.children || [])) {
+          if (lines.length >= maxLines) { lines.push(`${indent}... (truncated)`); return; }
+          const kids = (child.children || []).length;
+          const suffix = kids > 0 ? ` (${kids})` : "";
+          lines.push(`${indent}${child.name}${suffix}`);
+          if (kids > 0) printTree(child, indent + "  ", lines, maxLines);
+        }
+      }
+      const lines: string[] = [`=== EPIC ${env} NAVIGATION TREE ===`, ""];
+      for (const [client, tree] of Object.entries(trees)) {
+        const label = client === "hyperspace" ? "Hyperspace" : "Text";
+        lines.push(`[${label}] scanned ${(tree as any).scannedAt || "unknown"}`);
+        printTree(tree, "  ", lines, 200);
+        lines.push("");
+      }
+      return ok(lines.join(nl2));
+    }
+
+    if (args[0] === "go") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const path = args.slice(2).join(" ");
+      if (!path) return fail("[epic] Usage: epic go SUP Epic Button > Patient Care > Patient Lookup");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "navigate_path", env, path }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) {
+          return ok(`Path navigation sent: ${env}${nl}Path: ${path}${nl}Command ID: ${data.commandId}${nl}Desktop agent will replay the stored click/keystroke path.`);
+        }
+        return fail(`[epic] Failed to send command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "search") {
+      const query = args.slice(1).join(" ");
+      if (!query) return fail("[epic] Usage: epic search Patient Lookup");
+
+      function fuzzyMatch(text: string, q: string): boolean {
+        const lower = text.toLowerCase();
+        const words = q.toLowerCase().split(/\s+/);
+        return words.every(w => lower.includes(w));
+      }
+
+      function searchTree(node: any, results: any[], env: string, client: string): void {
+        for (const child of (node.children || [])) {
+          if (fuzzyMatch(child.name || "", query) || fuzzyMatch(child.path || "", query)) {
+            results.push({
+              name: child.name,
+              path: child.path || child.name,
+              env,
+              client,
+              controlType: child.controlType || "",
+            });
+          }
+          searchTree(child, results, env, client);
+        }
+      }
+
+      const allResults: any[] = [];
+      for (const env of ["SUP", "POC", "TST"]) {
+        for (const client of ["hyperspace", "text"]) {
+          const key = `epic_tree_${env.toLowerCase()}_${client}`;
+          const cfg = await storage.getAgentConfig(key);
+          if (cfg?.value) {
+            try {
+              const tree = JSON.parse(cfg.value);
+              searchTree(tree, allResults, env, client);
+            } catch {}
+          }
+        }
+        const actKey = `epic_activities_${env.toLowerCase()}`;
+        const actCfg = await storage.getAgentConfig(actKey);
+        if (actCfg?.value) {
+          try {
+            const acts = JSON.parse(actCfg.value);
+            for (const a of acts) {
+              if (fuzzyMatch(a.name || "", query)) {
+                allResults.push({ name: a.name, path: a.name, env, client: "activity", controlType: a.type || "" });
+              }
+            }
+          } catch {}
+        }
+      }
+
+      if (allResults.length === 0) return ok(`No Epic items matching "${query}"`);
+
+      const lines = [`=== EPIC SEARCH: "${query}" === (${allResults.length} results)`, ""];
+      for (let i = 0; i < Math.min(allResults.length, 30); i++) {
+        const r = allResults[i];
+        const clientLabel = r.client === "hyperspace" ? "HS" : r.client === "text" ? "TXT" : "ACT";
+        lines.push(`  ${String(i + 1).padStart(3)}. [${r.env}/${clientLabel}] ${r.name}`);
+        if (r.path !== r.name) lines.push(`       Path: ${r.path}`);
+      }
+      if (allResults.length > 30) lines.push(`  ... and ${allResults.length - 30} more`);
+      lines.push("", "Use: epic go <env> <path> to navigate");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "mf") {
+      const masterfile = args[1];
+      const item = args.slice(2).join(" ");
+      if (!masterfile) return fail("[epic] Usage: epic mf EMP John Smith");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "masterfile", masterfile: masterfile.toUpperCase(), item: item || "" }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) {
+          const detail = item ? ` -> ${item}` : "";
+          return ok(`Masterfile lookup sent: ${masterfile.toUpperCase()}${detail}${nl}Command ID: ${data.commandId}${nl}Desktop agent will send keystrokes to Epic Text.`);
+        }
+        return fail(`[epic] Failed to send command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
     return ok([
       "Epic commands:",
-      "  epic activities <env>  - Show cataloged activities",
-      "  epic navigate <env> <target>  - Navigate Hyperspace",
-      "  epic screenshot <env>  - Capture current screen",
-      "  epic click <env> <el>  - Click an element by name",
-      "  epic status            - Desktop agent status",
-      "  epic clear <env>       - Clear activities",
-      "  epic scan              - Run one-time activity scan",
-      "  epic setup             - Desktop agent setup guide",
+      "  epic activities <env>     - Show cataloged activities",
+      "  epic tree <env>           - Show full navigation tree",
+      "  epic tree --refresh <env> - Re-scan tree via desktop agent",
+      "  epic go <env> <path>      - Navigate using stored path",
+      "  epic search <query>       - Search across all activities",
+      "  epic mf <masterfile> [item] - Text masterfile lookup",
+      "  epic navigate <env> <target> - Navigate Hyperspace (vision)",
+      "  epic screenshot <env>     - Capture current screen",
+      "  epic click <env> <el>     - Click an element by name",
+      "  epic status               - Desktop agent status",
+      "  epic clear <env>          - Clear activities",
+      "  epic scan                 - One-time activity scan guide",
+      "  epic setup                - Desktop agent setup guide",
     ].join(nl));
   });
 

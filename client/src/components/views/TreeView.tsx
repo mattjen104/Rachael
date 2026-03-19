@@ -79,6 +79,14 @@ type TreeNode = {
   category: string;
   actType?: string;
 } | {
+  type: "epicTreeNode";
+  name: string;
+  env: string;
+  client: string;
+  navPath: string;
+  controlType: string;
+  hasChildren: boolean;
+} | {
   type: "pulseLink";
   name: string;
   url: string;
@@ -197,26 +205,104 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
     }
 
     const epicActs = (data as any).epicActivities || {};
-    const epicEnvs = Object.keys(epicActs);
+    const epicTrees = (data as any).epicTrees || {};
+    const epicEnvs = [...new Set([...Object.keys(epicActs), ...Object.keys(epicTrees)])].sort();
+
+    function countTreeNodes(node: any): number {
+      let c = 0;
+      for (const child of (node.children || [])) {
+        c += 1;
+        c += countTreeNodes(child);
+      }
+      return c;
+    }
+
+    function addTreeChildren(children: any[], env: string, client: string, parentKey: string, indent: string) {
+      for (const child of children) {
+        const childKey = `${parentKey}-${child.name}`;
+        const hasKids = (child.children || []).length > 0;
+        if (hasKids) {
+          nodes.push({ type: "section", label: `${indent}${child.name}`, key: childKey, count: child.children.length });
+          if (expanded.has(childKey)) {
+            addTreeChildren(child.children, env, client, childKey, indent + "  ");
+          }
+        } else {
+          nodes.push({
+            type: "epicTreeNode",
+            name: child.name,
+            env,
+            client,
+            navPath: child.path || child.name,
+            controlType: child.controlType || "",
+            hasChildren: false,
+          });
+        }
+      }
+    }
+
     if (epicEnvs.length > 0) {
-      const totalActs = epicEnvs.reduce((sum, env) => sum + (epicActs[env]?.length || 0), 0);
-      nodes.push({ type: "section", label: "EPIC (Activities)", key: "epic", count: totalActs });
+      let totalItems = 0;
+      for (const env of epicEnvs) {
+        totalItems += (epicActs[env]?.length || 0);
+        if (epicTrees[env]) {
+          for (const client of Object.keys(epicTrees[env])) {
+            totalItems += countTreeNodes(epicTrees[env][client]);
+          }
+        }
+      }
+
+      nodes.push({ type: "section", label: "EPIC", key: "epic", count: totalItems });
       if (expanded.has("epic")) {
         for (const env of epicEnvs) {
-          const acts: any[] = epicActs[env] || [];
-          nodes.push({ type: "section", label: `  ${env}`, key: `epic-${env}`, count: acts.length });
+          const envTrees = epicTrees[env] || {};
+          const envActs: any[] = epicActs[env] || [];
+          const treeClients = Object.keys(envTrees);
+          const envTotal = envActs.length + treeClients.reduce((s, c) => s + countTreeNodes(envTrees[c]), 0);
+
+          if (envTotal === 0) continue;
+          nodes.push({ type: "section", label: `  ${env}`, key: `epic-${env}`, count: envTotal });
           if (expanded.has(`epic-${env}`)) {
-            const cats = new Map<string, any[]>();
-            for (const a of acts) {
-              const cat = a.parent || a.category || "General";
-              if (!cats.has(cat)) cats.set(cat, []);
-              cats.get(cat)!.push(a);
+            for (const client of treeClients) {
+              const tree = envTrees[client];
+              const treeCount = countTreeNodes(tree);
+              const clientLabel = client === "hyperspace" ? "Hyperspace" : "Text";
+              nodes.push({ type: "section", label: `    ${clientLabel}`, key: `epic-${env}-${client}`, count: treeCount });
+              if (expanded.has(`epic-${env}-${client}`)) {
+                addTreeChildren(tree.children || [], env, client, `epic-${env}-${client}`, "      ");
+              }
             }
-            for (const [cat, items] of cats) {
-              nodes.push({ type: "section", label: `    ${cat}`, key: `epic-${env}-${cat}`, count: items.length });
-              if (expanded.has(`epic-${env}-${cat}`)) {
-                for (const item of items) {
-                  nodes.push({ type: "epicActivity", name: item.name, actType: item.type || "activity", env, category: cat });
+
+            if (envActs.length > 0 && treeClients.length > 0) {
+              nodes.push({ type: "section", label: `    Activities (flat)`, key: `epic-${env}-flat`, count: envActs.length });
+              if (expanded.has(`epic-${env}-flat`)) {
+                const cats = new Map<string, any[]>();
+                for (const a of envActs) {
+                  const cat = a.parent || a.category || "General";
+                  if (!cats.has(cat)) cats.set(cat, []);
+                  cats.get(cat)!.push(a);
+                }
+                for (const [cat, items] of Array.from(cats.entries())) {
+                  nodes.push({ type: "section", label: `      ${cat}`, key: `epic-${env}-flat-${cat}`, count: items.length });
+                  if (expanded.has(`epic-${env}-flat-${cat}`)) {
+                    for (const item of items) {
+                      nodes.push({ type: "epicActivity", name: item.name, actType: item.type || "activity", env, category: cat });
+                    }
+                  }
+                }
+              }
+            } else if (envActs.length > 0) {
+              const cats = new Map<string, any[]>();
+              for (const a of envActs) {
+                const cat = a.parent || a.category || "General";
+                if (!cats.has(cat)) cats.set(cat, []);
+                cats.get(cat)!.push(a);
+              }
+              for (const [cat, items] of Array.from(cats.entries())) {
+                nodes.push({ type: "section", label: `    ${cat}`, key: `epic-${env}-${cat}`, count: items.length });
+                if (expanded.has(`epic-${env}-${cat}`)) {
+                  for (const item of items) {
+                    nodes.push({ type: "epicActivity", name: item.name, actType: item.type || "activity", env, category: cat });
+                  }
                 }
               }
             }
@@ -432,6 +518,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "epicActivity" && onRunCommand) {
           onRunCommand(`epic navigate ${node.env} ${node.name}`);
         }
+        else if (node?.type === "epicTreeNode" && onRunCommand) {
+          onRunCommand(`epic go ${node.env} ${node.navPath}`);
+        }
         else if (node?.type === "pulseLink") {
           window.open(node.url, "_blank");
         }
@@ -517,6 +606,10 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           icon = "·";
           label = node.name;
           extra = node.actType || "";
+        } else if (node.type === "epicTreeNode") {
+          icon = node.client === "text" ? "#" : "·";
+          label = node.name;
+          extra = node.controlType === "TextMenuItem" ? "txt" : "";
         } else if (node.type === "pulseLink") {
           icon = "→";
           label = node.name;
@@ -561,6 +654,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 }
               } else if (node.type === "epicActivity" && onRunCommand) {
                 onRunCommand(`epic navigate ${node.env} ${node.name}`);
+              } else if (node.type === "epicTreeNode" && onRunCommand) {
+                onRunCommand(`epic go ${node.env} ${node.navPath}`);
               } else if (node.type === "pulseLink") {
                 window.open(node.url, "_blank");
               } else if (node.type === "snow-item") {

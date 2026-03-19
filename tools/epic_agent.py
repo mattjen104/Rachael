@@ -426,6 +426,157 @@ Coordinates should be relative to the image."""
     print(f"  [click] Clicked '{target}' at ({result['x']}, {result['y']})")
 
 
+def execute_navigate_path(cmd):
+    """Navigate using a stored path by replaying clicks/keystrokes."""
+    env = cmd.get("env", "SUP")
+    path = cmd.get("path", "")
+    command_id = cmd.get("id", "unknown")
+
+    if not path:
+        post_result(command_id, "error", error="No path provided")
+        return
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    steps = [s.strip() for s in path.split(">") if s.strip()]
+    print(f"  [path-nav] {env}: {' > '.join(steps)} ({len(steps)} steps)")
+
+    try:
+        window.activate()
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    for i, step in enumerate(steps):
+        print(f"  [step {i+1}/{len(steps)}] Clicking: {step}")
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+
+        prompt = f"""Find the exact pixel coordinates of the UI element labeled "{step}" in this Epic Hyperspace screenshot.
+Return ONLY a JSON object: {{"x": <number>, "y": <number>, "found": true}}
+If not found: {{"found": false, "reason": "why"}}
+Coordinates relative to the image."""
+
+        response = ask_claude(b64, prompt)
+        if not response:
+            post_result(command_id, "error", error=f"Claude did not respond for step: {step}")
+            return
+
+        try:
+            json_match = re.search(r'\{[\s\S]*?\}', response)
+            if not json_match:
+                post_result(command_id, "error", error=f"Could not parse response for step: {step}")
+                return
+            result = json.loads(json_match.group())
+        except Exception:
+            post_result(command_id, "error", error=f"Invalid JSON for step: {step}")
+            return
+
+        if not result.get("found", False):
+            post_result(command_id, "error", error=f"Element not found at step {i+1}: {step} - {result.get('reason', 'unknown')}")
+            return
+
+        abs_x = window.left + result["x"]
+        abs_y = window.top + result["y"]
+        pyautogui.click(abs_x, abs_y)
+        time.sleep(0.8)
+
+    time.sleep(0.5)
+    final_img = screenshot_window(window)
+    final_b64 = img_to_base64(final_img)
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "path": path,
+        "stepsCompleted": len(steps),
+    })
+    print(f"  [path-nav] Complete: {len(steps)} steps executed")
+
+
+def execute_tree_scan(cmd):
+    """Trigger a pywinauto tree scan and upload results."""
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+
+    print(f"  [tree-scan] Starting pywinauto scan for {env}...")
+
+    try:
+        import subprocess
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        tree_script = os.path.join(script_dir, "epic_tree.py")
+
+        if not os.path.exists(tree_script):
+            post_result(command_id, "error", error="epic_tree.py not found in tools directory")
+            return
+
+        combined_output = ""
+        for client in ["hyperspace", "text"]:
+            print(f"  [tree-scan] Scanning {client}...")
+            result = subprocess.run(
+                [sys.executable, tree_script, client, env],
+                capture_output=True, text=True, timeout=300,
+                env={**os.environ, "BRIDGE_TOKEN": BRIDGE_TOKEN, "ORGCLOUD_URL": ORGCLOUD_URL},
+            )
+            combined_output += f"--- {client} (exit {result.returncode}) ---\n"
+            combined_output += result.stdout + result.stderr + "\n"
+
+        post_result(command_id, "complete", data={
+            "output": combined_output[-2000:],
+        })
+        print(f"  [tree-scan] Both scans complete")
+
+    except subprocess.TimeoutExpired:
+        post_result(command_id, "error", error="Tree scan timed out (5 min limit)")
+    except Exception as e:
+        post_result(command_id, "error", error=f"Tree scan error: {str(e)}")
+
+
+def execute_masterfile(cmd):
+    """Send keystrokes for Epic Text masterfile lookup."""
+    masterfile = cmd.get("masterfile", "")
+    item = cmd.get("item", "")
+    command_id = cmd.get("id", "unknown")
+    env = cmd.get("env", "SUP")
+
+    if not masterfile:
+        post_result(command_id, "error", error="No masterfile specified")
+        return
+
+    print(f"  [masterfile] {masterfile} -> {item}")
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found for masterfile lookup")
+        return
+
+    try:
+        window.activate()
+        time.sleep(0.5)
+
+        pyautogui.typewrite(masterfile, interval=0.05)
+        time.sleep(0.3)
+        pyautogui.press("enter")
+        time.sleep(1.0)
+
+        if item:
+            pyautogui.typewrite(item, interval=0.05)
+            time.sleep(0.3)
+            pyautogui.press("enter")
+            time.sleep(1.0)
+
+        final_img = screenshot_window(window)
+        final_b64 = img_to_base64(final_img)
+        post_result(command_id, "complete", screenshot_b64=final_b64, data={
+            "masterfile": masterfile,
+            "item": item,
+        })
+        print(f"  [masterfile] Complete")
+
+    except Exception as e:
+        post_result(command_id, "error", error=f"Masterfile error: {str(e)}")
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -433,12 +584,18 @@ def execute_command(cmd):
     try:
         if cmd_type == "navigate":
             execute_navigate(cmd)
+        elif cmd_type == "navigate_path":
+            execute_navigate_path(cmd)
         elif cmd_type == "screenshot":
             execute_screenshot(cmd)
         elif cmd_type == "scan":
             execute_scan(cmd)
+        elif cmd_type == "tree-scan":
+            execute_tree_scan(cmd)
         elif cmd_type == "click":
             execute_click(cmd)
+        elif cmd_type == "masterfile":
+            execute_masterfile(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except Exception as e:

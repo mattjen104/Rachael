@@ -546,10 +546,14 @@ export async function registerRoutes(
   });
 
   app.post("/api/epic/agent/send", (req, res) => {
-    const { type, env, target } = req.body;
+    const { type, env, target, path, masterfile, item } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const cmd = { id, type, env: env || "SUP", target: target || "" };
+    const cmd: Record<string, any> = { id, type, env: env || "SUP" };
+    if (target) cmd.target = target;
+    if (path) cmd.path = path;
+    if (masterfile) cmd.masterfile = masterfile;
+    if (item) cmd.item = item;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });
@@ -650,6 +654,46 @@ export async function registerRoutes(
     res.json({ ok: true, environment: env, count: current.length });
   });
 
+  app.post("/api/epic/tree", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const tree = req.body;
+    if (!tree || !tree.client || !tree.environment) {
+      return res.status(400).json({ error: "Missing client or environment in tree data" });
+    }
+    const client = tree.client.toLowerCase();
+    const env = tree.environment.toUpperCase();
+    const key = `epic_tree_${env.toLowerCase()}_${client}`;
+
+    function countNodes(node: any): number {
+      let c = 0;
+      for (const child of (node.children || [])) {
+        c += 1;
+        c += countNodes(child);
+      }
+      return c;
+    }
+
+    const nodeCount = countNodes(tree);
+    await storage.setAgentConfig(key, JSON.stringify(tree), "epic");
+    res.json({ ok: true, environment: env, client, nodeCount });
+  });
+
+  app.get("/api/epic/tree/:env", async (req, res) => {
+    const env = req.params.env.toUpperCase();
+    const trees: Record<string, any> = {};
+    for (const client of ["hyperspace", "text"]) {
+      const key = `epic_tree_${env.toLowerCase()}_${client}`;
+      const cfg = await storage.getAgentConfig(key);
+      if (cfg?.value) {
+        try { trees[client] = JSON.parse(cfg.value); } catch {}
+      }
+    }
+    res.json({ environment: env, trees });
+  });
+
   app.get("/api/epic/activities/:env", async (req, res) => {
     const env = req.params.env.toUpperCase();
     const key = `epic_activities_${env.toLowerCase()}`;
@@ -694,6 +738,22 @@ export async function registerRoutes(
       }
     } catch {}
 
+    const epicTrees: Record<string, Record<string, any>> = {};
+    for (const env of ["sup", "poc", "tst"]) {
+      for (const client of ["hyperspace", "text"]) {
+        try {
+          const cfg = await storage.getAgentConfig(`epic_tree_${env}_${client}`);
+          if (cfg?.value) {
+            const parsed = JSON.parse(cfg.value);
+            if (parsed && parsed.children) {
+              if (!epicTrees[env.toUpperCase()]) epicTrees[env.toUpperCase()] = {};
+              epicTrees[env.toUpperCase()][client] = parsed;
+            }
+          }
+        } catch {}
+      }
+    }
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -703,6 +763,7 @@ export async function registerRoutes(
       reader: allPages,
       transcripts: allTranscripts,
       epicActivities,
+      epicTrees,
       pulseLinks,
     });
   });
