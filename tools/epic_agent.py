@@ -25,6 +25,17 @@ import base64
 import io
 import re
 import traceback
+import random
+
+try:
+    import ctypes
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except Exception:
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
 
 try:
     import pyautogui
@@ -39,16 +50,6 @@ except ImportError:
 pyautogui.PAUSE = 0.05
 pyautogui.MINIMUM_DURATION = 0
 pyautogui.MINIMUM_SLEEP = 0
-
-try:
-    import ctypes
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except Exception:
-    try:
-        import ctypes
-        ctypes.windll.user32.SetProcessDPIAware()
-    except Exception:
-        pass
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ORGCLOUD_URL = os.environ.get("ORGCLOUD_URL", "https://i-cloud-sync-manager.replit.app")
@@ -184,6 +185,44 @@ def find_text_window(env_upper):
     return None
 
 
+def activate_window(window):
+    """Reliably bring a window to the foreground.
+
+    Windows restricts SetForegroundWindow to prevent focus-stealing.
+    pygetwindow's activate() silently fails when the calling process
+    doesn't own the foreground. We use AttachThreadInput to temporarily
+    attach our thread to the foreground window's thread, which bypasses
+    the restriction.
+    """
+    try:
+        if hasattr(window, 'isMinimized') and window.isMinimized:
+            window.restore()
+            time.sleep(0.2)
+    except Exception:
+        pass
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = window._hWnd
+        foreground_hwnd = user32.GetForegroundWindow()
+        if foreground_hwnd == hwnd:
+            return
+        fg_thread = user32.GetWindowThreadProcessId(foreground_hwnd, None)
+        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+        attached = False
+        if fg_thread != target_thread:
+            attached = bool(user32.AttachThreadInput(fg_thread, target_thread, True))
+        result = user32.SetForegroundWindow(hwnd)
+        if attached:
+            user32.AttachThreadInput(fg_thread, target_thread, False)
+        if not result:
+            window.activate()
+    except Exception:
+        try:
+            window.activate()
+        except Exception:
+            pass
+
+
 def get_dpi_scale():
     """Get the DPI scaling factor for coordinate correction."""
     try:
@@ -212,13 +251,10 @@ def screenshot_window(window):
     the screenshot_scale factor.
     """
     global DPI_SCALE
-    try:
-        window.activate()
-        time.sleep(0.3)
-    except Exception:
-        pass
+    activate_window(window)
+    time.sleep(0.3)
     bbox = (window.left, window.top, window.left + window.width, window.top + window.height)
-    img = ImageGrab.grab(bbox=bbox)
+    img = ImageGrab.grab(bbox=bbox, include_layered_windows=True)
     win_w = window.width
     img_w, img_h = img.size
     if win_w > 0 and img_w > 0 and abs(img_w - win_w) > 10:
@@ -238,9 +274,12 @@ def screenshot_window(window):
     return img
 
 
-def img_to_base64(img):
+def img_to_base64(img, use_jpeg=False):
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    if use_jpeg:
+        img.save(buf, format="JPEG", quality=80)
+    else:
+        img.save(buf, format="PNG", compress_level=6)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
@@ -264,86 +303,135 @@ def vision_to_screen(window, img_x, img_y):
     return screen_x, screen_y
 
 
-def ask_claude(screenshot_b64, prompt):
+def ask_claude(screenshot_b64, prompt, max_retries=3):
     if not OPENROUTER_API_KEY:
         return None
-    try:
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
-                "max_tokens": 4096,
-            },
-            timeout=60,
-        )
-        if resp.status_code != 200:
+    base_delay = 1.0
+    max_delay = 60.0
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
+                                },
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ],
+                    "max_tokens": 4096,
+                },
+                timeout=60,
+            )
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"]
             detail = ""
             try:
                 detail = resp.json().get("error", {}).get("message", resp.text[:200])
             except Exception:
                 detail = resp.text[:200]
+            if resp.status_code == 429 or resp.status_code >= 500:
+                retry_after = resp.headers.get("Retry-After")
+                wait = None
+                if retry_after:
+                    try:
+                        wait = float(retry_after)
+                    except (ValueError, TypeError):
+                        wait = None
+                if wait is None:
+                    backoff = min(base_delay * (2 ** attempt), max_delay)
+                    wait = backoff + random.uniform(0, backoff * 0.25)
+                if attempt < max_retries:
+                    print(f"  Claude API {resp.status_code} (attempt {attempt + 1}/{max_retries + 1}) - retrying in {wait:.1f}s: {detail}")
+                    time.sleep(wait)
+                    continue
             print(f"  Claude API error: {resp.status_code} - {detail}")
             if resp.status_code == 401:
                 print(f"  -> Check your OPENROUTER_API_KEY environment variable. It may be expired or invalid.")
                 print(f"  -> Key starts with: {OPENROUTER_API_KEY[:8]}..." if len(OPENROUTER_API_KEY) > 8 else "  -> Key appears empty or too short")
             return None
-        return resp.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"  Claude error: {e}")
-        return None
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries:
+                backoff = min(base_delay * (2 ** attempt), max_delay)
+                wait = backoff + random.uniform(0, backoff * 0.25)
+                print(f"  Claude network error (attempt {attempt + 1}/{max_retries + 1}) - retrying in {wait:.1f}s: {e}")
+                time.sleep(wait)
+                continue
+            print(f"  Claude error after {max_retries + 1} attempts: {e}")
+            return None
+        except Exception as e:
+            print(f"  Claude error: {e}")
+            return None
+    return None
+
+
+def _bridge_request(method, path, label, timeout=10, max_retries=2, **kwargs):
+    base_delay = 0.5
+    for attempt in range(max_retries + 1):
+        try:
+            resp = getattr(requests, method)(
+                f"{ORGCLOUD_URL}{path}",
+                timeout=timeout,
+                **kwargs,
+            )
+            if resp.status_code >= 500 and attempt < max_retries:
+                wait = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                print(f"  [{label}] HTTP {resp.status_code} (attempt {attempt + 1}/{max_retries + 1}) - retrying in {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            return resp
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            if attempt < max_retries:
+                wait = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                print(f"  [{label}] Network error (attempt {attempt + 1}/{max_retries + 1}) - retrying in {wait:.1f}s: {e}")
+                time.sleep(wait)
+                continue
+            print(f"  [{label}] Failed after {max_retries + 1} attempts: {e}")
+            return None
+        except Exception as e:
+            print(f"  [{label}] Error: {e}")
+            return None
+    return None
 
 
 def poll_commands():
-    try:
-        resp = requests.get(
-            f"{ORGCLOUD_URL}/api/epic/agent/commands",
-            headers={
-                "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                "X-Agent-Type": "epic-desktop",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("commands", [])
-        else:
-            print(f"  [poll] HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        print(f"  [poll] Error: {e}")
+    resp = _bridge_request(
+        "get", "/api/epic/agent/commands", "poll", timeout=10,
+        headers={
+            "Authorization": f"Bearer {BRIDGE_TOKEN}",
+            "X-Agent-Type": "epic-desktop",
+        },
+    )
+    if resp and resp.status_code == 200:
+        data = resp.json()
+        return data.get("commands", [])
+    elif resp:
+        print(f"  [poll] HTTP {resp.status_code}: {resp.text[:200]}")
     return []
 
 
 def send_heartbeat(windows_found):
-    try:
-        resp = requests.post(
-            f"{ORGCLOUD_URL}/api/epic/agent/heartbeat",
-            headers={
-                "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json={"windows": windows_found, "timestamp": time.time()},
-            timeout=5,
-        )
-        if resp.status_code != 200:
-            print(f"  [heartbeat] HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        print(f"  [heartbeat] Error: {e}")
+    resp = _bridge_request(
+        "post", "/api/epic/agent/heartbeat", "heartbeat", timeout=5,
+        headers={
+            "Authorization": f"Bearer {BRIDGE_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"windows": windows_found, "timestamp": time.time()},
+    )
+    if resp and resp.status_code != 200:
+        print(f"  [heartbeat] HTTP {resp.status_code}: {resp.text[:200]}")
 
 
 def post_result(command_id, status, screenshot_b64=None, data=None, error=None):
@@ -357,18 +445,16 @@ def post_result(command_id, status, screenshot_b64=None, data=None, error=None):
         body["data"] = data
     if error:
         body["error"] = error
-    try:
-        requests.post(
-            f"{ORGCLOUD_URL}/api/epic/agent/results",
-            headers={
-                "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-            timeout=30,
-        )
-    except Exception as e:
-        print(f"  Failed to post result: {e}")
+    resp = _bridge_request(
+        "post", "/api/epic/agent/results", "result", timeout=30, max_retries=3,
+        headers={
+            "Authorization": f"Bearer {BRIDGE_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json=body,
+    )
+    if not resp:
+        print(f"  Failed to post result for {command_id}")
 
 
 def execute_navigate(cmd):
@@ -555,18 +641,14 @@ Return ONLY the JSON array."""
         except Exception:
             pass
 
-    try:
-        requests.post(
-            f"{ORGCLOUD_URL}/api/epic/activities",
-            headers={
-                "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json={"environment": env, "activities": activities},
-            timeout=30,
-        )
-    except Exception:
-        pass
+    _bridge_request(
+        "post", "/api/epic/activities", "activities-upload", timeout=30,
+        headers={
+            "Authorization": f"Bearer {BRIDGE_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"environment": env, "activities": activities},
+    )
 
     post_result(command_id, "complete", screenshot_b64=b64, data={
         "activitiesFound": len(activities),
@@ -651,18 +733,14 @@ def find_uia_element_by_name(parent, name):
 
 def fetch_cached_tree(env, client="hyperspace"):
     """Fetch the saved Epic tree from the server (cached coordinates)."""
-    try:
-        resp = requests.get(
-            f"{ORGCLOUD_URL}/api/epic/tree/{env.upper()}",
-            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            trees = data.get("trees", {})
-            return trees.get(client)
-    except Exception as e:
-        print(f"  [tree-cache] Error fetching tree: {e}")
+    resp = _bridge_request(
+        "get", f"/api/epic/tree/{env.upper()}", "tree-cache", timeout=10,
+        headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+    )
+    if resp and resp.status_code == 200:
+        data = resp.json()
+        trees = data.get("trees", {})
+        return trees.get(client)
     return None
 
 
@@ -835,13 +913,8 @@ def execute_navigate_path(cmd):
     steps = [s.strip() for s in path.split(">") if s.strip()]
     print(f"  [path-nav] {env}/{client}: {' > '.join(steps)} ({len(steps)} steps)")
 
-    try:
-        window.activate()
-        time.sleep(0.3)
-        window.activate()
-        time.sleep(0.5)
-    except Exception:
-        pass
+    activate_window(window)
+    time.sleep(0.5)
 
     if client == "text":
         for i, step in enumerate(steps):
@@ -1064,7 +1137,7 @@ def execute_masterfile(cmd):
         return
 
     try:
-        window.activate()
+        activate_window(window)
         time.sleep(0.5)
 
         pyautogui.typewrite(masterfile, interval=0.05)
@@ -1173,26 +1246,22 @@ def recording_capture_tick():
     print(f"  [record] Step: {description} [{screen_name}]")
 
     if len(recording_state["pending_steps"]) >= 1:
-        try:
-            resp = requests.post(
-                f"{ORGCLOUD_URL}/api/epic/record/steps",
-                headers={
-                    "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                    "Content-Type": "application/json",
-                },
-                json={"steps": recording_state["pending_steps"]},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                recording_state["pending_steps"] = []
-            elif resp.status_code == 409:
-                print("  [record] Server says recording stopped, halting capture")
-                recording_state["active"] = False
-                recording_state["pending_steps"] = []
-            else:
-                print(f"  [record] Upload failed ({resp.status_code}), will retry")
-        except Exception as e:
-            print(f"  [record] Upload error: {e}")
+        resp = _bridge_request(
+            "post", "/api/epic/record/steps", "record-upload", timeout=10,
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"steps": recording_state["pending_steps"]},
+        )
+        if resp and resp.status_code == 200:
+            recording_state["pending_steps"] = []
+        elif resp and resp.status_code == 409:
+            print("  [record] Server says recording stopped, halting capture")
+            recording_state["active"] = False
+            recording_state["pending_steps"] = []
+        elif resp:
+            print(f"  [record] Upload failed ({resp.status_code}), will retry")
 
 
 def execute_record_start(cmd):
@@ -1212,19 +1281,15 @@ def execute_record_stop(cmd):
     """Stop recording mode."""
     recording_state["active"] = False
     if recording_state["pending_steps"]:
-        try:
-            requests.post(
-                f"{ORGCLOUD_URL}/api/epic/record/steps",
-                headers={
-                    "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                    "Content-Type": "application/json",
-                },
-                json={"steps": recording_state["pending_steps"]},
-                timeout=10,
-            )
-            recording_state["pending_steps"] = []
-        except Exception as e:
-            print(f"  [record] Final upload error: {e}")
+        _bridge_request(
+            "post", "/api/epic/record/steps", "record-flush", timeout=10,
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"steps": recording_state["pending_steps"]},
+        )
+        recording_state["pending_steps"] = []
     print(f"  [record] Recording stopped")
     post_result(cmd.get("id", "unknown"), "complete", data={"recording": False})
 
@@ -1441,16 +1506,8 @@ def execute_menu_crawl(cmd):
         post_result(command_id, "error", error=f"No {env} window found")
         return
 
-    try:
-        window.activate()
-        time.sleep(0.3)
-        window.activate()
-        time.sleep(0.5)
-        if hasattr(window, 'restore') and window.isMinimized:
-            window.restore()
-            time.sleep(0.3)
-    except Exception:
-        pass
+    activate_window(window)
+    time.sleep(0.5)
 
     print(f"  [menu-crawl] Window: '{window.title}' at ({window.left},{window.top}) size {window.width}x{window.height}")
 
@@ -2038,22 +2095,20 @@ def execute_menu_crawl(cmd):
             "dpiScale": DPI_SCALE,
         }
 
-        try:
-            resp = requests.post(
-                f"{ORGCLOUD_URL}/api/epic/tree",
-                headers={
-                    "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                    "Content-Type": "application/json",
-                },
-                json=tree,
-                timeout=30,
-            )
-            if resp.status_code == 200:
-                print(f"  [menu-crawl] Tree uploaded and locked: {crawled_count} items")
-            else:
-                print(f"  [menu-crawl] Upload failed: HTTP {resp.status_code}")
-        except Exception as e:
-            print(f"  [menu-crawl] Upload error: {e}")
+        resp = _bridge_request(
+            "post", "/api/epic/tree", "tree-upload", timeout=30, max_retries=3,
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=tree,
+        )
+        if resp and resp.status_code == 200:
+            print(f"  [menu-crawl] Tree uploaded and locked: {crawled_count} items")
+        elif resp:
+            print(f"  [menu-crawl] Upload failed: HTTP {resp.status_code}")
+        else:
+            print(f"  [menu-crawl] Upload failed: no response")
 
         final_img = screenshot_window(window)
         final_b64 = img_to_base64(final_img) if final_img else None
@@ -2088,11 +2143,8 @@ def execute_launch(cmd):
 
     print(f"  [launch] Opening '{activity_name}' via search bar in {env}")
 
-    try:
-        window.activate()
-        time.sleep(0.5)
-    except Exception:
-        pass
+    activate_window(window)
+    time.sleep(0.5)
 
     img = screenshot_window(window)
     b64 = img_to_base64(img)
@@ -2175,11 +2227,8 @@ def execute_patient(cmd):
 
     print(f"  [patient] Searching for '{patient_name}' in {env}")
 
-    try:
-        window.activate()
-        time.sleep(0.5)
-    except Exception:
-        pass
+    activate_window(window)
+    time.sleep(0.5)
 
     img = screenshot_window(window)
     b64 = img_to_base64(img)
@@ -2351,11 +2400,8 @@ def execute_shortcuts(cmd):
 
     print(f"  [shortcuts] Discovering keyboard shortcuts in {env}")
 
-    try:
-        window.activate()
-        time.sleep(0.5)
-    except Exception:
-        pass
+    activate_window(window)
+    time.sleep(0.5)
 
     img = screenshot_window(window)
     b64 = img_to_base64(img)
@@ -2387,22 +2433,18 @@ def execute_shortcuts(cmd):
         except Exception:
             pass
 
-    try:
-        requests.post(
-            f"{ORGCLOUD_URL}/api/epic/activities",
-            headers={
-                "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json={"environment": env, "activities": [
-                {"name": s.get("keys", ""), "category": "Keyboard Shortcuts", "type": "shortcut",
-                 "description": s.get("action", "")}
-                for s in shortcuts
-            ]},
-            timeout=30,
-        )
-    except Exception:
-        pass
+    _bridge_request(
+        "post", "/api/epic/activities", "shortcuts-upload", timeout=30,
+        headers={
+            "Authorization": f"Bearer {BRIDGE_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"environment": env, "activities": [
+            {"name": s.get("keys", ""), "category": "Keyboard Shortcuts", "type": "shortcut",
+             "description": s.get("action", "")}
+            for s in shortcuts
+        ]},
+    )
 
     post_result(command_id, "complete", screenshot_b64=b64, data={
         "shortcuts": shortcuts,
@@ -2450,6 +2492,8 @@ def execute_command(cmd):
             execute_shortcuts(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
+    except pyautogui.FailSafeException:
+        raise
     except Exception as e:
         print(f"  [error] {e}")
         traceback.print_exc()
@@ -2514,6 +2558,9 @@ def main():
         except KeyboardInterrupt:
             print("\nAgent stopped.")
             break
+        except pyautogui.FailSafeException:
+            print("\n[FAILSAFE] Mouse moved to corner — agent paused for 10s. Move mouse away from corner to resume.")
+            time.sleep(10)
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(5)
