@@ -3817,6 +3817,7 @@ ${fullHtml}`;
         }
 
         await storage.setAgentConfig("galaxy_last_results", JSON.stringify(results), "galaxy");
+        await storage.setAgentConfig("galaxy_last_query", query, "galaxy");
 
         if (results.length === 0) {
           return ok(`Galaxy search: "${query}" -- No results found.${nl}The page may have a different structure or require specific auth.`);
@@ -3841,6 +3842,7 @@ ${fullHtml}`;
       if (!target) return fail("[galaxy] Usage: galaxy read <url or result #>");
 
       let url = target;
+      let fromSearch = false;
       const num = parseInt(target, 10);
       if (!isNaN(num) && num >= 1) {
         const cfg = await storage.getAgentConfig("galaxy_last_results");
@@ -3850,6 +3852,7 @@ ${fullHtml}`;
           if (num > results.length) return fail(`[galaxy] Result #${num} not found. Only ${results.length} results.`);
           url = results[num - 1].url;
           if (!url) return fail(`[galaxy] Result #${num} has no URL.`);
+          fromSearch = true;
         } catch {
           return fail("[galaxy] Failed to parse stored results.");
         }
@@ -3868,10 +3871,19 @@ ${fullHtml}`;
       try {
         emitEvent("bridge", `Galaxy read: navigating naturally to ${url}`, "info");
 
-        await galaxyFetch("https://galaxy.epic.com", "galaxy-browse-home", {
-          maxText: 1000,
-          spaWaitMs: 1500,
-        });
+        if (fromSearch) {
+          const lastQuery = (await storage.getAgentConfig("galaxy_last_query"))?.value || "guide";
+          const refererUrl = `https://galaxy.epic.com/Search/GetResults?query=${encodeURIComponent(lastQuery)}&page=1&pageSize=10`;
+          await galaxyFetch(refererUrl, "galaxy-browse-search", {
+            maxText: 1000,
+            spaWaitMs: 1500,
+          });
+        } else {
+          await galaxyFetch("https://galaxy.epic.com", "galaxy-browse-home", {
+            maxText: 1000,
+            spaWaitMs: 1500,
+          });
+        }
         const browseDelay = 2000 + Math.floor(Math.random() * 3000);
         await new Promise(resolve => setTimeout(resolve, browseDelay));
 
