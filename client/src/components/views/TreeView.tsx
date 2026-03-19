@@ -354,11 +354,23 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
     }
 
     const galaxyPages = (data.reader || []).filter((r: any) => r.domain === "galaxy.epic.com");
+    const galaxyCats: Record<number, string> = (data as any).galaxyCategories || {};
     if (galaxyPages.length > 0) {
       nodes.push({ type: "section", label: "GALAXY (Epic KB)", key: "galaxy", count: galaxyPages.length });
       if (expanded.has("galaxy")) {
+        const catMap = new Map<string, any[]>();
         for (const g of galaxyPages) {
-          nodes.push({ type: "galaxyGuide", id: g.id, title: g.title, url: g.url });
+          const cat = galaxyCats[g.id] || "General";
+          if (!catMap.has(cat)) catMap.set(cat, []);
+          catMap.get(cat)!.push(g);
+        }
+        for (const [cat, items] of Array.from(catMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+          nodes.push({ type: "section", label: `  ${cat}`, key: `galaxy-${cat}`, count: items.length });
+          if (expanded.has(`galaxy-${cat}`)) {
+            for (const g of items) {
+              nodes.push({ type: "galaxyGuide", id: g.id, title: g.title, url: g.url });
+            }
+          }
         }
       }
     }

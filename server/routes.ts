@@ -762,6 +762,15 @@ export async function registerRoutes(
       }
     }
 
+    const galaxyCategories: Record<number, string> = {};
+    const galaxyPageIds = allPages.filter(p => p.domain === "galaxy.epic.com").map(p => p.id);
+    for (const id of galaxyPageIds) {
+      try {
+        const cfg = await storage.getAgentConfig(`galaxy_category_${id}`);
+        if (cfg?.value) galaxyCategories[id] = cfg.value;
+      } catch {}
+    }
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -773,6 +782,7 @@ export async function registerRoutes(
       epicActivities,
       epicTrees,
       pulseLinks,
+      galaxyCategories,
     });
   });
 

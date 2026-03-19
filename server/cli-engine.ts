@@ -3632,47 +3632,72 @@ ${fullHtml}`;
 
   const galaxyState = {
     lastFetchTime: 0,
-    sessionFetchCount: 0,
-    sessionStartTime: 0,
+    readCount: 0,
+    readSessionStart: 0,
+    inFlight: false,
   };
 
-  function galaxyDelay(): number {
+  function galaxyRandomDelay(): number {
     return 3000 + Math.floor(Math.random() * 5000);
   }
 
-  async function galaxyRateCheck(): Promise<string | null> {
-    const now = Date.now();
-    const SESSION_WINDOW = 10 * 60 * 1000;
-    const MAX_PER_SESSION = 5;
+  function galaxyCooldownDelay(): number {
+    return 30000 + Math.floor(Math.random() * 30000);
+  }
 
-    if (now - galaxyState.sessionStartTime > SESSION_WINDOW) {
-      galaxyState.sessionFetchCount = 0;
-      galaxyState.sessionStartTime = now;
+  async function galaxyWaitAndRecord(isRead: boolean): Promise<string | null> {
+    if (galaxyState.inFlight) {
+      return "A Galaxy request is already in progress. Please wait for it to complete.";
     }
 
-    if (galaxyState.sessionFetchCount >= MAX_PER_SESSION) {
-      const elapsed = now - galaxyState.sessionStartTime;
-      const remaining = Math.ceil((SESSION_WINDOW - elapsed) / 1000);
-      if (remaining > 0) {
-        return `Session limit reached (${MAX_PER_SESSION} fetches). Please wait ${remaining}s or try again later.`;
+    const now = Date.now();
+
+    if (isRead) {
+      const SESSION_WINDOW = 10 * 60 * 1000;
+      if (now - galaxyState.readSessionStart > SESSION_WINDOW) {
+        galaxyState.readCount = 0;
+        galaxyState.readSessionStart = now;
       }
-      galaxyState.sessionFetchCount = 0;
-      galaxyState.sessionStartTime = now;
+      if (galaxyState.readCount >= 5) {
+        const cooldown = galaxyCooldownDelay();
+        const sinceLast = now - galaxyState.lastFetchTime;
+        if (sinceLast < cooldown) {
+          const waitSec = Math.ceil((cooldown - sinceLast) / 1000);
+          return `Cooldown active (${galaxyState.readCount} guides fetched). Waiting ${waitSec}s before next fetch.`;
+        }
+        galaxyState.readCount = 0;
+        galaxyState.readSessionStart = now;
+      }
     }
 
     const sinceLast = now - galaxyState.lastFetchTime;
-    const minDelay = galaxyDelay();
+    const minDelay = galaxyRandomDelay();
     if (sinceLast < minDelay && galaxyState.lastFetchTime > 0) {
-      const waitSec = Math.ceil((minDelay - sinceLast) / 1000);
-      return `Rate limit: please wait ${waitSec}s between Galaxy requests.`;
+      const waitMs = minDelay - sinceLast;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
     }
 
+    galaxyState.inFlight = true;
+    galaxyState.lastFetchTime = Date.now();
+    if (isRead) galaxyState.readCount++;
     return null;
   }
 
-  function galaxyRecordFetch(): void {
-    galaxyState.lastFetchTime = Date.now();
-    galaxyState.sessionFetchCount++;
+  function galaxyDone(): void {
+    galaxyState.inFlight = false;
+  }
+
+  async function galaxyFetch(
+    url: string,
+    submittedBy: string,
+    options?: any
+  ): Promise<any> {
+    const { submitJob, waitForResult, isExtensionConnected } = await import("./bridge-queue");
+    if (!isExtensionConnected()) {
+      throw new Error("Chrome extension bridge not connected.");
+    }
+    const jobId = submitJob("dom", url, submittedBy, options, 0);
+    return waitForResult(jobId, 45000);
   }
 
   registerCommand("galaxy", "Galaxy knowledge base search & retrieval", "galaxy [search <query>|read <url or #>|recent]", async (args) => {
@@ -3695,89 +3720,82 @@ ${fullHtml}`;
       const query = args.slice(1).join(" ");
       if (!query) return fail("[galaxy] Usage: galaxy search <query>");
 
-      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
-      if (!isExtensionConnected()) {
-        return fail("[galaxy] Chrome extension bridge not connected. Connect extension first.");
-      }
-
-      const rateMsg = await galaxyRateCheck();
+      const rateMsg = await galaxyWaitAndRecord(false);
       if (rateMsg) return fail(`[galaxy] ${rateMsg}`);
 
-      const searchUrl = `https://galaxy.epic.com/Search/GetResults?query=${encodeURIComponent(query)}&page=1&pageSize=10`;
+      try {
+        const searchUrl = `https://galaxy.epic.com/Search/GetResults?query=${encodeURIComponent(query)}&page=1&pageSize=10`;
 
-      emitEvent("bridge", `Galaxy search: "${query}"`, "info");
-      galaxyRecordFetch();
+        emitEvent("bridge", `Galaxy search: "${query}"`, "info");
 
-      const result = await smartFetch(searchUrl, "dom", "galaxy-search", {
-        maxText: 30000,
-        includeHtml: true,
-        maxHtml: 50000,
-        spaWaitMs: 3000,
-      });
+        const result = await galaxyFetch(searchUrl, "galaxy-search", {
+          maxText: 30000,
+          includeHtml: true,
+          maxHtml: 50000,
+          spaWaitMs: 3000,
+        });
 
-      if (result.error) {
-        return fail(`[galaxy] Search failed: ${result.error}`);
-      }
+        if (result.error) {
+          return fail(`[galaxy] Search failed: ${result.error}${nl}No automatic retry. Try again manually if needed.`);
+        }
 
-      const html = result.body || result.text || "";
-      const textContent = result.text || "";
-      const results: { title: string; url: string; snippet: string }[] = [];
+        const html = (typeof result.body === "string" ? result.body : "") || "";
+        const textContent = result.text || "";
+        const results: { title: string; url: string; snippet: string }[] = [];
 
-      const titlePattern = /<a[^>]*href=["']([^"']*?)["'][^>]*class=["'][^"']*search-result-title[^"']*["'][^>]*>([^<]*)<\/a>/gi;
-      let match;
-      while ((match = titlePattern.exec(html)) !== null && results.length < 10) {
-        let href = match[1];
-        const title = match[2].trim();
-        if (!href.startsWith("http")) href = `https://galaxy.epic.com${href}`;
-        results.push({ title, url: href, snippet: "" });
-      }
-
-      if (results.length === 0) {
-        const linkPattern = /<a[^>]*href=["'](\/[^"']*?)["'][^>]*>([^<]{5,80})<\/a>/gi;
-        while ((match = linkPattern.exec(html)) !== null && results.length < 10) {
-          const href = `https://galaxy.epic.com${match[1]}`;
+        const resultBlockPattern = /<a[^>]*href=["']([^"']*?)["'][^>]*>([^<]{3,})<\/a>[^<]*(?:<[^>]+>[^<]*){0,5}/gi;
+        let match;
+        while ((match = resultBlockPattern.exec(html)) !== null && results.length < 10) {
+          let href = match[1];
           const title = match[2].trim();
-          if (title.length > 4 && !href.includes("/Search/") && !href.includes("/Account/")) {
-            results.push({ title, url: href, snippet: "" });
+          if (title.length < 4) continue;
+          if (href.includes("/Search/") || href.includes("/Account/") || href.includes("javascript:")) continue;
+          if (!href.startsWith("http")) href = `https://galaxy.epic.com${href}`;
+
+          let snippet = "";
+          const afterMatch = html.substring(match.index + match[0].length, match.index + match[0].length + 300);
+          const snippetClean = afterMatch
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (snippetClean.length > 10) {
+            snippet = snippetClean.substring(0, 120);
+          }
+
+          const isDupe = results.some(r => r.url === href || r.title === title);
+          if (!isDupe) results.push({ title, url: href, snippet });
+        }
+
+        if (results.length === 0 && textContent.length > 20) {
+          const lines = textContent.split(/\n/).map((l: string) => l.trim()).filter((l: string) => l.length > 10);
+          for (let i = 0; i < Math.min(lines.length, 10); i++) {
+            results.push({ title: lines[i].substring(0, 100), url: "", snippet: "" });
           }
         }
-      }
 
-      if (results.length === 0 && textContent.length > 20) {
-        const lines = textContent.split(/\n/).map((l: string) => l.trim()).filter((l: string) => l.length > 10);
-        for (let i = 0; i < Math.min(lines.length, 10); i++) {
-          results.push({ title: lines[i].substring(0, 100), url: "", snippet: "" });
+        await storage.setAgentConfig("galaxy_last_results", JSON.stringify(results), "galaxy");
+
+        if (results.length === 0) {
+          return ok(`Galaxy search: "${query}" -- No results found.${nl}The page may have a different structure or require specific auth.`);
         }
-      }
 
-      await storage.setAgentConfig("galaxy_last_results", JSON.stringify(results), "galaxy");
-
-      if (results.length === 0) {
-        return ok(`Galaxy search: "${query}" -- No results found.${nl}The page may have a different structure or require specific auth.`);
+        const outLines = [`=== GALAXY SEARCH: "${query}" === (${results.length} results)`, ""];
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          outLines.push(`  ${String(i + 1).padStart(3)}. ${r.title}`);
+          if (r.url) outLines.push(`       ${r.url.slice(0, 70)}`);
+          if (r.snippet) outLines.push(`       ${r.snippet}`);
+        }
+        outLines.push("", "Use: galaxy read <#> to fetch & save a guide");
+        return ok(outLines.join(nl));
+      } finally {
+        galaxyDone();
       }
-
-      const outLines = [`=== GALAXY SEARCH: "${query}" === (${results.length} results)`, ""];
-      for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        outLines.push(`  ${String(i + 1).padStart(3)}. ${r.title}`);
-        if (r.url) outLines.push(`       ${r.url.slice(0, 70)}`);
-        if (r.snippet) outLines.push(`       ${r.snippet.slice(0, 80)}`);
-      }
-      outLines.push("", "Use: galaxy read <#> to fetch & save a guide");
-      return ok(outLines.join(nl));
     }
 
     if (args[0] === "read") {
       const target = args.slice(1).join(" ");
       if (!target) return fail("[galaxy] Usage: galaxy read <url or result #>");
-
-      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
-      if (!isExtensionConnected()) {
-        return fail("[galaxy] Chrome extension bridge not connected. Connect extension first.");
-      }
-
-      const rateMsg = await galaxyRateCheck();
-      if (rateMsg) return fail(`[galaxy] ${rateMsg}`);
 
       let url = target;
       const num = parseInt(target, 10);
@@ -3798,59 +3816,89 @@ ${fullHtml}`;
         url = `https://galaxy.epic.com${url.startsWith("/") ? "" : "/"}${url}`;
       }
 
-      emitEvent("bridge", `Galaxy read: ${url}`, "info");
-      galaxyRecordFetch();
+      const rateMsg = await galaxyWaitAndRecord(true);
+      if (rateMsg) return fail(`[galaxy] ${rateMsg}`);
 
-      const result = await smartFetch(url, "dom", "galaxy-read", {
-        maxText: 50000,
-        includeHtml: true,
-        maxHtml: 100000,
-        spaWaitMs: 3000,
-      });
+      try {
+        emitEvent("bridge", `Galaxy read: ${url}`, "info");
 
-      if (result.error) {
-        return fail(`[galaxy] Fetch failed: ${result.error}${nl}No automatic retry. Try again manually if needed.`);
+        const result = await galaxyFetch(url, "galaxy-read", {
+          maxText: 50000,
+          includeHtml: true,
+          maxHtml: 100000,
+          spaWaitMs: 3000,
+        });
+
+        if (result.error) {
+          return fail(`[galaxy] Fetch failed: ${result.error}${nl}No automatic retry. Try again manually if needed.`);
+        }
+
+        const html = (typeof result.body === "string" ? result.body : "") || "";
+        const text = result.text || "";
+
+        let title = "";
+        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+        if (titleMatch) title = titleMatch[1].trim();
+        const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+        if (h1Match) title = h1Match[1].trim();
+
+        if (!title) {
+          title = text.split(/\n/)[0]?.trim().substring(0, 100) || "Galaxy Article";
+        }
+
+        let category = "";
+        const breadcrumbMatch = html.match(/<[^>]*class=["'][^"']*breadcrumb[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+        if (breadcrumbMatch) {
+          const crumbLinks = breadcrumbMatch[1].match(/>([^<]{2,})</g);
+          if (crumbLinks && crumbLinks.length > 1) {
+            category = crumbLinks[crumbLinks.length - 2].replace(/^>/, "").trim();
+          }
+        }
+        if (!category) {
+          const pathParts = new URL(url).pathname.split("/").filter(Boolean);
+          if (pathParts.length > 1) {
+            category = decodeURIComponent(pathParts[0]).replace(/[-_]/g, " ");
+            category = category.charAt(0).toUpperCase() + category.slice(1);
+          }
+        }
+        if (!category) category = "General";
+
+        const extractedText = text.length > 100 ? text : html
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+          .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+          .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+          .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        const saved = await storage.createReaderPage({
+          url,
+          title,
+          extractedText: extractedText.substring(0, 50000),
+          domain: "galaxy.epic.com",
+        });
+
+        await storage.setAgentConfig(
+          `galaxy_category_${saved.id}`,
+          category,
+          "galaxy"
+        );
+
+        return ok([
+          `Galaxy guide saved to Reader:`,
+          `  Title:    ${title}`,
+          `  Category: ${category}`,
+          `  URL:      ${url}`,
+          `  ID:       ${saved.id}`,
+          `  Size:     ${extractedText.length} chars`,
+          "",
+          "View in Reader (C-c r) or TreeView GALAXY section.",
+        ].join(nl));
+      } finally {
+        galaxyDone();
       }
-
-      const html = result.body || "";
-      const text = result.text || "";
-
-      let title = "";
-      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-      if (titleMatch) title = titleMatch[1].trim();
-      const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
-      if (h1Match) title = h1Match[1].trim();
-
-      if (!title) {
-        title = text.split(/\n/)[0]?.trim().substring(0, 100) || "Galaxy Article";
-      }
-
-      const extractedText = text.length > 100 ? text : html
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-        .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-        .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
-        .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      const saved = await storage.createReaderPage({
-        url,
-        title,
-        extractedText: extractedText.substring(0, 50000),
-        domain: "galaxy.epic.com",
-      });
-
-      return ok([
-        `Galaxy guide saved to Reader:`,
-        `  Title: ${title}`,
-        `  URL:   ${url}`,
-        `  ID:    ${saved.id}`,
-        `  Size:  ${extractedText.length} chars`,
-        "",
-        "View in Reader (C-c r) or TreeView GALAXY section.",
-      ].join(nl));
     }
 
     if (args[0] === "recent") {
