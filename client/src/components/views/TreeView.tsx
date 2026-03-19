@@ -77,6 +77,12 @@ type TreeNode = {
   name: string;
   env: string;
   category: string;
+  actType?: string;
+} | {
+  type: "pulseLink";
+  name: string;
+  url: string;
+  category: string;
 };
 
 export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
@@ -213,6 +219,27 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                   nodes.push({ type: "epicActivity", name: item.name, actType: item.type || "activity", env, category: cat });
                 }
               }
+            }
+          }
+        }
+      }
+    }
+
+    const pulseLinks: any[] = (data as any).pulseLinks || [];
+    if (pulseLinks.length > 0) {
+      nodes.push({ type: "section", label: "PULSE (Intranet)", key: "pulse", count: pulseLinks.length });
+      if (expanded.has("pulse")) {
+        const pulseCats = new Map<string, any[]>();
+        for (const l of pulseLinks) {
+          const cat = l.category || "General";
+          if (!pulseCats.has(cat)) pulseCats.set(cat, []);
+          pulseCats.get(cat)!.push(l);
+        }
+        for (const [cat, items] of Array.from(pulseCats.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+          nodes.push({ type: "section", label: `  ${cat}`, key: `pulse-${cat}`, count: items.length });
+          if (expanded.has(`pulse-${cat}`)) {
+            for (const item of items) {
+              nodes.push({ type: "pulseLink", name: item.name, url: item.url, category: cat });
             }
           }
         }
@@ -405,6 +432,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "epicActivity" && onRunCommand) {
           onRunCommand(`epic navigate ${node.env} ${node.name}`);
         }
+        else if (node?.type === "pulseLink") {
+          window.open(node.url, "_blank");
+        }
         break;
     }
   }, [nodes, selectedIdx, toggleTask, onNavigate, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched, launchCitrixApp]);
@@ -487,6 +517,10 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           icon = "·";
           label = node.name;
           extra = node.actType || "";
+        } else if (node.type === "pulseLink") {
+          icon = "→";
+          label = node.name;
+          extra = "↗";
         } else if (node.type === "bridge-info") {
           icon = "ℹ";
           label = node.label;
@@ -527,6 +561,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 }
               } else if (node.type === "epicActivity" && onRunCommand) {
                 onRunCommand(`epic navigate ${node.env} ${node.name}`);
+              } else if (node.type === "pulseLink") {
+                window.open(node.url, "_blank");
               } else if (node.type === "snow-item") {
                 if (node.url) {
                   window.open(node.url, "_blank");

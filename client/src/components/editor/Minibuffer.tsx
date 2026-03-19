@@ -217,6 +217,12 @@ export default function Minibuffer({
       { id: "epic-click", label: "epic-click", hint: "Click element in Hyperspace", action: () => { setMode("shell"); setQuery("epic click "); setShellOutput(""); } },
       { id: "epic-activities", label: "epic-activities", hint: "Show cataloged activities", action: () => { setMode("shell"); setQuery("epic activities "); setShellOutput(""); } },
       { id: "epic-setup", label: "epic-setup", hint: "Desktop agent setup guide", action: () => { setMode("shell"); setQuery("epic setup"); setShellOutput(""); executeShellCommand("epic setup"); } },
+      { id: "pulse-scan", label: "pulse-scan", hint: "Scrape Pulse intranet links", action: () => { setMode("shell"); setQuery("pulse scan"); setShellOutput(""); executeShellCommand("pulse scan"); } },
+      { id: "pulse-search", label: "pulse-search", hint: "Search intranet links", action: () => { setMode("shell"); setQuery("pulse search "); setShellOutput(""); } },
+      { id: "pulse-list", label: "pulse-list", hint: "List intranet links", action: () => { setMode("shell"); setQuery("pulse list"); setShellOutput(""); executeShellCommand("pulse list"); } },
+      { id: "pulse-categories", label: "pulse-categories", hint: "Show link categories", action: () => { setMode("shell"); setQuery("pulse categories"); setShellOutput(""); executeShellCommand("pulse categories"); } },
+      { id: "pulse-open", label: "pulse-open", hint: "Open intranet link", action: () => { setMode("shell"); setQuery("pulse open "); setShellOutput(""); } },
+      { id: "pulse-clear", label: "pulse-clear", hint: "Clear stored links", action: () => { setMode("shell"); setQuery("pulse clear"); setShellOutput(""); executeShellCommand("pulse clear"); } },
       { id: "transcripts", label: "transcripts", hint: "View transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "meetings", label: "meetings", hint: "View meeting transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "record-start", label: "record-start", hint: "Start mic recording", action: () => {

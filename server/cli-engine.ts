@@ -169,7 +169,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -3085,6 +3085,316 @@ ${fullHtml}`;
       "  epic clear <env>       - Clear activities",
       "  epic scan              - Run one-time activity scan",
       "  epic setup             - Desktop agent setup guide",
+    ].join(nl));
+  });
+
+  registerCommand("pulse", "Pulse intranet link directory", "pulse [scan|search <query>|list [category]|open <name or #>|categories]", async (args) => {
+    const nl = String.fromCharCode(10);
+
+    interface PulseLink {
+      name: string;
+      url: string;
+      category: string;
+      subcategory: string;
+      description: string;
+    }
+
+    async function getPulseLinks(): Promise<PulseLink[]> {
+      const cfg = await storage.getAgentConfig("pulse_links");
+      if (!cfg?.value) return [];
+      try { return JSON.parse(cfg.value); } catch { return []; }
+    }
+
+    async function savePulseLinks(links: PulseLink[]): Promise<void> {
+      await storage.setAgentConfig("pulse_links", JSON.stringify(links), "pulse");
+    }
+
+    function fuzzyMatch(text: string, query: string): boolean {
+      const lower = text.toLowerCase();
+      const q = query.toLowerCase();
+      const words = q.split(/\s+/);
+      return words.every(w => lower.includes(w));
+    }
+
+    if (!args[0] || args[0] === "help") {
+      return ok([
+        "Pulse Intranet Directory",
+        "========================",
+        "  pulse scan              - Scrape Pulse homepage + nav links",
+        "  pulse search <query>    - Fuzzy search links by name/category/URL",
+        "  pulse list [category]   - List all links or filter by category",
+        "  pulse open <name or #>  - Open a link (by name or search result #)",
+        "  pulse categories        - List all categories",
+        "  pulse clear             - Clear stored links",
+      ].join(nl));
+    }
+
+    if (args[0] === "scan") {
+      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+      if (!isExtensionConnected()) {
+        return fail("[pulse] Chrome extension bridge not connected. Connect extension first.");
+      }
+
+      const seenUrls = new Set<string>();
+      const allLinks: PulseLink[] = [];
+      const pagesToScan: { url: string; depth: number }[] = [{ url: "https://pulse.ucsd.edu", depth: 0 }];
+      const scannedPages = new Set<string>();
+      const maxDepth = 1;
+      const maxPages = 20;
+      let pagesScanned = 0;
+
+      while (pagesToScan.length > 0 && pagesScanned < maxPages) {
+        const page = pagesToScan.shift()!;
+        if (scannedPages.has(page.url)) continue;
+        scannedPages.add(page.url);
+        pagesScanned++;
+
+        try {
+          const result = await smartFetch(page.url, "dom", "cli-pulse-scan", {
+            maxText: 50000,
+            includeHtml: true,
+            maxHtml: 100000,
+          }, 30000);
+
+          const html = result.html || result.body || "";
+          const text = result.text || "";
+          const htmlStr = typeof html === "string" ? html : JSON.stringify(html);
+
+          let currentCategory = page.depth === 0 ? "General" : "General";
+          const urlObj = new URL(page.url);
+
+          const pathParts = urlObj.pathname.split("/").filter(Boolean);
+          if (pathParts.length > 0) {
+            currentCategory = decodeURIComponent(pathParts[0])
+              .replace(/[-_]/g, " ")
+              .replace(/\b\w/g, c => c.toUpperCase());
+          }
+
+          const headingPattern = /<h[1-4][^>]*>(.*?)<\/h[1-4]>/gi;
+          const headings: { text: string; pos: number }[] = [];
+          let hMatch;
+          while ((hMatch = headingPattern.exec(htmlStr)) !== null) {
+            const hText = hMatch[1].replace(/<[^>]+>/g, "").trim();
+            if (hText.length > 1 && hText.length < 100) {
+              headings.push({ text: hText, pos: hMatch.index });
+            }
+          }
+
+          const linkPattern = /<a\s[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi;
+          let lMatch;
+          while ((lMatch = linkPattern.exec(htmlStr)) !== null) {
+            let href = lMatch[1].trim();
+            const linkText = lMatch[2].replace(/<[^>]+>/g, "").trim();
+
+            if (!linkText || linkText.length < 2 || linkText.length > 200) continue;
+            if (/^(skip|back to top|close|cancel|sign out|log out|#)$/i.test(linkText)) continue;
+            if (href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:")) continue;
+
+            if (href.startsWith("/")) {
+              href = `${urlObj.protocol}//${urlObj.host}${href}`;
+            } else if (!href.startsWith("http")) {
+              continue;
+            }
+
+            if (seenUrls.has(href)) continue;
+            seenUrls.add(href);
+
+            let linkCategory = currentCategory;
+            if (page.depth === 0) {
+              for (let h = headings.length - 1; h >= 0; h--) {
+                if (headings[h].pos < lMatch.index) {
+                  linkCategory = headings[h].text;
+                  break;
+                }
+              }
+            }
+
+            const descMatch = htmlStr.substring(lMatch.index, lMatch.index + 500).match(/title=["']([^"']+)["']/i);
+            const description = descMatch ? descMatch[1].trim() : "";
+
+            let subcategory = "";
+            const listItemMatch = htmlStr.substring(Math.max(0, lMatch.index - 200), lMatch.index).match(/<li[^>]*class=["']([^"']+)["']/i);
+            if (listItemMatch) {
+              subcategory = listItemMatch[1].replace(/[-_]/g, " ").trim();
+            }
+
+            try {
+              const linkHost = new URL(href).hostname.toLowerCase();
+              const isInternal = linkHost.includes("ucsd.edu") || linkHost.includes("uchealth") || linkHost.includes("ucsd");
+              if (!isInternal && !linkHost.includes("sharepoint") && !linkHost.includes("microsoft")) continue;
+            } catch { continue; }
+
+            allLinks.push({
+              name: linkText,
+              url: href,
+              category: linkCategory.slice(0, 60),
+              subcategory: subcategory.slice(0, 60),
+              description: description.slice(0, 200),
+            });
+
+            if (page.depth < maxDepth) {
+              try {
+                const linkHost = new URL(href).hostname.toLowerCase();
+                if (linkHost === "pulse.ucsd.edu" && !scannedPages.has(href)) {
+                  pagesToScan.push({ url: href, depth: page.depth + 1 });
+                }
+              } catch {}
+            }
+          }
+
+          if (page.depth < maxDepth && pagesScanned < maxPages) {
+            const navLinkPattern = /<nav[^>]*>([\s\S]*?)<\/nav>/gi;
+            let navMatch;
+            while ((navMatch = navLinkPattern.exec(htmlStr)) !== null) {
+              const navHtml = navMatch[1];
+              const navLinks = navHtml.matchAll(/<a\s[^>]*href=["']([^"']+)["']/gi);
+              for (const nl2 of navLinks) {
+                let navHref = nl2[1].trim();
+                if (navHref.startsWith("/")) navHref = `${urlObj.protocol}//${urlObj.host}${navHref}`;
+                if (navHref.startsWith("http") && !scannedPages.has(navHref)) {
+                  try {
+                    const navHost = new URL(navHref).hostname.toLowerCase();
+                    if (navHost === "pulse.ucsd.edu") {
+                      pagesToScan.push({ url: navHref, depth: page.depth + 1 });
+                    }
+                  } catch {}
+                }
+              }
+            }
+          }
+
+          if (pagesScanned < maxPages && pagesToScan.length > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        } catch (e: any) {
+          continue;
+        }
+      }
+
+      const existing = await getPulseLinks();
+      const mergedMap = new Map<string, PulseLink>();
+      for (const l of existing) mergedMap.set(l.url, l);
+      for (const l of allLinks) mergedMap.set(l.url, l);
+      const merged = Array.from(mergedMap.values());
+      await savePulseLinks(merged);
+
+      const cats = new Map<string, number>();
+      for (const l of merged) {
+        cats.set(l.category, (cats.get(l.category) || 0) + 1);
+      }
+
+      const lines = [
+        `Pulse scan complete: ${allLinks.length} new links found, ${merged.length} total`,
+        `Pages scanned: ${pagesScanned}`,
+        "",
+        "Categories:",
+      ];
+      for (const [cat, count] of Array.from(cats.entries()).sort((a, b) => b[1] - a[1])) {
+        lines.push(`  ${cat} (${count})`);
+      }
+      lines.push("", "Use: pulse list | pulse search <query>");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "search") {
+      const query = args.slice(1).join(" ");
+      if (!query) return fail("[pulse] Usage: pulse search <query>");
+      const links = await getPulseLinks();
+      const matches = links.filter(l =>
+        fuzzyMatch(l.name, query) || fuzzyMatch(l.category, query) || fuzzyMatch(l.url, query) || fuzzyMatch(l.description, query)
+      );
+      if (matches.length === 0) return ok(`No Pulse links matching "${query}"`);
+
+      const lines = [`=== PULSE SEARCH: "${query}" === (${matches.length} results)`, ""];
+      for (let i = 0; i < Math.min(matches.length, 30); i++) {
+        const m = matches[i];
+        lines.push(`  ${String(i + 1).padStart(3)}. ${m.name}`);
+        lines.push(`       [${m.category}] ${m.url.slice(0, 60)}`);
+      }
+      lines.push("", "Use: pulse open <# or name>");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "list") {
+      const catFilter = args.slice(1).join(" ");
+      const links = await getPulseLinks();
+      if (links.length === 0) return ok("No Pulse links stored. Run: pulse scan");
+
+      let filtered = links;
+      if (catFilter) {
+        filtered = links.filter(l => fuzzyMatch(l.category, catFilter));
+        if (filtered.length === 0) return ok(`No links in category matching "${catFilter}"`);
+      }
+
+      const grouped = new Map<string, PulseLink[]>();
+      for (const l of filtered) {
+        if (!grouped.has(l.category)) grouped.set(l.category, []);
+        grouped.get(l.category)!.push(l);
+      }
+
+      const lines = [`=== PULSE LINKS === (${filtered.length} links)`, ""];
+      for (const [cat, items] of Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+        lines.push(`  ${cat} (${items.length})`);
+        for (const item of items.slice(0, 20)) {
+          lines.push(`    - ${item.name}`);
+        }
+        if (items.length > 20) lines.push(`    ... and ${items.length - 20} more`);
+        lines.push("");
+      }
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "open") {
+      const target = args.slice(1).join(" ");
+      if (!target) return fail("[pulse] Usage: pulse open <name or #>");
+      const links = await getPulseLinks();
+
+      const num = parseInt(target, 10);
+      if (!isNaN(num) && num >= 1 && num <= links.length) {
+        const link = links[num - 1];
+        return ok(`Opening: ${link.name}${nl}URL: ${link.url}${nl}${nl}(Open in browser: ${link.url})`);
+      }
+
+      const matches = links.filter(l => fuzzyMatch(l.name, target));
+      if (matches.length === 0) return ok(`No Pulse link matching "${target}"`);
+      if (matches.length === 1) {
+        return ok(`Opening: ${matches[0].name}${nl}URL: ${matches[0].url}${nl}${nl}(Open in browser: ${matches[0].url})`);
+      }
+
+      const lines = [`Multiple matches for "${target}":`, ""];
+      for (let i = 0; i < Math.min(matches.length, 10); i++) {
+        lines.push(`  ${i + 1}. ${matches[i].name} [${matches[i].category}]`);
+      }
+      lines.push("", "Use: pulse open <#> to select");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "categories") {
+      const links = await getPulseLinks();
+      if (links.length === 0) return ok("No Pulse links stored. Run: pulse scan");
+      const cats = new Map<string, number>();
+      for (const l of links) cats.set(l.category, (cats.get(l.category) || 0) + 1);
+      const lines = [`=== PULSE CATEGORIES === (${cats.size} categories, ${links.length} total links)`, ""];
+      for (const [cat, count] of Array.from(cats.entries()).sort((a, b) => b[1] - a[1])) {
+        lines.push(`  ${cat.padEnd(40)} ${count} links`);
+      }
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "clear") {
+      await savePulseLinks([]);
+      return ok("Pulse link directory cleared.");
+    }
+
+    return ok([
+      "Pulse Intranet Directory",
+      "========================",
+      "  pulse scan              - Scrape Pulse homepage + nav links",
+      "  pulse search <query>    - Fuzzy search links by name/category/URL",
+      "  pulse list [category]   - List all links or filter by category",
+      "  pulse open <name or #>  - Open a link (by name or search result #)",
+      "  pulse categories        - List all categories",
+      "  pulse clear             - Clear stored links",
     ].join(nl));
   });
 }

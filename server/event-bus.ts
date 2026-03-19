@@ -1,4 +1,4 @@
-export type EventType = "info" | "action" | "take-over-point" | "error";
+export type EventType = "info" | "action" | "take-over-point" | "error" | "warn";
 
 export interface CockpitEvent {
   id: string;

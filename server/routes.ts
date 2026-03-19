@@ -685,6 +685,15 @@ export async function registerRoutes(
       } catch {}
     }
 
+    let pulseLinks: any[] = [];
+    try {
+      const pulseCfg = await storage.getAgentConfig("pulse_links");
+      if (pulseCfg?.value) {
+        const parsed = JSON.parse(pulseCfg.value);
+        if (Array.isArray(parsed)) pulseLinks = parsed;
+      }
+    } catch {}
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -694,6 +703,7 @@ export async function registerRoutes(
       reader: allPages,
       transcripts: allTranscripts,
       epicActivities,
+      pulseLinks,
     });
   });
 
