@@ -152,7 +152,13 @@ export default function Minibuffer({
     try {
       const res = await apiRequest("POST", "/api/cli/run", { command: cmd });
       const data: { output: string; exitCode: number; durationMs: number } = await res.json();
-      setShellOutput(data.output);
+      const openMatch = data.output.match(/__OPEN_URL:(.+?)__/);
+      if (openMatch) {
+        window.open(openMatch[1], "_blank");
+        setShellOutput(data.output.replace(/__OPEN_URL:.+?__/, "[Opened in browser]"));
+      } else {
+        setShellOutput(data.output);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Command failed";
       setShellOutput(`[error] ${msg}`);

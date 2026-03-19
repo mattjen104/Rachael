@@ -3109,6 +3109,16 @@ ${fullHtml}`;
       await storage.setAgentConfig("pulse_links", JSON.stringify(links), "pulse");
     }
 
+    async function getLastPulseResults(): Promise<PulseLink[]> {
+      const cfg = await storage.getAgentConfig("pulse_last_results");
+      if (!cfg?.value) return [];
+      try { return JSON.parse(cfg.value); } catch { return []; }
+    }
+
+    async function saveLastPulseResults(links: PulseLink[]): Promise<void> {
+      await storage.setAgentConfig("pulse_last_results", JSON.stringify(links), "pulse");
+    }
+
     function fuzzyMatch(text: string, query: string): boolean {
       const lower = text.toLowerCase();
       const q = query.toLowerCase();
@@ -3305,6 +3315,8 @@ ${fullHtml}`;
       );
       if (matches.length === 0) return ok(`No Pulse links matching "${query}"`);
 
+      await saveLastPulseResults(matches.slice(0, 30));
+
       const lines = [`=== PULSE SEARCH: "${query}" === (${matches.length} results)`, ""];
       for (let i = 0; i < Math.min(matches.length, 30); i++) {
         const m = matches[i];
@@ -3347,20 +3359,30 @@ ${fullHtml}`;
     if (args[0] === "open") {
       const target = args.slice(1).join(" ");
       if (!target) return fail("[pulse] Usage: pulse open <name or #>");
-      const links = await getPulseLinks();
 
       const num = parseInt(target, 10);
-      if (!isNaN(num) && num >= 1 && num <= links.length) {
-        const link = links[num - 1];
-        return ok(`Opening: ${link.name}${nl}URL: ${link.url}${nl}${nl}(Open in browser: ${link.url})`);
+      if (!isNaN(num) && num >= 1) {
+        const lastResults = await getLastPulseResults();
+        if (lastResults.length > 0 && num <= lastResults.length) {
+          const link = lastResults[num - 1];
+          return ok(`Opening: ${link.name}${nl}URL: ${link.url}${nl}__OPEN_URL:${link.url}__`);
+        }
+        const links = await getPulseLinks();
+        if (num <= links.length) {
+          const link = links[num - 1];
+          return ok(`Opening: ${link.name}${nl}URL: ${link.url}${nl}__OPEN_URL:${link.url}__`);
+        }
+        return fail(`[pulse] Link #${num} not found. Run pulse search or pulse list first.`);
       }
 
+      const links = await getPulseLinks();
       const matches = links.filter(l => fuzzyMatch(l.name, target));
       if (matches.length === 0) return ok(`No Pulse link matching "${target}"`);
       if (matches.length === 1) {
-        return ok(`Opening: ${matches[0].name}${nl}URL: ${matches[0].url}${nl}${nl}(Open in browser: ${matches[0].url})`);
+        return ok(`Opening: ${matches[0].name}${nl}URL: ${matches[0].url}${nl}__OPEN_URL:${matches[0].url}__`);
       }
 
+      await saveLastPulseResults(matches.slice(0, 10));
       const lines = [`Multiple matches for "${target}":`, ""];
       for (let i = 0; i < Math.min(matches.length, 10); i++) {
         lines.push(`  ${i + 1}. ${matches[i].name} [${matches[i].category}]`);
