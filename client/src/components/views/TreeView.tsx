@@ -63,6 +63,7 @@ type TreeNode = {
   id: number;
   name: string;
   href: string;
+  portalName?: string;
 } | {
   type: "snow-item";
   number: string;
@@ -113,10 +114,11 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const [chatFetched, setChatFetched] = useState(false);
   const [launchingApp, setLaunchingApp] = useState<string | null>(null);
 
-  const launchCitrixApp = useCallback(async (appName: string) => {
+  const launchCitrixApp = useCallback(async (appName: string, portalName?: string) => {
     setLaunchingApp(appName);
     try {
-      const res = await apiRequest("POST", "/api/cli/run", { command: `citrix launch ${appName}` });
+      const cmd = portalName ? `citrix launch ${appName} --portal ${portalName}` : `citrix launch ${appName}`;
+      const res = await apiRequest("POST", "/api/cli/run", { command: cmd });
       const data: { output: string } = await res.json();
       setLaunchingApp(null);
       return data.output;
@@ -191,16 +193,64 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       categorized.get(app.category)!.push({ id: n.id, name: app.name, href: app.href });
     }
 
-    nodes.push({ type: "section", label: "APPS (Citrix)", key: "apps", count: appNotes.length || (bridgeConnected ? -1 : 0) });
+    const portalAppsData = (data as any).citrixPortalApps || {};
+    const portalsData: Array<{ name: string; url: string; appCount: number }> = (data as any).citrixPortals || [];
+    const hasPortalApps = Object.keys(portalAppsData).some(k => portalAppsData[k]?.length > 0);
+    const totalAppCount = appNotes.length + Object.values(portalAppsData).reduce((sum: number, arr: any) => sum + (arr?.length || 0), 0);
+
+    nodes.push({ type: "section", label: "APPS (Citrix)", key: "apps", count: totalAppCount || (bridgeConnected ? -1 : 0) });
     if (expanded.has("apps")) {
-      if (appNotes.length > 0) {
-        for (const cat of catOrder) {
-          const items = categorized.get(cat);
-          if (!items || items.length === 0) continue;
-          nodes.push({ type: "section", label: `  ${cat}`, key: `apps-${cat}`, count: items.length });
-          if (expanded.has(`apps-${cat}`)) {
-            for (const app of items) {
-              nodes.push({ type: "appLink", id: app.id, name: app.name, href: app.href });
+      if (appNotes.length > 0 || hasPortalApps) {
+        if (appNotes.length > 0) {
+          for (const cat of catOrder) {
+            const items = categorized.get(cat);
+            if (!items || items.length === 0) continue;
+            nodes.push({ type: "section", label: `  ${cat}`, key: `apps-${cat}`, count: items.length });
+            if (expanded.has(`apps-${cat}`)) {
+              for (const app of items) {
+                nodes.push({ type: "appLink", id: app.id, name: app.name, href: app.href });
+              }
+            }
+          }
+        }
+
+        for (let pi = 0; pi < portalsData.length; pi++) {
+          const portal = portalsData[pi];
+          const pApps = portalAppsData[portal.name];
+          if (!pApps || pApps.length === 0) continue;
+          const portalKey = `apps-portal-${portal.name}`;
+          nodes.push({ type: "section", label: `  [${portal.name}]`, key: portalKey, count: pApps.length });
+          if (expanded.has(portalKey)) {
+            const portalCategorized = new Map<string, Array<{ name: string; href: string; stableId: number }>>();
+            for (let ai = 0; ai < pApps.length; ai++) {
+              const app = pApps[ai];
+              const appName = app.name || "";
+              let cat = "Apps";
+              if (/^PRD |^SUP /i.test(appName)) cat = "Production";
+              else if (/^TST |^REL |^POC |^OLDTST |^PJX |^UAT /i.test(appName)) cat = "Non-Production";
+              else if (/^ACE\d|^MST |^PLY |^PREP |^REF |^EXAM |^FSC /i.test(appName)) cat = "Training";
+              else if (/MyChart/i.test(appName)) cat = "MyChart";
+              else if (/CTX|Remote Desktop|BCA|ClinApps|Hyland|OnBase|Tableau|Kuiper/i.test(appName)) cat = "Desktop Apps";
+              if (!portalCategorized.has(cat)) portalCategorized.set(cat, []);
+              portalCategorized.get(cat)!.push({ ...app, stableId: -(1000 + pi * 1000 + ai) });
+            }
+            const pCats = [...portalCategorized.keys()].sort();
+            if (pCats.length === 1 && pCats[0] === "Apps") {
+              for (let ai = 0; ai < pApps.length; ai++) {
+                nodes.push({ type: "appLink", id: -(1000 + pi * 1000 + ai), name: pApps[ai].name, href: pApps[ai].href || "", portalName: portal.name });
+              }
+            } else {
+              for (const cat of [...catOrder, ...pCats.filter(c => !catOrder.includes(c))]) {
+                const items = portalCategorized.get(cat);
+                if (!items || items.length === 0) continue;
+                const catKey = `${portalKey}-${cat}`;
+                nodes.push({ type: "section", label: `    ${cat}`, key: catKey, count: items.length });
+                if (expanded.has(catKey)) {
+                  for (const app of items) {
+                    nodes.push({ type: "appLink", id: app.stableId, name: app.name, href: app.href || "", portalName: portal.name });
+                  }
+                }
+              }
             }
           }
         }
@@ -532,7 +582,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           if (href && href.startsWith("http")) {
             window.open(href, "_blank");
           } else {
-            launchCitrixApp(node.name);
+            launchCitrixApp(node.name, node.portalName);
           }
         }
         else if (node?.type === "chat") {
@@ -685,7 +735,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 if (href && href.startsWith("http")) {
                   window.open(href, "_blank");
                 } else {
-                  launchCitrixApp(node.name);
+                  launchCitrixApp(node.name, node.portalName);
                 }
               } else if (node.type === "epicActivity" && onRunCommand) {
                 onRunCommand(`epic navigate ${node.env} ${node.name}`);

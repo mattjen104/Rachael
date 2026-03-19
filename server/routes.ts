@@ -771,6 +771,27 @@ export async function registerRoutes(
       } catch {}
     }
 
+    let citrixPortals: any[] = [];
+    const citrixPortalApps: Record<string, any[]> = {};
+    try {
+      const portalCfg = await storage.getAgentConfig("citrix_portals");
+      if (portalCfg?.value) {
+        citrixPortals = JSON.parse(portalCfg.value);
+      } else {
+        citrixPortals = [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu", lastScanned: null, appCount: 0 }];
+      }
+      for (const portal of citrixPortals) {
+        const key = `citrix_portal_apps_${portal.name.toLowerCase().replace(/\s+/g, "_")}`;
+        const appsCfg = await storage.getAgentConfig(key);
+        if (appsCfg?.value) {
+          const parsed = JSON.parse(appsCfg.value);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            citrixPortalApps[portal.name] = parsed;
+          }
+        }
+      }
+    } catch {}
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -783,6 +804,8 @@ export async function registerRoutes(
       epicTrees,
       pulseLinks,
       galaxyCategories,
+      citrixPortals,
+      citrixPortalApps,
     });
   });
 

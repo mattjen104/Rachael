@@ -2703,19 +2703,210 @@ ${fullHtml}`;
     return fail(`[snow] unknown subcommand "${sub}"${nl}Usage: snow [incidents|changes|requests|detail <number>|queue|refresh]`);
   });
 
-  registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--save] | citrix clean", async (args) => {
+  registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--save] | citrix clean | citrix portal [add|list|remove|scan]", async (args) => {
     const CITRIX_JUNK_SET = new Set(["open", "restart", "request", "cancel request", "add to favorites", "remove from favorites", "install", "more", "less", "cancel", "save", "refresh"]);
     const CITRIX_CAT_HEADER_RE = /^\[App\]\s*(Epic Non-Production|Epic Production|Epic Training|Epic Utilities|MyChart|Troubleshooting|Uncategorized)\s*\(\d+\)$/i;
 
+    interface PortalConfig {
+      name: string;
+      url: string;
+      lastScanned: string | null;
+      appCount: number;
+    }
+
+    async function getPortals(): Promise<PortalConfig[]> {
+      const cfg = await storage.getAgentConfig("citrix_portals");
+      if (!cfg?.value) return [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu", lastScanned: null, appCount: 0 }];
+      try { return JSON.parse(cfg.value); } catch { return [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu", lastScanned: null, appCount: 0 }]; }
+    }
+
+    async function savePortals(portals: PortalConfig[]): Promise<void> {
+      await storage.setAgentConfig("citrix_portals", JSON.stringify(portals), "citrix");
+    }
+
+    async function getPortalApps(portalName: string): Promise<Array<{ name: string; href: string }>> {
+      const key = `citrix_portal_apps_${portalName.toLowerCase().replace(/\s+/g, "_")}`;
+      const cfg = await storage.getAgentConfig(key);
+      if (!cfg?.value) return [];
+      try { return JSON.parse(cfg.value); } catch { return []; }
+    }
+
+    async function savePortalApps(portalName: string, apps: Array<{ name: string; href: string }>): Promise<void> {
+      const key = `citrix_portal_apps_${portalName.toLowerCase().replace(/\s+/g, "_")}`;
+      await storage.setAgentConfig(key, JSON.stringify(apps), "citrix");
+    }
+
+    const nl = String.fromCharCode(10);
+
+    if (args[0] === "portal") {
+      if (!args[1] || args[1] === "help") {
+        return ok([
+          "Citrix Portal Management",
+          "========================",
+          "  citrix portal list               - List configured portals",
+          "  citrix portal add <url> --name <label>  - Add a new portal",
+          "  citrix portal remove <name>      - Remove a portal",
+          "  citrix portal scan <name>        - Scan portal for apps",
+        ].join(nl));
+      }
+
+      if (args[1] === "list") {
+        const portals = await getPortals();
+        const lines = [`=== CITRIX PORTALS === (${portals.length})`, ""];
+        for (let i = 0; i < portals.length; i++) {
+          const p = portals[i];
+          const scanned = p.lastScanned || "never";
+          lines.push(`  ${i + 1}. ${p.name}`);
+          lines.push(`     URL: ${p.url}`);
+          lines.push(`     Apps: ${p.appCount}  Last scanned: ${scanned}`);
+        }
+        return ok(lines.join(nl));
+      }
+
+      if (args[1] === "add") {
+        const rest = args.slice(2).join(" ");
+        const nameIdx = rest.indexOf("--name");
+        let url = "";
+        let name = "";
+        if (nameIdx >= 0) {
+          url = rest.substring(0, nameIdx).trim();
+          name = rest.substring(nameIdx + 6).trim();
+        } else {
+          url = rest.trim();
+          try {
+            name = new URL(url).hostname.replace(/\./g, " ").replace(/\b\w/g, c => c.toUpperCase());
+          } catch {
+            return fail("[citrix] Invalid URL. Usage: citrix portal add <url> --name <label>");
+          }
+        }
+        if (!url || !url.startsWith("http")) return fail("[citrix] Invalid URL. Must start with http:// or https://");
+        if (!name) return fail("[citrix] Name required. Usage: citrix portal add <url> --name <label>");
+
+        const portals = await getPortals();
+        if (portals.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+          return fail(`[citrix] Portal "${name}" already exists. Remove it first.`);
+        }
+        portals.push({ name, url, lastScanned: null, appCount: 0 });
+        await savePortals(portals);
+        return ok(`Portal added: ${name} -> ${url}`);
+      }
+
+      if (args[1] === "remove") {
+        const name = args.slice(2).join(" ").trim();
+        if (!name) return fail("[citrix] Usage: citrix portal remove <name>");
+        const portals = await getPortals();
+        const idx = portals.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
+        if (idx < 0) return fail(`[citrix] Portal "${name}" not found.`);
+        if (portals[idx].name === "UCSD CWP") return fail("[citrix] Cannot remove the default UCSD CWP portal.");
+        const removed = portals.splice(idx, 1)[0];
+        await savePortals(portals);
+        const appKey = `citrix_portal_apps_${removed.name.toLowerCase().replace(/\s+/g, "_")}`;
+        try { await storage.setAgentConfig(appKey, "[]", "citrix"); } catch {}
+        return ok(`Portal removed: ${removed.name}`);
+      }
+
+      if (args[1] === "scan") {
+        const portalName = args.slice(2).join(" ").trim();
+        if (!portalName) return fail("[citrix] Usage: citrix portal scan <portal name>");
+
+        const portals = await getPortals();
+        const portal = portals.find(p => p.name.toLowerCase() === portalName.toLowerCase());
+        if (!portal) return fail(`[citrix] Portal "${portalName}" not found. Use: citrix portal list`);
+
+        const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+        if (!isExtensionConnected()) {
+          return fail("[citrix] Chrome extension bridge not connected.");
+        }
+
+        emitEvent("cli", `Scanning Citrix portal: ${portal.name} (${portal.url})`, "info");
+
+        const result = await smartFetch(portal.url, "dom", `cli-citrix-scan-${portal.name}`, {
+          maxText: 60000,
+          selectors: {
+            apps: '[class*="app"] a, [class*="App"] a, [data-testid*="app"] a, .storeapp-icon a, .store-app a, a[href*="launch"], a[href*="app"], [class*="resource"] a, [role="listitem"] a, .citrix-resource a, button[class*="app"], [class*="appCard"] a, [class*="tile"] a, a[class*="launch"], [class*="StoreApp"] a',
+            allLinks: 'a[href]',
+            headings: 'h1, h2, h3, h4, [class*="title"], [class*="Title"], [class*="name"], [class*="Name"]',
+          },
+        }, 60000);
+
+        if (result.error) return fail(`[citrix] Scan failed: ${result.error}`);
+
+        const extracted = (result as any).extracted || {};
+        interface AppLink { name: string; href: string }
+        const apps: AppLink[] = [];
+        const seen = new Set<string>();
+        const CITRIX_JUNK = new Set(["open", "restart", "request", "cancel request", "add to favorites", "remove from favorites", "install", "more", "less", "cancel", "save", "refresh"]);
+        const CITRIX_CAT_RE = /^(Epic Non-Production|Epic Production|Epic Training|Epic Utilities|MyChart|Troubleshooting|Uncategorized)\s*\(\d+\)$/i;
+
+        const addApp = (name: string, href: string) => {
+          const clean = cleanUnicode(name).trim();
+          if (!clean || clean.length < 2 || clean.length > 100) return;
+          if (CITRIX_JUNK.has(clean.toLowerCase())) return;
+          if (CITRIX_CAT_RE.test(clean)) return;
+          if (seen.has(clean.toLowerCase())) return;
+          seen.add(clean.toLowerCase());
+          apps.push({ name: clean, href: href || "" });
+        };
+
+        if (extracted.apps && extracted.apps.length > 0) {
+          for (const a of extracted.apps) addApp(a.text || "", a.href || "");
+        }
+        if (apps.length === 0 && extracted.allLinks) {
+          for (const link of extracted.allLinks) {
+            const t = (link.text || "").trim();
+            const h = link.href || "";
+            if (t.length >= 2 && t.length <= 80) {
+              if (h.includes("launch") || h.includes("app") || h.includes("resource") || h.includes("citrix")) {
+                addApp(t, h);
+              }
+            }
+          }
+        }
+
+        await savePortalApps(portal.name, apps);
+        portal.lastScanned = new Date().toISOString().split("T")[0];
+        portal.appCount = apps.length;
+        await savePortals(portals);
+
+        if (apps.length === 0) {
+          return ok(`Scanned ${portal.name}: no apps found. Portal may require authentication.`);
+        }
+
+        const lines = [`=== ${portal.name} APPS === (${apps.length})`, ""];
+        for (let i = 0; i < apps.length; i++) {
+          lines.push(`  ${String(i + 1).padStart(3)}  ${apps[i].name}`);
+        }
+        lines.push("", `Apps saved for portal "${portal.name}".`);
+        return ok(lines.join(nl));
+      }
+
+      return fail(`[citrix] Unknown portal command: ${args[1]}. Use: citrix portal help`);
+    }
+
     if (args[0] === "launch") {
-      const appName = args.slice(1).join(" ").trim();
-      if (!appName) return fail("[citrix] Usage: citrix launch <app name>");
+      const rawArgs = args.slice(1).join(" ").trim();
+      const portalFlag = rawArgs.match(/--portal\s+(.+?)(?:\s*$)/i);
+      const appName = portalFlag ? rawArgs.replace(portalFlag[0], "").trim() : rawArgs;
+      if (!appName) return fail("[citrix] Usage: citrix launch <app name> [--portal <name>]");
+
+      const portals = await getPortals();
+      let portalUrl = "https://cwp.ucsd.edu";
+      let portalLabel = "UCSD CWP";
+
+      if (portalFlag) {
+        const pName = portalFlag[1].trim();
+        const portal = portals.find(p => p.name.toLowerCase() === pName.toLowerCase());
+        if (!portal) return fail(`[citrix] Portal "${pName}" not found. Use: citrix portal list`);
+        portalUrl = portal.url;
+        portalLabel = portal.name;
+      }
+
       const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
       if (!isExtensionConnected()) {
         return fail("[citrix] Bridge not connected. Cannot launch Citrix apps without browser session.");
       }
-      emitEvent("cli", `Launching Citrix app: ${appName}`, "info", { metadata: { command: "citrix" } });
-      const launchResult = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix-launch", {
+      emitEvent("cli", `Launching Citrix app: ${appName} from ${portalLabel}`, "info", { metadata: { command: "citrix" } });
+      const launchResult = await smartFetch(portalUrl, "dom", "cli-citrix-launch", {
         maxText: 2000,
         reuseTab: true,
         spaWaitMs: 2000,
@@ -2731,7 +2922,7 @@ ${fullHtml}`;
       if (cd?.error) return fail(`[citrix launch] ${cd.error}`);
       const method = cd?.method || "unknown";
       const matched = cd?.matchedApp || appName;
-      return ok(`Launched "${matched}" via Citrix [${method}]`);
+      return ok(`Launched "${matched}" via ${portalLabel} [${method}]`);
     }
 
     if (args[0] === "workspace") {
@@ -2881,7 +3072,6 @@ ${fullHtml}`;
       }
     }
 
-    const nl = String.fromCharCode(10);
     if (apps.length === 0) {
       const sampleText = text.slice(0, 1500).split(/[\n\r]+/).filter(l => l.trim().length > 0).slice(0, 15).join(nl);
       const linkCount = extracted.allLinks?.length || 0;
