@@ -167,14 +167,16 @@ def poll_commands():
         if resp.status_code == 200:
             data = resp.json()
             return data.get("commands", [])
-    except Exception:
-        pass
+        else:
+            print(f"  [poll] HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"  [poll] Error: {e}")
     return []
 
 
 def send_heartbeat(windows_found):
     try:
-        requests.post(
+        resp = requests.post(
             f"{ORGCLOUD_URL}/api/epic/agent/heartbeat",
             headers={
                 "Authorization": f"Bearer {BRIDGE_TOKEN}",
@@ -183,8 +185,10 @@ def send_heartbeat(windows_found):
             json={"windows": windows_found, "timestamp": time.time()},
             timeout=5,
         )
-    except Exception:
-        pass
+        if resp.status_code != 200:
+            print(f"  [heartbeat] HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"  [heartbeat] Error: {e}")
 
 
 def post_result(command_id, status, screenshot_b64=None, data=None, error=None):

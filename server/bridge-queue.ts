@@ -72,7 +72,7 @@ let extensionLastError: string | null = null;
 
 export function getBridgeToken(): string {
   if (!bridgeToken) {
-    bridgeToken = process.env.BRIDGE_TOKEN || randomUUID();
+    bridgeToken = process.env.BRIDGE_TOKEN || "46c6eeeb-8404-40cb-9b09-fb379ab4d3c6";
   }
   return bridgeToken;
 }
