@@ -1301,6 +1301,28 @@ EPIC_MENU_CATEGORIES = [
     "My Toolbar Default Items", "Help",
 ]
 
+EPIC_MENU_CATEGORY_POSITIONS = {
+    "Lab":                      {"relX": 0.62, "relY": 0.10},
+    "Patient Care":             {"relX": 0.62, "relY": 0.14},
+    "Pharmacy":                 {"relX": 0.62, "relY": 0.18},
+    "Radiology":                {"relX": 0.62, "relY": 0.22},
+    "Surgery":                  {"relX": 0.62, "relY": 0.26},
+    "CRM/CM":                   {"relX": 0.62, "relY": 0.32},
+    "Billing":                  {"relX": 0.62, "relY": 0.36},
+    "HIM":                      {"relX": 0.62, "relY": 0.40},
+    "Utilization Management":   {"relX": 0.62, "relY": 0.44},
+    "Referrals":                {"relX": 0.62, "relY": 0.48},
+    "Registration/ADT":         {"relX": 0.62, "relY": 0.52},
+    "Scheduling":               {"relX": 0.62, "relY": 0.56},
+    "Interfaces":               {"relX": 0.62, "relY": 0.60},
+    "Reports":                  {"relX": 0.62, "relY": 0.67},
+    "Tools":                    {"relX": 0.62, "relY": 0.71},
+    "Admin":                    {"relX": 0.62, "relY": 0.75},
+    "My Settings":              {"relX": 0.62, "relY": 0.79},
+    "My Toolbar Default Items": {"relX": 0.62, "relY": 0.83},
+    "Help":                     {"relX": 0.62, "relY": 0.87},
+}
+
 
 def execute_menu_crawl(cmd):
     """Crawl Epic menus using screenshot + vision AI.
@@ -1652,30 +1674,26 @@ def execute_menu_crawl(cmd):
             post_result(command_id, "error", error="Could not open Epic menu after multiple attempts")
             return
 
-        print(f"  [menu-crawl] Step 2: Reading top-level menu...")
+        print(f"  [menu-crawl] Step 2: Detecting menu boundaries...")
         img, b64 = safe_screenshot()
         if not b64:
             post_result(command_id, "error", error="Cannot screenshot after Epic button click")
             return
 
-        def vision_find_item(b64_img, item_name):
-            """Use vision to find a specific navigation category in the RIGHT column of the Epic menu."""
+        def vision_detect_menu_bounds(b64_img):
+            """Use ONE vision call to detect the Epic menu popup boundaries."""
             prompt = (
-                f"Find the navigation category labeled \"{item_name}\" in this Epic Hyperspace menu screenshot.\n\n"
-                f"CRITICAL LAYOUT RULES:\n"
-                f"- The Epic menu has TWO distinct columns/panels:\n"
-                f"  LEFT PANEL: Shows 'Pinned' and 'Recently Accessed' items — DO NOT click anything here\n"
-                f"  RIGHT PANEL: Shows permanent navigation categories like Lab, Patient Care, Pharmacy, etc.\n"
-                f"- \"{item_name}\" is a NAVIGATION CATEGORY in the RIGHT panel\n"
-                f"- Navigation categories have a RIGHT-ARROW (>) or chevron indicating they open submenus\n"
-                f"- The right panel categories are typically in the right half of the menu popup\n"
-                f"- Do NOT return coordinates for any item in the LEFT panel (Pinned/Recent)\n"
-                f"- Do NOT return coordinates for any search bar or search field\n"
-                f"- Do NOT return coordinates for any dashboard item or workspace item behind the menu\n"
-                f"- If the menu is NOT currently open (you see the main desktop/workspace), return found: false\n\n"
-                f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true, \"panel\": \"right\"}}\n"
-                f"x and y are pixel coordinates relative to the image.\n"
-                f"If not found or menu not open: {{\"found\": false, \"reason\": \"why\"}}"
+                "This screenshot shows the Epic Hyperspace application with its main menu popup open.\n"
+                "The menu popup is a large floating panel that covers part of the screen.\n"
+                "It has a search bar at the top, a left panel (Pinned/Recent), and a right panel (navigation categories).\n\n"
+                "I need you to identify the BOUNDING BOX of the entire menu popup in pixel coordinates.\n"
+                "Also identify the pixel coordinates of these TWO specific items to calibrate positioning:\n"
+                "1. The 'Lab' category (first item in the right column)\n"
+                "2. The 'Help' category (last item in the right column)\n\n"
+                "Return ONLY: {\"menuLeft\": <int>, \"menuTop\": <int>, \"menuRight\": <int>, \"menuBottom\": <int>, "
+                "\"labX\": <int>, \"labY\": <int>, \"helpX\": <int>, \"helpY\": <int>, \"found\": true}\n"
+                "All coordinates are pixels relative to the image.\n"
+                "If the menu is not visible: {\"found\": false}"
             )
             resp = ask_claude(b64_img, prompt)
             if not resp:
@@ -1683,20 +1701,73 @@ def execute_menu_crawl(cmd):
             try:
                 fm = re.search(r'\{[\s\S]*?\}', resp)
                 if fm:
-                    result = json.loads(fm.group())
-                    if result.get("found"):
-                        img_w = 0
-                        try:
-                            import struct
-                            raw = base64.b64decode(b64_img[:100])
-                        except Exception:
-                            pass
-                    return result
+                    return json.loads(fm.group())
             except Exception:
                 pass
             return None
 
-        print(f"  [menu-crawl] Step 2: Reading recent items from left panel...")
+        menu_bounds = vision_detect_menu_bounds(b64)
+        if not menu_bounds or not menu_bounds.get("found"):
+            print(f"  [menu-crawl] Could not detect menu boundaries, falling back to vision per-item")
+            menu_bounds = None
+        else:
+            m_left = menu_bounds["menuLeft"]
+            m_top = menu_bounds["menuTop"]
+            m_right = menu_bounds["menuRight"]
+            m_bottom = menu_bounds["menuBottom"]
+            m_width = m_right - m_left
+            m_height = m_bottom - m_top
+            lab_x = menu_bounds.get("labX", 0)
+            lab_y = menu_bounds.get("labY", 0)
+            help_x = menu_bounds.get("helpX", 0)
+            help_y = menu_bounds.get("helpY", 0)
+            print(f"  [menu-crawl] Menu bounds: ({m_left},{m_top}) to ({m_right},{m_bottom}) = {m_width}x{m_height}px")
+            print(f"  [menu-crawl] Lab at ({lab_x},{lab_y}), Help at ({help_x},{help_y})")
+            print(f"  [menu-crawl] Will use hardcoded positions interpolated between Lab and Help")
+
+        def get_category_img_coords(cat_name):
+            """Get pixel coordinates for a category using calibrated menu bounds."""
+            if not menu_bounds:
+                return None
+            pos = EPIC_MENU_CATEGORY_POSITIONS.get(cat_name)
+            if not pos:
+                return None
+            lab_y = menu_bounds.get("labY", 0)
+            help_y = menu_bounds.get("helpY", 0)
+            cat_x = menu_bounds.get("labX", 0)
+
+            lab_rel = EPIC_MENU_CATEGORY_POSITIONS["Lab"]["relY"]
+            help_rel = EPIC_MENU_CATEGORY_POSITIONS["Help"]["relY"]
+            cat_rel = pos["relY"]
+
+            if help_rel != lab_rel:
+                t = (cat_rel - lab_rel) / (help_rel - lab_rel)
+                cat_y = int(lab_y + t * (help_y - lab_y))
+            else:
+                cat_y = lab_y
+
+            return {"x": cat_x, "y": cat_y, "found": True, "method": "calibrated"}
+
+        def vision_find_item(b64_img, item_name):
+            """Fallback: use vision to find a specific category if calibration failed."""
+            prompt = (
+                f"Find the navigation category labeled \"{item_name}\" in this Epic menu.\n"
+                f"It should be in the RIGHT column with a > arrow. The left column is Pinned/Recent - ignore it.\n"
+                f"Return ONLY: {{\"x\": <int>, \"y\": <int>, \"found\": true}}\n"
+                f"If not found: {{\"found\": false}}"
+            )
+            resp = ask_claude(b64_img, prompt)
+            if not resp:
+                return None
+            try:
+                fm = re.search(r'\{[\s\S]*?\}', resp)
+                if fm:
+                    return json.loads(fm.group())
+            except Exception:
+                pass
+            return None
+
+        print(f"  [menu-crawl] Step 2b: Reading recent items from left panel...")
         recent_prompt = (
             "Look at the LEFT panel of this Epic menu. It shows 'Pinned' and 'Recent' sections.\n"
             "List every item under Pinned and Recent.\n"
@@ -1742,6 +1813,7 @@ def execute_menu_crawl(cmd):
         print(f"  [menu-crawl] Step 3: Crawling {len(EPIC_MENU_CATEGORIES)} known categories...")
 
         consecutive_failures = 0
+        menu_confirmed_open = True
         for i, cat_name in enumerate(EPIC_MENU_CATEGORIES):
             print(f"  [menu-crawl] === [{i+1}/{len(EPIC_MENU_CATEGORIES)}] '{cat_name}' ===")
 
@@ -1758,33 +1830,38 @@ def execute_menu_crawl(cmd):
             crawled_count += 1
 
             try:
-                state_before, _ = check_screen_state(f"before looking for {cat_name}")
-                if state_before != "menu":
-                    print(f"  [menu-crawl]   Menu not open (state={state_before}), reopening...")
-                    pyautogui.press("escape")
-                    time.sleep(0.3)
-                    pyautogui.press("escape")
-                    time.sleep(0.3)
-                    if not reopen_epic_menu():
-                        print(f"  [menu-crawl]   Cannot reopen menu, skipping '{cat_name}'")
+                if not menu_confirmed_open:
+                    state_before, _ = check_screen_state(f"before looking for {cat_name}")
+                    if state_before != "menu":
+                        print(f"  [menu-crawl]   Menu not open (state={state_before}), reopening...")
+                        pyautogui.press("escape")
+                        time.sleep(0.3)
+                        pyautogui.press("escape")
+                        time.sleep(0.3)
+                        if not reopen_epic_menu():
+                            print(f"  [menu-crawl]   Cannot reopen menu, skipping '{cat_name}'")
+                            consecutive_failures += 1
+                            tree_children.append(node)
+                            continue
+                    menu_confirmed_open = True
+
+                loc = get_category_img_coords(cat_name)
+                if loc and loc.get("found"):
+                    print(f"  [menu-crawl]   Using calibrated position for '{cat_name}' (no vision call needed)")
+                else:
+                    img, b64 = safe_screenshot()
+                    if not b64:
+                        print(f"  [menu-crawl]   Screenshot failed, skipping '{cat_name}'")
                         consecutive_failures += 1
                         tree_children.append(node)
                         continue
-
-                img, b64 = safe_screenshot()
-                if not b64:
-                    print(f"  [menu-crawl]   Screenshot failed, skipping '{cat_name}'")
-                    consecutive_failures += 1
-                    tree_children.append(node)
-                    continue
-
-                loc = vision_find_item(b64, cat_name)
-                if not loc or not loc.get("found"):
-                    reason = loc.get("reason", "not found") if loc else "vision failed"
-                    print(f"  [menu-crawl]   Could not find '{cat_name}': {reason}")
-                    consecutive_failures += 1
-                    tree_children.append(node)
-                    continue
+                    loc = vision_find_item(b64, cat_name)
+                    if not loc or not loc.get("found"):
+                        reason = loc.get("reason", "not found") if loc else "vision failed"
+                        print(f"  [menu-crawl]   Could not find '{cat_name}': {reason}")
+                        consecutive_failures += 1
+                        tree_children.append(node)
+                        continue
 
                 cat_img_x = loc["x"]
                 cat_img_y = loc["y"]
@@ -1802,10 +1879,10 @@ def execute_menu_crawl(cmd):
                     print(f"  [menu-crawl]   '{cat_name}' opened an activity (not a submenu) - recovering")
                     node["controlType"] = "Activity"
                     recover_to_menu()
-                    reopen_epic_menu()
+                    menu_confirmed_open = reopen_epic_menu()
                 elif state_after_click == "desktop":
                     print(f"  [menu-crawl]   Click closed the menu or hit nothing - recovering")
-                    reopen_epic_menu()
+                    menu_confirmed_open = reopen_epic_menu()
                 elif state_after_click in ("menu", "unknown"):
                     sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
                     node["children"] = sub_children
@@ -1815,11 +1892,11 @@ def execute_menu_crawl(cmd):
                     time.sleep(0.3)
                     pyautogui.press("escape")
                     time.sleep(0.3)
-                    reopen_epic_menu()
+                    menu_confirmed_open = reopen_epic_menu()
                 else:
                     print(f"  [menu-crawl]   Unexpected state: {state_after_click} - recovering")
                     recover_to_menu()
-                    reopen_epic_menu()
+                    menu_confirmed_open = reopen_epic_menu()
 
                 consecutive_failures = 0
 
@@ -1827,9 +1904,10 @@ def execute_menu_crawl(cmd):
                 print(f"  [menu-crawl] !! Error crawling '{cat_name}': {e}")
                 traceback.print_exc()
                 consecutive_failures += 1
+                menu_confirmed_open = False
                 try:
                     recover_to_menu()
-                    reopen_epic_menu()
+                    menu_confirmed_open = reopen_epic_menu()
                 except Exception:
                     pass
 
