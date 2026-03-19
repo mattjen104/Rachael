@@ -3367,7 +3367,7 @@ ${fullHtml}`;
 
     if (args[0] === "menu-crawl") {
       const env = (args[1] || "SUP").toUpperCase();
-      const depth = parseInt(args[2] || "2", 10);
+      const depth = parseInt(args[2] || "4", 10);
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
           method: "POST",

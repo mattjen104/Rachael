@@ -610,8 +610,58 @@ def execute_navigate_path(cmd):
                 current_parent = element
 
         except ImportError:
-            post_result(command_id, "error", error="pywinauto not installed for UIA path replay")
-            return
+            pass
+
+        if not uia_window:
+            print(f"  [path-nav] UIA unavailable, falling back to vision-click navigation")
+            img = screenshot_window(window)
+            b64 = img_to_base64(img)
+            epic_prompt = (
+                "Find the Epic button in this Hyperspace window (top-left corner, opens the main menu).\n"
+                "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
+            )
+            epic_resp = ask_claude(b64, epic_prompt)
+            epic_loc = None
+            if epic_resp:
+                try:
+                    em = re.search(r'\{[\s\S]*?\}', epic_resp)
+                    if em:
+                        epic_loc = json.loads(em.group())
+                except Exception:
+                    pass
+            if not epic_loc or not epic_loc.get("found"):
+                post_result(command_id, "error", error="Vision could not find Epic button")
+                return
+
+            pyautogui.click(window.left + epic_loc["x"], window.top + epic_loc["y"])
+            time.sleep(1.5)
+
+            for i, step in enumerate(steps):
+                print(f"  [step {i+1}/{len(steps)}] Vision-click: {step}")
+                step_img = screenshot_window(window)
+                step_b64 = img_to_base64(step_img)
+                find_prompt = (
+                    f"Find the menu item labeled \"{step}\" in this screenshot.\n"
+                    f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true}}\n"
+                    f"If not found: {{\"found\": false, \"reason\": \"why\"}}"
+                )
+                resp = ask_claude(step_b64, find_prompt)
+                if not resp:
+                    post_result(command_id, "error", error=f"Vision failed at step {i+1}: {step}")
+                    return
+                try:
+                    fm = re.search(r'\{[\s\S]*?\}', resp)
+                    if fm:
+                        loc = json.loads(fm.group())
+                        if loc.get("found"):
+                            pyautogui.click(window.left + loc["x"], window.top + loc["y"])
+                            time.sleep(1.0)
+                        else:
+                            post_result(command_id, "error", error=f"Vision could not find '{step}': {loc.get('reason', '?')}")
+                            return
+                except Exception as e:
+                    post_result(command_id, "error", error=f"Vision parse error at step {i+1}: {e}")
+                    return
 
     time.sleep(0.5)
     final_img = screenshot_window(window)
@@ -1086,6 +1136,159 @@ def execute_menu_crawl(cmd):
             pass
         return []
 
+    def close_activity_if_opened(prev_b64):
+        """Check if an activity opened (screen changed significantly) and close it."""
+        new_img, new_b64 = safe_screenshot()
+        if not new_b64:
+            return
+        prompt = (
+            "Compare these observations about this Epic Hyperspace screen:\n"
+            "Has an activity or workspace opened (i.e., the menu is gone and a new view/form appeared)?\n"
+            "Or is the menu still visible?\n\n"
+            "Return ONLY a JSON object: {\"activityOpened\": true/false, \"description\": \"what you see\"}"
+        )
+        resp = ask_claude(new_b64, prompt)
+        if not resp:
+            return
+        try:
+            m = re.search(r'\{[\s\S]*?\}', resp)
+            if m:
+                result = json.loads(m.group())
+                if result.get("activityOpened", False):
+                    print(f"  [menu-crawl]     Activity opened - closing it...")
+                    pyautogui.hotkey("alt", "F4")
+                    time.sleep(0.5)
+                    check_img, check_b64 = safe_screenshot()
+                    if check_b64:
+                        close_resp = ask_claude(check_b64,
+                            "Is there a dialog asking to save or confirm closing? "
+                            "Return ONLY: {\"hasDialog\": true/false, \"buttonToClick\": \"No\" or \"Don't Save\" or \"Close\" or null}")
+                        if close_resp:
+                            try:
+                                dm = re.search(r'\{[\s\S]*?\}', close_resp)
+                                if dm:
+                                    dr = json.loads(dm.group())
+                                    if dr.get("hasDialog") and dr.get("buttonToClick"):
+                                        btn = dr["buttonToClick"]
+                                        print(f"  [menu-crawl]     Clicking '{btn}' on close dialog")
+                                        pyautogui.press("tab")
+                                        time.sleep(0.2)
+                                        pyautogui.press("enter")
+                                        time.sleep(0.5)
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+
+    def crawl_submenu(parent_path, current_depth, max_depth, reopen_epic_fn):
+        """Recursively crawl a submenu. Returns (children_list, item_count)."""
+        sub_img, sub_b64 = safe_screenshot()
+        if not sub_b64:
+            return [], 0
+
+        context = f"submenu of '{parent_path}'" if parent_path else "Epic menu"
+        items = vision_read_menu(sub_b64, context)
+        indent = "  " * (current_depth + 1)
+        print(f"  [menu-crawl]{indent}'{parent_path}' -> {len(items)} items")
+
+        children = []
+        count = 0
+
+        for si in items:
+            si_name = si.get("name", "?")
+            si_path = f"{parent_path} > {si_name}" if parent_path else si_name
+            has_sub = si.get("hasSubmenu", False)
+            is_activity = not has_sub
+
+            si_node = {
+                "name": si_name,
+                "controlType": "Activity" if is_activity else "MenuItem",
+                "path": si_path,
+                "children": []
+            }
+            count += 1
+
+            if has_sub and current_depth < max_depth:
+                print(f"  [menu-crawl]{indent}  -> Expanding '{si_name}'...")
+                si_x = si.get("x", 0)
+                si_y = si.get("y", 0)
+                click_x = window.left + int(si_x)
+                click_y = window.top + int(si_y)
+
+                pyautogui.click(click_x, click_y)
+                time.sleep(1.0)
+
+                sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
+                si_node["children"] = sub_children
+                count += sub_count
+
+                pyautogui.press("escape")
+                time.sleep(0.5)
+
+            elif is_activity and current_depth < max_depth:
+                si_x = si.get("x", 0)
+                si_y = si.get("y", 0)
+                click_x = window.left + int(si_x)
+                click_y = window.top + int(si_y)
+
+                print(f"  [menu-crawl]{indent}  -> Opening activity '{si_name}' to check for sub-items...")
+                pre_b64 = sub_b64
+                pyautogui.click(click_x, click_y)
+                time.sleep(1.5)
+
+                post_img, post_b64 = safe_screenshot()
+                if post_b64:
+                    check_prompt = (
+                        f"I just clicked '{si_name}' in Epic Hyperspace.\n"
+                        "Did this open an activity/workspace (the menu disappeared and a new screen appeared)?\n"
+                        "Or did it open a submenu with more options?\n"
+                        "Or did nothing change?\n\n"
+                        "Return ONLY: {\"result\": \"activity\" or \"submenu\" or \"nothing\", \"description\": \"what you see\"}"
+                    )
+                    check_resp = ask_claude(post_b64, check_prompt)
+                    result_type = "nothing"
+                    if check_resp:
+                        try:
+                            cm = re.search(r'\{[\s\S]*?\}', check_resp)
+                            if cm:
+                                cr = json.loads(cm.group())
+                                result_type = cr.get("result", "nothing")
+                        except Exception:
+                            pass
+
+                    if result_type == "submenu":
+                        si_node["controlType"] = "MenuItem"
+                        sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
+                        si_node["children"] = sub_children
+                        count += sub_count
+                        pyautogui.press("escape")
+                        time.sleep(0.5)
+                    elif result_type == "activity":
+                        si_node["controlType"] = "Activity"
+                        print(f"  [menu-crawl]{indent}  -> Activity '{si_name}' opened, closing...")
+                        pyautogui.hotkey("ctrl", "w")
+                        time.sleep(1.0)
+                        verify_img, verify_b64 = safe_screenshot()
+                        if verify_b64:
+                            v_resp = ask_claude(verify_b64,
+                                "Is there a save/close dialog on screen? Return ONLY: {\"hasDialog\": true/false}")
+                            if v_resp:
+                                try:
+                                    vm = re.search(r'\{[\s\S]*?\}', v_resp)
+                                    if vm:
+                                        vr = json.loads(vm.group())
+                                        if vr.get("hasDialog"):
+                                            pyautogui.press("n")
+                                            time.sleep(0.5)
+                                except Exception:
+                                    pass
+
+                        reopen_epic_fn()
+
+            children.append(si_node)
+
+        return children, count
+
     try:
         img, b64 = safe_screenshot()
         if not b64:
@@ -1101,12 +1304,16 @@ def execute_menu_crawl(cmd):
             post_result(command_id, "error", error=f"Could not find Epic button: {reason}")
             return
 
+        epic_abs_x = window.left + epic_loc["x"]
+        epic_abs_y = window.top + epic_loc["y"]
         print(f"  [menu-crawl] Found Epic button at ({epic_loc['x']}, {epic_loc['y']}): '{epic_loc.get('label', '?')}'")
 
-        abs_x = window.left + epic_loc["x"]
-        abs_y = window.top + epic_loc["y"]
-        pyautogui.click(abs_x, abs_y)
-        time.sleep(1.5)
+        def reopen_epic_menu():
+            """Re-open the Epic button menu."""
+            pyautogui.click(epic_abs_x, epic_abs_y)
+            time.sleep(1.5)
+
+        reopen_epic_menu()
 
         print(f"  [menu-crawl] Step 2: Reading top-level menu...")
         img, b64 = safe_screenshot()
@@ -1114,7 +1321,7 @@ def execute_menu_crawl(cmd):
             post_result(command_id, "error", error="Cannot screenshot after Epic button click")
             return
 
-        top_items = vision_read_menu(b64, "Epic button menu - top level categories")
+        top_items = vision_read_menu(b64, "Epic button menu - top level categories. These are the main sections like Patient Care, Lab, Pharmacy, Admin, etc.")
         print(f"  [menu-crawl] Found {len(top_items)} top-level items")
         for item in top_items:
             sub_flag = " [+submenu]" if item.get("hasSubmenu") else ""
@@ -1141,8 +1348,8 @@ def execute_menu_crawl(cmd):
             }
             crawled_count += 1
 
-            if depth >= 2 and has_submenu:
-                print(f"  [menu-crawl] Step 2.{i+1}: Expanding '{item_name}'...")
+            if has_submenu:
+                print(f"  [menu-crawl] === Category {i+1}/{len(top_items)}: '{item_name}' ===")
                 item_x = item.get("x", epic_loc["x"] + 50)
                 item_y = item.get("y", 0)
                 click_x = window.left + int(item_x)
@@ -1151,55 +1358,16 @@ def execute_menu_crawl(cmd):
                 pyautogui.click(click_x, click_y)
                 time.sleep(1.0)
 
-                sub_img, sub_b64 = safe_screenshot()
-                if sub_b64:
-                    sub_items = vision_read_menu(sub_b64, f"submenu of '{item_name}'")
-                    print(f"  [menu-crawl]   '{item_name}' -> {len(sub_items)} sub-items")
-
-                    for si in sub_items:
-                        sub_name = si.get("name", "?")
-                        sub_node = {
-                            "name": sub_name,
-                            "controlType": "MenuItem",
-                            "path": f"{item_name} > {sub_name}",
-                            "children": []
-                        }
-
-                        if depth >= 3 and si.get("hasSubmenu", False):
-                            print(f"  [menu-crawl]     Expanding '{sub_name}'...")
-                            si_x = si.get("x", item_x + 100)
-                            si_y = si.get("y", 0)
-                            si_click_x = window.left + int(si_x)
-                            si_click_y = window.top + int(si_y)
-
-                            pyautogui.click(si_click_x, si_click_y)
-                            time.sleep(0.8)
-
-                            deep_img, deep_b64 = safe_screenshot()
-                            if deep_b64:
-                                deep_items = vision_read_menu(deep_b64, f"submenu of '{item_name} > {sub_name}'")
-                                print(f"  [menu-crawl]       '{sub_name}' -> {len(deep_items)} items")
-                                for di in deep_items:
-                                    deep_name = di.get("name", "?")
-                                    sub_node["children"].append({
-                                        "name": deep_name,
-                                        "controlType": "MenuItem",
-                                        "path": f"{item_name} > {sub_name} > {deep_name}",
-                                        "children": []
-                                    })
-                                    crawled_count += 1
-
-                            pyautogui.press("escape")
-                            time.sleep(0.5)
-
-                        node["children"].append(sub_node)
-                        crawled_count += 1
+                sub_children, sub_count = crawl_submenu(item_name, 2, depth + 1, reopen_epic_menu)
+                node["children"] = sub_children
+                crawled_count += sub_count
 
                 pyautogui.press("escape")
-                time.sleep(0.5)
+                time.sleep(0.3)
+                pyautogui.press("escape")
+                time.sleep(0.3)
 
-                pyautogui.click(abs_x, abs_y)
-                time.sleep(1.0)
+                reopen_epic_menu()
 
             tree_children.append(node)
 
