@@ -510,6 +510,7 @@ def execute_click(cmd):
     b64 = img_to_base64(img)
 
     prompt = f"""Find the exact pixel coordinates of the UI element labeled "{target}" in this screenshot.
+{VISION_COORD_INSTRUCTION}
 Return ONLY a JSON object: {{"x": <number>, "y": <number>, "found": true}}
 If you cannot find it, return: {{"found": false, "reason": "why not found"}}
 Coordinates should be relative to the image."""
@@ -534,8 +535,7 @@ Coordinates should be relative to the image."""
         return
 
     abs_x, abs_y = vision_to_screen(window, result["x"], result["y"])
-    pyautogui.click(abs_x, abs_y)
-    time.sleep(1.0)
+    safe_click(abs_x, abs_y, pause_after=0.8, label=f"{target} (vision_click)")
 
     final_img = screenshot_window(window)
     final_b64 = img_to_base64(final_img)
@@ -716,9 +716,7 @@ def click_with_verification(window, img_x, img_y, item_name, max_retries=2):
     """Click at coordinates and verify it worked. If miss, retry with vision.
     Returns the screen state after click ('menu', 'activity', etc.)."""
     sx, sy = vision_to_screen(window, img_x, img_y)
-    print(f"    [click] '{item_name}' at img({img_x},{img_y}) -> screen({sx},{sy})")
-    pyautogui.click(sx, sy)
-    time.sleep(1.0)
+    safe_click(sx, sy, pause_after=0.8, label=f"{item_name} img({img_x},{img_y})")
 
     state = verify_click(window, item_name)
     if state == "same" and max_retries > 0:
@@ -727,9 +725,7 @@ def click_with_verification(window, img_x, img_y, item_name, max_retries=2):
         if coords:
             new_x, new_y = coords
             new_sx, new_sy = vision_to_screen(window, new_x, new_y)
-            print(f"    [click] Vision found '{item_name}' at ({new_x},{new_y}) -> screen({new_sx},{new_sy})")
-            pyautogui.click(new_sx, new_sy)
-            time.sleep(1.0)
+            safe_click(new_sx, new_sy, pause_after=0.8, label=f"{item_name} retry")
             state = verify_click(window, item_name)
         else:
             print(f"    [click] Vision could not find '{item_name}' on screen")
@@ -803,8 +799,7 @@ def execute_navigate_path(cmd):
                 adj_y = int(epic_btn_y * scale_y)
                 btn_sx, btn_sy = vision_to_screen(window, adj_x, adj_y)
                 print(f"  [step 0] Epic button: cached({epic_btn_x},{epic_btn_y}) -> adjusted({adj_x},{adj_y}) -> screen({btn_sx},{btn_sy})")
-                pyautogui.click(btn_sx, btn_sy)
-                time.sleep(1.5)
+                safe_click(btn_sx, btn_sy, pause_after=1.2, label="Epic button (cached)")
 
                 state = verify_click(window, "Epic button")
                 api_calls += 1
@@ -814,8 +809,7 @@ def execute_navigate_path(cmd):
                     api_calls += 1
                     if coords:
                         nav_sx, nav_sy = vision_to_screen(window, coords[0], coords[1])
-                        pyautogui.click(nav_sx, nav_sy)
-                        time.sleep(1.5)
+                        safe_click(nav_sx, nav_sy, pause_after=1.2, label="Epic button (vision retry)")
                     else:
                         post_result(command_id, "error", error="Cannot find Epic button after retry")
                         return
@@ -827,8 +821,7 @@ def execute_navigate_path(cmd):
                     post_result(command_id, "error", error="Cannot find Epic button")
                     return
                 nav_sx, nav_sy = vision_to_screen(window, coords[0], coords[1])
-                pyautogui.click(nav_sx, nav_sy)
-                time.sleep(1.5)
+                safe_click(nav_sx, nav_sy, pause_after=1.2, label="Epic button (vision)")
 
             for i, node in enumerate(found_nodes):
                 node_name = node.get("name", "?")
@@ -841,8 +834,7 @@ def execute_navigate_path(cmd):
                 if confidence == "high":
                     sx, sy = vision_to_screen(window, adj_x, adj_y)
                     print(f"  [step {i+1}/{len(steps)}] Cached click: '{node_name}' ({adj_x},{adj_y}) -> ({sx},{sy})")
-                    pyautogui.click(sx, sy)
-                    time.sleep(1.0)
+                    safe_click(sx, sy, pause_after=0.8, label=f"{node_name} (cached)")
 
                     if not is_last:
                         state = verify_click(window, node_name, f"step {i+1}")
@@ -853,8 +845,7 @@ def execute_navigate_path(cmd):
                             api_calls += 1
                             if coords:
                                 vsx, vsy = vision_to_screen(window, coords[0], coords[1])
-                                pyautogui.click(vsx, vsy)
-                                time.sleep(1.0)
+                                safe_click(vsx, vsy, pause_after=0.8, label=f"{node_name} (vision fallback)")
                             else:
                                 post_result(command_id, "error", error=f"Cannot find '{node_name}' after retry")
                                 return
@@ -888,8 +879,7 @@ def execute_navigate_path(cmd):
                 post_result(command_id, "error", error="Vision could not find Epic button")
                 return
             nav_x, nav_y = vision_to_screen(window, coords[0], coords[1])
-            pyautogui.click(nav_x, nav_y)
-            time.sleep(1.5)
+            safe_click(nav_x, nav_y, pause_after=1.2, label="Epic button (vision full)")
 
             for i, step in enumerate(steps):
                 print(f"  [step {i+1}/{len(steps)}] Vision-click: {step}")
@@ -897,8 +887,7 @@ def execute_navigate_path(cmd):
                 api_calls += 1
                 if vis_coords:
                     sx, sy = vision_to_screen(window, vis_coords[0], vis_coords[1])
-                    pyautogui.click(sx, sy)
-                    time.sleep(1.0)
+                    safe_click(sx, sy, pause_after=0.8, label=f"{step} (vision)")
 
                     if i < len(steps) - 1:
                         state = verify_click(window, step, f"step {i+1}")
@@ -909,8 +898,7 @@ def execute_navigate_path(cmd):
                             api_calls += 1
                             if vis_coords2:
                                 sx2, sy2 = vision_to_screen(window, vis_coords2[0], vis_coords2[1])
-                                pyautogui.click(sx2, sy2)
-                                time.sleep(1.0)
+                                safe_click(sx2, sy2, pause_after=0.8, label=f"{step} (vision retry)")
                             else:
                                 post_result(command_id, "error", error=f"Cannot find '{step}' after retry")
                                 return
@@ -1404,6 +1392,7 @@ def execute_menu_crawl(cmd):
             "- Do NOT confuse it with any menu items, search bars, or dashboard items below\n"
             "- Do NOT click on any text in the main workspace area\n"
             "- The button is typically at the very top of the window, y coordinate should be small (under 100 pixels from top)\n\n"
+            f"{VISION_COORD_INSTRUCTION}\n"
             "Return ONLY a JSON object: {\"x\": <number>, \"y\": <number>, \"found\": true, \"label\": \"text on button\"}\n"
             "Coordinates should be pixel positions relative to the image.\n"
             "If you cannot find it, return: {\"found\": false, \"reason\": \"why\"}"
@@ -1438,7 +1427,7 @@ def execute_menu_crawl(cmd):
                 "- If NO submenu panel is visible (the click may have opened an activity instead), return an empty array [].\n\n"
                 "For EACH submenu item, provide:\n"
                 "- name: the text label\n"
-                "- x, y: pixel coordinates relative to the image\n"
+                f"- x, y: pixel coordinates of the CENTER of the text label (not edges/icons)\n"
                 "- hasSubmenu: true if it has a right-arrow (>) indicating another level\n\n"
                 "Return ONLY a JSON array:\n"
                 "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false}]\n\n"
@@ -1456,7 +1445,7 @@ def execute_menu_crawl(cmd):
                 "- Mark the permanent navigation categories with \"section\": \"nav\".\n"
                 "- Items with a right-arrow (>) or triangle indicator have submenus.\n"
                 "- Items without arrows are terminal activities.\n\n"
-                "For EACH item, provide its name and approximate coordinates (pixels from top-left of image).\n\n"
+                "For EACH item, provide its name and the CENTER coordinates of its text label (pixels from top-left of image).\n\n"
                 "Return ONLY a JSON array:\n"
                 "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false, \"section\": \"recent\" or \"nav\" or \"other\"}]\n\n"
                 "Be thorough - list EVERY visible menu item.\n"
@@ -1620,7 +1609,7 @@ def execute_menu_crawl(cmd):
                     print(f"  [menu-crawl]{indent}  -> Expanding '{si_name}'...")
                     click_x, click_y = vision_to_screen(window, si_x, si_y)
 
-                    pyautogui.click(click_x, click_y)
+                    safe_click(click_x, click_y, pause_after=0.8, label=f"{si_name} (submenu expand)")
                     time.sleep(1.0)
 
                     state, _ = check_screen_state(f"after expanding {si_name}")
@@ -1677,8 +1666,7 @@ def execute_menu_crawl(cmd):
         def reopen_epic_menu():
             """Re-open the Epic button menu with verification."""
             for attempt in range(3):
-                pyautogui.click(epic_abs_x, epic_abs_y)
-                time.sleep(1.5)
+                safe_click(epic_abs_x, epic_abs_y, pause_after=1.2, label="Epic button (reopen)")
                 state, _ = check_screen_state("after clicking Epic button")
                 if state == "menu":
                     print(f"  [menu] Epic menu opened successfully")
@@ -1899,8 +1887,7 @@ def execute_menu_crawl(cmd):
                 node["imgX"] = cat_img_x
                 node["imgY"] = cat_img_y
 
-                pyautogui.click(click_x, click_y)
-                time.sleep(1.0)
+                safe_click(click_x, click_y, pause_after=0.8, label=f"{cat_name} (category)")
 
                 state_after_click, _ = check_screen_state(f"after clicking category {cat_name}")
                 if state_after_click == "activity":
@@ -2045,8 +2032,7 @@ def execute_launch(cmd):
         return
 
     ex, ey = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
-    pyautogui.click(ex, ey)
-    time.sleep(1.0)
+    safe_click(ex, ey, pause_after=0.8, label="Epic button (launch)")
 
     search_img = screenshot_window(window)
     search_b64 = img_to_base64(search_img)
@@ -2069,8 +2055,7 @@ def execute_launch(cmd):
         return
 
     sx, sy = vision_to_screen(window, search_loc["x"], search_loc["y"])
-    pyautogui.click(sx, sy)
-    time.sleep(0.5)
+    safe_click(sx, sy, pause_after=0.3, label="search bar")
 
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.1)
@@ -2131,8 +2116,7 @@ def execute_patient(cmd):
 
     if loc and loc.get("found"):
         px, py = vision_to_screen(window, loc["x"], loc["y"])
-        pyautogui.click(px, py)
-        time.sleep(1.0)
+        safe_click(px, py, pause_after=0.8, label="patient search")
 
         pyautogui.typewrite(patient_name, interval=0.03)
         time.sleep(0.5)
