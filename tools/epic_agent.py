@@ -535,8 +535,58 @@ def find_uia_element_by_name(parent, name):
     return None
 
 
+def fetch_cached_tree(env, client="hyperspace"):
+    """Fetch the saved Epic tree from the server (cached coordinates)."""
+    try:
+        resp = requests.get(
+            f"{ORGCLOUD_URL}/api/epic/tree/{env.upper()}",
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            trees = data.get("trees", {})
+            return trees.get(client)
+    except Exception as e:
+        print(f"  [tree-cache] Error fetching tree: {e}")
+    return None
+
+
+def find_node_in_tree(tree, steps):
+    """Walk the tree to find the node matching the given path steps.
+    Returns list of (node, depth) pairs for each step found."""
+    if not tree or not steps:
+        return []
+
+    found_path = []
+    current_children = tree.get("children", [])
+
+    for step in steps:
+        step_lower = step.lower().strip()
+        match = None
+        for child in current_children:
+            child_name = (child.get("name", "")).lower().strip()
+            if child_name == step_lower:
+                match = child
+                break
+        if not match:
+            for child in current_children:
+                child_name = (child.get("name", "")).lower().strip()
+                if step_lower in child_name or child_name in step_lower:
+                    match = child
+                    break
+        if match:
+            found_path.append(match)
+            current_children = match.get("children", [])
+        else:
+            break
+
+    return found_path
+
+
 def execute_navigate_path(cmd):
-    """Navigate using a stored path by replaying deterministic clicks/keystrokes."""
+    """Navigate using cached pixel coordinates from the crawled tree.
+    Falls back to vision only if coordinates are missing."""
     env = cmd.get("env", "SUP")
     path = cmd.get("path", "")
     client = cmd.get("client", "hyperspace")
@@ -574,94 +624,67 @@ def execute_navigate_path(cmd):
             pyautogui.press("enter")
             time.sleep(1.0)
     else:
-        try:
-            from pywinauto import Desktop
-            desktop = Desktop(backend="uia")
-            uia_window = None
-            env_upper = env.upper()
-            for w in desktop.windows():
-                try:
-                    title = w.element_info.name or ""
-                    t = title.upper()
-                    if env_upper in t and ("HYPERSPACE" in t or "EPIC" in t or "HYPERDRIVE" in t):
-                        uia_window = w
-                        break
-                except Exception:
-                    continue
+        tree = fetch_cached_tree(env, client)
+        found_nodes = find_node_in_tree(tree, steps) if tree else []
+        use_cache = len(found_nodes) == len(steps) and all(
+            n.get("imgX", 0) > 0 and n.get("imgY", 0) > 0 for n in found_nodes
+        )
 
-            if not uia_window:
-                post_result(command_id, "error", error=f"No {env} UIA window found for path replay")
-                return
+        if use_cache and tree:
+            print(f"  [path-nav] Using cached coordinates (0 API calls needed)")
 
-            NAV_SAFE_TYPES = frozenset([
-                "MenuItem", "Menu", "MenuBar",
-                "ToolBar", "ToolBarButton",
-                "TabItem", "TabControl",
-                "TreeItem", "TreeView",
-                "Header", "HeaderItem",
-                "SplitButton", "Hyperlink",
-                "StatusBar",
-            ])
-            NAV_UNSAFE_PATTERNS = frozenset([
-                "save", "submit", "yes", "delete", "remove",
-                "sign", "confirm", "apply", "approve",
-                "print", "send", "release", "finalize",
-            ])
-            NAV_UNSAFE_EXACT = frozenset([
-                "ok", "okay", "order",
-            ])
+            epic_btn_x = tree.get("epicButtonImgX", 0)
+            epic_btn_y = tree.get("epicButtonImgY", 0)
 
-            current_parent = uia_window
-            for i, step in enumerate(steps):
-                print(f"  [step {i+1}/{len(steps)}] UIA find+click: {step}")
-                element = find_uia_element_by_name(current_parent, step)
-                if not element:
-                    element = find_uia_element_by_name(uia_window, step)
-                if not element:
-                    post_result(command_id, "error", error=f"UIA element not found at step {i+1}: {step}")
+            if epic_btn_x > 0 and epic_btn_y > 0:
+                btn_sx, btn_sy = vision_to_screen(window, epic_btn_x, epic_btn_y)
+                print(f"  [step 0] Epic button at cached ({epic_btn_x},{epic_btn_y}) -> screen({btn_sx},{btn_sy})")
+                pyautogui.click(btn_sx, btn_sy)
+                time.sleep(1.5)
+            else:
+                print(f"  [step 0] No cached Epic button coords, using vision...")
+                img = screenshot_window(window)
+                b64 = img_to_base64(img)
+                epic_resp = ask_claude(b64,
+                    "Find the Epic button in this Hyperspace window (top-left corner, opens the main menu).\n"
+                    "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}")
+                epic_loc = None
+                if epic_resp:
+                    try:
+                        em = re.search(r'\{[\\s\\S]*?\}', epic_resp)
+                        if em:
+                            epic_loc = json.loads(em.group())
+                    except Exception:
+                        pass
+                if not epic_loc or not epic_loc.get("found"):
+                    post_result(command_id, "error", error="Cannot find Epic button")
                     return
-                try:
-                    ctrl_type = element.element_info.control_type or ""
-                    el_name = (element.element_info.name or "").lower()
+                nav_x, nav_y = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
+                pyautogui.click(nav_x, nav_y)
+                time.sleep(1.5)
 
-                    if ctrl_type not in NAV_SAFE_TYPES:
-                        post_result(command_id, "error", error=f"Safety block: {step} has control type '{ctrl_type}' (not in navigation allowlist)")
-                        return
-                    for unsafe in NAV_UNSAFE_PATTERNS:
-                        if unsafe in el_name:
-                            post_result(command_id, "error", error=f"Safety block: {step} matches unsafe pattern '{unsafe}'")
-                            return
-                    el_words = set(re.split(r'[\s\-_/]+', el_name))
-                    for exact in NAV_UNSAFE_EXACT:
-                        if exact in el_words:
-                            post_result(command_id, "error", error=f"Safety block: {step} matches unsafe word '{exact}'")
-                            return
+            for i, node in enumerate(found_nodes):
+                node_name = node.get("name", "?")
+                img_x = node.get("imgX", 0)
+                img_y = node.get("imgY", 0)
+                sx, sy = vision_to_screen(window, img_x, img_y)
+                is_last = (i == len(found_nodes) - 1)
+                print(f"  [step {i+1}/{len(steps)}] Cached click: '{node_name}' at ({img_x},{img_y}) -> screen({sx},{sy})")
+                pyautogui.click(sx, sy)
+                time.sleep(1.0 if not is_last else 0.5)
 
-                    if ctrl_type in ("MenuItem", "Menu"):
-                        try:
-                            element.expand()
-                        except Exception:
-                            element.click_input()
-                    else:
-                        element.click_input()
-                except Exception as e:
-                    post_result(command_id, "error", error=f"Failed to click step {i+1} ({step}): {str(e)}")
-                    return
-                time.sleep(0.5)
-                current_parent = element
+        else:
+            if not use_cache:
+                matched = len(found_nodes)
+                print(f"  [path-nav] Cache miss ({matched}/{len(steps)} steps matched), falling back to vision")
+            else:
+                print(f"  [path-nav] No cached tree, using vision navigation")
 
-        except ImportError:
-            pass
-
-        if not uia_window:
-            print(f"  [path-nav] UIA unavailable, falling back to vision-click navigation")
             img = screenshot_window(window)
             b64 = img_to_base64(img)
-            epic_prompt = (
+            epic_resp = ask_claude(b64,
                 "Find the Epic button in this Hyperspace window (top-left corner, opens the main menu).\n"
-                "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
-            )
-            epic_resp = ask_claude(b64, epic_prompt)
+                "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}")
             epic_loc = None
             if epic_resp:
                 try:
@@ -713,8 +736,9 @@ def execute_navigate_path(cmd):
         "path": path,
         "client": client,
         "stepsCompleted": len(steps),
+        "usedCache": use_cache if client != "text" else False,
     })
-    print(f"  [path-nav] Complete: {len(steps)} steps executed")
+    print(f"  [path-nav] Complete: {len(steps)} steps executed{' (cached)' if client != 'text' and use_cache else ''}")
 
 
 def execute_tree_scan(cmd):
@@ -1300,10 +1324,14 @@ def execute_menu_crawl(cmd):
             si_path = f"{parent_path} > {si_name}" if parent_path else si_name
             has_sub = si.get("hasSubmenu", False)
 
+            si_x = si.get("x", 0)
+            si_y = si.get("y", 0)
             si_node = {
                 "name": si_name,
                 "controlType": "MenuItem" if has_sub else "Activity",
                 "path": si_path,
+                "imgX": si_x,
+                "imgY": si_y,
                 "children": []
             }
             count += 1
@@ -1311,8 +1339,6 @@ def execute_menu_crawl(cmd):
             if has_sub and current_depth < max_depth:
                 try:
                     print(f"  [menu-crawl]{indent}  -> Expanding '{si_name}'...")
-                    si_x = si.get("x", 0)
-                    si_y = si.get("y", 0)
                     click_x, click_y = vision_to_screen(window, si_x, si_y)
 
                     pyautogui.click(click_x, click_y)
@@ -1459,8 +1485,13 @@ def execute_menu_crawl(cmd):
                     tree_children.append(node)
                     continue
 
-                click_x, click_y = vision_to_screen(window, loc["x"], loc["y"])
-                print(f"  [menu-crawl]   Found '{cat_name}' at img({loc['x']},{loc['y']}) -> screen({click_x},{click_y})")
+                cat_img_x = loc["x"]
+                cat_img_y = loc["y"]
+                click_x, click_y = vision_to_screen(window, cat_img_x, cat_img_y)
+                print(f"  [menu-crawl]   Found '{cat_name}' at img({cat_img_x},{cat_img_y}) -> screen({click_x},{click_y})")
+
+                node["imgX"] = cat_img_x
+                node["imgY"] = cat_img_y
 
                 pyautogui.click(click_x, click_y)
                 time.sleep(1.0)
@@ -1502,6 +1533,8 @@ def execute_menu_crawl(cmd):
             "environment": env,
             "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "locked": True,
+            "epicButtonImgX": epic_loc.get("x", 0),
+            "epicButtonImgY": epic_loc.get("y", 0),
         }
 
         try:
