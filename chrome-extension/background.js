@@ -272,6 +272,100 @@ async function executeJob(job) {
         });
       }
 
+      const citrixApiEnumerate = options?.citrixApiEnumerate || false;
+      if (citrixApiEnumerate) {
+        console.log(`[bridge] Citrix API enumerate resources on ${url}`);
+        const enumResults = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: async () => {
+            const debug = { method: "api-enumerate", steps: [], error: null };
+            try {
+              const csrfToken = document.cookie.split(";").map(c => c.trim()).find(c => c.startsWith("CsrfToken=") || c.startsWith("CtxsAuthId="));
+              const csrf = csrfToken ? csrfToken.split("=").slice(1).join("=") : "";
+              debug.steps.push("csrf:" + (csrf ? "found" : "missing"));
+
+              const metaEl = document.querySelector("meta[name='_ctxstokenname']");
+              const metaTokenName = metaEl ? metaEl.getAttribute("content") : null;
+              const metaValEl = metaTokenName ? document.querySelector("meta[name='" + metaTokenName + "']") : null;
+              const metaCsrf = metaValEl ? metaValEl.getAttribute("content") : null;
+
+              const headers = { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" };
+              if (csrf) headers["Csrf-Token"] = csrf;
+              if (metaCsrf && metaTokenName) headers[metaTokenName] = metaCsrf;
+              headers["X-Citrix-IsUsingHTTPS"] = "Yes";
+
+              const baseUrl = location.origin;
+              let configPaths = [];
+              try {
+                if (window.CTXS && window.CTXS.Store) {
+                  const storeUrl = window.CTXS.Store.StoreUrl || window.CTXS.Store.storeUrl || "";
+                  if (storeUrl) configPaths.push(storeUrl.replace(/\/$/, "") + "/resources/v2");
+                }
+                if (window.CTXS && window.CTXS.Configuration) {
+                  const webUrl = window.CTXS.Configuration.webUIUrl || window.CTXS.Configuration.storeUrl || "";
+                  if (webUrl) configPaths.push(webUrl.replace(/\/$/, "") + "/Resources/List");
+                }
+              } catch (e) {}
+
+              try {
+                const scripts = document.querySelectorAll("script");
+                for (const sc of scripts) {
+                  const src = sc.src || "";
+                  const match = src.match(/\/(Citrix\/[^\/]+Web)\//i) || src.match(/\/(Citrix\/[^\/]+)\//i);
+                  if (match) {
+                    configPaths.push("/" + match[1] + "/Resources/List");
+                    break;
+                  }
+                }
+              } catch (e) {}
+
+              const storePaths = [...new Set([
+                ...configPaths,
+                "/Citrix/CWPSFWeb/Resources/List",
+                "/Citrix/StoreWeb/Resources/List",
+                "/Citrix/Store/resources/v2",
+                "/Citrix/PNAgent/Resources/List",
+                "/Citrix/CWPWeb/Resources/List",
+                "/Citrix/cwpWeb/Resources/List",
+              ])];
+
+              for (const p of storePaths) {
+                try {
+                  debug.steps.push("try:" + p);
+                  const r = await fetch(baseUrl + p, { method: "POST", headers, credentials: "include", body: "format=json&resourceDetails=Full" });
+                  if (r.ok) {
+                    const data = await r.json();
+                    const list = data.resources || data.Resources || (Array.isArray(data) ? data : null);
+                    if (list && list.length > 0) {
+                      debug.steps.push("found:" + list.length);
+                      return { resources: list.map(r => ({ name: r.name || r.Name || r.title || "", launchurl: r.launchurl || r.LaunchUrl || "" })), debug };
+                    }
+                  }
+                } catch (e) {
+                  debug.steps.push("err:" + (e.message || "").substring(0, 40));
+                }
+              }
+              debug.error = "No StoreFront resources found";
+              return { resources: [], debug };
+            } catch (e) {
+              debug.error = e.message || String(e);
+              return { resources: [], debug };
+            }
+          },
+        });
+
+        const enumData = enumResults?.[0]?.result || { resources: [], debug: {} };
+        console.log(`[bridge] Citrix enumerate: ${enumData.resources?.length || 0} resources found`);
+        if (!tabReused) {
+          try { await chrome.tabs.remove(tab.id); } catch {}
+        }
+        return {
+          status: 200,
+          body: enumData,
+          url: tab.url || url,
+        };
+      }
+
       const citrixApiLaunch = options?.citrixApiLaunch || null;
       if (citrixApiLaunch) {
         console.log(`[bridge] Citrix API launch for "${citrixApiLaunch}"`);
