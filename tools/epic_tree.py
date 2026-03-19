@@ -48,9 +48,13 @@ SAFE_CONTROL_TYPES = frozenset([
 ])
 
 UNSAFE_PATTERNS = frozenset([
-    "save", "submit", "ok", "yes", "delete", "remove",
-    "sign", "order", "confirm", "apply", "approve",
+    "save", "submit", "yes", "delete", "remove",
+    "sign", "confirm", "apply", "approve",
     "print", "send", "release", "finalize",
+])
+
+UNSAFE_EXACT = frozenset([
+    "ok", "okay", "order",
 ])
 
 SAFE_CLOSE_PATTERNS = frozenset([
@@ -84,6 +88,11 @@ def is_safe_element(element):
 
     for pattern in UNSAFE_PATTERNS:
         if pattern in name:
+            return False
+
+    words = set(re.split(r'[\s\-_/]+', name))
+    for exact in UNSAFE_EXACT:
+        if exact in words:
             return False
 
     return True

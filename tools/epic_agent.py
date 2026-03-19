@@ -548,10 +548,13 @@ def execute_navigate_path(cmd):
                 "SplitButton", "Hyperlink",
                 "StatusBar",
             ])
-            NAV_UNSAFE_NAMES = frozenset([
-                "save", "submit", "ok", "yes", "delete", "remove",
-                "sign", "order", "confirm", "apply", "approve",
+            NAV_UNSAFE_PATTERNS = frozenset([
+                "save", "submit", "yes", "delete", "remove",
+                "sign", "confirm", "apply", "approve",
                 "print", "send", "release", "finalize",
+            ])
+            NAV_UNSAFE_EXACT = frozenset([
+                "ok", "okay", "order",
             ])
 
             current_parent = uia_window
@@ -570,9 +573,14 @@ def execute_navigate_path(cmd):
                     if ctrl_type not in NAV_SAFE_TYPES:
                         post_result(command_id, "error", error=f"Safety block: {step} has control type '{ctrl_type}' (not in navigation allowlist)")
                         return
-                    for unsafe in NAV_UNSAFE_NAMES:
+                    for unsafe in NAV_UNSAFE_PATTERNS:
                         if unsafe in el_name:
                             post_result(command_id, "error", error=f"Safety block: {step} matches unsafe pattern '{unsafe}'")
+                            return
+                    el_words = set(re.split(r'[\s\-_/]+', el_name))
+                    for exact in NAV_UNSAFE_EXACT:
+                        if exact in el_words:
+                            post_result(command_id, "error", error=f"Safety block: {step} matches unsafe word '{exact}'")
                             return
 
                     if ctrl_type in ("MenuItem", "Menu"):
