@@ -819,6 +819,35 @@ export async function registerRoutes(
     res.json({ environment: env, trees });
   });
 
+  app.get("/api/epic/autocomplete", async (req, res) => {
+    const q = ((req.query.q as string) || "").toLowerCase().trim();
+    if (!q || q.length < 2) return res.json({ results: [] });
+
+    function searchTree(node: any, results: any[], env: string, client: string) {
+      for (const child of (node.children || [])) {
+        const name = (child.name || "").toLowerCase();
+        const path = child.path || child.name || "";
+        if (name.includes(q) || path.toLowerCase().includes(q)) {
+          results.push({ name: child.name, path, env, client, controlType: child.controlType || "" });
+        }
+        searchTree(child, results, env, client);
+      }
+    }
+
+    const results: any[] = [];
+    for (const env of ["SUP", "POC", "TST"]) {
+      for (const client of ["hyperspace", "text"]) {
+        const key = `epic_tree_${env.toLowerCase()}_${client}`;
+        const cfg = await storage.getAgentConfig(key);
+        if (cfg?.value) {
+          try { searchTree(JSON.parse(cfg.value), results, env, client); } catch {}
+        }
+      }
+    }
+
+    res.json({ results: results.slice(0, 20), total: results.length });
+  });
+
   app.get("/api/epic/activities/:env", async (req, res) => {
     const env = req.params.env.toUpperCase();
     const key = `epic_activities_${env.toLowerCase()}`;

@@ -3406,9 +3406,17 @@ ${fullHtml}`;
 
       let resolved: { path: string; client: string; name: string } | null = null;
 
-      if (target.includes(">")) {
-        const isTextPath = /^\d+\s/.test(target.split(">")[0].trim());
-        resolved = { path: target, client: isTextPath ? "text" : "hyperspace", name: target };
+      const aliasCfg = await storage.getAgentConfig("epic_aliases");
+      let epicAliases: Record<string, string> = {};
+      if (aliasCfg?.value) {
+        try { epicAliases = JSON.parse(aliasCfg.value); } catch {}
+      }
+      const resolvedAlias = epicAliases[target.toLowerCase()];
+      const effectiveTarget = resolvedAlias || target;
+
+      if (effectiveTarget.includes(">")) {
+        const isTextPath = /^\d+\s/.test(effectiveTarget.split(">")[0].trim());
+        resolved = { path: effectiveTarget, client: isTextPath ? "text" : "hyperspace", name: resolvedAlias ? `${target} -> ${effectiveTarget}` : effectiveTarget };
       } else {
         for (const client of ["hyperspace", "text"]) {
           const key = `epic_tree_${env.toLowerCase()}_${client}`;
@@ -3702,28 +3710,244 @@ ${fullHtml}`;
       return ok(`Workflow "${name}" deleted.`);
     }
 
+    if (args[0] === "launch") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const activity = args.slice(2).join(" ");
+      if (!activity) return fail("[epic] Usage: epic launch SUP Results Review");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "launch", env, activity }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Launching '${activity}' via search bar in ${env}${nl}Command ID: ${data.commandId}${nl}The agent will click Epic button, type in search, and open the activity.`);
+        return fail(`[epic] Failed to send launch command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "patient") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const patient = args.slice(2).join(" ");
+      if (!patient) return fail("[epic] Usage: epic patient SUP Smith, John");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "patient", env, patient }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Patient search sent: '${patient}' in ${env}${nl}Command ID: ${data.commandId}${nl}The agent will open patient lookup and search.`);
+        return fail(`[epic] Failed to send patient command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "read") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const focus = args.slice(2).join(" ");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "read_screen", env, focus }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) {
+          const focusNote = focus ? ` (focus: ${focus})` : "";
+          return ok(`Screen read requested for ${env}${focusNote}${nl}Command ID: ${data.commandId}${nl}The agent will screenshot and extract structured data from the current screen.`);
+        }
+        return fail(`[epic] Failed to send read command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "alias") {
+      if (args[1] === "set" || (args[1] && args[1] !== "list" && args[1] !== "rm")) {
+        const aliasName = args[1] === "set" ? args[2] : args[1];
+        const aliasPath = args[1] === "set" ? args.slice(3).join(" ") : args.slice(2).join(" ");
+        if (!aliasName || !aliasPath) return fail("[epic] Usage: epic alias <name> <path>${nl}  Example: epic alias lr Lab > Results Review");
+        const cfg = await storage.getAgentConfig("epic_aliases");
+        let aliases: Record<string, string> = {};
+        if (cfg?.value) {
+          try { aliases = JSON.parse(cfg.value); } catch {}
+        }
+        aliases[aliasName.toLowerCase()] = aliasPath;
+        await storage.setAgentConfig("epic_aliases", JSON.stringify(aliases), "epic");
+        return ok(`Alias saved: '${aliasName}' -> '${aliasPath}'${nl}Use: epic go SUP ${aliasName}`);
+      }
+      if (args[1] === "rm" || args[1] === "delete") {
+        const aliasName = args[2];
+        if (!aliasName) return fail("[epic] Usage: epic alias rm <name>");
+        const cfg = await storage.getAgentConfig("epic_aliases");
+        let aliases: Record<string, string> = {};
+        if (cfg?.value) {
+          try { aliases = JSON.parse(cfg.value); } catch {}
+        }
+        if (aliases[aliasName.toLowerCase()]) {
+          delete aliases[aliasName.toLowerCase()];
+          await storage.setAgentConfig("epic_aliases", JSON.stringify(aliases), "epic");
+          return ok(`Alias '${aliasName}' deleted.`);
+        }
+        return fail(`[epic] Alias '${aliasName}' not found.`);
+      }
+      const cfg = await storage.getAgentConfig("epic_aliases");
+      let aliases: Record<string, string> = {};
+      if (cfg?.value) {
+        try { aliases = JSON.parse(cfg.value); } catch {}
+      }
+      const keys = Object.keys(aliases);
+      if (keys.length === 0) return ok(`No Epic aliases defined.${nl}Set one: epic alias lr Lab > Results Review`);
+      const lines = ["=== EPIC ALIASES ===", ""];
+      for (const k of keys) {
+        lines.push(`  ${k.padEnd(15)} -> ${aliases[k]}`);
+      }
+      lines.push("", "Use: epic go SUP <alias>");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "batch" || args[0] === "run") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const recipeArg = args.slice(2).join(" ");
+      if (!recipeArg) return fail(`[epic] Usage: epic run SUP <recipe_name>${nl}Recipes chain multiple commands. Create with: recipe save <name>${nl}Or provide inline JSON steps.`);
+
+      const recipeCfg = await storage.getAgentConfig(`epic_recipe_${recipeArg.toLowerCase()}`);
+      let steps: any[] = [];
+      if (recipeCfg?.value) {
+        try { steps = JSON.parse(recipeCfg.value); } catch {}
+      }
+
+      if (steps.length === 0) {
+        try {
+          steps = JSON.parse(recipeArg);
+        } catch {
+          return fail(`[epic] Recipe '${recipeArg}' not found. List recipes: epic recipes`);
+        }
+      }
+
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "batch", env, steps }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Batch execution started: ${steps.length} steps in ${env}${nl}Command ID: ${data.commandId}`);
+        return fail(`[epic] Failed to send batch command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "recipe") {
+      if (args[1] === "save") {
+        const name = args[2];
+        const stepsJson = args.slice(3).join(" ");
+        if (!name || !stepsJson) return fail(`[epic] Usage: epic recipe save <name> <JSON steps array>${nl}Example steps: [{"type":"launch","activity":"Results Review"},{"type":"wait","seconds":2},{"type":"read_screen"}]`);
+        try {
+          const steps = JSON.parse(stepsJson);
+          await storage.setAgentConfig(`epic_recipe_${name.toLowerCase()}`, JSON.stringify(steps), "epic");
+          return ok(`Recipe '${name}' saved with ${steps.length} steps.${nl}Run with: epic run SUP ${name}`);
+        } catch {
+          return fail(`[epic] Invalid JSON for recipe steps.`);
+        }
+      }
+      if (args[1] === "delete" || args[1] === "rm") {
+        const name = args[2];
+        if (!name) return fail("[epic] Usage: epic recipe delete <name>");
+        await storage.deleteAgentConfig(`epic_recipe_${name.toLowerCase()}`);
+        return ok(`Recipe '${name}' deleted.`);
+      }
+      const configs = await storage.getAgentConfigs();
+      const recipes = configs.filter((c: any) => c.key.startsWith("epic_recipe_"));
+      if (recipes.length === 0) return ok(`No recipes saved.${nl}Create one: epic recipe save <name> <JSON steps>`);
+      const lines = ["=== EPIC RECIPES ===", ""];
+      for (const r of recipes) {
+        const rName = r.key.replace("epic_recipe_", "");
+        let stepCount = 0;
+        try { stepCount = JSON.parse(r.value).length; } catch {}
+        lines.push(`  ${rName.padEnd(20)} (${stepCount} steps)`);
+      }
+      lines.push("", "Run with: epic run SUP <recipe_name>");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "recipes") {
+      const configs = await storage.getAgentConfigs();
+      const recipes = configs.filter((c: any) => c.key.startsWith("epic_recipe_"));
+      if (recipes.length === 0) return ok(`No recipes saved.${nl}Create one: epic recipe save <name> <JSON steps>`);
+      const lines = ["=== EPIC RECIPES ===", ""];
+      for (const r of recipes) {
+        const rName = r.key.replace("epic_recipe_", "");
+        let stepCount = 0;
+        try { stepCount = JSON.parse(r.value).length; } catch {}
+        lines.push(`  ${rName.padEnd(20)} (${stepCount} steps)`);
+      }
+      lines.push("", "Run with: epic run SUP <recipe_name>");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "shortcuts") {
+      const env = (args[1] || "SUP").toUpperCase();
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "shortcuts", env }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Keyboard shortcut scan started for ${env}${nl}Command ID: ${data.commandId}${nl}The agent will identify visible and known shortcuts.`);
+        return fail(`[epic] Failed to send shortcuts command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
     return ok([
       "Epic commands:",
-      "  epic activities <env>     - Show cataloged activities",
-      "  epic tree <env>           - Show full navigation tree",
-      "  epic tree --refresh <env> - Re-scan tree via desktop agent",
-      "  epic go <env> <path>      - Navigate using stored path",
+      "",
+      "  NAVIGATION",
+      "  epic go <env> <path>      - Navigate using stored path or alias",
+      "  epic launch <env> <name>  - Open activity via search bar (fastest)",
       "  epic search <query>       - Search across all activities",
-      "  epic mf <masterfile> [item] - Text masterfile lookup",
-      "  epic navigate <env> <target> - Navigate Hyperspace (vision)",
+      "  epic patient <env> <name> - Search for a patient",
+      "",
+      "  SCREEN",
       "  epic screenshot <env>     - Capture current screen",
+      "  epic read <env> [focus]   - Extract structured data from screen",
       "  epic click <env> <el>     - Click an element by name",
-      "  epic status               - Desktop agent status",
-      "  epic clear <env>          - Clear activities",
-      "  epic scan                 - One-time activity scan guide",
+      "",
+      "  DISCOVERY",
       "  epic menu-crawl [env]     - Auto-crawl all Epic menus (vision)",
-      "  epic setup                - Desktop agent setup guide",
+      "  epic tree <env>           - Show full navigation tree",
+      "  epic activities <env>     - Show cataloged activities",
+      "  epic shortcuts <env>      - Discover keyboard shortcuts",
+      "  epic scan                 - One-time activity scan guide",
+      "",
+      "  ALIASES & RECIPES",
+      "  epic alias <name> <path>  - Create shortcut alias",
+      "  epic alias                - List all aliases",
+      "  epic alias rm <name>      - Delete an alias",
+      "  epic recipe save <n> <json> - Save a multi-step recipe",
+      "  epic recipes              - List saved recipes",
+      "  epic run <env> <recipe>   - Execute a recipe",
+      "",
+      "  WORKFLOWS",
       "  epic record start [env]   - Start recording workflow",
       "  epic record stop          - Stop recording",
       "  epic record save <name>   - Save recorded workflow",
       "  epic workflows            - List saved workflows",
       "  epic replay <name>        - Replay a saved workflow",
-      "  epic workflow delete <name> - Delete a saved workflow",
+      "",
+      "  SYSTEM",
+      "  epic status               - Desktop agent status",
+      "  epic navigate <env> <target> - Navigate Hyperspace (vision)",
+      "  epic mf <masterfile> [item] - Text masterfile lookup",
+      "  epic setup                - Desktop agent setup guide",
     ].join(nl));
   });
 

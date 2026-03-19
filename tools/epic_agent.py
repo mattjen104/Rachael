@@ -1475,6 +1475,346 @@ def execute_menu_crawl(cmd):
         post_result(command_id, "error", error=str(e))
 
 
+def execute_launch(cmd):
+    """Launch an activity using Epic's search bar - fastest way to open anything."""
+    env = cmd.get("env", "SUP")
+    activity_name = cmd.get("activity", "")
+    command_id = cmd.get("id", "unknown")
+
+    if not activity_name:
+        post_result(command_id, "error", error="No activity name provided")
+        return
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    print(f"  [launch] Opening '{activity_name}' via search bar in {env}")
+
+    try:
+        window.activate()
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+    epic_prompt = (
+        "Find the Epic button in this Hyperspace window (top-left corner).\n"
+        "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
+    )
+    epic_resp = ask_claude(b64, epic_prompt)
+    epic_loc = None
+    if epic_resp:
+        try:
+            em = re.search(r'\{[\s\S]*?\}', epic_resp)
+            if em:
+                epic_loc = json.loads(em.group())
+        except Exception:
+            pass
+
+    if not epic_loc or not epic_loc.get("found"):
+        post_result(command_id, "error", error="Could not find Epic button")
+        return
+
+    ex, ey = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
+    pyautogui.click(ex, ey)
+    time.sleep(1.0)
+
+    search_img = screenshot_window(window)
+    search_b64 = img_to_base64(search_img)
+    search_prompt = (
+        "Find the 'Search activities' text box at the top of this Epic menu.\n"
+        "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
+    )
+    search_resp = ask_claude(search_b64, search_prompt)
+    search_loc = None
+    if search_resp:
+        try:
+            sm = re.search(r'\{[\s\S]*?\}', search_resp)
+            if sm:
+                search_loc = json.loads(sm.group())
+        except Exception:
+            pass
+
+    if not search_loc or not search_loc.get("found"):
+        post_result(command_id, "error", error="Could not find search bar")
+        return
+
+    sx, sy = vision_to_screen(window, search_loc["x"], search_loc["y"])
+    pyautogui.click(sx, sy)
+    time.sleep(0.5)
+
+    pyautogui.hotkey("ctrl", "a")
+    time.sleep(0.1)
+    pyautogui.typewrite(activity_name, interval=0.03)
+    time.sleep(1.0)
+
+    pyautogui.press("enter")
+    time.sleep(1.5)
+
+    final_img = screenshot_window(window)
+    final_b64 = img_to_base64(final_img)
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "launched": activity_name,
+    })
+    print(f"  [launch] Launched '{activity_name}' via search bar")
+
+
+def execute_patient(cmd):
+    """Search for a patient in Epic."""
+    env = cmd.get("env", "SUP")
+    patient_name = cmd.get("patient", "")
+    command_id = cmd.get("id", "unknown")
+
+    if not patient_name:
+        post_result(command_id, "error", error="No patient name provided")
+        return
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    print(f"  [patient] Searching for '{patient_name}' in {env}")
+
+    try:
+        window.activate()
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+    prompt = (
+        "Find the patient search field, patient lookup button, or any element that would let me search for a patient.\n"
+        "Common locations: toolbar with a magnifying glass icon, or a 'Patient Lookup' / 'Find Patient' button.\n"
+        "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true, \"type\": \"search_field\" or \"button\"}\n"
+        "If not found: {\"found\": false}"
+    )
+    resp = ask_claude(b64, prompt)
+    loc = None
+    if resp:
+        try:
+            m = re.search(r'\{[\s\S]*?\}', resp)
+            if m:
+                loc = json.loads(m.group())
+        except Exception:
+            pass
+
+    if loc and loc.get("found"):
+        px, py = vision_to_screen(window, loc["x"], loc["y"])
+        pyautogui.click(px, py)
+        time.sleep(1.0)
+
+        pyautogui.typewrite(patient_name, interval=0.03)
+        time.sleep(0.5)
+        pyautogui.press("enter")
+        time.sleep(2.0)
+    else:
+        execute_launch({"env": env, "activity": "Patient Lookup", "id": command_id + "-sub"})
+        time.sleep(2.0)
+        pyautogui.typewrite(patient_name, interval=0.03)
+        time.sleep(0.5)
+        pyautogui.press("enter")
+        time.sleep(2.0)
+
+    final_img = screenshot_window(window)
+    final_b64 = img_to_base64(final_img)
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "searched": patient_name,
+    })
+    print(f"  [patient] Patient search completed for '{patient_name}'")
+
+
+def execute_read_screen(cmd):
+    """Read and extract structured data from the current Epic screen."""
+    env = cmd.get("env", "SUP")
+    focus = cmd.get("focus", "")
+    command_id = cmd.get("id", "unknown")
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    print(f"  [read] Reading screen data from {env}")
+
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+
+    focus_hint = f"Focus on: {focus}\n" if focus else ""
+    prompt = (
+        f"You are looking at an Epic Hyperspace screen.\n"
+        f"{focus_hint}"
+        "Extract ALL visible data into structured JSON. Include:\n"
+        "- Patient demographics (name, MRN, DOB, age, sex, location, room)\n"
+        "- Current activity/workspace name\n"
+        "- Any visible clinical data (vitals, labs, meds, orders, allergies, diagnoses)\n"
+        "- Navigation breadcrumb or current location in Epic\n"
+        "- Status messages or alerts visible on screen\n"
+        "- Any table/grid data with column headers and row values\n\n"
+        "Return ONLY a JSON object with the extracted data.\n"
+        "Use descriptive keys. Include everything visible.\n"
+        "If a section has no data, omit it.\n"
+        "Return ONLY the JSON object."
+    )
+
+    response = ask_claude(b64, prompt)
+    screen_data = {}
+    if response:
+        try:
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                screen_data = json.loads(json_match.group())
+        except Exception:
+            screen_data = {"raw": response}
+
+    post_result(command_id, "complete", screenshot_b64=b64, data={
+        "screenData": screen_data,
+    })
+    print(f"  [read] Screen data extracted: {len(screen_data)} fields")
+
+
+def execute_batch(cmd):
+    """Execute a sequence of commands in order."""
+    env = cmd.get("env", "SUP")
+    steps = cmd.get("steps", [])
+    command_id = cmd.get("id", "unknown")
+
+    if not steps:
+        post_result(command_id, "error", error="No steps provided")
+        return
+
+    print(f"  [batch] Executing {len(steps)} steps in {env}")
+    results = []
+
+    for i, step in enumerate(steps):
+        step_type = step.get("type", "")
+        print(f"  [batch] Step {i+1}/{len(steps)}: {step_type}")
+
+        step["env"] = step.get("env", env)
+        step["id"] = f"{command_id}-step-{i+1}"
+
+        if step_type == "launch":
+            execute_launch(step)
+        elif step_type == "navigate_path":
+            execute_navigate_path(step)
+        elif step_type == "click":
+            execute_click(step)
+        elif step_type == "screenshot":
+            execute_screenshot(step)
+        elif step_type == "read_screen":
+            execute_read_screen(step)
+        elif step_type == "patient":
+            execute_patient(step)
+        elif step_type == "wait":
+            wait_secs = step.get("seconds", 2)
+            print(f"  [batch]   Waiting {wait_secs}s...")
+            time.sleep(wait_secs)
+        elif step_type == "keypress":
+            keys = step.get("keys", "")
+            if keys:
+                print(f"  [batch]   Pressing: {keys}")
+                for k in keys.split("+"):
+                    pyautogui.press(k.strip())
+                    time.sleep(0.2)
+        elif step_type == "type":
+            text = step.get("text", "")
+            if text:
+                print(f"  [batch]   Typing: {text}")
+                pyautogui.typewrite(text, interval=0.03)
+                time.sleep(0.3)
+        else:
+            print(f"  [batch]   Unknown step type: {step_type}")
+
+        results.append({"step": i + 1, "type": step_type, "status": "done"})
+
+        delay = step.get("delay", 0.5)
+        time.sleep(delay)
+
+    final_img = screenshot_window(find_window(env))
+    final_b64 = img_to_base64(final_img) if final_img else None
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "stepsCompleted": len(results),
+        "results": results,
+    })
+    print(f"  [batch] All {len(steps)} steps completed")
+
+
+def execute_shortcuts(cmd):
+    """Discover keyboard shortcuts from the current Epic screen."""
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    print(f"  [shortcuts] Discovering keyboard shortcuts in {env}")
+
+    try:
+        window.activate()
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+
+    prompt = (
+        "Look at this Epic Hyperspace screen carefully.\n"
+        "Identify ALL keyboard shortcuts visible in the interface. These appear as:\n"
+        "- Underlined letters in menu items (Alt+letter shortcuts)\n"
+        "- Shortcut hints next to menu items (like Ctrl+S, F5, etc.)\n"
+        "- Toolbar tooltips showing keyboard shortcuts\n"
+        "- Any visible key bindings\n\n"
+        "Also list common Epic keyboard shortcuts you know:\n"
+        "- Alt+F4: Close\n"
+        "- Ctrl+1: Patient Station\n"
+        "- Ctrl+2: Schedule\n"
+        "- F5: Refresh\n\n"
+        "Return a JSON array of shortcuts:\n"
+        "[{\"keys\": \"Ctrl+1\", \"action\": \"Open Patient Station\", \"source\": \"visible\" or \"known\"}]\n"
+        "Return ONLY the JSON array."
+    )
+
+    response = ask_claude(b64, prompt)
+    shortcuts = []
+    if response:
+        try:
+            json_match = re.search(r'\[[\s\S]*\]', response)
+            if json_match:
+                shortcuts = json.loads(json_match.group())
+        except Exception:
+            pass
+
+    try:
+        requests.post(
+            f"{ORGCLOUD_URL}/api/epic/activities",
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"environment": env, "activities": [
+                {"name": s.get("keys", ""), "category": "Keyboard Shortcuts", "type": "shortcut",
+                 "description": s.get("action", "")}
+                for s in shortcuts
+            ]},
+            timeout=30,
+        )
+    except Exception:
+        pass
+
+    post_result(command_id, "complete", screenshot_b64=b64, data={
+        "shortcuts": shortcuts,
+        "count": len(shortcuts),
+    })
+    print(f"  [shortcuts] Found {len(shortcuts)} shortcuts")
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -1502,6 +1842,16 @@ def execute_command(cmd):
             execute_replay(cmd)
         elif cmd_type == "menu_crawl":
             execute_menu_crawl(cmd)
+        elif cmd_type == "launch":
+            execute_launch(cmd)
+        elif cmd_type == "patient":
+            execute_patient(cmd)
+        elif cmd_type == "read_screen":
+            execute_read_screen(cmd)
+        elif cmd_type == "batch":
+            execute_batch(cmd)
+        elif cmd_type == "shortcuts":
+            execute_shortcuts(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except Exception as e:
