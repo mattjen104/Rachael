@@ -2714,10 +2714,17 @@ ${fullHtml}`;
       appCount: number;
     }
 
+    const DEFAULT_PORTAL: PortalConfig = { name: "UCSD CWP", url: "https://cwp.ucsd.edu", lastScanned: null, appCount: 0 };
+
     async function getPortals(): Promise<PortalConfig[]> {
       const cfg = await storage.getAgentConfig("citrix_portals");
-      if (!cfg?.value) return [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu", lastScanned: null, appCount: 0 }];
-      try { return JSON.parse(cfg.value); } catch { return [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu", lastScanned: null, appCount: 0 }]; }
+      if (!cfg?.value) return [DEFAULT_PORTAL];
+      try {
+        const parsed: PortalConfig[] = JSON.parse(cfg.value);
+        if (!Array.isArray(parsed) || parsed.length === 0) return [DEFAULT_PORTAL];
+        if (!parsed.some(p => p.name === "UCSD CWP")) parsed.unshift(DEFAULT_PORTAL);
+        return parsed;
+      } catch { return [DEFAULT_PORTAL]; }
     }
 
     async function savePortals(portals: PortalConfig[]): Promise<void> {
