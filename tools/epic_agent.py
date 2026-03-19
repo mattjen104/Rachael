@@ -1009,14 +1009,67 @@ def uia_crawl_children(element, depth, max_depth, parent_path=""):
     return children
 
 
+def uia_find_by_name(parent, name, exact=True):
+    """Find a UI element by name, searching children."""
+    name_lower = name.lower().strip()
+    try:
+        for child in parent.children():
+            try:
+                child_name = (child.element_info.name or "").strip()
+                if exact:
+                    if child_name.lower() == name_lower:
+                        return child
+                else:
+                    if name_lower in child_name.lower():
+                        return child
+            except Exception:
+                continue
+        for child in parent.children():
+            try:
+                found = uia_find_by_name(child, name, exact)
+                if found:
+                    return found
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def uia_collect_named_children(element, max_depth=2, current_depth=0):
+    """Collect all named children of an element as a flat list."""
+    items = []
+    if current_depth >= max_depth:
+        return items
+    try:
+        for child in element.children():
+            try:
+                name = (child.element_info.name or "").strip()
+                ctrl_type = child.element_info.control_type or ""
+                if not name:
+                    sub = uia_collect_named_children(child, max_depth, current_depth + 1)
+                    items.extend(sub)
+                    continue
+                if ctrl_type in ("TitleBar", "ScrollBar", "Thumb", "Image", "Separator", "Text"):
+                    continue
+                if len(name) > 100:
+                    continue
+                items.append({"name": name, "controlType": ctrl_type, "element": child})
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return items
+
+
 def execute_menu_crawl(cmd):
-    """Crawl Epic menus using pywinauto UI Automation to build a complete navigation tree.
-    Does NOT control the mouse - uses programmatic UI element inspection."""
+    """Crawl Epic menus by clicking the Epic button, then each menu category.
+    Uses pywinauto to programmatically click and read - no mouse control needed."""
     env = cmd.get("env", "SUP")
     command_id = cmd.get("id", "unknown")
-    depth = cmd.get("depth", 3)
+    depth = cmd.get("depth", 2)
 
-    print(f"  [menu-crawl] Starting pywinauto menu crawl for {env} (depth={depth})")
+    print(f"  [menu-crawl] Starting Epic menu crawl for {env} (depth={depth})")
 
     try:
         from pywinauto import Desktop
@@ -1048,45 +1101,191 @@ def execute_menu_crawl(cmd):
             return
 
         print(f"  [menu-crawl] Found UIA window: {uia_window.element_info.name}")
-        print(f"  [menu-crawl] Scanning UI elements (depth={depth})... this may take a minute")
 
-        all_children = uia_crawl_children(uia_window, 0, depth)
+        try:
+            uia_window.set_focus()
+            time.sleep(0.5)
+        except Exception:
+            pass
 
-        menu_children = []
-        toolbar_children = []
-        other_children = []
-        for child in all_children:
-            ct = child.get("controlType", "")
-            if ct in ("MenuItem", "Menu", "MenuBar", "TreeItem", "TreeView"):
-                menu_children.append(child)
-            elif ct in ("ToolBar", "ToolBarButton", "Button"):
-                toolbar_children.append(child)
+        epic_button = None
+        for search_name in ["Epic", "Epic Button", "EpicButton", "Menu"]:
+            epic_button = uia_find_by_name(uia_window, search_name)
+            if epic_button:
+                print(f"  [menu-crawl] Found Epic button: '{epic_button.element_info.name}' ({epic_button.element_info.control_type})")
+                break
+
+        if not epic_button:
+            print(f"  [menu-crawl] No 'Epic' button found, searching for menu/toolbar...")
+            top_items = uia_collect_named_children(uia_window, max_depth=3)
+            print(f"  [menu-crawl] Found {len(top_items)} top-level elements:")
+            for item in top_items[:30]:
+                print(f"    - '{item['name']}' ({item['controlType']})")
+
+            if not top_items:
+                post_result(command_id, "error", error="No UI elements found in window")
+                return
+
+            menu_types = ("MenuItem", "Menu", "MenuBar", "Button", "SplitButton",
+                          "ToolBar", "TabItem", "TreeItem", "ListItem", "Hyperlink",
+                          "Pane", "Group", "Custom")
+            menu_items = [i for i in top_items if i["controlType"] in menu_types]
+            if not menu_items:
+                menu_items = top_items
+
+            tree_children = []
+            for item in menu_items:
+                node = {
+                    "name": item["name"],
+                    "controlType": item["controlType"],
+                    "path": item["name"],
+                    "children": []
+                }
+                tree_children.append(node)
+
+            tree = {
+                "name": "Epic Menu",
+                "children": tree_children,
+                "client": "hyperspace",
+                "environment": env,
+                "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+
+            try:
+                requests.post(
+                    f"{ORGCLOUD_URL}/api/epic/tree",
+                    headers={
+                        "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                        "Content-Type": "application/json",
+                    },
+                    json=tree,
+                    timeout=30,
+                )
+            except Exception:
+                pass
+
+            post_result(command_id, "complete", data={
+                "totalItems": len(tree_children),
+                "topLevel": len(tree_children),
+                "note": "Epic button not found - captured top-level elements only",
+            })
+            return
+
+        try:
+            ct = epic_button.element_info.control_type or ""
+            if ct in ("MenuItem", "Menu"):
+                epic_button.expand()
             else:
-                other_children.append(child)
+                epic_button.click_input()
+            time.sleep(1.0)
+            print(f"  [menu-crawl] Epic button clicked/expanded")
+        except Exception as e:
+            print(f"  [menu-crawl] Failed to click Epic button: {e}")
+            try:
+                epic_button.click_input()
+                time.sleep(1.0)
+            except Exception as e2:
+                post_result(command_id, "error", error=f"Cannot click Epic button: {e2}")
+                return
+
+        top_menu_items = uia_collect_named_children(epic_button, max_depth=2)
+        if not top_menu_items:
+            time.sleep(0.5)
+            top_menu_items = uia_collect_named_children(uia_window, max_depth=3)
+
+        print(f"  [menu-crawl] Found {len(top_menu_items)} menu items after clicking Epic button")
+        for item in top_menu_items:
+            print(f"    - '{item['name']}' ({item['controlType']})")
 
         tree_children = []
-        if menu_children:
-            tree_children.extend(menu_children)
-        if toolbar_children:
-            tree_children.append({
-                "name": "Toolbar",
-                "controlType": "ToolBar",
-                "path": "Toolbar",
-                "children": toolbar_children
-            })
-        for oc in other_children:
-            if oc.get("children"):
-                tree_children.append(oc)
+        crawled_count = 0
 
-        def count_all(nodes):
-            c = 0
-            for n in nodes:
-                c += 1
-                c += count_all(n.get("children", []))
-            return c
+        for item in top_menu_items:
+            item_name = item["name"]
+            ctrl_type = item["controlType"]
+            element = item["element"]
 
-        total = count_all(tree_children)
-        print(f"  [menu-crawl] Found {total} total UI elements")
+            node = {
+                "name": item_name,
+                "controlType": ctrl_type,
+                "path": item_name,
+                "children": []
+            }
+            crawled_count += 1
+
+            if depth >= 2 and ctrl_type in ("MenuItem", "Menu", "TreeItem", "ListItem", "TabItem", "Button", "Hyperlink"):
+                print(f"  [menu-crawl] Expanding '{item_name}'...")
+                try:
+                    try:
+                        element.expand()
+                        time.sleep(0.5)
+                    except Exception:
+                        try:
+                            element.click_input()
+                            time.sleep(0.5)
+                        except Exception:
+                            pass
+
+                    sub_items = uia_collect_named_children(element, max_depth=2)
+
+                    if not sub_items:
+                        sub_items = uia_collect_named_children(uia_window, max_depth=2)
+                        sub_items = [s for s in sub_items if s["name"] != item_name]
+
+                    if sub_items:
+                        print(f"  [menu-crawl]   '{item_name}' -> {len(sub_items)} sub-items")
+                        for si in sub_items:
+                            sub_node = {
+                                "name": si["name"],
+                                "controlType": si["controlType"],
+                                "path": f"{item_name} > {si['name']}",
+                                "children": []
+                            }
+
+                            if depth >= 3 and si["controlType"] in ("MenuItem", "Menu", "TreeItem"):
+                                try:
+                                    si["element"].expand()
+                                    time.sleep(0.3)
+                                    sub_sub = uia_collect_named_children(si["element"], max_depth=1)
+                                    if sub_sub:
+                                        for ssi in sub_sub:
+                                            sub_node["children"].append({
+                                                "name": ssi["name"],
+                                                "controlType": ssi["controlType"],
+                                                "path": f"{item_name} > {si['name']} > {ssi['name']}",
+                                                "children": []
+                                            })
+                                            crawled_count += 1
+                                    try:
+                                        si["element"].collapse()
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
+
+                            node["children"].append(sub_node)
+                            crawled_count += 1
+
+                    try:
+                        element.collapse()
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
+
+                except Exception as e:
+                    print(f"  [menu-crawl]   Error expanding '{item_name}': {e}")
+
+            tree_children.append(node)
+
+        try:
+            ct = epic_button.element_info.control_type or ""
+            if ct in ("MenuItem", "Menu"):
+                epic_button.collapse()
+            else:
+                pyautogui.press("escape")
+            time.sleep(0.3)
+        except Exception:
+            pass
 
         tree = {
             "name": "Epic Menu",
@@ -1107,7 +1306,7 @@ def execute_menu_crawl(cmd):
                 timeout=30,
             )
             if resp.status_code == 200:
-                print(f"  [menu-crawl] Tree uploaded: {total} items")
+                print(f"  [menu-crawl] Tree uploaded: {crawled_count} items")
             else:
                 print(f"  [menu-crawl] Upload failed: HTTP {resp.status_code}")
         except Exception as e:
@@ -1116,10 +1315,10 @@ def execute_menu_crawl(cmd):
         final_img = screenshot_window(window)
         final_b64 = img_to_base64(final_img) if final_img else None
         post_result(command_id, "complete", screenshot_b64=final_b64, data={
-            "totalItems": total,
+            "totalItems": crawled_count,
             "topLevel": len(tree_children),
         })
-        print(f"  [menu-crawl] Complete! {total} items across {len(tree_children)} top-level sections")
+        print(f"  [menu-crawl] Complete! {crawled_count} items across {len(tree_children)} sections")
 
     except Exception as e:
         print(f"  [menu-crawl] Error: {e}")
