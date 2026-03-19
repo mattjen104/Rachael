@@ -201,21 +201,27 @@ def activate_window(window):
     except Exception:
         pass
     try:
+        kernel32 = ctypes.windll.kernel32
         user32 = ctypes.windll.user32
         hwnd = window._hWnd
         foreground_hwnd = user32.GetForegroundWindow()
         if foreground_hwnd == hwnd:
             return
+        current_thread = kernel32.GetCurrentThreadId()
         fg_thread = user32.GetWindowThreadProcessId(foreground_hwnd, None)
-        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
         attached = False
-        if fg_thread != target_thread:
-            attached = bool(user32.AttachThreadInput(fg_thread, target_thread, True))
-        result = user32.SetForegroundWindow(hwnd)
-        if attached:
-            user32.AttachThreadInput(fg_thread, target_thread, False)
-        if not result:
-            window.activate()
+        try:
+            if current_thread != fg_thread:
+                attached = bool(user32.AttachThreadInput(current_thread, fg_thread, True))
+            user32.BringWindowToTop(hwnd)
+            user32.ShowWindow(hwnd, 9)
+            result = user32.SetForegroundWindow(hwnd)
+            if not result:
+                print(f"  [focus] SetForegroundWindow failed for hwnd={hwnd}, falling back")
+                window.activate()
+        finally:
+            if attached:
+                user32.AttachThreadInput(current_thread, fg_thread, False)
     except Exception:
         try:
             window.activate()
