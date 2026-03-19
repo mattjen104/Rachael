@@ -959,15 +959,69 @@ def execute_replay(cmd):
     print(f"  [replay] Replay complete")
 
 
+def uia_crawl_children(element, depth, max_depth, parent_path=""):
+    """Recursively crawl UI Automation element children to build a tree."""
+    children = []
+    if depth >= max_depth:
+        return children
+    try:
+        for child in element.children():
+            try:
+                name = (child.element_info.name or "").strip()
+                ctrl_type = child.element_info.control_type or ""
+                if not name:
+                    continue
+                if ctrl_type in ("TitleBar", "ScrollBar", "Thumb", "Image", "Separator"):
+                    continue
+                if len(name) > 100:
+                    continue
+                path = f"{parent_path} > {name}" if parent_path else name
+                node = {
+                    "name": name,
+                    "controlType": ctrl_type,
+                    "path": path,
+                    "children": []
+                }
+                if ctrl_type in ("MenuItem", "Menu", "TreeItem", "TabItem", "ListItem", "Group", "Pane"):
+                    try:
+                        if ctrl_type in ("MenuItem", "Menu", "TreeItem"):
+                            try:
+                                child.expand()
+                                time.sleep(0.3)
+                            except Exception:
+                                pass
+                        sub_children = uia_crawl_children(child, depth + 1, max_depth, path)
+                        if sub_children:
+                            node["children"] = sub_children
+                        if ctrl_type in ("MenuItem", "Menu", "TreeItem"):
+                            try:
+                                child.collapse()
+                                time.sleep(0.2)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                children.append(node)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return children
+
+
 def execute_menu_crawl(cmd):
-    """Crawl Epic menus using vision to build a complete navigation tree.
-    Takes screenshots at each menu level and asks Claude to list all items."""
+    """Crawl Epic menus using pywinauto UI Automation to build a complete navigation tree.
+    Does NOT control the mouse - uses programmatic UI element inspection."""
     env = cmd.get("env", "SUP")
     command_id = cmd.get("id", "unknown")
-    depth = cmd.get("depth", 2)
+    depth = cmd.get("depth", 3)
 
-    if not OPENROUTER_API_KEY:
-        post_result(command_id, "error", error="OPENROUTER_API_KEY required for menu crawl")
+    print(f"  [menu-crawl] Starting pywinauto menu crawl for {env} (depth={depth})")
+
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        post_result(command_id, "error", error="pywinauto not installed. Run: pip install pywinauto")
         return
 
     window = find_window(env)
@@ -975,141 +1029,102 @@ def execute_menu_crawl(cmd):
         post_result(command_id, "error", error=f"No {env} window found")
         return
 
-    print(f"  [menu-crawl] Starting menu crawl for {env} (depth={depth})")
-
-    tree = {"name": "Epic Menu", "children": [], "client": "hyperspace", "environment": env}
-
-    img = screenshot_window(window)
-    b64 = img_to_base64(img)
-
-    prompt = """You are looking at an Epic Hyperspace application window.
-List ALL menu items visible in the LEFT NAVIGATION panel (the Epic button menu).
-For each item, specify:
-- name: exact text label
-- hasSubmenu: true if it looks like it has a submenu/expandable section, false if it's a leaf item
-- category: "left navigation", "toolbar", "admin submenu", or other grouping
-
-IMPORTANT: Do NOT mention any patient names, MRNs, dates of birth, or clinical data.
-Return ONLY a JSON array of objects. Be thorough - list every single item."""
-
-    response = ask_claude(b64, prompt)
-    top_items = []
-    if response:
-        try:
-            json_match = re.search(r'\[[\s\S]*\]', response)
-            if json_match:
-                top_items = json.loads(json_match.group())
-        except Exception as e:
-            print(f"  [menu-crawl] Parse error: {e}")
-
-    print(f"  [menu-crawl] Found {len(top_items)} top-level items")
-
-    left_nav_items = [i for i in top_items if i.get("category", "").lower() in ("left navigation", "left nav", "navigation")]
-    other_items = [i for i in top_items if i not in left_nav_items]
-
-    for item in other_items:
-        tree["children"].append({
-            "name": item.get("name", "Unknown"),
-            "controlType": item.get("category", "button"),
-            "path": item.get("name", ""),
-            "children": []
-        })
-
-    crawled_count = len(top_items)
-
-    if depth >= 2:
-        for item in left_nav_items:
-            item_name = item.get("name", "")
-            if not item_name:
+    try:
+        desktop = Desktop(backend="uia")
+        uia_window = None
+        env_upper = env.upper()
+        for w in desktop.windows():
+            try:
+                title = w.element_info.name or ""
+                t = title.upper()
+                if env_upper in t and ("HYPERSPACE" in t or "EPIC" in t or "HYPERDRIVE" in t):
+                    uia_window = w
+                    break
+            except Exception:
                 continue
 
-            node = {
-                "name": item_name,
-                "controlType": "MenuItem",
-                "path": item_name,
-                "children": []
-            }
+        if not uia_window:
+            post_result(command_id, "error", error=f"No {env} UIA window found")
+            return
 
-            if item.get("hasSubmenu", False):
-                print(f"  [menu-crawl] Clicking '{item_name}' to scan sub-items...")
-                try:
-                    click_prompt = f"""Look at this Epic Hyperspace window. I need to click on the menu item labeled "{item_name}" in the left navigation panel.
-Return JSON with the EXACT pixel coordinates of the CENTER of that menu item text, relative to the window:
-{{"found": true, "x": <number>, "y": <number>}}
-If you cannot find it: {{"found": false, "reason": "..."}}
-IMPORTANT: Do NOT mention any patient data."""
+        print(f"  [menu-crawl] Found UIA window: {uia_window.element_info.name}")
+        print(f"  [menu-crawl] Scanning UI elements (depth={depth})... this may take a minute")
 
-                    click_resp = ask_claude(b64, click_prompt)
-                    if click_resp:
-                        coord_match = re.search(r'\{[\s\S]*?\}', click_resp)
-                        if coord_match:
-                            coords = json.loads(coord_match.group())
-                            if coords.get("found"):
-                                abs_x = window.left + coords["x"]
-                                abs_y = window.top + coords["y"]
-                                pyautogui.click(abs_x, abs_y)
-                                time.sleep(1.5)
+        all_children = uia_crawl_children(uia_window, 0, depth)
 
-                                sub_img = screenshot_window(window)
-                                sub_b64 = img_to_base64(sub_img)
+        menu_children = []
+        toolbar_children = []
+        other_children = []
+        for child in all_children:
+            ct = child.get("controlType", "")
+            if ct in ("MenuItem", "Menu", "MenuBar", "TreeItem", "TreeView"):
+                menu_children.append(child)
+            elif ct in ("ToolBar", "ToolBarButton", "Button"):
+                toolbar_children.append(child)
+            else:
+                other_children.append(child)
 
-                                sub_prompt = f"""You are looking at the Epic Hyperspace window after clicking the "{item_name}" menu.
-List ALL sub-menu items, options, links, and buttons that are NOW visible as a result of expanding/clicking "{item_name}".
-Only list items that belong to this menu section, not items from other sections.
+        tree_children = []
+        if menu_children:
+            tree_children.extend(menu_children)
+        if toolbar_children:
+            tree_children.append({
+                "name": "Toolbar",
+                "controlType": "ToolBar",
+                "path": "Toolbar",
+                "children": toolbar_children
+            })
+        for oc in other_children:
+            if oc.get("children"):
+                tree_children.append(oc)
 
-For each item specify:
-- name: exact text label
-- type: "menu", "button", "link", "activity", or "submenu"
+        def count_all(nodes):
+            c = 0
+            for n in nodes:
+                c += 1
+                c += count_all(n.get("children", []))
+            return c
 
-IMPORTANT: Do NOT mention any patient names, MRNs, dates of birth, or clinical data.
-Return ONLY a JSON array. Be thorough - list every single visible item in this section."""
+        total = count_all(tree_children)
+        print(f"  [menu-crawl] Found {total} total UI elements")
 
-                                sub_response = ask_claude(sub_b64, sub_prompt)
-                                if sub_response:
-                                    try:
-                                        sub_match = re.search(r'\[[\s\S]*\]', sub_response)
-                                        if sub_match:
-                                            sub_items = json.loads(sub_match.group())
-                                            for si in sub_items:
-                                                node["children"].append({
-                                                    "name": si.get("name", "Unknown"),
-                                                    "controlType": si.get("type", "MenuItem"),
-                                                    "path": f"{item_name} > {si.get('name', '')}",
-                                                    "children": []
-                                                })
-                                            crawled_count += len(sub_items)
-                                            print(f"  [menu-crawl]   '{item_name}' -> {len(sub_items)} sub-items")
-                                    except Exception as e:
-                                        print(f"  [menu-crawl]   Parse error for '{item_name}': {e}")
+        tree = {
+            "name": "Epic Menu",
+            "children": tree_children,
+            "client": "hyperspace",
+            "environment": env,
+            "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
 
-                                b64 = sub_b64
-                except Exception as e:
-                    print(f"  [menu-crawl]   Error crawling '{item_name}': {e}")
+        try:
+            resp = requests.post(
+                f"{ORGCLOUD_URL}/api/epic/tree",
+                headers={
+                    "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json=tree,
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                print(f"  [menu-crawl] Tree uploaded: {total} items")
+            else:
+                print(f"  [menu-crawl] Upload failed: HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"  [menu-crawl] Upload error: {e}")
 
-            tree["children"].append(node)
+        final_img = screenshot_window(window)
+        final_b64 = img_to_base64(final_img) if final_img else None
+        post_result(command_id, "complete", screenshot_b64=final_b64, data={
+            "totalItems": total,
+            "topLevel": len(tree_children),
+        })
+        print(f"  [menu-crawl] Complete! {total} items across {len(tree_children)} top-level sections")
 
-    try:
-        requests.post(
-            f"{ORGCLOUD_URL}/api/epic/tree",
-            headers={
-                "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json=tree,
-            timeout=30,
-        )
-        print(f"  [menu-crawl] Tree uploaded: {crawled_count} total items")
     except Exception as e:
-        print(f"  [menu-crawl] Upload error: {e}")
-
-    final_img = screenshot_window(window)
-    final_b64 = img_to_base64(final_img)
-    post_result(command_id, "complete", screenshot_b64=final_b64, data={
-        "totalItems": crawled_count,
-        "topLevel": len(left_nav_items),
-        "tree": {"name": tree["name"], "childCount": len(tree["children"])},
-    })
-    print(f"  [menu-crawl] Complete! {crawled_count} items across {len(tree['children'])} sections")
+        print(f"  [menu-crawl] Error: {e}")
+        traceback.print_exc()
+        post_result(command_id, "error", error=str(e))
 
 
 def execute_command(cmd):
