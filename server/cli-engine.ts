@@ -3127,15 +3127,18 @@ ${fullHtml}`;
       const env = (args[1] || "SUP").toUpperCase();
       const path = args.slice(2).join(" ");
       if (!path) return fail("[epic] Usage: epic go SUP Epic Button > Patient Care > Patient Lookup");
+      const isTextPath = /^\d+\s/.test(path.split(">")[0].trim());
+      const client = isTextPath ? "text" : "hyperspace";
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "navigate_path", env, path }),
+          body: JSON.stringify({ type: "navigate_path", env, path, client }),
         });
         const data = await resp.json() as any;
         if (data.ok) {
-          return ok(`Path navigation sent: ${env}${nl}Path: ${path}${nl}Command ID: ${data.commandId}${nl}Desktop agent will replay the stored click/keystroke path.`);
+          const mode = client === "text" ? "keystrokes" : "UIA clicks";
+          return ok(`Path navigation sent: ${env} (${client})${nl}Path: ${path}${nl}Mode: ${mode}${nl}Command ID: ${data.commandId}${nl}Desktop agent will replay the stored path.`);
         }
         return fail(`[epic] Failed to send command`);
       } catch (e: any) {

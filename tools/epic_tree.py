@@ -173,7 +173,7 @@ def scan_hyperspace(env):
     total_found = [0]
 
     def walk_element(element, path, depth):
-        """Recursively walk UI elements, collecting safe navigation items."""
+        """Recursively walk UI elements, expanding menus to discover full tree."""
         if depth > MAX_DEPTH:
             return []
 
@@ -207,6 +207,7 @@ def scan_hyperspace(env):
                 "automationId": info["automation_id"],
                 "path": " > ".join(child_path),
                 "depth": depth,
+                "replayAction": "click",
                 "children": [],
             }
 
@@ -217,22 +218,61 @@ def scan_hyperspace(env):
 
             if is_expandable and depth < MAX_DEPTH:
                 sub = walk_element(child, child_path, depth + 1)
-                node["children"] = sub
 
-                if info["control_type"] == "MenuItem" and not sub:
+                if info["control_type"] in ("MenuItem", "Menu", "SplitButton") and not sub:
                     try:
                         child.expand()
                         time.sleep(SCAN_DELAY)
                         sub = walk_element(child, child_path, depth + 1)
-                        node["children"] = sub
+
+                        if not sub:
+                            try:
+                                expanded_children = child.children()
+                                for ec in expanded_children:
+                                    ec_info = get_element_info(ec)
+                                    if ec_info and ec_info["name"] and is_safe_element(ec):
+                                        ec_path = child_path + [ec_info["name"]]
+                                        ec_node = {
+                                            "name": ec_info["name"],
+                                            "controlType": ec_info["control_type"],
+                                            "automationId": ec_info["automation_id"],
+                                            "path": " > ".join(ec_path),
+                                            "depth": depth + 1,
+                                            "replayAction": "click",
+                                            "children": [],
+                                        }
+                                        total_found[0] += 1
+                                        ec_sub = walk_element(ec, ec_path, depth + 2)
+                                        ec_node["children"] = ec_sub
+                                        sub.append(ec_node)
+                            except Exception:
+                                pass
 
                         try:
                             child.collapse()
                             time.sleep(SCAN_DELAY * 0.5)
                         except Exception:
+                            try:
+                                pyautogui.press("escape")
+                                time.sleep(SCAN_DELAY * 0.5)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                elif info["control_type"] == "TreeItem" and not sub:
+                    try:
+                        child.expand()
+                        time.sleep(SCAN_DELAY)
+                        sub = walk_element(child, child_path, depth + 1)
+                        try:
+                            child.collapse()
+                        except Exception:
                             pass
                     except Exception:
                         pass
+
+                node["children"] = sub
 
             children_nodes.append(node)
 
@@ -337,12 +377,19 @@ def scan_text(env):
                     items.append({"number": num, "name": name})
         return items
 
-    def walk_text_menu(path, depth, max_depth=3):
-        """Walk through Text menus by typing numbers and reading results."""
-        if depth > max_depth:
+    visited_screens = set()
+
+    def walk_text_menu(path, depth):
+        """Walk through Text menus exhaustively by entering each numbered option."""
+        if depth > MAX_DEPTH:
             return []
 
         screen = read_screen()
+        screen_sig = screen.strip()[:200]
+        if screen_sig in visited_screens:
+            return []
+        visited_screens.add(screen_sig)
+
         items = parse_menu_items(screen)
         nodes = []
 
@@ -356,34 +403,38 @@ def scan_text(env):
             if skip:
                 continue
 
-            child_path = path + [item["name"]]
+            child_path = path + [f"{item['number']} {item['name']}"]
             node = {
                 "name": item["name"],
                 "controlType": "TextMenuItem",
                 "menuNumber": item["number"],
                 "keystroke": item["number"],
+                "replayAction": "keystroke",
                 "path": " > ".join(child_path),
                 "depth": depth,
                 "children": [],
             }
 
-            is_submenu_likely = any(kw in name_lower for kw in [
-                "menu", "list", "option", "select", "view", "report",
-                "management", "admin", "setup", "system", "tool",
-            ])
+            try:
+                pyautogui.typewrite(item["number"], interval=0.05)
+                pyautogui.press("enter")
+                time.sleep(1.0)
 
-            if is_submenu_likely and depth < max_depth:
-                try:
-                    pyautogui.typewrite(item["number"], interval=0.05)
-                    pyautogui.press("enter")
-                    time.sleep(1.0)
+                new_screen = read_screen()
+                new_items = parse_menu_items(new_screen)
 
-                    sub_nodes = walk_text_menu(child_path, depth + 1, max_depth)
+                if new_items and new_screen.strip()[:200] != screen_sig:
+                    sub_nodes = walk_text_menu(child_path, depth + 1)
                     node["children"] = sub_nodes
 
+                pyautogui.typewrite("0", interval=0.05)
+                pyautogui.press("enter")
+                time.sleep(0.8)
+            except Exception:
+                try:
                     pyautogui.typewrite("0", interval=0.05)
                     pyautogui.press("enter")
-                    time.sleep(0.8)
+                    time.sleep(0.5)
                 except Exception:
                     pass
 
@@ -391,7 +442,7 @@ def scan_text(env):
 
         return nodes
 
-    print("[text] Reading main menu...")
+    print("[text] Reading main menu and walking all branches...")
     tree["children"] = walk_text_menu([], 0)
     print(f"[text] Scan complete: {count_nodes(tree)} items found")
 

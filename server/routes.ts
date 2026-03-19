@@ -546,12 +546,13 @@ export async function registerRoutes(
   });
 
   app.post("/api/epic/agent/send", (req, res) => {
-    const { type, env, target, path, masterfile, item } = req.body;
+    const { type, env, target, path, client, masterfile, item } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, any> = { id, type, env: env || "SUP" };
     if (target) cmd.target = target;
     if (path) cmd.path = path;
+    if (client) cmd.client = client;
     if (masterfile) cmd.masterfile = masterfile;
     if (item) cmd.item = item;
     epicCommandQueue.push(cmd);

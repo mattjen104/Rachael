@@ -426,10 +426,38 @@ Coordinates should be relative to the image."""
     print(f"  [click] Clicked '{target}' at ({result['x']}, {result['y']})")
 
 
+def find_uia_element_by_name(parent, name):
+    """Find a UI Automation element by name within parent, searching breadth-first."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return None
+    name_lower = name.lower().strip()
+    try:
+        for child in parent.children():
+            try:
+                child_name = (child.element_info.name or "").strip()
+                if child_name.lower() == name_lower:
+                    return child
+            except Exception:
+                continue
+        for child in parent.children():
+            try:
+                found = find_uia_element_by_name(child, name)
+                if found:
+                    return found
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
 def execute_navigate_path(cmd):
-    """Navigate using a stored path by replaying clicks/keystrokes."""
+    """Navigate using a stored path by replaying deterministic clicks/keystrokes."""
     env = cmd.get("env", "SUP")
     path = cmd.get("path", "")
+    client = cmd.get("client", "hyperspace")
     command_id = cmd.get("id", "unknown")
 
     if not path:
@@ -442,7 +470,7 @@ def execute_navigate_path(cmd):
         return
 
     steps = [s.strip() for s in path.split(">") if s.strip()]
-    print(f"  [path-nav] {env}: {' > '.join(steps)} ({len(steps)} steps)")
+    print(f"  [path-nav] {env}/{client}: {' > '.join(steps)} ({len(steps)} steps)")
 
     try:
         window.activate()
@@ -450,45 +478,74 @@ def execute_navigate_path(cmd):
     except Exception:
         pass
 
-    for i, step in enumerate(steps):
-        print(f"  [step {i+1}/{len(steps)}] Clicking: {step}")
-        img = screenshot_window(window)
-        b64 = img_to_base64(img)
-
-        prompt = f"""Find the exact pixel coordinates of the UI element labeled "{step}" in this Epic Hyperspace screenshot.
-Return ONLY a JSON object: {{"x": <number>, "y": <number>, "found": true}}
-If not found: {{"found": false, "reason": "why"}}
-Coordinates relative to the image."""
-
-        response = ask_claude(b64, prompt)
-        if not response:
-            post_result(command_id, "error", error=f"Claude did not respond for step: {step}")
-            return
-
+    if client == "text":
+        for i, step in enumerate(steps):
+            num_match = re.match(r'^(\d+)', step)
+            if num_match:
+                keystroke = num_match.group(1)
+                print(f"  [step {i+1}/{len(steps)}] Typing: {keystroke} ({step})")
+                pyautogui.typewrite(keystroke, interval=0.05)
+                pyautogui.press("enter")
+                time.sleep(1.0)
+            else:
+                print(f"  [step {i+1}/{len(steps)}] Typing: {step}")
+                pyautogui.typewrite(step, interval=0.05)
+                pyautogui.press("enter")
+                time.sleep(1.0)
+    else:
         try:
-            json_match = re.search(r'\{[\s\S]*?\}', response)
-            if not json_match:
-                post_result(command_id, "error", error=f"Could not parse response for step: {step}")
+            from pywinauto import Desktop
+            desktop = Desktop(backend="uia")
+            uia_window = None
+            env_upper = env.upper()
+            for w in desktop.windows():
+                try:
+                    title = w.element_info.name or ""
+                    t = title.upper()
+                    if env_upper in t and ("HYPERSPACE" in t or "EPIC" in t or "HYPERDRIVE" in t):
+                        uia_window = w
+                        break
+                except Exception:
+                    continue
+
+            if not uia_window:
+                post_result(command_id, "error", error=f"No {env} UIA window found for path replay")
                 return
-            result = json.loads(json_match.group())
-        except Exception:
-            post_result(command_id, "error", error=f"Invalid JSON for step: {step}")
-            return
 
-        if not result.get("found", False):
-            post_result(command_id, "error", error=f"Element not found at step {i+1}: {step} - {result.get('reason', 'unknown')}")
-            return
+            current_parent = uia_window
+            for i, step in enumerate(steps):
+                print(f"  [step {i+1}/{len(steps)}] UIA find+click: {step}")
+                element = find_uia_element_by_name(current_parent, step)
+                if not element:
+                    element = find_uia_element_by_name(uia_window, step)
+                if not element:
+                    post_result(command_id, "error", error=f"UIA element not found at step {i+1}: {step}")
+                    return
+                try:
+                    ctrl_type = element.element_info.control_type or ""
+                    if ctrl_type in ("MenuItem", "Menu"):
+                        try:
+                            element.expand()
+                        except Exception:
+                            element.click_input()
+                    else:
+                        element.click_input()
+                except Exception as e:
+                    post_result(command_id, "error", error=f"Failed to click step {i+1} ({step}): {str(e)}")
+                    return
+                time.sleep(0.5)
+                current_parent = element
 
-        abs_x = window.left + result["x"]
-        abs_y = window.top + result["y"]
-        pyautogui.click(abs_x, abs_y)
-        time.sleep(0.8)
+        except ImportError:
+            post_result(command_id, "error", error="pywinauto not installed for UIA path replay")
+            return
 
     time.sleep(0.5)
     final_img = screenshot_window(window)
     final_b64 = img_to_base64(final_img)
     post_result(command_id, "complete", screenshot_b64=final_b64, data={
         "path": path,
+        "client": client,
         "stepsCompleted": len(steps),
     })
     print(f"  [path-nav] Complete: {len(steps)} steps executed")
