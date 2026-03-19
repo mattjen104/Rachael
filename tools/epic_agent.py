@@ -303,9 +303,10 @@ def vision_to_screen(window, img_x, img_y):
     return screen_x, screen_y
 
 
-def ask_claude(screenshot_b64, prompt, max_retries=3):
+def ask_claude(screenshot_b64, prompt, max_retries=3, image_format="png"):
     if not OPENROUTER_API_KEY:
         return None
+    mime = "image/jpeg" if image_format == "jpeg" else "image/png"
     base_delay = 1.0
     max_delay = 60.0
     for attempt in range(max_retries + 1):
@@ -324,7 +325,7 @@ def ask_claude(screenshot_b64, prompt, max_retries=3):
                             "content": [
                                 {
                                     "type": "image_url",
-                                    "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
+                                    "image_url": {"url": f"data:{mime};base64,{screenshot_b64}"},
                                 },
                                 {"type": "text", "text": prompt},
                             ],
@@ -348,7 +349,12 @@ def ask_claude(screenshot_b64, prompt, max_retries=3):
                     try:
                         wait = float(retry_after)
                     except (ValueError, TypeError):
-                        wait = None
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            retry_dt = parsedate_to_datetime(retry_after)
+                            wait = max(0, (retry_dt - __import__('datetime').datetime.now(retry_dt.tzinfo)).total_seconds())
+                        except Exception:
+                            wait = None
                 if wait is None:
                     backoff = min(base_delay * (2 ** attempt), max_delay)
                     wait = backoff + random.uniform(0, backoff * 0.25)
@@ -2287,7 +2293,7 @@ def execute_read_screen(cmd):
     print(f"  [read] Reading screen data from {env}")
 
     img = screenshot_window(window)
-    b64 = img_to_base64(img)
+    b64 = img_to_base64(img, use_jpeg=True)
 
     focus_hint = f"Focus on: {focus}\n" if focus else ""
     prompt = (
@@ -2306,7 +2312,7 @@ def execute_read_screen(cmd):
         "Return ONLY the JSON object."
     )
 
-    response = ask_claude(b64, prompt)
+    response = ask_claude(b64, prompt, image_format="jpeg")
     screen_data = {}
     if response:
         try:
