@@ -3681,7 +3681,7 @@ ${fullHtml}`;
       const key = `epic_workflow_${safeName}`;
       const cfg = await storage.getAgentConfig(key);
       if (!cfg?.value) return fail(`[epic] Workflow "${name}" not found.`);
-      await storage.setAgentConfig(key, "", "epic");
+      await storage.deleteAgentConfig(key);
       return ok(`Workflow "${name}" deleted.`);
     }
 

@@ -699,9 +699,26 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                           body: JSON.stringify({}),
                         });
                         if (resp.ok) {
-                          const d = await resp.json();
                           setEpicRecording(prev => ({ ...prev, active: false }));
-                          const steps = (d.steps || []).map((s: any, i: number) => ({ ...s, step: i + 1 }));
+                          const d = await resp.json();
+                          let steps = d.steps || [];
+                          await new Promise(r => setTimeout(r, 3000));
+                          const statusResp = await fetch("/api/epic/record/status");
+                          if (statusResp.ok) {
+                            const sd = await statusResp.json();
+                            if (sd.stepCount > steps.length) {
+                              const stopResp2 = await fetch("/api/epic/record/stop", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({}),
+                              }).catch(() => null);
+                              if (stopResp2?.ok) {
+                                const d2 = await stopResp2.json();
+                                if ((d2.steps || []).length > steps.length) steps = d2.steps;
+                              }
+                            }
+                          }
+                          steps = steps.map((s: any, i: number) => ({ ...s, step: i + 1 }));
                           if (steps.length > 0) {
                             setRecReview({ show: true, steps, name: "" });
                           }
