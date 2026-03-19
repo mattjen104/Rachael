@@ -3629,6 +3629,260 @@ ${fullHtml}`;
       "  pulse clear             - Clear stored links",
     ].join(nl));
   });
+
+  const galaxyState = {
+    lastFetchTime: 0,
+    sessionFetchCount: 0,
+    sessionStartTime: 0,
+  };
+
+  function galaxyDelay(): number {
+    return 3000 + Math.floor(Math.random() * 5000);
+  }
+
+  async function galaxyRateCheck(): Promise<string | null> {
+    const now = Date.now();
+    const SESSION_WINDOW = 10 * 60 * 1000;
+    const MAX_PER_SESSION = 5;
+
+    if (now - galaxyState.sessionStartTime > SESSION_WINDOW) {
+      galaxyState.sessionFetchCount = 0;
+      galaxyState.sessionStartTime = now;
+    }
+
+    if (galaxyState.sessionFetchCount >= MAX_PER_SESSION) {
+      const elapsed = now - galaxyState.sessionStartTime;
+      const remaining = Math.ceil((SESSION_WINDOW - elapsed) / 1000);
+      if (remaining > 0) {
+        return `Session limit reached (${MAX_PER_SESSION} fetches). Please wait ${remaining}s or try again later.`;
+      }
+      galaxyState.sessionFetchCount = 0;
+      galaxyState.sessionStartTime = now;
+    }
+
+    const sinceLast = now - galaxyState.lastFetchTime;
+    const minDelay = galaxyDelay();
+    if (sinceLast < minDelay && galaxyState.lastFetchTime > 0) {
+      const waitSec = Math.ceil((minDelay - sinceLast) / 1000);
+      return `Rate limit: please wait ${waitSec}s between Galaxy requests.`;
+    }
+
+    return null;
+  }
+
+  function galaxyRecordFetch(): void {
+    galaxyState.lastFetchTime = Date.now();
+    galaxyState.sessionFetchCount++;
+  }
+
+  registerCommand("galaxy", "Galaxy knowledge base search & retrieval", "galaxy [search <query>|read <url or #>|recent]", async (args) => {
+    const nl = String.fromCharCode(10);
+
+    if (!args[0] || args[0] === "help") {
+      return ok([
+        "Galaxy Knowledge Base (galaxy.epic.com)",
+        "========================================",
+        "  galaxy search <query>    - Search Galaxy for articles/guides",
+        "  galaxy read <url or #>   - Fetch & save a guide to Reader",
+        "  galaxy recent            - Show recently saved Galaxy guides",
+        "",
+        "Galaxy is behind Epic SSO. Requires Chrome extension bridge.",
+        "Rate limited: 3-8s between requests, max 5 per session.",
+      ].join(nl));
+    }
+
+    if (args[0] === "search") {
+      const query = args.slice(1).join(" ");
+      if (!query) return fail("[galaxy] Usage: galaxy search <query>");
+
+      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+      if (!isExtensionConnected()) {
+        return fail("[galaxy] Chrome extension bridge not connected. Connect extension first.");
+      }
+
+      const rateMsg = await galaxyRateCheck();
+      if (rateMsg) return fail(`[galaxy] ${rateMsg}`);
+
+      const searchUrl = `https://galaxy.epic.com/Search/GetResults?query=${encodeURIComponent(query)}&page=1&pageSize=10`;
+
+      emitEvent("bridge", `Galaxy search: "${query}"`, "info");
+      galaxyRecordFetch();
+
+      const result = await smartFetch(searchUrl, "dom", "galaxy-search", {
+        maxText: 30000,
+        includeHtml: true,
+        maxHtml: 50000,
+        spaWaitMs: 3000,
+      });
+
+      if (result.error) {
+        return fail(`[galaxy] Search failed: ${result.error}`);
+      }
+
+      const html = result.body || result.text || "";
+      const textContent = result.text || "";
+      const results: { title: string; url: string; snippet: string }[] = [];
+
+      const titlePattern = /<a[^>]*href=["']([^"']*?)["'][^>]*class=["'][^"']*search-result-title[^"']*["'][^>]*>([^<]*)<\/a>/gi;
+      let match;
+      while ((match = titlePattern.exec(html)) !== null && results.length < 10) {
+        let href = match[1];
+        const title = match[2].trim();
+        if (!href.startsWith("http")) href = `https://galaxy.epic.com${href}`;
+        results.push({ title, url: href, snippet: "" });
+      }
+
+      if (results.length === 0) {
+        const linkPattern = /<a[^>]*href=["'](\/[^"']*?)["'][^>]*>([^<]{5,80})<\/a>/gi;
+        while ((match = linkPattern.exec(html)) !== null && results.length < 10) {
+          const href = `https://galaxy.epic.com${match[1]}`;
+          const title = match[2].trim();
+          if (title.length > 4 && !href.includes("/Search/") && !href.includes("/Account/")) {
+            results.push({ title, url: href, snippet: "" });
+          }
+        }
+      }
+
+      if (results.length === 0 && textContent.length > 20) {
+        const lines = textContent.split(/\n/).map((l: string) => l.trim()).filter((l: string) => l.length > 10);
+        for (let i = 0; i < Math.min(lines.length, 10); i++) {
+          results.push({ title: lines[i].substring(0, 100), url: "", snippet: "" });
+        }
+      }
+
+      await storage.setAgentConfig("galaxy_last_results", JSON.stringify(results), "galaxy");
+
+      if (results.length === 0) {
+        return ok(`Galaxy search: "${query}" -- No results found.${nl}The page may have a different structure or require specific auth.`);
+      }
+
+      const outLines = [`=== GALAXY SEARCH: "${query}" === (${results.length} results)`, ""];
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        outLines.push(`  ${String(i + 1).padStart(3)}. ${r.title}`);
+        if (r.url) outLines.push(`       ${r.url.slice(0, 70)}`);
+        if (r.snippet) outLines.push(`       ${r.snippet.slice(0, 80)}`);
+      }
+      outLines.push("", "Use: galaxy read <#> to fetch & save a guide");
+      return ok(outLines.join(nl));
+    }
+
+    if (args[0] === "read") {
+      const target = args.slice(1).join(" ");
+      if (!target) return fail("[galaxy] Usage: galaxy read <url or result #>");
+
+      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+      if (!isExtensionConnected()) {
+        return fail("[galaxy] Chrome extension bridge not connected. Connect extension first.");
+      }
+
+      const rateMsg = await galaxyRateCheck();
+      if (rateMsg) return fail(`[galaxy] ${rateMsg}`);
+
+      let url = target;
+      const num = parseInt(target, 10);
+      if (!isNaN(num) && num >= 1) {
+        const cfg = await storage.getAgentConfig("galaxy_last_results");
+        if (!cfg?.value) return fail("[galaxy] No search results stored. Run galaxy search first.");
+        try {
+          const results = JSON.parse(cfg.value);
+          if (num > results.length) return fail(`[galaxy] Result #${num} not found. Only ${results.length} results.`);
+          url = results[num - 1].url;
+          if (!url) return fail(`[galaxy] Result #${num} has no URL.`);
+        } catch {
+          return fail("[galaxy] Failed to parse stored results.");
+        }
+      }
+
+      if (!url.startsWith("http")) {
+        url = `https://galaxy.epic.com${url.startsWith("/") ? "" : "/"}${url}`;
+      }
+
+      emitEvent("bridge", `Galaxy read: ${url}`, "info");
+      galaxyRecordFetch();
+
+      const result = await smartFetch(url, "dom", "galaxy-read", {
+        maxText: 50000,
+        includeHtml: true,
+        maxHtml: 100000,
+        spaWaitMs: 3000,
+      });
+
+      if (result.error) {
+        return fail(`[galaxy] Fetch failed: ${result.error}${nl}No automatic retry. Try again manually if needed.`);
+      }
+
+      const html = result.body || "";
+      const text = result.text || "";
+
+      let title = "";
+      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (titleMatch) title = titleMatch[1].trim();
+      const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      if (h1Match) title = h1Match[1].trim();
+
+      if (!title) {
+        title = text.split(/\n/)[0]?.trim().substring(0, 100) || "Galaxy Article";
+      }
+
+      const extractedText = text.length > 100 ? text : html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+        .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+        .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const saved = await storage.createReaderPage({
+        url,
+        title,
+        extractedText: extractedText.substring(0, 50000),
+        domain: "galaxy.epic.com",
+      });
+
+      return ok([
+        `Galaxy guide saved to Reader:`,
+        `  Title: ${title}`,
+        `  URL:   ${url}`,
+        `  ID:    ${saved.id}`,
+        `  Size:  ${extractedText.length} chars`,
+        "",
+        "View in Reader (C-c r) or TreeView GALAXY section.",
+      ].join(nl));
+    }
+
+    if (args[0] === "recent") {
+      const pages = await storage.getReaderPages();
+      const galaxyPages = pages.filter(p => p.domain === "galaxy.epic.com");
+      const recent = galaxyPages.slice(0, 10);
+
+      if (recent.length === 0) {
+        return ok("No Galaxy guides saved yet. Use: galaxy search <query> then galaxy read <#>");
+      }
+
+      const outLines = [`=== GALAXY GUIDES (${galaxyPages.length} total, showing latest 10) ===`, ""];
+      for (let i = 0; i < recent.length; i++) {
+        const p = recent[i];
+        const date = p.scrapedAt ? new Date(p.scrapedAt).toLocaleDateString() : "unknown";
+        outLines.push(`  ${String(i + 1).padStart(3)}. ${p.title}`);
+        outLines.push(`       ${p.url.slice(0, 60)}  (${date})`);
+      }
+      return ok(outLines.join(nl));
+    }
+
+    return ok([
+      "Galaxy Knowledge Base (galaxy.epic.com)",
+      "========================================",
+      "  galaxy search <query>    - Search Galaxy for articles/guides",
+      "  galaxy read <url or #>   - Fetch & save a guide to Reader",
+      "  galaxy recent            - Show recently saved Galaxy guides",
+      "",
+      "Galaxy is behind Epic SSO. Requires Chrome extension bridge.",
+      "Rate limited: 3-8s between requests, max 5 per session.",
+    ].join(nl));
+  });
 }
 
 registerBuiltinCommands();

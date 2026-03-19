@@ -91,6 +91,11 @@ type TreeNode = {
   name: string;
   url: string;
   category: string;
+} | {
+  type: "galaxyGuide";
+  id: number;
+  title: string;
+  url: string;
 };
 
 export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
@@ -348,10 +353,21 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       }
     }
 
-    if (data.reader.length > 0) {
-      nodes.push({ type: "section", label: "READER", key: "reader", count: data.reader.length });
+    const galaxyPages = (data.reader || []).filter((r: any) => r.domain === "galaxy.epic.com");
+    if (galaxyPages.length > 0) {
+      nodes.push({ type: "section", label: "GALAXY (Epic KB)", key: "galaxy", count: galaxyPages.length });
+      if (expanded.has("galaxy")) {
+        for (const g of galaxyPages) {
+          nodes.push({ type: "galaxyGuide", id: g.id, title: g.title, url: g.url });
+        }
+      }
+    }
+
+    const nonGalaxyReader = (data.reader || []).filter((r: any) => r.domain !== "galaxy.epic.com");
+    if (nonGalaxyReader.length > 0) {
+      nodes.push({ type: "section", label: "READER", key: "reader", count: nonGalaxyReader.length });
       if (expanded.has("reader")) {
-        for (const r of data.reader) {
+        for (const r of nonGalaxyReader) {
           nodes.push({ type: "reader", id: r.id, title: r.title, domain: r.domain });
         }
       }
@@ -524,6 +540,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "pulseLink") {
           window.open(node.url, "_blank");
         }
+        else if (node?.type === "galaxyGuide") {
+          onNavigate?.("reader", node.id);
+        }
         break;
     }
   }, [nodes, selectedIdx, toggleTask, onNavigate, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched, launchCitrixApp]);
@@ -614,6 +633,10 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           icon = "→";
           label = node.name;
           extra = "↗";
+        } else if (node.type === "galaxyGuide") {
+          icon = "★";
+          label = node.title.slice(0, 55);
+          extra = "";
         } else if (node.type === "bridge-info") {
           icon = "ℹ";
           label = node.label;
@@ -658,6 +681,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 onRunCommand(`epic go ${node.env} ${node.navPath}`);
               } else if (node.type === "pulseLink") {
                 window.open(node.url, "_blank");
+              } else if (node.type === "galaxyGuide") {
+                onNavigate?.("reader", node.id);
               } else if (node.type === "snow-item") {
                 if (node.url) {
                   window.open(node.url, "_blank");

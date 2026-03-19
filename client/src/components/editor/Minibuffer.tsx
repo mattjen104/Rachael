@@ -234,6 +234,9 @@ export default function Minibuffer({
       { id: "pulse-categories", label: "pulse-categories", hint: "Show link categories", action: () => { setMode("shell"); setQuery("pulse categories"); setShellOutput(""); executeShellCommand("pulse categories"); } },
       { id: "pulse-open", label: "pulse-open", hint: "Open intranet link", action: () => { setMode("shell"); setQuery("pulse open "); setShellOutput(""); } },
       { id: "pulse-clear", label: "pulse-clear", hint: "Clear stored links", action: () => { setMode("shell"); setQuery("pulse clear"); setShellOutput(""); executeShellCommand("pulse clear"); } },
+      { id: "galaxy-search", label: "galaxy-search", hint: "Search Galaxy knowledge base", action: () => { setMode("shell"); setQuery("galaxy search "); setShellOutput(""); } },
+      { id: "galaxy-read", label: "galaxy-read", hint: "Fetch & save Galaxy guide", action: () => { setMode("shell"); setQuery("galaxy read "); setShellOutput(""); } },
+      { id: "galaxy-recent", label: "galaxy-recent", hint: "Show saved Galaxy guides", action: () => { setMode("shell"); setQuery("galaxy recent"); setShellOutput(""); executeShellCommand("galaxy recent"); } },
       { id: "transcripts", label: "transcripts", hint: "View transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "meetings", label: "meetings", hint: "View meeting transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "record-start", label: "record-start", hint: "Start mic recording", action: () => {
