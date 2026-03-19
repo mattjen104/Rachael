@@ -498,6 +498,20 @@ export async function registerRoutes(
     res.json({ active });
   });
 
+  app.get("/api/epic/scan-script", async (_req, res) => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const scriptPath = path.join(process.cwd(), "tools", "epic_scan.py");
+    try {
+      const content = fs.readFileSync(scriptPath, "utf-8");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="epic_scan.py"');
+      res.send(content);
+    } catch {
+      res.status(404).json({ error: "Script not found" });
+    }
+  });
+
   app.post("/api/epic/activities", async (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
