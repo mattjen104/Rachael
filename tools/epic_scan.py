@@ -38,7 +38,10 @@ except ImportError:
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ORGCLOUD_URL = os.environ.get("ORGCLOUD_URL", "https://i-cloud-sync-manager.replit.app")
-BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN", "46c6eeeb-8404-40cb-9b09-fb379ab4d3c6")
+BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN", "")
+if not BRIDGE_TOKEN:
+    print("ERROR: BRIDGE_TOKEN environment variable required")
+    sys.exit(1)
 MODEL = "anthropic/claude-sonnet-4"
 
 pyautogui.PAUSE = 0.3

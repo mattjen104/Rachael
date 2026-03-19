@@ -50,8 +50,20 @@ pyautogui.PAUSE = 0.2
 pyautogui.FAILSAFE = True
 
 
-def find_window(env):
+def find_window(env, client=None):
+    """Find a window for the given env, optionally filtered by client type."""
     env_upper = env.upper()
+    if client == "text":
+        return find_text_window(env_upper)
+    if client == "hyperspace":
+        return find_hyperspace_window(env_upper)
+    w = find_hyperspace_window(env_upper)
+    if w:
+        return w
+    return find_text_window(env_upper)
+
+
+def find_hyperspace_window(env_upper):
     for w in gw.getAllWindows():
         title = w.title or ""
         t = title.upper()
@@ -60,6 +72,22 @@ def find_window(env):
     for w in gw.getAllWindows():
         title = w.title or ""
         if env_upper in title.upper() and w.width > 400 and w.height > 300:
+            t = title.upper()
+            if "TEXT" not in t and "TERMINAL" not in t and "SESSION" not in t:
+                return w
+    return None
+
+
+def find_text_window(env_upper):
+    for w in gw.getAllWindows():
+        title = w.title or ""
+        t = title.upper()
+        if env_upper in t and ("TEXT" in t or "TERMINAL" in t or "SESSION" in t or "CACHE" in t):
+            return w
+    for w in gw.getAllWindows():
+        title = w.title or ""
+        t = title.upper()
+        if env_upper in t and ("EXCEED" in t or "PUTTY" in t or "TERATERM" in t):
             return w
     return None
 
@@ -464,9 +492,9 @@ def execute_navigate_path(cmd):
         post_result(command_id, "error", error="No path provided")
         return
 
-    window = find_window(env)
+    window = find_window(env, client)
     if not window:
-        post_result(command_id, "error", error=f"No {env} window found")
+        post_result(command_id, "error", error=f"No {env} {client} window found")
         return
 
     steps = [s.strip() for s in path.split(">") if s.strip()]
@@ -627,9 +655,9 @@ def execute_masterfile(cmd):
 
     print(f"  [masterfile] {masterfile} -> {item}")
 
-    window = find_window(env)
+    window = find_window(env, "text")
     if not window:
-        post_result(command_id, "error", error=f"No {env} window found for masterfile lookup")
+        post_result(command_id, "error", error=f"No {env} Text window found for masterfile lookup")
         return
 
     try:

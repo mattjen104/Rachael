@@ -3124,20 +3124,68 @@ ${fullHtml}`;
 
     if (args[0] === "go") {
       const env = (args[1] || "SUP").toUpperCase();
-      const path = args.slice(2).join(" ");
-      if (!path) return fail("[epic] Usage: epic go SUP Epic Button > Patient Care > Patient Lookup");
-      const isTextPath = /^\d+\s/.test(path.split(">")[0].trim());
-      const client = isTextPath ? "text" : "hyperspace";
+      const target = args.slice(2).join(" ");
+      if (!target) return fail("[epic] Usage: epic go SUP Patient Lookup");
+
+      function fMatch(text: string, q: string): boolean {
+        const lower = text.toLowerCase();
+        const words = q.toLowerCase().split(/\s+/);
+        return words.every(w => lower.includes(w));
+      }
+
+      function findInTree(node: any, query: string, client: string): { path: string; client: string; name: string } | null {
+        for (const child of (node.children || [])) {
+          if (fMatch(child.name || "", query)) {
+            return { path: child.path || child.name, client, name: child.name };
+          }
+          const found = findInTree(child, query, client);
+          if (found) return found;
+        }
+        return null;
+      }
+
+      let resolved: { path: string; client: string; name: string } | null = null;
+
+      if (target.includes(">")) {
+        const isTextPath = /^\d+\s/.test(target.split(">")[0].trim());
+        resolved = { path: target, client: isTextPath ? "text" : "hyperspace", name: target };
+      } else {
+        for (const client of ["hyperspace", "text"]) {
+          const key = `epic_tree_${env.toLowerCase()}_${client}`;
+          const cfg = await storage.getAgentConfig(key);
+          if (cfg?.value) {
+            try {
+              const tree = JSON.parse(cfg.value);
+              const found = findInTree(tree, target, client);
+              if (found) { resolved = found; break; }
+            } catch {}
+          }
+        }
+        if (!resolved) {
+          const actKey = `epic_activities_${env.toLowerCase()}`;
+          const actCfg = await storage.getAgentConfig(actKey);
+          if (actCfg?.value) {
+            try {
+              const acts = JSON.parse(actCfg.value);
+              const match = acts.find((a: any) => fMatch(a.name || "", target));
+              if (match) resolved = { path: match.name, client: "hyperspace", name: match.name };
+            } catch {}
+          }
+        }
+      }
+
+      if (!resolved) return fail(`[epic] No activity matching "${target}" found in ${env} tree. Run epic search ${target} to find it.`);
+
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "navigate_path", env, path, client }),
+          body: JSON.stringify({ type: "navigate_path", env, path: resolved.path, client: resolved.client }),
         });
         const data = await resp.json() as any;
         if (data.ok) {
-          const mode = client === "text" ? "keystrokes" : "UIA clicks";
-          return ok(`Path navigation sent: ${env} (${client})${nl}Path: ${path}${nl}Mode: ${mode}${nl}Command ID: ${data.commandId}${nl}Desktop agent will replay the stored path.`);
+          const mode = resolved.client === "text" ? "keystrokes" : "UIA clicks";
+          return ok(`Path navigation sent: ${env} (${resolved.client})${nl}Activity: ${resolved.name}${nl}Path: ${resolved.path}${nl}Mode: ${mode}${nl}Command ID: ${data.commandId}`);
         }
         return fail(`[epic] Failed to send command`);
       } catch (e: any) {
