@@ -1181,7 +1181,9 @@ def execute_menu_crawl(cmd):
             pass
 
     def crawl_submenu(parent_path, current_depth, max_depth, reopen_epic_fn):
-        """Recursively crawl a submenu. Returns (children_list, item_count)."""
+        """Recursively crawl a submenu. Returns (children_list, item_count).
+        Only clicks items with submenu arrows. Terminal items (activities) are
+        recorded without clicking to avoid launching them."""
         sub_img, sub_b64 = safe_screenshot()
         if not sub_b64:
             return [], 0
@@ -1198,11 +1200,10 @@ def execute_menu_crawl(cmd):
             si_name = si.get("name", "?")
             si_path = f"{parent_path} > {si_name}" if parent_path else si_name
             has_sub = si.get("hasSubmenu", False)
-            is_activity = not has_sub
 
             si_node = {
                 "name": si_name,
-                "controlType": "Activity" if is_activity else "MenuItem",
+                "controlType": "MenuItem" if has_sub else "Activity",
                 "path": si_path,
                 "children": []
             }
@@ -1224,66 +1225,8 @@ def execute_menu_crawl(cmd):
 
                 pyautogui.press("escape")
                 time.sleep(0.5)
-
-            elif is_activity and current_depth < max_depth:
-                si_x = si.get("x", 0)
-                si_y = si.get("y", 0)
-                click_x = window.left + int(si_x)
-                click_y = window.top + int(si_y)
-
-                print(f"  [menu-crawl]{indent}  -> Opening activity '{si_name}' to check for sub-items...")
-                pre_b64 = sub_b64
-                pyautogui.click(click_x, click_y)
-                time.sleep(1.5)
-
-                post_img, post_b64 = safe_screenshot()
-                if post_b64:
-                    check_prompt = (
-                        f"I just clicked '{si_name}' in Epic Hyperspace.\n"
-                        "Did this open an activity/workspace (the menu disappeared and a new screen appeared)?\n"
-                        "Or did it open a submenu with more options?\n"
-                        "Or did nothing change?\n\n"
-                        "Return ONLY: {\"result\": \"activity\" or \"submenu\" or \"nothing\", \"description\": \"what you see\"}"
-                    )
-                    check_resp = ask_claude(post_b64, check_prompt)
-                    result_type = "nothing"
-                    if check_resp:
-                        try:
-                            cm = re.search(r'\{[\s\S]*?\}', check_resp)
-                            if cm:
-                                cr = json.loads(cm.group())
-                                result_type = cr.get("result", "nothing")
-                        except Exception:
-                            pass
-
-                    if result_type == "submenu":
-                        si_node["controlType"] = "MenuItem"
-                        sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
-                        si_node["children"] = sub_children
-                        count += sub_count
-                        pyautogui.press("escape")
-                        time.sleep(0.5)
-                    elif result_type == "activity":
-                        si_node["controlType"] = "Activity"
-                        print(f"  [menu-crawl]{indent}  -> Activity '{si_name}' opened, closing...")
-                        pyautogui.hotkey("ctrl", "w")
-                        time.sleep(1.0)
-                        verify_img, verify_b64 = safe_screenshot()
-                        if verify_b64:
-                            v_resp = ask_claude(verify_b64,
-                                "Is there a save/close dialog on screen? Return ONLY: {\"hasDialog\": true/false}")
-                            if v_resp:
-                                try:
-                                    vm = re.search(r'\{[\s\S]*?\}', v_resp)
-                                    if vm:
-                                        vr = json.loads(vm.group())
-                                        if vr.get("hasDialog"):
-                                            pyautogui.press("n")
-                                            time.sleep(0.5)
-                                except Exception:
-                                    pass
-
-                        reopen_epic_fn()
+            else:
+                print(f"  [menu-crawl]{indent}  -> Activity: '{si_name}' (recorded, not clicked)")
 
             children.append(si_node)
 
