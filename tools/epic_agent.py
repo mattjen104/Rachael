@@ -1345,10 +1345,17 @@ def execute_menu_crawl(cmd):
     def vision_find_epic_button(b64):
         """Use vision to find the Epic button coordinates."""
         prompt = (
-            "Find the Epic button in this Hyperspace window. It is typically in the top-left corner "
-            "and says 'Epic' with a logo. It opens the main application menu.\n\n"
+            "Find the 'Epic' button in this Epic Hyperspace window screenshot.\n\n"
+            "IMPORTANT DETAILS:\n"
+            "- The Epic button is a SMALL button in the TOP-LEFT corner of the window\n"
+            "- It typically shows the Epic logo (a flame/torch icon) and may say 'Epic' next to it\n"
+            "- It is in the TITLE BAR or TOOLBAR area, NOT in the main content area\n"
+            "- It is usually the FIRST button on the left side of the toolbar ribbon\n"
+            "- Do NOT confuse it with any menu items, search bars, or dashboard items below\n"
+            "- Do NOT click on any text in the main workspace area\n"
+            "- The button is typically at the very top of the window, y coordinate should be small (under 100 pixels from top)\n\n"
             "Return ONLY a JSON object: {\"x\": <number>, \"y\": <number>, \"found\": true, \"label\": \"text on button\"}\n"
-            "Coordinates should be relative to the image.\n"
+            "Coordinates should be pixel positions relative to the image.\n"
             "If you cannot find it, return: {\"found\": false, \"reason\": \"why\"}"
         )
         resp = ask_claude(b64, prompt)
@@ -1357,7 +1364,10 @@ def execute_menu_crawl(cmd):
         try:
             m = re.search(r'\{[\s\S]*?\}', resp)
             if m:
-                return json.loads(m.group())
+                result = json.loads(m.group())
+                if result.get("found") and result.get("y", 999) > 200:
+                    print(f"  [menu-crawl] WARNING: Epic button y={result['y']} seems too far down, may be wrong element")
+                return result
         except Exception:
             pass
         return None
@@ -1430,18 +1440,27 @@ def execute_menu_crawl(cmd):
 
     def check_screen_state(context=""):
         """Check what's on screen: menu visible, activity opened, or something else.
-        Returns: 'menu', 'activity', 'desktop', or 'unknown'"""
+        Returns: ('state', b64_screenshot) where state is 'menu', 'activity', 'desktop', 'dialog', or 'unknown'"""
         check_img, check_b64 = safe_screenshot()
         if not check_b64:
             return "unknown", None
         prompt = (
-            f"Look at this Epic Hyperspace screen{(' (' + context + ')') if context else ''}.\n"
-            "What is the current state?\n"
-            "- 'menu': The Epic button menu (or a submenu) is visible\n"
-            "- 'activity': An activity/workspace/form has opened (no menu visible)\n"
-            "- 'dialog': A dialog box, popup, or save prompt is showing\n"
-            "- 'desktop': The main Epic desktop/workspace with no menus open\n\n"
-            "Return ONLY: {\"state\": \"menu\"|\"activity\"|\"dialog\"|\"desktop\", \"description\": \"brief description\"}"
+            f"Look at this Epic Hyperspace screen{(' (' + context + ')') if context else ''}.\n\n"
+            "Determine the current screen state by looking for these specific visual cues:\n\n"
+            "'menu': A dropdown/popup menu panel is visible OVERLAYING the main window. This looks like:\n"
+            "  - A floating panel/popup with a list of items\n"
+            "  - The Epic button menu has TWO columns: left=Pinned/Recent, right=Navigation categories\n"
+            "  - Submenu popups appear as additional floating panels\n"
+            "  - The menu panel has a distinct border/shadow separating it from the background\n\n"
+            "'desktop': The main Epic workspace/dashboard is showing with NO overlay menus. This is:\n"
+            "  - The normal working view with tabs, patient lists, or a dashboard\n"
+            "  - No floating menu panels visible\n"
+            "  - The toolbar/ribbon is visible at the top but no dropdown is open\n\n"
+            "'activity': A specific clinical activity/form has opened (like a patient chart, lab results, etc.)\n\n"
+            "'dialog': A modal dialog box (save prompt, confirmation, error message) is showing\n\n"
+            "IMPORTANT: If you see the Epic desktop/workspace with NO floating menu panels, that is 'desktop', not 'menu'.\n"
+            "A menu must be a FLOATING OVERLAY panel, not just the toolbar.\n\n"
+            "Return ONLY: {\"state\": \"menu\"|\"activity\"|\"dialog\"|\"desktop\", \"description\": \"brief description of what you see\"}"
         )
         resp = ask_claude(check_b64, prompt)
         if not resp:
@@ -1450,7 +1469,10 @@ def execute_menu_crawl(cmd):
             m = re.search(r'\{[\s\S]*?\}', resp)
             if m:
                 result = json.loads(m.group())
-                return result.get("state", "unknown"), check_b64
+                state = result.get("state", "unknown")
+                desc = result.get("description", "")
+                print(f"  [state-check] {state}: {desc}")
+                return state, check_b64
         except Exception:
             pass
         return "unknown", check_b64
@@ -1603,11 +1625,32 @@ def execute_menu_crawl(cmd):
         print(f"  [menu-crawl] Found Epic button at img({epic_loc['x']}, {epic_loc['y']}) -> screen({epic_abs_x}, {epic_abs_y}): '{epic_loc.get('label', '?')}'")
 
         def reopen_epic_menu():
-            """Re-open the Epic button menu."""
-            pyautogui.click(epic_abs_x, epic_abs_y)
-            time.sleep(1.5)
+            """Re-open the Epic button menu with verification."""
+            for attempt in range(3):
+                pyautogui.click(epic_abs_x, epic_abs_y)
+                time.sleep(1.5)
+                state, _ = check_screen_state("after clicking Epic button")
+                if state == "menu":
+                    print(f"  [menu] Epic menu opened successfully")
+                    return True
+                elif state == "desktop":
+                    print(f"  [menu] Menu didn't open (attempt {attempt+1}/3) - clicking again")
+                    time.sleep(0.5)
+                elif state == "activity":
+                    print(f"  [menu] Activity visible instead of menu - pressing Escape first")
+                    pyautogui.press("escape")
+                    time.sleep(0.5)
+                else:
+                    print(f"  [menu] State after click: {state} (attempt {attempt+1}/3)")
+                    pyautogui.press("escape")
+                    time.sleep(0.3)
+            print(f"  [menu] WARNING: Could not confirm menu opened after 3 attempts")
+            return False
 
-        reopen_epic_menu()
+        menu_opened = reopen_epic_menu()
+        if not menu_opened:
+            post_result(command_id, "error", error="Could not open Epic menu after multiple attempts")
+            return
 
         print(f"  [menu-crawl] Step 2: Reading top-level menu...")
         img, b64 = safe_screenshot()
@@ -1616,14 +1659,23 @@ def execute_menu_crawl(cmd):
             return
 
         def vision_find_item(b64_img, item_name):
-            """Use vision to find the exact coordinates of a specific menu item."""
+            """Use vision to find a specific navigation category in the RIGHT column of the Epic menu."""
             prompt = (
-                f"Find the menu item labeled \"{item_name}\" in this Epic Hyperspace menu screenshot.\n"
-                f"The menu has two columns: left side has Pinned/Recent items, right side has navigation categories.\n"
-                f"\"{item_name}\" should be in the RIGHT column with a submenu arrow (>).\n\n"
-                f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true}}\n"
+                f"Find the navigation category labeled \"{item_name}\" in this Epic Hyperspace menu screenshot.\n\n"
+                f"CRITICAL LAYOUT RULES:\n"
+                f"- The Epic menu has TWO distinct columns/panels:\n"
+                f"  LEFT PANEL: Shows 'Pinned' and 'Recently Accessed' items — DO NOT click anything here\n"
+                f"  RIGHT PANEL: Shows permanent navigation categories like Lab, Patient Care, Pharmacy, etc.\n"
+                f"- \"{item_name}\" is a NAVIGATION CATEGORY in the RIGHT panel\n"
+                f"- Navigation categories have a RIGHT-ARROW (>) or chevron indicating they open submenus\n"
+                f"- The right panel categories are typically in the right half of the menu popup\n"
+                f"- Do NOT return coordinates for any item in the LEFT panel (Pinned/Recent)\n"
+                f"- Do NOT return coordinates for any search bar or search field\n"
+                f"- Do NOT return coordinates for any dashboard item or workspace item behind the menu\n"
+                f"- If the menu is NOT currently open (you see the main desktop/workspace), return found: false\n\n"
+                f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true, \"panel\": \"right\"}}\n"
                 f"x and y are pixel coordinates relative to the image.\n"
-                f"If not found: {{\"found\": false}}"
+                f"If not found or menu not open: {{\"found\": false, \"reason\": \"why\"}}"
             )
             resp = ask_claude(b64_img, prompt)
             if not resp:
@@ -1631,7 +1683,15 @@ def execute_menu_crawl(cmd):
             try:
                 fm = re.search(r'\{[\s\S]*?\}', resp)
                 if fm:
-                    return json.loads(fm.group())
+                    result = json.loads(fm.group())
+                    if result.get("found"):
+                        img_w = 0
+                        try:
+                            import struct
+                            raw = base64.b64decode(b64_img[:100])
+                        except Exception:
+                            pass
+                    return result
             except Exception:
                 pass
             return None
@@ -1681,8 +1741,13 @@ def execute_menu_crawl(cmd):
 
         print(f"  [menu-crawl] Step 3: Crawling {len(EPIC_MENU_CATEGORIES)} known categories...")
 
+        consecutive_failures = 0
         for i, cat_name in enumerate(EPIC_MENU_CATEGORIES):
             print(f"  [menu-crawl] === [{i+1}/{len(EPIC_MENU_CATEGORIES)}] '{cat_name}' ===")
+
+            if consecutive_failures >= 3:
+                print(f"  [menu-crawl] 3 consecutive failures - stopping crawl early to save what we have")
+                break
 
             node = {
                 "name": cat_name,
@@ -1693,15 +1758,31 @@ def execute_menu_crawl(cmd):
             crawled_count += 1
 
             try:
+                state_before, _ = check_screen_state(f"before looking for {cat_name}")
+                if state_before != "menu":
+                    print(f"  [menu-crawl]   Menu not open (state={state_before}), reopening...")
+                    pyautogui.press("escape")
+                    time.sleep(0.3)
+                    pyautogui.press("escape")
+                    time.sleep(0.3)
+                    if not reopen_epic_menu():
+                        print(f"  [menu-crawl]   Cannot reopen menu, skipping '{cat_name}'")
+                        consecutive_failures += 1
+                        tree_children.append(node)
+                        continue
+
                 img, b64 = safe_screenshot()
                 if not b64:
                     print(f"  [menu-crawl]   Screenshot failed, skipping '{cat_name}'")
+                    consecutive_failures += 1
                     tree_children.append(node)
                     continue
 
                 loc = vision_find_item(b64, cat_name)
                 if not loc or not loc.get("found"):
-                    print(f"  [menu-crawl]   Could not find '{cat_name}' on screen, skipping")
+                    reason = loc.get("reason", "not found") if loc else "vision failed"
+                    print(f"  [menu-crawl]   Could not find '{cat_name}': {reason}")
+                    consecutive_failures += 1
                     tree_children.append(node)
                     continue
 
@@ -1722,6 +1803,9 @@ def execute_menu_crawl(cmd):
                     node["controlType"] = "Activity"
                     recover_to_menu()
                     reopen_epic_menu()
+                elif state_after_click == "desktop":
+                    print(f"  [menu-crawl]   Click closed the menu or hit nothing - recovering")
+                    reopen_epic_menu()
                 elif state_after_click in ("menu", "unknown"):
                     sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
                     node["children"] = sub_children
@@ -1733,13 +1817,16 @@ def execute_menu_crawl(cmd):
                     time.sleep(0.3)
                     reopen_epic_menu()
                 else:
-                    print(f"  [menu-crawl]   Unexpected state after clicking '{cat_name}': {state_after_click} - recovering")
+                    print(f"  [menu-crawl]   Unexpected state: {state_after_click} - recovering")
                     recover_to_menu()
                     reopen_epic_menu()
+
+                consecutive_failures = 0
 
             except Exception as e:
                 print(f"  [menu-crawl] !! Error crawling '{cat_name}': {e}")
                 traceback.print_exc()
+                consecutive_failures += 1
                 try:
                     recover_to_menu()
                     reopen_epic_menu()
