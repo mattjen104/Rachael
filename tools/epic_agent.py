@@ -36,6 +36,20 @@ except ImportError:
     print("  pip install pyautogui pillow requests pygetwindow")
     sys.exit(1)
 
+pyautogui.PAUSE = 0.05
+pyautogui.MINIMUM_DURATION = 0
+pyautogui.MINIMUM_SLEEP = 0
+
+try:
+    import ctypes
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except Exception:
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ORGCLOUD_URL = os.environ.get("ORGCLOUD_URL", "https://i-cloud-sync-manager.replit.app")
 BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN", "")
@@ -101,20 +115,48 @@ def find_text_window(env_upper):
     return None
 
 
+def get_dpi_scale():
+    """Get the DPI scaling factor for coordinate correction."""
+    try:
+        import ctypes
+        hdc = ctypes.windll.user32.GetDC(0)
+        dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+        return dpi / 96.0
+    except Exception:
+        return 1.0
+
+DPI_SCALE = 1.0
+
 def screenshot_window(window):
+    global DPI_SCALE
     try:
         window.activate()
         time.sleep(0.3)
     except Exception:
         pass
     bbox = (window.left, window.top, window.left + window.width, window.top + window.height)
-    return ImageGrab.grab(bbox=bbox)
+    img = ImageGrab.grab(bbox=bbox)
+    win_w = window.width
+    img_w = img.size[0]
+    if win_w > 0 and img_w > 0 and abs(img_w - win_w) > 10:
+        DPI_SCALE = img_w / win_w
+        print(f"  [dpi] Detected DPI scale: {DPI_SCALE:.2f} (image={img_w}px, window={win_w}px)")
+    return img
 
 
 def img_to_base64(img):
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def vision_to_screen(window, img_x, img_y):
+    """Convert vision AI pixel coords (relative to image) to absolute screen coords.
+    Handles DPI scaling where image pixels != screen pixels."""
+    screen_x = window.left + int(img_x / DPI_SCALE)
+    screen_y = window.top + int(img_y / DPI_SCALE)
+    return screen_x, screen_y
 
 
 def ask_claude(screenshot_b64, prompt):
@@ -456,8 +498,7 @@ Coordinates should be relative to the image."""
         post_result(command_id, "error", error=f"Element not found: {result.get('reason', 'unknown')}")
         return
 
-    abs_x = window.left + result["x"]
-    abs_y = window.top + result["y"]
+    abs_x, abs_y = vision_to_screen(window, result["x"], result["y"])
     pyautogui.click(abs_x, abs_y)
     time.sleep(1.0)
 
@@ -633,7 +674,8 @@ def execute_navigate_path(cmd):
                 post_result(command_id, "error", error="Vision could not find Epic button")
                 return
 
-            pyautogui.click(window.left + epic_loc["x"], window.top + epic_loc["y"])
+            nav_x, nav_y = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
+            pyautogui.click(nav_x, nav_y)
             time.sleep(1.5)
 
             for i, step in enumerate(steps):
@@ -654,7 +696,8 @@ def execute_navigate_path(cmd):
                     if fm:
                         loc = json.loads(fm.group())
                         if loc.get("found"):
-                            pyautogui.click(window.left + loc["x"], window.top + loc["y"])
+                            sx, sy = vision_to_screen(window, loc["x"], loc["y"])
+                            pyautogui.click(sx, sy)
                             time.sleep(1.0)
                         else:
                             post_result(command_id, "error", error=f"Vision could not find '{step}': {loc.get('reason', '?')}")
@@ -1213,8 +1256,7 @@ def execute_menu_crawl(cmd):
                 print(f"  [menu-crawl]{indent}  -> Expanding '{si_name}'...")
                 si_x = si.get("x", 0)
                 si_y = si.get("y", 0)
-                click_x = window.left + int(si_x)
-                click_y = window.top + int(si_y)
+                click_x, click_y = vision_to_screen(window, si_x, si_y)
 
                 pyautogui.click(click_x, click_y)
                 time.sleep(1.0)
@@ -1247,9 +1289,8 @@ def execute_menu_crawl(cmd):
             post_result(command_id, "error", error=f"Could not find Epic button: {reason}")
             return
 
-        epic_abs_x = window.left + epic_loc["x"]
-        epic_abs_y = window.top + epic_loc["y"]
-        print(f"  [menu-crawl] Found Epic button at ({epic_loc['x']}, {epic_loc['y']}): '{epic_loc.get('label', '?')}'")
+        epic_abs_x, epic_abs_y = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
+        print(f"  [menu-crawl] Found Epic button at img({epic_loc['x']}, {epic_loc['y']}) -> screen({epic_abs_x}, {epic_abs_y}): '{epic_loc.get('label', '?')}'")
 
         def reopen_epic_menu():
             """Re-open the Epic button menu."""
@@ -1295,8 +1336,7 @@ def execute_menu_crawl(cmd):
                 print(f"  [menu-crawl] === Category {i+1}/{len(top_items)}: '{item_name}' ===")
                 item_x = item.get("x", epic_loc["x"] + 50)
                 item_y = item.get("y", 0)
-                click_x = window.left + int(item_x)
-                click_y = window.top + int(item_y)
+                click_x, click_y = vision_to_screen(window, item_x, item_y)
 
                 pyautogui.click(click_x, click_y)
                 time.sleep(1.0)
