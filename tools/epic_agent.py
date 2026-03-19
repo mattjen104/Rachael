@@ -1155,9 +1155,16 @@ def execute_menu_crawl(cmd):
 
     try:
         window.activate()
+        time.sleep(0.3)
+        window.activate()
         time.sleep(0.5)
+        if hasattr(window, 'restore') and window.isMinimized:
+            window.restore()
+            time.sleep(0.3)
     except Exception:
         pass
+
+    print(f"  [menu-crawl] Window: '{window.title}' at ({window.left},{window.top}) size {window.width}x{window.height}")
 
     def safe_screenshot():
         """Take screenshot of the Epic window."""
@@ -1254,54 +1261,82 @@ def execute_menu_crawl(cmd):
             pass
         return []
 
-    def close_activity_if_opened(prev_b64):
-        """Check if an activity opened (screen changed significantly) and close it."""
-        new_img, new_b64 = safe_screenshot()
-        if not new_b64:
-            return
+    def check_screen_state(context=""):
+        """Check what's on screen: menu visible, activity opened, or something else.
+        Returns: 'menu', 'activity', 'desktop', or 'unknown'"""
+        check_img, check_b64 = safe_screenshot()
+        if not check_b64:
+            return "unknown", None
         prompt = (
-            "Compare these observations about this Epic Hyperspace screen:\n"
-            "Has an activity or workspace opened (i.e., the menu is gone and a new view/form appeared)?\n"
-            "Or is the menu still visible?\n\n"
-            "Return ONLY a JSON object: {\"activityOpened\": true/false, \"description\": \"what you see\"}"
+            f"Look at this Epic Hyperspace screen{(' (' + context + ')') if context else ''}.\n"
+            "What is the current state?\n"
+            "- 'menu': The Epic button menu (or a submenu) is visible\n"
+            "- 'activity': An activity/workspace/form has opened (no menu visible)\n"
+            "- 'dialog': A dialog box, popup, or save prompt is showing\n"
+            "- 'desktop': The main Epic desktop/workspace with no menus open\n\n"
+            "Return ONLY: {\"state\": \"menu\"|\"activity\"|\"dialog\"|\"desktop\", \"description\": \"brief description\"}"
         )
-        resp = ask_claude(new_b64, prompt)
+        resp = ask_claude(check_b64, prompt)
         if not resp:
-            return
+            return "unknown", check_b64
         try:
             m = re.search(r'\{[\s\S]*?\}', resp)
             if m:
                 result = json.loads(m.group())
-                if result.get("activityOpened", False):
-                    print(f"  [menu-crawl]     Activity opened - closing it...")
-                    pyautogui.hotkey("alt", "F4")
-                    time.sleep(0.5)
-                    check_img, check_b64 = safe_screenshot()
-                    if check_b64:
-                        close_resp = ask_claude(check_b64,
-                            "Is there a dialog asking to save or confirm closing? "
-                            "Return ONLY: {\"hasDialog\": true/false, \"buttonToClick\": \"No\" or \"Don't Save\" or \"Close\" or null}")
-                        if close_resp:
-                            try:
-                                dm = re.search(r'\{[\s\S]*?\}', close_resp)
-                                if dm:
-                                    dr = json.loads(dm.group())
-                                    if dr.get("hasDialog") and dr.get("buttonToClick"):
-                                        btn = dr["buttonToClick"]
-                                        print(f"  [menu-crawl]     Clicking '{btn}' on close dialog")
-                                        pyautogui.press("tab")
-                                        time.sleep(0.2)
-                                        pyautogui.press("enter")
-                                        time.sleep(0.5)
-                            except Exception:
-                                pass
+                return result.get("state", "unknown"), check_b64
         except Exception:
             pass
+        return "unknown", check_b64
+
+    def recover_to_menu():
+        """Get back to the Epic menu from any state. Returns True if successful."""
+        for attempt in range(3):
+            state, _ = check_screen_state("recovery attempt")
+            if state == "menu":
+                print(f"  [recovery] Menu is visible")
+                return True
+            elif state == "dialog":
+                print(f"  [recovery] Dialog detected - pressing Escape")
+                pyautogui.press("escape")
+                time.sleep(0.5)
+            elif state == "activity":
+                print(f"  [recovery] Activity opened - pressing Escape to close")
+                pyautogui.press("escape")
+                time.sleep(0.5)
+                state2, _ = check_screen_state("after escape")
+                if state2 == "activity":
+                    print(f"  [recovery] Still in activity - trying Alt+F4")
+                    pyautogui.hotkey("alt", "F4")
+                    time.sleep(0.5)
+                    state3, _ = check_screen_state("after alt-f4")
+                    if state3 == "dialog":
+                        print(f"  [recovery] Close dialog - pressing N for No/Don't Save")
+                        pyautogui.press("n")
+                        time.sleep(0.5)
+            elif state == "desktop":
+                print(f"  [recovery] At desktop - reopening Epic menu")
+                reopen_epic_menu()
+                time.sleep(0.5)
+                continue
+            else:
+                print(f"  [recovery] Unknown state - pressing Escape")
+                pyautogui.press("escape")
+                time.sleep(0.5)
+
+        state_final, _ = check_screen_state("final check")
+        if state_final == "menu":
+            return True
+        print(f"  [recovery] Reopening Epic menu as last resort")
+        pyautogui.press("escape")
+        time.sleep(0.3)
+        pyautogui.press("escape")
+        time.sleep(0.3)
+        reopen_epic_menu()
+        return True
 
     def crawl_submenu(parent_path, current_depth, max_depth, reopen_epic_fn):
         """Recursively crawl a submenu. Returns (children_list, item_count).
-        Only clicks items with submenu arrows. Terminal items (activities) are
-        recorded without clicking to avoid launching them."""
+        Self-healing: detects when clicks go wrong and recovers automatically."""
         sub_img, sub_b64 = safe_screenshot()
         if not sub_b64:
             return [], 0
@@ -1312,8 +1347,13 @@ def execute_menu_crawl(cmd):
         print(f"  [menu-crawl]{indent}'{parent_path}' -> {len(items)} items")
 
         if len(items) == 0:
-            print(f"  [menu-crawl]{indent}  (no submenu items found - may have opened an activity)")
-            close_activity_if_opened(sub_b64)
+            state, _ = check_screen_state(f"after clicking {parent_path}")
+            if state == "activity":
+                print(f"  [menu-crawl]{indent}  (click launched an activity instead of submenu - recovering)")
+                recover_to_menu()
+            elif state == "desktop":
+                print(f"  [menu-crawl]{indent}  (menu closed - recovering)")
+                recover_to_menu()
             return [], 0
 
         children = []
@@ -1344,17 +1384,30 @@ def execute_menu_crawl(cmd):
                     pyautogui.click(click_x, click_y)
                     time.sleep(1.0)
 
-                    sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
-                    si_node["children"] = sub_children
-                    count += sub_count
+                    state, _ = check_screen_state(f"after expanding {si_name}")
+                    if state == "activity":
+                        print(f"  [menu-crawl]{indent}     '{si_name}' opened an activity (not a submenu) - recovering")
+                        si_node["controlType"] = "Activity"
+                        recover_to_menu()
+                        reopen_epic_fn()
+                        time.sleep(0.5)
+                    elif state == "desktop":
+                        print(f"  [menu-crawl]{indent}     Menu closed after clicking '{si_name}' - recovering")
+                        recover_to_menu()
+                    elif state == "menu":
+                        sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
+                        si_node["children"] = sub_children
+                        count += sub_count
+                        pyautogui.press("escape")
+                        time.sleep(0.5)
+                    else:
+                        print(f"  [menu-crawl]{indent}     Unknown state after clicking '{si_name}': {state} - recovering")
+                        recover_to_menu()
 
-                    pyautogui.press("escape")
-                    time.sleep(0.5)
                 except Exception as e:
                     print(f"  [menu-crawl]{indent}  !! Error expanding '{si_name}': {e}")
                     try:
-                        pyautogui.press("escape")
-                        time.sleep(0.3)
+                        recover_to_menu()
                     except Exception:
                         pass
             else:
@@ -1496,30 +1549,38 @@ def execute_menu_crawl(cmd):
                 pyautogui.click(click_x, click_y)
                 time.sleep(1.0)
 
-                sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
-                node["children"] = sub_children
-                crawled_count += sub_count
+                state_after_click, _ = check_screen_state(f"after clicking category {cat_name}")
+                if state_after_click == "activity":
+                    print(f"  [menu-crawl]   '{cat_name}' opened an activity (not a submenu) - recovering")
+                    node["controlType"] = "Activity"
+                    recover_to_menu()
+                    reopen_epic_menu()
+                elif state_after_click in ("menu", "unknown"):
+                    sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
+                    node["children"] = sub_children
+                    crawled_count += sub_count
 
-                pyautogui.press("escape")
-                time.sleep(0.3)
-                pyautogui.press("escape")
-                time.sleep(0.3)
-
-                reopen_epic_menu()
-
-            except Exception as e:
-                print(f"  [menu-crawl] !! Error crawling '{cat_name}': {e}")
-                traceback.print_exc()
-                try:
                     pyautogui.press("escape")
                     time.sleep(0.3)
                     pyautogui.press("escape")
                     time.sleep(0.3)
                     reopen_epic_menu()
+                else:
+                    print(f"  [menu-crawl]   Unexpected state after clicking '{cat_name}': {state_after_click} - recovering")
+                    recover_to_menu()
+                    reopen_epic_menu()
+
+            except Exception as e:
+                print(f"  [menu-crawl] !! Error crawling '{cat_name}': {e}")
+                traceback.print_exc()
+                try:
+                    recover_to_menu()
+                    reopen_epic_menu()
                 except Exception:
                     pass
 
             tree_children.append(node)
+            print(f"  [menu-crawl]   '{cat_name}' done: {len(node.get('children', []))} children")
 
         pyautogui.press("escape")
         time.sleep(0.3)
