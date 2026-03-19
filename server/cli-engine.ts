@@ -3104,20 +3104,19 @@ ${fullHtml}`;
       if (Object.keys(trees).length === 0) {
         return ok(`No navigation tree stored for ${env}.${nl2}Run: python epic_tree.py hyperspace ${env}  on desktop`);
       }
-      function printTree(node: any, indent: string, lines: string[], maxLines: number): void {
+      function printTree(node: any, indent: string, lines: string[]): void {
         for (const child of (node.children || [])) {
-          if (lines.length >= maxLines) { lines.push(`${indent}... (truncated)`); return; }
           const kids = (child.children || []).length;
           const suffix = kids > 0 ? ` (${kids})` : "";
           lines.push(`${indent}${child.name}${suffix}`);
-          if (kids > 0) printTree(child, indent + "  ", lines, maxLines);
+          if (kids > 0) printTree(child, indent + "  ", lines);
         }
       }
       const lines: string[] = [`=== EPIC ${env} NAVIGATION TREE ===`, ""];
       for (const [client, tree] of Object.entries(trees)) {
         const label = client === "hyperspace" ? "Hyperspace" : "Text";
         lines.push(`[${label}] scanned ${(tree as any).scannedAt || "unknown"}`);
-        printTree(tree, "  ", lines, 200);
+        printTree(tree, "  ", lines);
         lines.push("");
       }
       return ok(lines.join(nl2));

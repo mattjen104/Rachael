@@ -546,6 +546,13 @@ export async function registerRoutes(
   });
 
   app.post("/api/epic/agent/send", (req, res) => {
+    const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+    if (!isLocal) {
+      const auth = req.headers.authorization;
+      if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
     const { type, env, target, path, client, masterfile, item } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

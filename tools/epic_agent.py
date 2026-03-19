@@ -512,6 +512,21 @@ def execute_navigate_path(cmd):
                 post_result(command_id, "error", error=f"No {env} UIA window found for path replay")
                 return
 
+            NAV_SAFE_TYPES = frozenset([
+                "MenuItem", "Menu", "MenuBar",
+                "ToolBar", "ToolBarButton",
+                "TabItem", "TabControl",
+                "TreeItem", "TreeView",
+                "Header", "HeaderItem",
+                "SplitButton", "Hyperlink",
+                "StatusBar",
+            ])
+            NAV_UNSAFE_NAMES = frozenset([
+                "save", "submit", "ok", "yes", "delete", "remove",
+                "sign", "order", "confirm", "apply", "approve",
+                "print", "send", "release", "finalize",
+            ])
+
             current_parent = uia_window
             for i, step in enumerate(steps):
                 print(f"  [step {i+1}/{len(steps)}] UIA find+click: {step}")
@@ -523,6 +538,16 @@ def execute_navigate_path(cmd):
                     return
                 try:
                     ctrl_type = element.element_info.control_type or ""
+                    el_name = (element.element_info.name or "").lower()
+
+                    if ctrl_type not in NAV_SAFE_TYPES:
+                        post_result(command_id, "error", error=f"Safety block: {step} has control type '{ctrl_type}' (not in navigation allowlist)")
+                        return
+                    for unsafe in NAV_UNSAFE_NAMES:
+                        if unsafe in el_name:
+                            post_result(command_id, "error", error=f"Safety block: {step} matches unsafe pattern '{unsafe}'")
+                            return
+
                     if ctrl_type in ("MenuItem", "Menu"):
                         try:
                             element.expand()

@@ -38,11 +38,13 @@ if not BRIDGE_TOKEN:
     sys.exit(1)
 
 SAFE_CONTROL_TYPES = frozenset([
-    "MenuItem", "Menu", "MenuBar", "ToolBar", "ToolBarButton",
-    "TabItem", "TabControl", "TreeItem", "TreeView",
-    "ListItem", "ListView", "Header", "HeaderItem",
-    "Button", "SplitButton", "Hyperlink",
-    "Pane", "Window", "Group", "StatusBar",
+    "MenuItem", "Menu", "MenuBar",
+    "ToolBar", "ToolBarButton",
+    "TabItem", "TabControl",
+    "TreeItem", "TreeView",
+    "Header", "HeaderItem",
+    "SplitButton", "Hyperlink",
+    "StatusBar",
 ])
 
 UNSAFE_PATTERNS = frozenset([
@@ -190,7 +192,7 @@ def scan_hyperspace(env):
 
             info = get_element_info(child)
             if not info or not info["name"]:
-                walk_deeper = walk_element(child, path, depth)
+                walk_deeper = walk_element(child, path, depth + 1)
                 children_nodes.extend(walk_deeper)
                 continue
 
