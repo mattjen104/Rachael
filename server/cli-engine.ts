@@ -3687,6 +3687,46 @@ ${fullHtml}`;
     galaxyState.inFlight = false;
   }
 
+  let galaxyRobotsParsed: { disallowed: string[] } | null = null;
+
+  async function galaxyCheckRobots(urlPath: string): Promise<boolean> {
+    if (!galaxyRobotsParsed) {
+      try {
+        const { submitJob, waitForResult, isExtensionConnected } = await import("./bridge-queue");
+        if (isExtensionConnected()) {
+          const jobId = submitJob("fetch", "https://galaxy.epic.com/robots.txt", "galaxy-robots", {}, 0);
+          const result = await waitForResult(jobId, 10000);
+          const body = typeof result.body === "string" ? result.body : "";
+          const disallowed: string[] = [];
+          let isUserAgent = false;
+          for (const line of body.split(/\n/)) {
+            const trimmed = line.trim();
+            if (trimmed.toLowerCase().startsWith("user-agent:")) {
+              isUserAgent = trimmed.includes("*");
+            }
+            if (isUserAgent && trimmed.toLowerCase().startsWith("disallow:")) {
+              const path = trimmed.substring(9).trim();
+              if (path) disallowed.push(path);
+            }
+          }
+          galaxyRobotsParsed = { disallowed };
+        } else {
+          galaxyRobotsParsed = { disallowed: [] };
+        }
+      } catch {
+        galaxyRobotsParsed = { disallowed: [] };
+      }
+    }
+
+    try {
+      const path = new URL(urlPath).pathname;
+      for (const d of galaxyRobotsParsed.disallowed) {
+        if (path.startsWith(d)) return false;
+      }
+    } catch {}
+    return true;
+  }
+
   async function galaxyFetch(
     url: string,
     submittedBy: string,
@@ -3720,12 +3760,15 @@ ${fullHtml}`;
       const query = args.slice(1).join(" ");
       if (!query) return fail("[galaxy] Usage: galaxy search <query>");
 
+      const searchUrl = `https://galaxy.epic.com/Search/GetResults?query=${encodeURIComponent(query)}&page=1&pageSize=10`;
+
+      const robotsOk = await galaxyCheckRobots(searchUrl);
+      if (!robotsOk) return fail(`[galaxy] Search URL blocked by robots.txt`);
+
       const rateMsg = await galaxyWaitAndRecord(false);
       if (rateMsg) return fail(`[galaxy] ${rateMsg}`);
 
       try {
-        const searchUrl = `https://galaxy.epic.com/Search/GetResults?query=${encodeURIComponent(query)}&page=1&pageSize=10`;
-
         emitEvent("bridge", `Galaxy search: "${query}"`, "info");
 
         const result = await galaxyFetch(searchUrl, "galaxy-search", {
@@ -3816,11 +3859,23 @@ ${fullHtml}`;
         url = `https://galaxy.epic.com${url.startsWith("/") ? "" : "/"}${url}`;
       }
 
+      const robotsOk = await galaxyCheckRobots(url);
+      if (!robotsOk) return fail(`[galaxy] URL blocked by robots.txt: ${url}`);
+
       const rateMsg = await galaxyWaitAndRecord(true);
       if (rateMsg) return fail(`[galaxy] ${rateMsg}`);
 
       try {
-        emitEvent("bridge", `Galaxy read: ${url}`, "info");
+        emitEvent("bridge", `Galaxy read: navigating naturally to ${url}`, "info");
+
+        await galaxyFetch("https://galaxy.epic.com", "galaxy-browse-home", {
+          maxText: 1000,
+          spaWaitMs: 1500,
+        });
+        const browseDelay = 2000 + Math.floor(Math.random() * 3000);
+        await new Promise(resolve => setTimeout(resolve, browseDelay));
+
+        emitEvent("bridge", `Galaxy read: fetching article`, "info");
 
         const result = await galaxyFetch(url, "galaxy-read", {
           maxText: 50000,
