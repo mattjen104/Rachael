@@ -554,7 +554,7 @@ def fetch_cached_tree(env, client="hyperspace"):
 
 def find_node_in_tree(tree, steps):
     """Walk the tree to find the node matching the given path steps.
-    Returns list of (node, depth) pairs for each step found."""
+    Returns list of nodes for each step found."""
     if not tree or not steps:
         return []
 
@@ -584,9 +584,125 @@ def find_node_in_tree(tree, steps):
     return found_path
 
 
+def compute_drift(tree, window):
+    """Compute coordinate drift between when the tree was crawled and now.
+    The tree stores image-space pixel coords. If the window size changed,
+    the image dimensions changed too, so we need to scale the cached coords.
+
+    Returns (scale_x, scale_y, confidence) where:
+    - scale_x/y: multiply cached imgX/imgY by these to get current image coords
+    - confidence: 'high' if geometry matches, 'medium' if small change, 'low' if big change
+    """
+    crawl_win_w = tree.get("windowWidth", 0)
+    crawl_win_h = tree.get("windowHeight", 0)
+    crawl_img_w = tree.get("imageWidth", 0)
+    crawl_img_h = tree.get("imageHeight", 0)
+
+    if crawl_img_w <= 0 or crawl_img_h <= 0:
+        return 1.0, 1.0, "unknown"
+
+    current_img = screenshot_window(window)
+    cur_w, cur_h = current_img.size
+
+    scale_x = cur_w / crawl_img_w
+    scale_y = cur_h / crawl_img_h
+
+    drift_pct = max(abs(1.0 - scale_x), abs(1.0 - scale_y)) * 100
+
+    if drift_pct < 1:
+        confidence = "high"
+    elif drift_pct < 10:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    if drift_pct > 0.5:
+        print(f"  [drift] Window geometry changed: crawl image was {crawl_img_w}x{crawl_img_h}, now {cur_w}x{cur_h}")
+        print(f"  [drift] Scale factors: x={scale_x:.3f} y={scale_y:.3f} (drift={drift_pct:.1f}%, confidence={confidence})")
+
+    return scale_x, scale_y, confidence
+
+
+def vision_find_on_screen(window, item_name):
+    """Use vision to find an item on the current screen. Returns (img_x, img_y) or None."""
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+    find_prompt = (
+        f"Find the menu item or button labeled \"{item_name}\" in this screenshot.\n"
+        f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true}}\n"
+        f"If not found: {{\"found\": false, \"reason\": \"why\"}}"
+    )
+    resp = ask_claude(b64, find_prompt)
+    if not resp:
+        return None
+    try:
+        fm = re.search(r'\{[\s\S]*?\}', resp)
+        if fm:
+            loc = json.loads(fm.group())
+            if loc.get("found"):
+                return loc["x"], loc["y"]
+    except Exception:
+        pass
+    return None
+
+
+def verify_click(window, expected_item, context=""):
+    """After clicking, verify the click had the expected effect.
+    Returns: 'menu' (submenu opened), 'activity' (activity launched),
+             'same' (nothing changed), 'dialog', 'unknown'"""
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+    prompt = (
+        f"After clicking '{expected_item}'{(' (' + context + ')') if context else ''}, what happened?\n"
+        "Classify the current screen state:\n"
+        f"- 'menu': A menu or submenu is visible (indicating '{expected_item}' expanded or a new menu appeared)\n"
+        "- 'activity': An activity, workspace, or form opened (the menu is gone)\n"
+        "- 'dialog': A dialog box or popup appeared\n"
+        "- 'desktop': Back to the main Epic desktop, no menus open\n"
+        "- 'same': Nothing seems to have changed\n\n"
+        "Return ONLY: {\"state\": \"menu\"|\"activity\"|\"dialog\"|\"desktop\"|\"same\", "
+        "\"description\": \"brief description of what you see\"}"
+    )
+    resp = ask_claude(b64, prompt)
+    if not resp:
+        return "unknown"
+    try:
+        m = re.search(r'\{[\s\S]*?\}', resp)
+        if m:
+            result = json.loads(m.group())
+            return result.get("state", "unknown")
+    except Exception:
+        pass
+    return "unknown"
+
+
+def click_with_verification(window, img_x, img_y, item_name, max_retries=2):
+    """Click at coordinates and verify it worked. If miss, retry with vision.
+    Returns the screen state after click ('menu', 'activity', etc.)."""
+    sx, sy = vision_to_screen(window, img_x, img_y)
+    print(f"    [click] '{item_name}' at img({img_x},{img_y}) -> screen({sx},{sy})")
+    pyautogui.click(sx, sy)
+    time.sleep(1.0)
+
+    state = verify_click(window, item_name)
+    if state == "same" and max_retries > 0:
+        print(f"    [click] Click may have missed '{item_name}' (screen unchanged) - retrying with vision")
+        coords = vision_find_on_screen(window, item_name)
+        if coords:
+            new_x, new_y = coords
+            new_sx, new_sy = vision_to_screen(window, new_x, new_y)
+            print(f"    [click] Vision found '{item_name}' at ({new_x},{new_y}) -> screen({new_sx},{new_sy})")
+            pyautogui.click(new_sx, new_sy)
+            time.sleep(1.0)
+            state = verify_click(window, item_name)
+        else:
+            print(f"    [click] Vision could not find '{item_name}' on screen")
+    return state
+
+
 def execute_navigate_path(cmd):
     """Navigate using cached pixel coordinates from the crawled tree.
-    Falls back to vision only if coordinates are missing."""
+    Features: drift correction, click verification, confidence-based fallback."""
     env = cmd.get("env", "SUP")
     path = cmd.get("path", "")
     client = cmd.get("client", "hyperspace")
@@ -605,6 +721,8 @@ def execute_navigate_path(cmd):
     print(f"  [path-nav] {env}/{client}: {' > '.join(steps)} ({len(steps)} steps)")
 
     try:
+        window.activate()
+        time.sleep(0.3)
         window.activate()
         time.sleep(0.5)
     except Exception:
@@ -626,119 +744,160 @@ def execute_navigate_path(cmd):
     else:
         tree = fetch_cached_tree(env, client)
         found_nodes = find_node_in_tree(tree, steps) if tree else []
-        use_cache = len(found_nodes) == len(steps) and all(
+        has_coords = len(found_nodes) == len(steps) and all(
             n.get("imgX", 0) > 0 and n.get("imgY", 0) > 0 for n in found_nodes
         )
 
+        scale_x, scale_y, confidence = (1.0, 1.0, "unknown")
+        if has_coords and tree:
+            scale_x, scale_y, confidence = compute_drift(tree, window)
+
+        use_cache = has_coords and confidence != "low"
+        api_calls = 0
+
         if use_cache and tree:
-            print(f"  [path-nav] Using cached coordinates (0 API calls needed)")
+            mode = "cached" if confidence == "high" else "cached+drift-corrected"
+            print(f"  [path-nav] Mode: {mode} (confidence={confidence})")
 
             epic_btn_x = tree.get("epicButtonImgX", 0)
             epic_btn_y = tree.get("epicButtonImgY", 0)
 
             if epic_btn_x > 0 and epic_btn_y > 0:
-                btn_sx, btn_sy = vision_to_screen(window, epic_btn_x, epic_btn_y)
-                print(f"  [step 0] Epic button at cached ({epic_btn_x},{epic_btn_y}) -> screen({btn_sx},{btn_sy})")
+                adj_x = int(epic_btn_x * scale_x)
+                adj_y = int(epic_btn_y * scale_y)
+                btn_sx, btn_sy = vision_to_screen(window, adj_x, adj_y)
+                print(f"  [step 0] Epic button: cached({epic_btn_x},{epic_btn_y}) -> adjusted({adj_x},{adj_y}) -> screen({btn_sx},{btn_sy})")
                 pyautogui.click(btn_sx, btn_sy)
                 time.sleep(1.5)
+
+                state = verify_click(window, "Epic button")
+                api_calls += 1
+                if state != "menu":
+                    print(f"  [step 0] Epic button click result: {state} - retrying with vision")
+                    coords = vision_find_on_screen(window, "Epic")
+                    api_calls += 1
+                    if coords:
+                        nav_sx, nav_sy = vision_to_screen(window, coords[0], coords[1])
+                        pyautogui.click(nav_sx, nav_sy)
+                        time.sleep(1.5)
+                    else:
+                        post_result(command_id, "error", error="Cannot find Epic button after retry")
+                        return
             else:
                 print(f"  [step 0] No cached Epic button coords, using vision...")
-                img = screenshot_window(window)
-                b64 = img_to_base64(img)
-                epic_resp = ask_claude(b64,
-                    "Find the Epic button in this Hyperspace window (top-left corner, opens the main menu).\n"
-                    "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}")
-                epic_loc = None
-                if epic_resp:
-                    try:
-                        em = re.search(r'\{[\\s\\S]*?\}', epic_resp)
-                        if em:
-                            epic_loc = json.loads(em.group())
-                    except Exception:
-                        pass
-                if not epic_loc or not epic_loc.get("found"):
+                coords = vision_find_on_screen(window, "Epic")
+                api_calls += 1
+                if not coords:
                     post_result(command_id, "error", error="Cannot find Epic button")
                     return
-                nav_x, nav_y = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
-                pyautogui.click(nav_x, nav_y)
+                nav_sx, nav_sy = vision_to_screen(window, coords[0], coords[1])
+                pyautogui.click(nav_sx, nav_sy)
                 time.sleep(1.5)
 
             for i, node in enumerate(found_nodes):
                 node_name = node.get("name", "?")
-                img_x = node.get("imgX", 0)
-                img_y = node.get("imgY", 0)
-                sx, sy = vision_to_screen(window, img_x, img_y)
+                raw_x = node.get("imgX", 0)
+                raw_y = node.get("imgY", 0)
+                adj_x = int(raw_x * scale_x)
+                adj_y = int(raw_y * scale_y)
                 is_last = (i == len(found_nodes) - 1)
-                print(f"  [step {i+1}/{len(steps)}] Cached click: '{node_name}' at ({img_x},{img_y}) -> screen({sx},{sy})")
-                pyautogui.click(sx, sy)
-                time.sleep(1.0 if not is_last else 0.5)
+
+                if confidence == "high":
+                    sx, sy = vision_to_screen(window, adj_x, adj_y)
+                    print(f"  [step {i+1}/{len(steps)}] Cached click: '{node_name}' ({adj_x},{adj_y}) -> ({sx},{sy})")
+                    pyautogui.click(sx, sy)
+                    time.sleep(1.0)
+
+                    if not is_last:
+                        state = verify_click(window, node_name, f"step {i+1}")
+                        api_calls += 1
+                        if state == "same":
+                            print(f"  [step {i+1}] Click missed - falling back to vision for '{node_name}'")
+                            coords = vision_find_on_screen(window, node_name)
+                            api_calls += 1
+                            if coords:
+                                vsx, vsy = vision_to_screen(window, coords[0], coords[1])
+                                pyautogui.click(vsx, vsy)
+                                time.sleep(1.0)
+                            else:
+                                post_result(command_id, "error", error=f"Cannot find '{node_name}' after retry")
+                                return
+                        elif state == "activity":
+                            print(f"  [step {i+1}] '{node_name}' launched an activity instead of submenu")
+                            break
+                else:
+                    state = click_with_verification(window, adj_x, adj_y, node_name)
+                    api_calls += 1
+                    if state == "same":
+                        print(f"  [step {i+1}] Could not click '{node_name}' even after retry")
+                        post_result(command_id, "error", error=f"Failed to click '{node_name}' at step {i+1}")
+                        return
+                    elif state == "activity" and not is_last:
+                        print(f"  [step {i+1}] '{node_name}' launched activity prematurely")
+                        break
+                    time.sleep(0.5 if is_last else 0.3)
 
         else:
-            if not use_cache:
+            if has_coords and confidence == "low":
+                print(f"  [path-nav] Window geometry changed too much (confidence=low), using full vision")
+            elif not has_coords:
                 matched = len(found_nodes)
-                print(f"  [path-nav] Cache miss ({matched}/{len(steps)} steps matched), falling back to vision")
+                print(f"  [path-nav] Cache miss ({matched}/{len(steps)} steps matched), using vision")
             else:
                 print(f"  [path-nav] No cached tree, using vision navigation")
 
-            img = screenshot_window(window)
-            b64 = img_to_base64(img)
-            epic_resp = ask_claude(b64,
-                "Find the Epic button in this Hyperspace window (top-left corner, opens the main menu).\n"
-                "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}")
-            epic_loc = None
-            if epic_resp:
-                try:
-                    em = re.search(r'\{[\s\S]*?\}', epic_resp)
-                    if em:
-                        epic_loc = json.loads(em.group())
-                except Exception:
-                    pass
-            if not epic_loc or not epic_loc.get("found"):
+            coords = vision_find_on_screen(window, "Epic")
+            api_calls += 1
+            if not coords:
                 post_result(command_id, "error", error="Vision could not find Epic button")
                 return
-
-            nav_x, nav_y = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
+            nav_x, nav_y = vision_to_screen(window, coords[0], coords[1])
             pyautogui.click(nav_x, nav_y)
             time.sleep(1.5)
 
             for i, step in enumerate(steps):
                 print(f"  [step {i+1}/{len(steps)}] Vision-click: {step}")
-                step_img = screenshot_window(window)
-                step_b64 = img_to_base64(step_img)
-                find_prompt = (
-                    f"Find the menu item labeled \"{step}\" in this screenshot.\n"
-                    f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true}}\n"
-                    f"If not found: {{\"found\": false, \"reason\": \"why\"}}"
-                )
-                resp = ask_claude(step_b64, find_prompt)
-                if not resp:
-                    post_result(command_id, "error", error=f"Vision failed at step {i+1}: {step}")
-                    return
-                try:
-                    fm = re.search(r'\{[\s\S]*?\}', resp)
-                    if fm:
-                        loc = json.loads(fm.group())
-                        if loc.get("found"):
-                            sx, sy = vision_to_screen(window, loc["x"], loc["y"])
-                            pyautogui.click(sx, sy)
-                            time.sleep(1.0)
-                        else:
-                            post_result(command_id, "error", error=f"Vision could not find '{step}': {loc.get('reason', '?')}")
-                            return
-                except Exception as e:
-                    post_result(command_id, "error", error=f"Vision parse error at step {i+1}: {e}")
+                vis_coords = vision_find_on_screen(window, step)
+                api_calls += 1
+                if vis_coords:
+                    sx, sy = vision_to_screen(window, vis_coords[0], vis_coords[1])
+                    pyautogui.click(sx, sy)
+                    time.sleep(1.0)
+
+                    if i < len(steps) - 1:
+                        state = verify_click(window, step, f"step {i+1}")
+                        api_calls += 1
+                        if state == "same":
+                            print(f"  [step {i+1}] Click missed '{step}' - retrying")
+                            vis_coords2 = vision_find_on_screen(window, step)
+                            api_calls += 1
+                            if vis_coords2:
+                                sx2, sy2 = vision_to_screen(window, vis_coords2[0], vis_coords2[1])
+                                pyautogui.click(sx2, sy2)
+                                time.sleep(1.0)
+                            else:
+                                post_result(command_id, "error", error=f"Cannot find '{step}' after retry")
+                                return
+                        elif state == "activity":
+                            print(f"  [step {i+1}] '{step}' launched activity")
+                            break
+                else:
+                    post_result(command_id, "error", error=f"Vision could not find '{step}'")
                     return
 
     time.sleep(0.5)
     final_img = screenshot_window(window)
     final_b64 = img_to_base64(final_img)
+    nav_mode = "cached" if (client != "text" and has_coords and use_cache) else "vision"
     post_result(command_id, "complete", screenshot_b64=final_b64, data={
         "path": path,
         "client": client,
         "stepsCompleted": len(steps),
-        "usedCache": use_cache if client != "text" else False,
+        "mode": nav_mode,
+        "apiCalls": api_calls if client != "text" else 0,
+        "driftConfidence": confidence if client != "text" else "n/a",
     })
-    print(f"  [path-nav] Complete: {len(steps)} steps executed{' (cached)' if client != 'text' and use_cache else ''}")
+    print(f"  [path-nav] Complete: {len(steps)} steps ({nav_mode}, {api_calls} API calls, drift={confidence})")
 
 
 def execute_tree_scan(cmd):
@@ -1587,6 +1746,9 @@ def execute_menu_crawl(cmd):
 
         print(f"  [menu-crawl] Step 3: Uploading tree ({crawled_count} items)...")
 
+        crawl_img = screenshot_window(window)
+        crawl_img_w, crawl_img_h = crawl_img.size if crawl_img else (0, 0)
+
         tree = {
             "name": "Epic Menu",
             "children": tree_children,
@@ -1596,6 +1758,13 @@ def execute_menu_crawl(cmd):
             "locked": True,
             "epicButtonImgX": epic_loc.get("x", 0),
             "epicButtonImgY": epic_loc.get("y", 0),
+            "windowWidth": window.width,
+            "windowHeight": window.height,
+            "windowLeft": window.left,
+            "windowTop": window.top,
+            "imageWidth": crawl_img_w,
+            "imageHeight": crawl_img_h,
+            "dpiScale": DPI_SCALE,
         }
 
         try:
