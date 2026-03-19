@@ -3365,6 +3365,23 @@ ${fullHtml}`;
       return ok(lines.join(nl2));
     }
 
+    if (args[0] === "menu-crawl") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const depth = parseInt(args[2] || "2", 10);
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "menu_crawl", env, depth }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Menu crawl started for ${env} (depth=${depth}). Command ID: ${data.commandId}${nl}The agent will click through each menu and use AI vision to catalog all items.${nl}This may take several minutes. Check the tree afterwards with: epic tree`);
+        return fail(`[epic] Failed to send menu-crawl command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
     if (args[0] === "go") {
       const env = (args[1] || "SUP").toUpperCase();
       const target = args.slice(2).join(" ");
@@ -3699,6 +3716,7 @@ ${fullHtml}`;
       "  epic status               - Desktop agent status",
       "  epic clear <env>          - Clear activities",
       "  epic scan                 - One-time activity scan guide",
+      "  epic menu-crawl [env]     - Auto-crawl all Epic menus (vision)",
       "  epic setup                - Desktop agent setup guide",
       "  epic record start [env]   - Start recording workflow",
       "  epic record stop          - Stop recording",

@@ -959,6 +959,159 @@ def execute_replay(cmd):
     print(f"  [replay] Replay complete")
 
 
+def execute_menu_crawl(cmd):
+    """Crawl Epic menus using vision to build a complete navigation tree.
+    Takes screenshots at each menu level and asks Claude to list all items."""
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+    depth = cmd.get("depth", 2)
+
+    if not OPENROUTER_API_KEY:
+        post_result(command_id, "error", error="OPENROUTER_API_KEY required for menu crawl")
+        return
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    print(f"  [menu-crawl] Starting menu crawl for {env} (depth={depth})")
+
+    tree = {"name": "Epic Menu", "children": [], "client": "hyperspace", "environment": env}
+
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+
+    prompt = """You are looking at an Epic Hyperspace application window.
+List ALL menu items visible in the LEFT NAVIGATION panel (the Epic button menu).
+For each item, specify:
+- name: exact text label
+- hasSubmenu: true if it looks like it has a submenu/expandable section, false if it's a leaf item
+- category: "left navigation", "toolbar", "admin submenu", or other grouping
+
+IMPORTANT: Do NOT mention any patient names, MRNs, dates of birth, or clinical data.
+Return ONLY a JSON array of objects. Be thorough - list every single item."""
+
+    response = ask_claude(b64, prompt)
+    top_items = []
+    if response:
+        try:
+            json_match = re.search(r'\[[\s\S]*\]', response)
+            if json_match:
+                top_items = json.loads(json_match.group())
+        except Exception as e:
+            print(f"  [menu-crawl] Parse error: {e}")
+
+    print(f"  [menu-crawl] Found {len(top_items)} top-level items")
+
+    left_nav_items = [i for i in top_items if i.get("category", "").lower() in ("left navigation", "left nav", "navigation")]
+    other_items = [i for i in top_items if i not in left_nav_items]
+
+    for item in other_items:
+        tree["children"].append({
+            "name": item.get("name", "Unknown"),
+            "controlType": item.get("category", "button"),
+            "path": item.get("name", ""),
+            "children": []
+        })
+
+    crawled_count = len(top_items)
+
+    if depth >= 2:
+        for item in left_nav_items:
+            item_name = item.get("name", "")
+            if not item_name:
+                continue
+
+            node = {
+                "name": item_name,
+                "controlType": "MenuItem",
+                "path": item_name,
+                "children": []
+            }
+
+            if item.get("hasSubmenu", False):
+                print(f"  [menu-crawl] Clicking '{item_name}' to scan sub-items...")
+                try:
+                    click_prompt = f"""Look at this Epic Hyperspace window. I need to click on the menu item labeled "{item_name}" in the left navigation panel.
+Return JSON with the EXACT pixel coordinates of the CENTER of that menu item text, relative to the window:
+{{"found": true, "x": <number>, "y": <number>}}
+If you cannot find it: {{"found": false, "reason": "..."}}
+IMPORTANT: Do NOT mention any patient data."""
+
+                    click_resp = ask_claude(b64, click_prompt)
+                    if click_resp:
+                        coord_match = re.search(r'\{[\s\S]*?\}', click_resp)
+                        if coord_match:
+                            coords = json.loads(coord_match.group())
+                            if coords.get("found"):
+                                abs_x = window.left + coords["x"]
+                                abs_y = window.top + coords["y"]
+                                pyautogui.click(abs_x, abs_y)
+                                time.sleep(1.5)
+
+                                sub_img = screenshot_window(window)
+                                sub_b64 = img_to_base64(sub_img)
+
+                                sub_prompt = f"""You are looking at the Epic Hyperspace window after clicking the "{item_name}" menu.
+List ALL sub-menu items, options, links, and buttons that are NOW visible as a result of expanding/clicking "{item_name}".
+Only list items that belong to this menu section, not items from other sections.
+
+For each item specify:
+- name: exact text label
+- type: "menu", "button", "link", "activity", or "submenu"
+
+IMPORTANT: Do NOT mention any patient names, MRNs, dates of birth, or clinical data.
+Return ONLY a JSON array. Be thorough - list every single visible item in this section."""
+
+                                sub_response = ask_claude(sub_b64, sub_prompt)
+                                if sub_response:
+                                    try:
+                                        sub_match = re.search(r'\[[\s\S]*\]', sub_response)
+                                        if sub_match:
+                                            sub_items = json.loads(sub_match.group())
+                                            for si in sub_items:
+                                                node["children"].append({
+                                                    "name": si.get("name", "Unknown"),
+                                                    "controlType": si.get("type", "MenuItem"),
+                                                    "path": f"{item_name} > {si.get('name', '')}",
+                                                    "children": []
+                                                })
+                                            crawled_count += len(sub_items)
+                                            print(f"  [menu-crawl]   '{item_name}' -> {len(sub_items)} sub-items")
+                                    except Exception as e:
+                                        print(f"  [menu-crawl]   Parse error for '{item_name}': {e}")
+
+                                b64 = sub_b64
+                except Exception as e:
+                    print(f"  [menu-crawl]   Error crawling '{item_name}': {e}")
+
+            tree["children"].append(node)
+
+    try:
+        requests.post(
+            f"{ORGCLOUD_URL}/api/epic/tree",
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=tree,
+            timeout=30,
+        )
+        print(f"  [menu-crawl] Tree uploaded: {crawled_count} total items")
+    except Exception as e:
+        print(f"  [menu-crawl] Upload error: {e}")
+
+    final_img = screenshot_window(window)
+    final_b64 = img_to_base64(final_img)
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "totalItems": crawled_count,
+        "topLevel": len(left_nav_items),
+        "tree": {"name": tree["name"], "childCount": len(tree["children"])},
+    })
+    print(f"  [menu-crawl] Complete! {crawled_count} items across {len(tree['children'])} sections")
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -984,6 +1137,8 @@ def execute_command(cmd):
             execute_record_stop(cmd)
         elif cmd_type == "replay":
             execute_replay(cmd)
+        elif cmd_type == "menu_crawl":
+            execute_menu_crawl(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except Exception as e:
