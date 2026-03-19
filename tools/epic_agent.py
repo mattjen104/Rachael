@@ -1102,11 +1102,19 @@ def uia_crawl_children(element, depth, max_depth, parent_path=""):
     return children
 
 
+EPIC_MENU_CATEGORIES = [
+    "Lab", "Patient Care", "Pharmacy", "Radiology", "Surgery",
+    "CRM/CM", "Billing", "HIM", "Utilization Management",
+    "Referrals", "Registration/ADT", "Scheduling", "Interfaces",
+    "Reports", "Tools", "Admin", "My Settings",
+    "My Toolbar Default Items", "Help",
+]
+
+
 def execute_menu_crawl(cmd):
     """Crawl Epic menus using screenshot + vision AI.
-    Strategy: click Epic button -> screenshot -> AI reads menu items with coordinates ->
-    click each category -> screenshot -> AI reads sub-items -> repeat.
-    Results are saved permanently so you only crawl once."""
+    Strategy: click Epic button -> find each known category by vision -> click ->
+    read sub-items -> repeat. Results are saved permanently so you only crawl once."""
     env = cmd.get("env", "SUP")
     command_id = cmd.get("id", "unknown")
     depth = cmd.get("depth", 2)
@@ -1114,6 +1122,7 @@ def execute_menu_crawl(cmd):
     print(f"  [menu-crawl] Starting Epic menu crawl for {env} (depth={depth})")
     print(f"  [menu-crawl] NOTE: This will briefly control your mouse to click menu items.")
     print(f"  [menu-crawl] Please don't move the mouse during the crawl.")
+    print(f"  [menu-crawl] Known categories: {len(EPIC_MENU_CATEGORIES)}")
 
     window = find_window(env)
     if not window:
@@ -1311,27 +1320,48 @@ def execute_menu_crawl(cmd):
             post_result(command_id, "error", error="Cannot screenshot after Epic button click")
             return
 
-        top_items = vision_read_menu(b64, "Epic button menu - top level. The TOP section has recently accessed/pinned items. BELOW that are permanent navigation categories like Patient Care, Lab, Pharmacy, Admin, etc.")
-        print(f"  [menu-crawl] Found {len(top_items)} top-level items")
+        def vision_find_item(b64_img, item_name):
+            """Use vision to find the exact coordinates of a specific menu item."""
+            prompt = (
+                f"Find the menu item labeled \"{item_name}\" in this Epic Hyperspace menu screenshot.\n"
+                f"The menu has two columns: left side has Pinned/Recent items, right side has navigation categories.\n"
+                f"\"{item_name}\" should be in the RIGHT column with a submenu arrow (>).\n\n"
+                f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true}}\n"
+                f"x and y are pixel coordinates relative to the image.\n"
+                f"If not found: {{\"found\": false}}"
+            )
+            resp = ask_claude(b64_img, prompt)
+            if not resp:
+                return None
+            try:
+                fm = re.search(r'\{[\s\S]*?\}', resp)
+                if fm:
+                    return json.loads(fm.group())
+            except Exception:
+                pass
+            return None
 
-        recent_items = [i for i in top_items if i.get("section") == "recent"]
-        nav_items = [i for i in top_items if i.get("section") != "recent"]
+        print(f"  [menu-crawl] Step 2: Reading recent items from left panel...")
+        recent_prompt = (
+            "Look at the LEFT panel of this Epic menu. It shows 'Pinned' and 'Recent' sections.\n"
+            "List every item under Pinned and Recent.\n"
+            "Return ONLY a JSON array: [{\"name\": \"item text\", \"section\": \"pinned\" or \"recent\"}]\n"
+            "If no items, return []"
+        )
+        recent_resp = ask_claude(b64, recent_prompt)
+        recent_items = []
+        if recent_resp:
+            try:
+                rm = re.search(r'\[[\s\S]*\]', recent_resp)
+                if rm:
+                    recent_items = json.loads(rm.group())
+            except Exception:
+                pass
 
         if recent_items:
             print(f"  [menu-crawl] Recent/pinned items ({len(recent_items)}):")
-            for item in recent_items:
-                print(f"    [recent] '{item['name']}'")
-
-        print(f"  [menu-crawl] Navigation categories ({len(nav_items)}):")
-        for item in nav_items:
-            sub_flag = " [+submenu]" if item.get("hasSubmenu") else ""
-            print(f"    [nav] '{item['name']}'{sub_flag}")
-
-        if not top_items:
-            print(f"  [menu-crawl] No items found in menu. Saving screenshot for debugging.")
-            post_result(command_id, "error", screenshot_b64=b64,
-                       error="Clicked Epic button but found no menu items. Check screenshot.")
-            return
+            for ri in recent_items:
+                print(f"    [{ri.get('section', '?')}] '{ri.get('name', '?')}'")
 
         tree_children = []
         crawled_count = 0
@@ -1354,39 +1384,47 @@ def execute_menu_crawl(cmd):
             tree_children.append(recent_node)
             crawled_count += 1
 
-        items_to_crawl = nav_items if nav_items else top_items
+        print(f"  [menu-crawl] Step 3: Crawling {len(EPIC_MENU_CATEGORIES)} known categories...")
 
-        for i, item in enumerate(items_to_crawl):
-            item_name = item.get("name", f"Item_{i}")
-            has_submenu = item.get("hasSubmenu", False)
+        for i, cat_name in enumerate(EPIC_MENU_CATEGORIES):
+            print(f"  [menu-crawl] === [{i+1}/{len(EPIC_MENU_CATEGORIES)}] '{cat_name}' ===")
 
             node = {
-                "name": item_name,
-                "controlType": "MenuItem" if has_submenu else "Activity",
-                "path": item_name,
+                "name": cat_name,
+                "controlType": "MenuItem",
+                "path": cat_name,
                 "children": []
             }
             crawled_count += 1
 
-            if has_submenu:
-                print(f"  [menu-crawl] === Category {i+1}/{len(items_to_crawl)}: '{item_name}' ===")
-                item_x = item.get("x", epic_loc["x"] + 50)
-                item_y = item.get("y", 0)
-                click_x, click_y = vision_to_screen(window, item_x, item_y)
+            img, b64 = safe_screenshot()
+            if not b64:
+                print(f"  [menu-crawl]   Screenshot failed, skipping '{cat_name}'")
+                tree_children.append(node)
+                continue
 
-                pyautogui.click(click_x, click_y)
-                time.sleep(1.0)
+            loc = vision_find_item(b64, cat_name)
+            if not loc or not loc.get("found"):
+                print(f"  [menu-crawl]   Could not find '{cat_name}' on screen, skipping")
+                tree_children.append(node)
+                continue
 
-                sub_children, sub_count = crawl_submenu(item_name, 2, depth + 1, reopen_epic_menu)
-                node["children"] = sub_children
-                crawled_count += sub_count
+            click_x, click_y = vision_to_screen(window, loc["x"], loc["y"])
+            print(f"  [menu-crawl]   Found '{cat_name}' at img({loc['x']},{loc['y']}) -> screen({click_x},{click_y})")
 
-                pyautogui.press("escape")
-                time.sleep(0.3)
-                pyautogui.press("escape")
-                time.sleep(0.3)
+            pyautogui.click(click_x, click_y)
+            time.sleep(1.0)
 
-                reopen_epic_menu()
+            sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
+            node["children"] = sub_children
+            crawled_count += sub_count
+
+            pyautogui.press("escape")
+            time.sleep(0.3)
+            pyautogui.press("escape")
+            time.sleep(0.3)
+
+            reopen_epic_menu()
 
             tree_children.append(node)
 
