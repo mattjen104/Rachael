@@ -120,6 +120,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const [chatFetched, setChatFetched] = useState(false);
   const [launchingApp, setLaunchingApp] = useState<string | null>(null);
   const [epicRecording, setEpicRecording] = useState<{ active: boolean; env: string; stepCount: number }>({ active: false, env: "SUP", stepCount: 0 });
+  const [recReview, setRecReview] = useState<{ show: boolean; steps: Array<{ step: number; description: string; screen: string; timeDelta: number; excluded?: boolean }>; name: string } | null>(null);
 
   useEffect(() => {
     const checkRecStatus = async () => {
@@ -691,11 +692,30 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                   onClick={async (e) => {
                     e.stopPropagation();
                     if (epicRecording.active) {
-                      if (onRunCommand) onRunCommand("epic record stop");
-                      setEpicRecording(prev => ({ ...prev, active: false }));
+                      try {
+                        const resp = await fetch("/api/epic/record/stop", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({}),
+                        });
+                        if (resp.ok) {
+                          const d = await resp.json();
+                          setEpicRecording(prev => ({ ...prev, active: false }));
+                          const steps = (d.steps || []).map((s: any, i: number) => ({ ...s, step: i + 1 }));
+                          if (steps.length > 0) {
+                            setRecReview({ show: true, steps, name: "" });
+                          }
+                        }
+                      } catch {}
                     } else {
-                      if (onRunCommand) onRunCommand("epic record start");
-                      setEpicRecording(prev => ({ ...prev, active: true }));
+                      try {
+                        await fetch("/api/epic/record/start", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ env: "SUP" }),
+                        });
+                        setEpicRecording(prev => ({ ...prev, active: true }));
+                      } catch {}
                     }
                   }}
                 >{epicRecording.active ? "[REC]" : "[rec]"}</span>
@@ -817,6 +837,65 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           </div>
         );
       })}
+      {recReview && recReview.show && (
+        <div className="border-t border-border bg-background p-2" data-testid="epic-rec-review">
+          <div className="text-xs font-bold mb-1 text-primary">RECORDING REVIEW ({recReview.steps.filter(s => !s.excluded).length} steps)</div>
+          <div className="mb-2 max-h-40 overflow-y-auto">
+            {recReview.steps.map((s, i) => (
+              <div key={i} className={`flex items-center gap-1 text-[10px] py-0.5 ${s.excluded ? "line-through text-muted-foreground" : ""}`}>
+                <span
+                  className="cursor-pointer w-3 text-center shrink-0"
+                  data-testid={`rec-step-toggle-${i}`}
+                  onClick={() => {
+                    setRecReview(prev => {
+                      if (!prev) return prev;
+                      const steps = [...prev.steps];
+                      steps[i] = { ...steps[i], excluded: !steps[i].excluded };
+                      return { ...prev, steps };
+                    });
+                  }}
+                >{s.excluded ? "x" : "+"}</span>
+                <span className="truncate flex-1">{s.description}</span>
+                <span className="text-muted-foreground shrink-0">[{s.screen}]</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-1 items-center">
+            <input
+              type="text"
+              data-testid="rec-workflow-name"
+              className="flex-1 bg-transparent border border-border px-1 py-0.5 text-xs font-mono"
+              placeholder="Workflow name..."
+              value={recReview.name}
+              onChange={(e) => setRecReview(prev => prev ? { ...prev, name: e.target.value } : prev)}
+            />
+            <button
+              data-testid="rec-save-btn"
+              className="px-2 py-0.5 text-xs border border-primary text-primary hover:bg-primary/20"
+              onClick={async () => {
+                if (!recReview.name.trim()) return;
+                const steps = recReview.steps.filter(s => !s.excluded);
+                try {
+                  const resp = await fetch("/api/epic/record/save", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: recReview.name.trim(), steps }),
+                  });
+                  if (resp.ok) {
+                    setRecReview(null);
+                    if (onRunCommand) onRunCommand("epic workflows");
+                  }
+                } catch {}
+              }}
+            >[save]</button>
+            <button
+              data-testid="rec-discard-btn"
+              className="px-2 py-0.5 text-xs border border-border text-muted-foreground hover:bg-muted"
+              onClick={() => setRecReview(null)}
+            >[discard]</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

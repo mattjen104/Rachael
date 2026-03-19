@@ -504,10 +504,11 @@ export async function registerRoutes(
 
   let epicRecordingState: {
     active: boolean;
+    draining: boolean;
     startedAt: number | null;
     env: string;
     steps: Array<{ step: number; description: string; screen: string; timeDelta: number }>;
-  } = { active: false, startedAt: null, env: "SUP", steps: [] };
+  } = { active: false, draining: false, startedAt: null, env: "SUP", steps: [] };
 
   app.get("/api/epic/agent/commands", (req, res) => {
     const auth = req.headers.authorization;
@@ -663,7 +664,7 @@ export async function registerRoutes(
       return res.status(409).json({ error: "Recording already active" });
     }
     const env = (req.body.env || "SUP").toUpperCase();
-    epicRecordingState = { active: true, startedAt: Date.now(), env, steps: [] };
+    epicRecordingState = { active: true, draining: false, startedAt: Date.now(), env, steps: [] };
     const id = `epic-${Date.now()}-rec-start`;
     epicCommandQueue.push({ id, type: "record_start", env });
     res.json({ ok: true, env });
@@ -677,12 +678,14 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    if (!epicRecordingState.active) {
+    if (!epicRecordingState.active && !epicRecordingState.draining) {
       return res.status(409).json({ error: "No recording active" });
     }
     epicRecordingState.active = false;
+    epicRecordingState.draining = true;
     const id = `epic-${Date.now()}-rec-stop`;
     epicCommandQueue.push({ id, type: "record_stop" });
+    setTimeout(() => { epicRecordingState.draining = false; }, 10000);
     const steps = [...epicRecordingState.steps];
     res.json({ ok: true, steps });
   });
@@ -696,7 +699,7 @@ export async function registerRoutes(
     if (!Array.isArray(steps)) {
       return res.status(400).json({ error: "Missing steps array" });
     }
-    if (!epicRecordingState.active) {
+    if (!epicRecordingState.active && !epicRecordingState.draining) {
       return res.status(409).json({ error: "No recording active" });
     }
     for (const s of steps) {

@@ -741,14 +741,14 @@ def recording_capture_tick():
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{prev_screen}"}},
                         {"type": "text", "text": "Current Epic Hyperspace screen:"},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                        {"type": "text", "text": "Describe in one sentence what navigation action the user took between these two screens. Also identify the current screen/activity name. Reply as JSON: {\"action\": \"...\", \"screen\": \"...\"}"},
+                        {"type": "text", "text": "Describe in one sentence what NAVIGATION action the user took between these two screens. Also identify the current screen/activity name. IMPORTANT: Only describe menu clicks, button presses, and screen transitions. Do NOT mention any patient names, MRNs, dates of birth, or any clinical/PHI data visible on screen. Reply as JSON: {\"action\": \"...\", \"screen\": \"...\"}"},
                     ]
                 })
             else:
                 messages.append({
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "This is an Epic Hyperspace screen. Identify the current screen/activity name. Reply as JSON: {\"action\": \"Initial screen\", \"screen\": \"...\"}"},
+                        {"type": "text", "text": "This is an Epic Hyperspace screen. Identify the current screen/activity name. IMPORTANT: Do NOT mention any patient names, MRNs, dates of birth, or any clinical/PHI data. Reply as JSON: {\"action\": \"Initial screen\", \"screen\": \"...\"}"},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
                     ]
                 })
@@ -876,7 +876,7 @@ def execute_replay(cmd):
                                 "role": "user",
                                 "content": [
                                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                                    {"type": "text", "text": f"I need to navigate to '{screen}' in Epic Hyperspace. Looking at the current screen, what should I click or what menu should I open? Give precise coordinates or element name. Reply as JSON: {{\"action\": \"click\", \"target\": \"...\", \"x\": ..., \"y\": ...}} or {{\"action\": \"already_there\"}}"},
+                                    {"type": "text", "text": f"I need to navigate to '{screen}' in Epic Hyperspace. Looking at the current screen, what should I click or what menu should I open? Give precise coordinates or element name. Do NOT reference any patient names, MRNs, or PHI data visible on screen. Reply as JSON: {{\"action\": \"click\", \"target\": \"...\", \"x\": ..., \"y\": ...}} or {{\"action\": \"already_there\"}} or {{\"action\": \"failed\", \"reason\": \"...\"}}"},
                                 ]
                             }],
                             "max_tokens": 200,
@@ -888,11 +888,54 @@ def execute_replay(cmd):
                     json_match = re.search(r'\{[^}]+\}', text)
                     if json_match:
                         parsed = json.loads(json_match.group())
-                        if parsed.get("action") == "click" and parsed.get("x") and parsed.get("y"):
+                        if parsed.get("action") == "already_there":
+                            results.append({"step": i+1, "status": "already_there"})
+                        elif parsed.get("action") == "failed":
+                            results.append({"step": i+1, "status": "failed", "reason": parsed.get("reason", "")})
+                        elif parsed.get("action") == "click" and parsed.get("x") and parsed.get("y"):
                             wx, wy = window.left, window.top
                             pyautogui.click(wx + parsed["x"], wy + parsed["y"])
                             time.sleep(2)
-                        results.append({"step": i+1, "status": "navigated", "parsed": parsed})
+                            verify_img = screenshot_window(window)
+                            verified = False
+                            if verify_img and screen:
+                                vb64 = img_to_base64(verify_img)
+                                try:
+                                    vresp = requests.post(
+                                        "https://openrouter.ai/api/v1/chat/completions",
+                                        headers={
+                                            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                                            "Content-Type": "application/json",
+                                        },
+                                        json={
+                                            "model": MODEL,
+                                            "messages": [{
+                                                "role": "user",
+                                                "content": [
+                                                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{vb64}"}},
+                                                    {"type": "text", "text": f"Am I now on the '{screen}' screen in Epic Hyperspace? Do NOT reference any patient names or PHI. Reply as JSON: {{\"on_target\": true/false, \"current_screen\": \"...\"}}"},
+                                                ]
+                                            }],
+                                            "max_tokens": 100,
+                                        },
+                                        timeout=30,
+                                    )
+                                    vdata = vresp.json()
+                                    vtext = vdata.get("choices", [{}])[0].get("message", {}).get("content", "")
+                                    vjson = re.search(r'\{[^}]+\}', vtext)
+                                    if vjson:
+                                        vparsed = json.loads(vjson.group())
+                                        verified = vparsed.get("on_target", False)
+                                        results.append({"step": i+1, "status": "verified" if verified else "unverified", "current": vparsed.get("current_screen", "")})
+                                    else:
+                                        results.append({"step": i+1, "status": "navigated_unverified"})
+                                except Exception as ve:
+                                    print(f"  [replay] Verify error: {ve}")
+                                    results.append({"step": i+1, "status": "navigated_verify_error"})
+                            else:
+                                results.append({"step": i+1, "status": "navigated"})
+                        else:
+                            results.append({"step": i+1, "status": "no_action"})
                     else:
                         results.append({"step": i+1, "status": "no_action"})
                 except Exception as e:
