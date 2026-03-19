@@ -65,16 +65,21 @@ pyautogui.FAILSAFE = True
 
 
 def safe_click(x, y, pause_before=0.15, pause_after=0.3, label=""):
-    """Click with computer-use best practices baked in.
+    """Click with computer-use best practices from Anthropic + OpenAI baked in.
 
-    Principles:
-    1. Move-then-click: Hover first so the UI can react (highlight, tooltip)
-       and we can visually confirm we're on the right target.
-    2. Brief pause before click: Lets any hover animations settle.
-       Prevents clicking mid-transition.
-    3. Single click with pause after: Lets the UI process the event
-       before we do anything else. Prevents click-stacking.
-    4. Coordinates are always absolute screen coords (not image coords).
+    Principles applied:
+    1. Move-then-click (Anthropic): Hover first so the UI can react (highlight,
+       tooltip) — confirms cursor is visually on the right target.
+    2. Brief pause before click: Lets hover animations and UI transitions settle.
+       'Some applications may take time to process actions' — Anthropic docs.
+    3. Single click with pause after: Lets the UI process the event fully
+       before next action. Prevents click-stacking where two fast clicks
+       hit the wrong targets.
+    4. Coordinates are absolute screen coords (already mapped from vision
+       space through vision_to_screen).
+    5. Center-of-element targeting: All vision prompts request center coords
+       via VISION_COORD_INSTRUCTION. 'Click buttons, links, icons with the
+       cursor tip in the center of the element' — Anthropic system prompt.
     """
     if label:
         print(f"    [click] '{label}' at ({x}, {y})")
@@ -89,6 +94,43 @@ VISION_COORD_INSTRUCTION = (
     "not the top-left corner, not the icon, not the arrow — the middle of the text itself. "
     "This ensures clicks land on the most clickable part of the element."
 )
+
+
+def wait_for_stable_screen(window, max_wait=3.0, interval=0.5, threshold=0.02):
+    """Wait until the screen stops changing (application has settled).
+
+    Anthropic best practice: 'Some applications may take time to start or process
+    actions, so you may need to wait and take successive screenshots to see the
+    results of your actions.'
+
+    Takes screenshots at intervals and compares pixel differences.
+    Returns when the screen is stable (< threshold difference) or max_wait reached.
+    Returns the final stable screenshot.
+    """
+    import hashlib
+    prev_hash = None
+    stable_count = 0
+    waited = 0.0
+
+    while waited < max_wait:
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+        curr_hash = hashlib.md5(b64.encode()).hexdigest()
+
+        if curr_hash == prev_hash:
+            stable_count += 1
+            if stable_count >= 2:
+                return img, b64
+        else:
+            stable_count = 0
+
+        prev_hash = curr_hash
+        time.sleep(interval)
+        waited += interval
+
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+    return img, b64
 
 recording_state = {
     "active": False,
@@ -155,7 +197,20 @@ def get_dpi_scale():
 
 DPI_SCALE = 1.0
 
+MAX_SCREENSHOT_WIDTH = 1280
+MAX_SCREENSHOT_HEIGHT = 800
+
 def screenshot_window(window):
+    """Capture window screenshot, auto-downscale to <=1280x800 for vision accuracy.
+
+    Anthropic best practice: 'Do not send screenshots above XGA/WXGA resolution.
+    Higher resolutions degrade model accuracy. Scale down and map coordinates back.'
+    OpenAI best practice: 'Use 1440x900 or 1600x900. Use detail:original.'
+
+    We capture at native resolution for coordinate precision, then downscale to
+    1280x800 max. vision_to_screen() maps coordinates back using DPI_SCALE and
+    the screenshot_scale factor.
+    """
     global DPI_SCALE
     try:
         window.activate()
@@ -165,10 +220,21 @@ def screenshot_window(window):
     bbox = (window.left, window.top, window.left + window.width, window.top + window.height)
     img = ImageGrab.grab(bbox=bbox)
     win_w = window.width
-    img_w = img.size[0]
+    img_w, img_h = img.size
     if win_w > 0 and img_w > 0 and abs(img_w - win_w) > 10:
         DPI_SCALE = img_w / win_w
         print(f"  [dpi] Detected DPI scale: {DPI_SCALE:.2f} (image={img_w}px, window={win_w}px)")
+
+    global SCREENSHOT_SCALE_RATIO
+    if img_w > MAX_SCREENSHOT_WIDTH or img_h > MAX_SCREENSHOT_HEIGHT:
+        ratio = min(MAX_SCREENSHOT_WIDTH / img_w, MAX_SCREENSHOT_HEIGHT / img_h)
+        new_w = int(img_w * ratio)
+        new_h = int(img_h * ratio)
+        img = img.resize((new_w, new_h), resample=1)
+        SCREENSHOT_SCALE_RATIO = ratio
+    else:
+        SCREENSHOT_SCALE_RATIO = 1.0
+
     return img
 
 
@@ -178,11 +244,23 @@ def img_to_base64(img):
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+SCREENSHOT_SCALE_RATIO = 1.0
+
 def vision_to_screen(window, img_x, img_y):
-    """Convert vision AI pixel coords (relative to image) to absolute screen coords.
-    Handles DPI scaling where image pixels != screen pixels."""
-    screen_x = window.left + int(img_x / DPI_SCALE)
-    screen_y = window.top + int(img_y / DPI_SCALE)
+    """Convert vision AI pixel coords (relative to downscaled image) to absolute screen coords.
+
+    Pipeline: vision coords (downscaled image space)
+      -> original image space (divide by screenshot scale ratio)
+      -> screen space (divide by DPI scale, add window offset)
+
+    Anthropic: 'Scale the image down, let the model interact with scaled version,
+    map coordinates back to original resolution proportionally.'
+    """
+    real_img_x = img_x / SCREENSHOT_SCALE_RATIO if SCREENSHOT_SCALE_RATIO != 1.0 else img_x
+    real_img_y = img_y / SCREENSHOT_SCALE_RATIO if SCREENSHOT_SCALE_RATIO != 1.0 else img_y
+
+    screen_x = window.left + int(real_img_x / DPI_SCALE)
+    screen_y = window.top + int(real_img_y / DPI_SCALE)
     return screen_x, screen_y
 
 
@@ -329,6 +407,7 @@ Return a JSON object with:
   "notes": "any relevant observations"
 }}
 
+{VISION_COORD_INSTRUCTION}
 Coordinates should be relative to the screenshot image.
 If you can see the target already on screen, just click it.
 If you need to use Epic search (Alt+Space), use the "search" action type.
@@ -684,10 +763,14 @@ def vision_find_on_screen(window, item_name):
 
 def verify_click(window, expected_item, context=""):
     """After clicking, verify the click had the expected effect.
+
+    Anthropic best practice: 'After each step, take a screenshot and carefully
+    evaluate if you have achieved the right outcome.'
+
+    Uses wait_for_stable_screen to handle slow-loading UIs before checking.
     Returns: 'menu' (submenu opened), 'activity' (activity launched),
              'same' (nothing changed), 'dialog', 'unknown'"""
-    img = screenshot_window(window)
-    b64 = img_to_base64(img)
+    img, b64 = wait_for_stable_screen(window, max_wait=2.0, interval=0.4)
     prompt = (
         f"After clicking '{expected_item}'{(' (' + context + ')') if context else ''}, what happened?\n"
         "Classify the current screen state:\n"
@@ -2015,6 +2098,7 @@ def execute_launch(cmd):
     b64 = img_to_base64(img)
     epic_prompt = (
         "Find the Epic button in this Hyperspace window (top-left corner).\n"
+        f"{VISION_COORD_INSTRUCTION}\n"
         "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
     )
     epic_resp = ask_claude(b64, epic_prompt)
@@ -2038,6 +2122,7 @@ def execute_launch(cmd):
     search_b64 = img_to_base64(search_img)
     search_prompt = (
         "Find the 'Search activities' text box at the top of this Epic menu.\n"
+        f"{VISION_COORD_INSTRUCTION}\n"
         "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
     )
     search_resp = ask_claude(search_b64, search_prompt)
@@ -2101,6 +2186,7 @@ def execute_patient(cmd):
     prompt = (
         "Find the patient search field, patient lookup button, or any element that would let me search for a patient.\n"
         "Common locations: toolbar with a magnifying glass icon, or a 'Patient Lookup' / 'Find Patient' button.\n"
+        f"{VISION_COORD_INSTRUCTION}\n"
         "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true, \"type\": \"search_field\" or \"button\"}\n"
         "If not found: {\"found\": false}"
     )
