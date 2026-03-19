@@ -498,6 +498,102 @@ export async function registerRoutes(
     res.json({ active });
   });
 
+  const epicCommandQueue: any[] = [];
+  const epicResults = new Map<string, any>();
+  let epicAgentStatus: any = { connected: false, lastSeen: 0, windows: [] };
+
+  app.get("/api/epic/agent/commands", (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const commands = epicCommandQueue.splice(0);
+    res.json({ commands });
+  });
+
+  app.post("/api/epic/agent/heartbeat", (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    epicAgentStatus = {
+      connected: true,
+      lastSeen: Date.now(),
+      windows: req.body.windows || [],
+    };
+    res.json({ ok: true });
+  });
+
+  app.post("/api/epic/agent/results", (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const { commandId, status, screenshot, data, error } = req.body;
+    epicResults.set(commandId, {
+      commandId,
+      status,
+      screenshot: screenshot || null,
+      data: data || null,
+      error: error || null,
+      receivedAt: Date.now(),
+    });
+    if (epicResults.size > 50) {
+      const oldest = Array.from(epicResults.keys()).slice(0, epicResults.size - 50);
+      for (const k of oldest) epicResults.delete(k);
+    }
+    res.json({ ok: true });
+  });
+
+  app.post("/api/epic/agent/send", (req, res) => {
+    const { type, env, target } = req.body;
+    if (!type) return res.status(400).json({ error: "Missing type" });
+    const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const cmd = { id, type, env: env || "SUP", target: target || "" };
+    epicCommandQueue.push(cmd);
+    res.json({ ok: true, commandId: id });
+  });
+
+  app.get("/api/epic/agent/result/:id", (req, res) => {
+    const result = epicResults.get(req.params.id);
+    if (!result) return res.json({ status: "pending" });
+    res.json(result);
+  });
+
+  app.get("/api/epic/agent/status", (_req, res) => {
+    const stale = Date.now() - (epicAgentStatus.lastSeen || 0) > 60000;
+    res.json({
+      connected: epicAgentStatus.connected && !stale,
+      lastSeen: epicAgentStatus.lastSeen,
+      windows: epicAgentStatus.windows || [],
+    });
+  });
+
+  app.get("/api/epic/agent/screenshots", (_req, res) => {
+    const screenshots: any[] = [];
+    for (const [id, r] of epicResults) {
+      if (r.screenshot) {
+        screenshots.push({
+          commandId: id,
+          data: r.data,
+          receivedAt: r.receivedAt,
+          hasScreenshot: true,
+        });
+      }
+    }
+    screenshots.sort((a, b) => b.receivedAt - a.receivedAt);
+    res.json({ screenshots: screenshots.slice(0, 10) });
+  });
+
+  app.get("/api/epic/agent/screenshot/:id", (req, res) => {
+    const result = epicResults.get(req.params.id);
+    if (!result?.screenshot) return res.status(404).json({ error: "Not found" });
+    const buf = Buffer.from(result.screenshot, "base64");
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(buf);
+  });
+
   app.get("/api/epic/scan-script", async (_req, res) => {
     const fs = await import("fs");
     const path = await import("path");
@@ -506,6 +602,20 @@ export async function registerRoutes(
       const content = fs.readFileSync(scriptPath, "utf-8");
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("Content-Disposition", 'attachment; filename="epic_scan.py"');
+      res.send(content);
+    } catch {
+      res.status(404).json({ error: "Script not found" });
+    }
+  });
+
+  app.get("/api/epic/agent-script", async (_req, res) => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const scriptPath = path.join(process.cwd(), "tools", "epic_agent.py");
+    try {
+      const content = fs.readFileSync(scriptPath, "utf-8");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="epic_agent.py"');
       res.send(content);
     } catch {
       res.status(404).json({ error: "Script not found" });

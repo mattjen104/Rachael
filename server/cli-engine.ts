@@ -2936,7 +2936,7 @@ ${fullHtml}`;
     return ok(lines.join(nl));
   });
 
-  registerCommand("epic", "Epic Hyperspace activity tools", "epic [activities <env>|clear <env>|scan]", async (args) => {
+  registerCommand("epic", "Epic Hyperspace activity tools", "epic [activities|navigate|screenshot|click|status|setup|scan|clear] <env> [target]", async (args) => {
     const nl = String.fromCharCode(10);
     if (args[0] === "activities") {
       const env = (args[1] || "SUP").toUpperCase();
@@ -2988,11 +2988,103 @@ ${fullHtml}`;
         "Environments: SUP, POC, TST",
       ].join(nl));
     }
+    if (args[0] === "navigate") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const target = args.slice(2).join(" ");
+      if (!target) return fail("[epic] Usage: epic navigate SUP Patient Lookup");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "navigate", env, target }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) {
+          return ok(`Navigation command sent: ${env} -> ${target}${nl}Command ID: ${data.commandId}${nl}Desktop agent will execute when ready.`);
+        }
+        return fail(`[epic] Failed to send command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+    if (args[0] === "screenshot") {
+      const env = (args[1] || "SUP").toUpperCase();
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "screenshot", env }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Screenshot requested for ${env}. ID: ${data.commandId}`);
+        return fail(`[epic] Failed to send command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+    if (args[0] === "click") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const target = args.slice(2).join(" ");
+      if (!target) return fail("[epic] Usage: epic click SUP Orders");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "click", env, target }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Click command sent: ${target} in ${env}. ID: ${data.commandId}`);
+        return fail(`[epic] Failed to send command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+    if (args[0] === "status") {
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/status`);
+        const data = await resp.json() as any;
+        if (data.connected) {
+          return ok(`Epic Desktop Agent: CONNECTED${nl}Windows: ${(data.windows || []).join(", ") || "none"}${nl}Last seen: ${new Date(data.lastSeen).toLocaleTimeString()}`);
+        }
+        return ok(`Epic Desktop Agent: DISCONNECTED${nl}Run epic_agent.py on your desktop to connect.`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+    if (args[0] === "setup") {
+      return ok([
+        "Epic Desktop Agent Setup",
+        "========================",
+        "Download: /api/epic/agent-script",
+        "",
+        "  1. pip install pyautogui pillow requests pygetwindow",
+        "  2. set OPENROUTER_API_KEY=your-key",
+        "  3. set BRIDGE_TOKEN=your-bridge-token",
+        "  4. python epic_agent.py",
+        "",
+        "The agent runs in background and:",
+        "  - Polls OrgCloud for commands every 3s",
+        "  - Takes screenshots on demand",
+        "  - Navigates Hyperspace via Claude vision",
+        "  - Clicks buttons/menus by name",
+        "",
+        "Commands:",
+        "  epic navigate SUP Patient Lookup",
+        "  epic screenshot SUP",
+        "  epic click SUP Orders",
+        "  epic status",
+      ].join(nl));
+    }
     return ok([
       "Epic commands:",
       "  epic activities <env>  - Show cataloged activities",
-      "  epic clear <env>       - Clear activities for environment",
-      "  epic scan              - How to run the desktop scanner",
+      "  epic navigate <env> <target>  - Navigate Hyperspace",
+      "  epic screenshot <env>  - Capture current screen",
+      "  epic click <env> <el>  - Click an element by name",
+      "  epic status            - Desktop agent status",
+      "  epic clear <env>       - Clear activities",
+      "  epic scan              - Run one-time activity scan",
+      "  epic setup             - Desktop agent setup guide",
     ].join(nl));
   });
 }

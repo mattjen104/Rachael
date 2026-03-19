@@ -72,6 +72,11 @@ type TreeNode = {
   recordType: "incident" | "change" | "request";
   slaBreached: boolean;
   url?: string;
+} | {
+  type: "epicActivity";
+  name: string;
+  env: string;
+  category: string;
 };
 
 export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
@@ -397,6 +402,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "snow-item" && onRunCommand) {
           onRunCommand(`snow detail ${node.number}`);
         }
+        else if (node?.type === "epicActivity" && onRunCommand) {
+          onRunCommand(`epic navigate ${node.env} ${node.name}`);
+        }
         break;
     }
   }, [nodes, selectedIdx, toggleTask, onNavigate, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched, launchCitrixApp]);
@@ -517,6 +525,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 } else {
                   launchCitrixApp(node.name);
                 }
+              } else if (node.type === "epicActivity" && onRunCommand) {
+                onRunCommand(`epic navigate ${node.env} ${node.name}`);
               } else if (node.type === "snow-item") {
                 if (node.url) {
                   window.open(node.url, "_blank");

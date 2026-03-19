@@ -265,6 +265,19 @@ Database-driven scraping system replacing hardcoded adapters:
 - CLI commands: `epic activities <env>`, `epic clear <env>`, `epic scan` (setup instructions)
 - API: `GET /api/epic/activities/:env` (read), `POST /api/epic/activities` (write, merges with existing)
 
+## Epic Desktop Agent (tools/epic_agent.py)
+
+- **Background Python agent** that polls OrgCloud for commands and drives Hyperspace via Claude vision
+- Requires env vars: `OPENROUTER_API_KEY`, `BRIDGE_TOKEN` (no hardcoded defaults)
+- Commands: navigate (go to activity), screenshot (capture screen), click (click element by name), scan (full menu scan)
+- Agent heartbeat/polling every 3s; status endpoint shows connected/disconnected with 60s staleness timeout
+- Screenshots stored in-memory Map (max 50), returned as base64 PNG
+- Download script: `GET /api/epic/agent-script`
+- API endpoints: `/api/epic/agent/commands`, `/api/epic/agent/heartbeat`, `/api/epic/agent/results`, `/api/epic/agent/send`, `/api/epic/agent/status`, `/api/epic/agent/screenshot/:id`
+- CLI commands: `epic navigate <env> <target>`, `epic screenshot <env>`, `epic click <env> <element>`, `epic status`, `epic setup`
+- M-x commands: epic-status, epic-navigate, epic-screenshot, epic-click, epic-activities, epic-setup
+- TreeView: clicking an epicActivity node sends `epic navigate <env> <name>` (both mouse click and Enter key)
+
 ## Citrix Workspace Launcher
 
 - `citrix workspace` queues all 6 apps for simultaneous launch via Chrome extension bridge

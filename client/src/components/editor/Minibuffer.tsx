@@ -211,6 +211,12 @@ export default function Minibuffer({
       { id: "citrix-launch", label: "citrix-launch", hint: "Launch single Citrix app", action: () => { setMode("shell"); setQuery("citrix launch "); setShellOutput(""); } },
       { id: "citrix-workspace-list", label: "citrix-workspace-list", hint: "Show configured apps", action: () => { setMode("shell"); setQuery("citrix workspace list"); setShellOutput(""); executeShellCommand("citrix workspace list"); } },
       { id: "citrix-keepalive", label: "citrix-keepalive-status", hint: "Check keepalive", action: () => { setMode("shell"); setQuery("citrix keepalive"); setShellOutput(""); executeShellCommand("citrix keepalive"); } },
+      { id: "epic-status", label: "epic-status", hint: "Desktop agent status", action: () => { setMode("shell"); setQuery("epic status"); setShellOutput(""); executeShellCommand("epic status"); } },
+      { id: "epic-screenshot", label: "epic-screenshot", hint: "Capture Hyperspace screen", action: () => { setMode("shell"); setQuery("epic screenshot "); setShellOutput(""); } },
+      { id: "epic-navigate", label: "epic-navigate", hint: "Navigate Hyperspace to activity", action: () => { setMode("shell"); setQuery("epic navigate "); setShellOutput(""); } },
+      { id: "epic-click", label: "epic-click", hint: "Click element in Hyperspace", action: () => { setMode("shell"); setQuery("epic click "); setShellOutput(""); } },
+      { id: "epic-activities", label: "epic-activities", hint: "Show cataloged activities", action: () => { setMode("shell"); setQuery("epic activities "); setShellOutput(""); } },
+      { id: "epic-setup", label: "epic-setup", hint: "Desktop agent setup guide", action: () => { setMode("shell"); setQuery("epic setup"); setShellOutput(""); executeShellCommand("epic setup"); } },
       { id: "transcripts", label: "transcripts", hint: "View transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "meetings", label: "meetings", hint: "View meeting transcripts", action: () => exec("Transcripts", () => onSwitchView("transcripts")) },
       { id: "record-start", label: "record-start", hint: "Start mic recording", action: () => {
