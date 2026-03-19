@@ -188,7 +188,15 @@ def ask_claude(screenshot_b64, prompt):
             timeout=60,
         )
         if resp.status_code != 200:
-            print(f"  Claude API error: {resp.status_code}")
+            detail = ""
+            try:
+                detail = resp.json().get("error", {}).get("message", resp.text[:200])
+            except Exception:
+                detail = resp.text[:200]
+            print(f"  Claude API error: {resp.status_code} - {detail}")
+            if resp.status_code == 401:
+                print(f"  -> Check your OPENROUTER_API_KEY environment variable. It may be expired or invalid.")
+                print(f"  -> Key starts with: {OPENROUTER_API_KEY[:8]}..." if len(OPENROUTER_API_KEY) > 8 else "  -> Key appears empty or too short")
             return None
         return resp.json()["choices"][0]["message"]["content"]
     except Exception as e:
