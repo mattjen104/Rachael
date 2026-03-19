@@ -1164,32 +1164,68 @@ def execute_menu_crawl(cmd):
             pass
         return None
 
-    def vision_read_menu(b64, context=""):
+    def vision_read_menu(b64, context="", is_submenu=False):
         """Use vision to read all visible menu items with their coordinates."""
-        prompt = (
-            f"You are looking at an Epic Hyperspace menu{(' (' + context + ')') if context else ''}.\n"
-            "List every visible menu item, category, or clickable option you can see.\n\n"
-            "IMPORTANT STRUCTURE NOTES:\n"
-            "- The Epic button menu typically has RECENTLY ACCESSED items at the top (with pin icons).\n"
-            "- Below the recent items are the PERMANENT MENU CATEGORIES (like Patient Care, Lab, Pharmacy, Admin, etc.).\n"
-            "- Mark recently accessed/pinned items with \"section\": \"recent\".\n"
-            "- Mark the permanent navigation categories with \"section\": \"nav\".\n"
-            "- Items with a right-arrow (>) or triangle indicator have submenus.\n"
-            "- Items without arrows are terminal activities.\n\n"
-            "For EACH item, provide its name and approximate coordinates (pixels from top-left of image).\n\n"
-            "Return ONLY a JSON array:\n"
-            "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false, \"section\": \"recent\" or \"nav\" or \"other\"}]\n\n"
-            "Be thorough - list EVERY visible menu item.\n"
-            "Order items from top to bottom by Y coordinate.\n"
-            "Return ONLY the JSON array, no other text."
-        )
+        if is_submenu:
+            prompt = (
+                f"You are looking at an Epic Hyperspace screen where a SUBMENU has just been opened ({context}).\n"
+                "There may be multiple menu panels visible. Focus ONLY on the RIGHTMOST or TOPMOST popup/submenu panel "
+                "that just appeared — this is the newly opened submenu.\n\n"
+                "CRITICAL RULES:\n"
+                "- IGNORE the main Epic menu categories on the left/background (like Lab, Patient Care, Pharmacy, Radiology, "
+                "Surgery, Billing, HIM, Admin, Scheduling, Reports, Tools, etc.) — those are parent menu items, NOT submenu items.\n"
+                "- IGNORE any 'Pinned' or 'Recent' sections — those belong to the main menu.\n"
+                "- ONLY list items that are inside the NEWLY OPENED submenu panel/popup.\n"
+                "- The submenu panel is usually a separate floating panel or popup that appeared after clicking.\n"
+                "- If NO submenu panel is visible (the click may have opened an activity instead), return an empty array [].\n\n"
+                "For EACH submenu item, provide:\n"
+                "- name: the text label\n"
+                "- x, y: pixel coordinates relative to the image\n"
+                "- hasSubmenu: true if it has a right-arrow (>) indicating another level\n\n"
+                "Return ONLY a JSON array:\n"
+                "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false}]\n\n"
+                "If no submenu items are visible, return: []\n"
+                "Return ONLY the JSON array, no other text."
+            )
+        else:
+            prompt = (
+                f"You are looking at an Epic Hyperspace menu{(' (' + context + ')') if context else ''}.\n"
+                "List every visible menu item, category, or clickable option you can see.\n\n"
+                "IMPORTANT STRUCTURE NOTES:\n"
+                "- The Epic button menu typically has RECENTLY ACCESSED items at the top (with pin icons).\n"
+                "- Below the recent items are the PERMANENT MENU CATEGORIES (like Patient Care, Lab, Pharmacy, Admin, etc.).\n"
+                "- Mark recently accessed/pinned items with \"section\": \"recent\".\n"
+                "- Mark the permanent navigation categories with \"section\": \"nav\".\n"
+                "- Items with a right-arrow (>) or triangle indicator have submenus.\n"
+                "- Items without arrows are terminal activities.\n\n"
+                "For EACH item, provide its name and approximate coordinates (pixels from top-left of image).\n\n"
+                "Return ONLY a JSON array:\n"
+                "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false, \"section\": \"recent\" or \"nav\" or \"other\"}]\n\n"
+                "Be thorough - list EVERY visible menu item.\n"
+                "Order items from top to bottom by Y coordinate.\n"
+                "Return ONLY the JSON array, no other text."
+            )
         resp = ask_claude(b64, prompt)
         if not resp:
             return []
         try:
             m = re.search(r'\[[\s\S]*\]', resp)
             if m:
-                return json.loads(m.group())
+                items = json.loads(m.group())
+                if is_submenu:
+                    known_cats_lower = [c.lower() for c in EPIC_MENU_CATEGORIES]
+                    filtered = []
+                    for item in items:
+                        name_lower = (item.get("name", "")).lower().strip()
+                        if name_lower in known_cats_lower:
+                            continue
+                        if name_lower in ("pinned", "recent", "recently accessed"):
+                            continue
+                        filtered.append(item)
+                    if len(items) != len(filtered):
+                        print(f"  [menu-crawl]   (filtered out {len(items) - len(filtered)} parent menu items from submenu results)")
+                    return filtered
+                return items
         except Exception:
             pass
         return []
@@ -1247,9 +1283,14 @@ def execute_menu_crawl(cmd):
             return [], 0
 
         context = f"submenu of '{parent_path}'" if parent_path else "Epic menu"
-        items = vision_read_menu(sub_b64, context)
+        items = vision_read_menu(sub_b64, context, is_submenu=(current_depth > 1))
         indent = "  " * (current_depth + 1)
         print(f"  [menu-crawl]{indent}'{parent_path}' -> {len(items)} items")
+
+        if len(items) == 0:
+            print(f"  [menu-crawl]{indent}  (no submenu items found - may have opened an activity)")
+            close_activity_if_opened(sub_b64)
+            return [], 0
 
         children = []
         count = 0
@@ -1268,20 +1309,28 @@ def execute_menu_crawl(cmd):
             count += 1
 
             if has_sub and current_depth < max_depth:
-                print(f"  [menu-crawl]{indent}  -> Expanding '{si_name}'...")
-                si_x = si.get("x", 0)
-                si_y = si.get("y", 0)
-                click_x, click_y = vision_to_screen(window, si_x, si_y)
+                try:
+                    print(f"  [menu-crawl]{indent}  -> Expanding '{si_name}'...")
+                    si_x = si.get("x", 0)
+                    si_y = si.get("y", 0)
+                    click_x, click_y = vision_to_screen(window, si_x, si_y)
 
-                pyautogui.click(click_x, click_y)
-                time.sleep(1.0)
+                    pyautogui.click(click_x, click_y)
+                    time.sleep(1.0)
 
-                sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
-                si_node["children"] = sub_children
-                count += sub_count
+                    sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
+                    si_node["children"] = sub_children
+                    count += sub_count
 
-                pyautogui.press("escape")
-                time.sleep(0.5)
+                    pyautogui.press("escape")
+                    time.sleep(0.5)
+                except Exception as e:
+                    print(f"  [menu-crawl]{indent}  !! Error expanding '{si_name}': {e}")
+                    try:
+                        pyautogui.press("escape")
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
             else:
                 print(f"  [menu-crawl]{indent}  -> Activity: '{si_name}' (recorded, not clicked)")
 
@@ -1397,34 +1446,47 @@ def execute_menu_crawl(cmd):
             }
             crawled_count += 1
 
-            img, b64 = safe_screenshot()
-            if not b64:
-                print(f"  [menu-crawl]   Screenshot failed, skipping '{cat_name}'")
-                tree_children.append(node)
-                continue
+            try:
+                img, b64 = safe_screenshot()
+                if not b64:
+                    print(f"  [menu-crawl]   Screenshot failed, skipping '{cat_name}'")
+                    tree_children.append(node)
+                    continue
 
-            loc = vision_find_item(b64, cat_name)
-            if not loc or not loc.get("found"):
-                print(f"  [menu-crawl]   Could not find '{cat_name}' on screen, skipping")
-                tree_children.append(node)
-                continue
+                loc = vision_find_item(b64, cat_name)
+                if not loc or not loc.get("found"):
+                    print(f"  [menu-crawl]   Could not find '{cat_name}' on screen, skipping")
+                    tree_children.append(node)
+                    continue
 
-            click_x, click_y = vision_to_screen(window, loc["x"], loc["y"])
-            print(f"  [menu-crawl]   Found '{cat_name}' at img({loc['x']},{loc['y']}) -> screen({click_x},{click_y})")
+                click_x, click_y = vision_to_screen(window, loc["x"], loc["y"])
+                print(f"  [menu-crawl]   Found '{cat_name}' at img({loc['x']},{loc['y']}) -> screen({click_x},{click_y})")
 
-            pyautogui.click(click_x, click_y)
-            time.sleep(1.0)
+                pyautogui.click(click_x, click_y)
+                time.sleep(1.0)
 
-            sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
-            node["children"] = sub_children
-            crawled_count += sub_count
+                sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
+                node["children"] = sub_children
+                crawled_count += sub_count
 
-            pyautogui.press("escape")
-            time.sleep(0.3)
-            pyautogui.press("escape")
-            time.sleep(0.3)
+                pyautogui.press("escape")
+                time.sleep(0.3)
+                pyautogui.press("escape")
+                time.sleep(0.3)
 
-            reopen_epic_menu()
+                reopen_epic_menu()
+
+            except Exception as e:
+                print(f"  [menu-crawl] !! Error crawling '{cat_name}': {e}")
+                traceback.print_exc()
+                try:
+                    pyautogui.press("escape")
+                    time.sleep(0.3)
+                    pyautogui.press("escape")
+                    time.sleep(0.3)
+                    reopen_epic_menu()
+                except Exception:
+                    pass
 
             tree_children.append(node)
 
