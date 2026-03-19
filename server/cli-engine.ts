@@ -3273,11 +3273,12 @@ ${fullHtml}`;
             }
           }
 
-          if (pagesScanned < maxPages && pagesToScan.length > 0) {
-            await new Promise(r => setTimeout(r, 2000));
-          }
         } catch (e: any) {
-          continue;
+          // fall through to delay
+        }
+
+        if (pagesScanned < maxPages && pagesToScan.length > 0) {
+          await new Promise(r => setTimeout(r, 2000));
         }
       }
 
