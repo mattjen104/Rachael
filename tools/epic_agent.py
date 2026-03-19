@@ -63,6 +63,33 @@ POLL_INTERVAL = 3
 pyautogui.PAUSE = 0.2
 pyautogui.FAILSAFE = True
 
+
+def safe_click(x, y, pause_before=0.15, pause_after=0.3, label=""):
+    """Click with computer-use best practices baked in.
+
+    Principles:
+    1. Move-then-click: Hover first so the UI can react (highlight, tooltip)
+       and we can visually confirm we're on the right target.
+    2. Brief pause before click: Lets any hover animations settle.
+       Prevents clicking mid-transition.
+    3. Single click with pause after: Lets the UI process the event
+       before we do anything else. Prevents click-stacking.
+    4. Coordinates are always absolute screen coords (not image coords).
+    """
+    if label:
+        print(f"    [click] '{label}' at ({x}, {y})")
+    pyautogui.moveTo(x, y)
+    time.sleep(pause_before)
+    pyautogui.click(x, y)
+    time.sleep(pause_after)
+
+
+VISION_COORD_INSTRUCTION = (
+    "IMPORTANT: Return the pixel coordinates of the CENTER of the text label, "
+    "not the top-left corner, not the icon, not the arrow — the middle of the text itself. "
+    "This ensures clicks land on the most clickable part of the element."
+)
+
 recording_state = {
     "active": False,
     "env": "SUP",
@@ -637,6 +664,7 @@ def vision_find_on_screen(window, item_name):
     b64 = img_to_base64(img)
     find_prompt = (
         f"Find the menu item or button labeled \"{item_name}\" in this screenshot.\n"
+        f"{VISION_COORD_INSTRUCTION}\n"
         f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true}}\n"
         f"If not found: {{\"found\": false, \"reason\": \"why\"}}"
     )
