@@ -3522,6 +3522,169 @@ ${fullHtml}`;
       }
     }
 
+    if (args[0] === "record") {
+      if (args[1] === "start") {
+        const env = (args[2] || "SUP").toUpperCase();
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/record/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ env }),
+          });
+          const data = await resp.json() as any;
+          if (data.ok) {
+            emitEvent("cli", `Recording started for ${env}`, "info");
+            return ok(`Recording started for ${env}.${nl}The desktop agent will capture screenshots every 2-3 seconds.${nl}Run: epic record stop  to finish.`);
+          }
+          return fail(`[epic] ${data.error || "Failed to start recording"}`);
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      if (args[1] === "stop") {
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/record/stop`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          const data = await resp.json() as any;
+          if (data.ok) {
+            const steps: any[] = data.steps || [];
+            if (steps.length === 0) {
+              return ok(`Recording stopped. No navigation steps captured.`);
+            }
+            const lines = [`Recording stopped. ${steps.length} step(s) captured:`, ""];
+            for (const s of steps) {
+              lines.push(`  ${s.step}. ${s.description}  [${s.screen}]  +${s.timeDelta}s`);
+            }
+            lines.push("", `Save with: epic record save <workflow name>`);
+            return ok(lines.join(nl));
+          }
+          return fail(`[epic] ${data.error || "Failed to stop recording"}`);
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      if (args[1] === "save") {
+        const name = args.slice(2).join(" ").trim();
+        if (!name) return fail("[epic] Usage: epic record save <workflow name>");
+        try {
+          const statusResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/record/status`);
+          const status = await statusResp.json() as any;
+          if (status.stepCount === 0) {
+            return fail("[epic] No recorded steps to save. Start and stop a recording first.");
+          }
+
+          if (status.active) {
+            await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/record/stop`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            });
+          }
+
+          const saveResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/record/save`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+          });
+          const data = await saveResp.json() as any;
+          if (data.ok) {
+            return ok(`Workflow "${name}" saved with ${status.stepCount} step(s).`);
+          }
+          return fail(`[epic] ${data.error || "Failed to save workflow"}`);
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/record/status`);
+        const data = await resp.json() as any;
+        if (data.active) {
+          const elapsed = Math.floor((Date.now() - data.startedAt) / 1000);
+          return ok(`Recording active for ${data.env} (${elapsed}s, ${data.stepCount} steps).${nl}Run: epic record stop`);
+        }
+        return ok([
+          "Epic Workflow Recorder",
+          "======================",
+          "  epic record start [env]  - Start recording navigation",
+          "  epic record stop         - Stop recording, show steps",
+          "  epic record save <name>  - Save last recorded steps as workflow",
+        ].join(nl));
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "workflows") {
+      const allCfgs = await storage.getAgentConfigs();
+      const workflows: any[] = [];
+      for (const cfg of allCfgs) {
+        if (cfg.key.startsWith("epic_workflow_") && cfg.value) {
+          try {
+            const wf = JSON.parse(cfg.value);
+            workflows.push({
+              key: cfg.key.replace("epic_workflow_", ""),
+              name: wf.name || cfg.key.replace("epic_workflow_", ""),
+              env: wf.env || "SUP",
+              steps: (wf.steps || []).length,
+              createdAt: wf.createdAt || "?",
+            });
+          } catch {}
+        }
+      }
+      if (workflows.length === 0) {
+        return ok(`No saved workflows.${nl}Record one: epic record start`);
+      }
+      const lines = [`=== EPIC WORKFLOWS === (${workflows.length})`, ""];
+      for (let i = 0; i < workflows.length; i++) {
+        const w = workflows[i];
+        lines.push(`  ${i + 1}. ${w.name}  [${w.env}]  ${w.steps} steps  ${w.createdAt}`);
+      }
+      lines.push("", "Replay with: epic replay <name>");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "replay") {
+      const name = args.slice(1).join(" ").trim();
+      if (!name) return fail("[epic] Usage: epic replay <workflow name>");
+      const safeName = name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_").toLowerCase();
+      const key = `epic_workflow_${safeName}`;
+      const cfg = await storage.getAgentConfig(key);
+      if (!cfg?.value) return fail(`[epic] Workflow "${name}" not found. Use: epic workflows`);
+      let wf: any;
+      try { wf = JSON.parse(cfg.value); } catch { return fail("[epic] Corrupt workflow data"); }
+      const steps = wf.steps || [];
+      if (steps.length === 0) return fail("[epic] Workflow has no steps");
+
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "replay", env: wf.env || "SUP", steps }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) {
+          return ok(`Replaying workflow "${wf.name}" (${steps.length} steps) on ${wf.env}.${nl}Command ID: ${data.commandId}${nl}Desktop agent will execute each step with vision verification.`);
+        }
+        return fail("[epic] Failed to send replay command");
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "workflow" && args[1] === "delete") {
+      const name = args.slice(2).join(" ").trim();
+      if (!name) return fail("[epic] Usage: epic workflow delete <name>");
+      const safeName = name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_").toLowerCase();
+      const key = `epic_workflow_${safeName}`;
+      const cfg = await storage.getAgentConfig(key);
+      if (!cfg?.value) return fail(`[epic] Workflow "${name}" not found.`);
+      await storage.setAgentConfig(key, "", "epic");
+      return ok(`Workflow "${name}" deleted.`);
+    }
+
     return ok([
       "Epic commands:",
       "  epic activities <env>     - Show cataloged activities",
@@ -3537,6 +3700,12 @@ ${fullHtml}`;
       "  epic clear <env>          - Clear activities",
       "  epic scan                 - One-time activity scan guide",
       "  epic setup                - Desktop agent setup guide",
+      "  epic record start [env]   - Start recording workflow",
+      "  epic record stop          - Stop recording",
+      "  epic record save <name>   - Save recorded workflow",
+      "  epic workflows            - List saved workflows",
+      "  epic replay <name>        - Replay a saved workflow",
+      "  epic workflow delete <name> - Delete a saved workflow",
     ].join(nl));
   });
 

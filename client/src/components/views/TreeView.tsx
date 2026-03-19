@@ -97,6 +97,12 @@ type TreeNode = {
   id: number;
   title: string;
   url: string;
+} | {
+  type: "epicWorkflow";
+  name: string;
+  key: string;
+  env: string;
+  stepCount: number;
 };
 
 export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
@@ -113,6 +119,22 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const [mailFetched, setMailFetched] = useState(false);
   const [chatFetched, setChatFetched] = useState(false);
   const [launchingApp, setLaunchingApp] = useState<string | null>(null);
+  const [epicRecording, setEpicRecording] = useState<{ active: boolean; env: string; stepCount: number }>({ active: false, env: "SUP", stepCount: 0 });
+
+  useEffect(() => {
+    const checkRecStatus = async () => {
+      try {
+        const resp = await fetch("/api/epic/record/status");
+        if (resp.ok) {
+          const d = await resp.json();
+          setEpicRecording({ active: d.active, env: d.env, stepCount: d.stepCount });
+        }
+      } catch {}
+    };
+    checkRecStatus();
+    const interval = setInterval(checkRecStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const launchCitrixApp = useCallback(async (appName: string, portalName?: string) => {
     setLaunchingApp(appName);
@@ -306,7 +328,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         }
       }
 
-      nodes.push({ type: "section", label: "EPIC", key: "epic", count: totalItems });
+      const epicWorkflows: any[] = (data as any).epicWorkflows || [];
+      nodes.push({ type: "section", label: "EPIC", key: "epic", count: totalItems + epicWorkflows.length });
       if (expanded.has("epic")) {
         for (const env of epicEnvs) {
           const envTrees = epicTrees[env] || {};
@@ -360,6 +383,15 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                   }
                 }
               }
+            }
+          }
+        }
+
+        if (epicWorkflows.length > 0) {
+          nodes.push({ type: "section", label: "  WORKFLOWS", key: "epic-workflows", count: epicWorkflows.length });
+          if (expanded.has("epic-workflows")) {
+            for (const wf of epicWorkflows) {
+              nodes.push({ type: "epicWorkflow" as const, name: wf.name, key: wf.key, env: wf.env, stepCount: wf.stepCount });
             }
           }
         }
@@ -599,6 +631,9 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         else if (node?.type === "epicTreeNode" && onRunCommand) {
           onRunCommand(`epic go ${node.env} ${node.navPath}`);
         }
+        else if (node?.type === "epicWorkflow" && onRunCommand) {
+          onRunCommand(`epic replay ${node.key}`);
+        }
         else if (node?.type === "pulseLink") {
           window.open(node.url, "_blank");
         }
@@ -649,6 +684,22 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
             >
               <span className="mr-1">{isExp ? "▼" : "▶"}</span>
               {node.label} {node.count >= 0 ? `(${node.count})` : ""}
+              {node.key === "epic" && (
+                <span
+                  data-testid="epic-rec-toggle"
+                  className={`ml-2 px-1 cursor-pointer ${epicRecording.active ? "text-red-500 animate-pulse" : "text-muted-foreground"}`}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (epicRecording.active) {
+                      if (onRunCommand) onRunCommand("epic record stop");
+                      setEpicRecording(prev => ({ ...prev, active: false }));
+                    } else {
+                      if (onRunCommand) onRunCommand("epic record start");
+                      setEpicRecording(prev => ({ ...prev, active: true }));
+                    }
+                  }}
+                >{epicRecording.active ? "[REC]" : "[rec]"}</span>
+              )}
             </div>
           );
         }
@@ -709,6 +760,10 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         } else if (node.type === "chat") {
           icon = node.unread ? ">" : " ";
           label = `${node.name.slice(0, 20).padEnd(20)}  ${node.lastMessage.slice(0, 35)}`;
+        } else if (node.type === "epicWorkflow") {
+          icon = "▶";
+          label = `${node.name}  [${node.env}]`;
+          extra = `${node.stepCount} steps`;
         } else if (node.type === "snow-item") {
           icon = node.slaBreached ? "!" : "·";
           label = `${node.number.padEnd(15)} ${node.shortDescription.slice(0, 40)}`;
@@ -741,6 +796,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
                 onRunCommand(`epic navigate ${node.env} ${node.name}`);
               } else if (node.type === "epicTreeNode" && onRunCommand) {
                 onRunCommand(`epic go ${node.env} ${node.navPath}`);
+              } else if (node.type === "epicWorkflow" && onRunCommand) {
+                onRunCommand(`epic replay ${node.key}`);
               } else if (node.type === "pulseLink") {
                 window.open(node.url, "_blank");
               } else if (node.type === "galaxyGuide") {

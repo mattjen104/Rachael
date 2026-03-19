@@ -502,6 +502,13 @@ export async function registerRoutes(
   const epicResults = new Map<string, any>();
   let epicAgentStatus: any = { connected: false, lastSeen: 0, windows: [] };
 
+  let epicRecordingState: {
+    active: boolean;
+    startedAt: number | null;
+    env: string;
+    steps: Array<{ step: number; description: string; screen: string; timeDelta: number }>;
+  } = { active: false, startedAt: null, env: "SUP", steps: [] };
+
   app.get("/api/epic/agent/commands", (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
@@ -553,7 +560,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, any> = { id, type, env: env || "SUP" };
@@ -562,6 +569,7 @@ export async function registerRoutes(
     if (client) cmd.client = client;
     if (masterfile) cmd.masterfile = masterfile;
     if (item) cmd.item = item;
+    if (steps) cmd.steps = steps;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });
@@ -632,6 +640,102 @@ export async function registerRoutes(
     } catch {
       res.status(404).json({ error: "Script not found" });
     }
+  });
+
+  app.get("/api/epic/record/status", (_req, res) => {
+    res.json({
+      active: epicRecordingState.active,
+      startedAt: epicRecordingState.startedAt,
+      env: epicRecordingState.env,
+      stepCount: epicRecordingState.steps.length,
+    });
+  });
+
+  app.post("/api/epic/record/start", (req, res) => {
+    const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+    if (!isLocal) {
+      const auth = req.headers.authorization;
+      if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+    if (epicRecordingState.active) {
+      return res.status(409).json({ error: "Recording already active" });
+    }
+    const env = (req.body.env || "SUP").toUpperCase();
+    epicRecordingState = { active: true, startedAt: Date.now(), env, steps: [] };
+    const id = `epic-${Date.now()}-rec-start`;
+    epicCommandQueue.push({ id, type: "record_start", env });
+    res.json({ ok: true, env });
+  });
+
+  app.post("/api/epic/record/stop", (req, res) => {
+    const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+    if (!isLocal) {
+      const auth = req.headers.authorization;
+      if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+    if (!epicRecordingState.active) {
+      return res.status(409).json({ error: "No recording active" });
+    }
+    epicRecordingState.active = false;
+    const id = `epic-${Date.now()}-rec-stop`;
+    epicCommandQueue.push({ id, type: "record_stop" });
+    const steps = [...epicRecordingState.steps];
+    res.json({ ok: true, steps });
+  });
+
+  app.post("/api/epic/record/steps", (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const { steps } = req.body;
+    if (!Array.isArray(steps)) {
+      return res.status(400).json({ error: "Missing steps array" });
+    }
+    if (!epicRecordingState.active) {
+      return res.status(409).json({ error: "No recording active" });
+    }
+    for (const s of steps) {
+      epicRecordingState.steps.push({
+        step: epicRecordingState.steps.length + 1,
+        description: s.description || "",
+        screen: s.screen || "",
+        timeDelta: s.timeDelta || 0,
+      });
+    }
+    res.json({ ok: true, totalSteps: epicRecordingState.steps.length });
+  });
+
+  app.post("/api/epic/record/save", async (req, res) => {
+    const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+    if (!isLocal) {
+      const auth = req.headers.authorization;
+      if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+    const { name } = req.body;
+    const steps = Array.isArray(req.body.steps) && req.body.steps.length > 0
+      ? req.body.steps
+      : epicRecordingState.steps;
+    if (!name || steps.length === 0) {
+      return res.status(400).json({ error: "Missing name or no recorded steps" });
+    }
+    const safeName = name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_").toLowerCase();
+    if (!safeName) return res.status(400).json({ error: "Invalid workflow name" });
+    const key = `epic_workflow_${safeName}`;
+    const workflow = {
+      name,
+      env: epicRecordingState.env || "SUP",
+      createdAt: new Date().toISOString(),
+      steps,
+    };
+    await storage.setAgentConfig(key, JSON.stringify(workflow), "epic");
+    res.json({ ok: true, key: safeName });
   });
 
   app.post("/api/epic/activities", async (req, res) => {
@@ -771,6 +875,25 @@ export async function registerRoutes(
       } catch {}
     }
 
+    const epicWorkflows: Array<{ name: string; key: string; env: string; stepCount: number; createdAt: string }> = [];
+    try {
+      const allConfigs = await storage.getAgentConfigs();
+      for (const cfg of allConfigs) {
+        if (cfg.key.startsWith("epic_workflow_") && cfg.value) {
+          try {
+            const wf = JSON.parse(cfg.value);
+            epicWorkflows.push({
+              name: wf.name || cfg.key.replace("epic_workflow_", ""),
+              key: cfg.key.replace("epic_workflow_", ""),
+              env: wf.env || "SUP",
+              stepCount: (wf.steps || []).length,
+              createdAt: wf.createdAt || "",
+            });
+          } catch {}
+        }
+      }
+    } catch {}
+
     let citrixPortals: any[] = [];
     const citrixPortalApps: Record<string, any[]> = {};
     try {
@@ -802,6 +925,7 @@ export async function registerRoutes(
       transcripts: allTranscripts,
       epicActivities,
       epicTrees,
+      epicWorkflows,
       pulseLinks,
       galaxyCategories,
       citrixPortals,

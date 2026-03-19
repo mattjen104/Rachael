@@ -49,6 +49,15 @@ POLL_INTERVAL = 3
 pyautogui.PAUSE = 0.2
 pyautogui.FAILSAFE = True
 
+recording_state = {
+    "active": False,
+    "env": "SUP",
+    "last_screen": "",
+    "last_capture_time": 0,
+    "capture_interval": 3,
+    "pending_steps": [],
+}
+
 
 def find_window(env, client=None):
     """Find a window for the given env, optionally filtered by client type."""
@@ -694,6 +703,215 @@ def execute_masterfile(cmd):
         post_result(command_id, "error", error=f"Masterfile error: {str(e)}")
 
 
+def recording_capture_tick():
+    """Called each loop iteration when recording is active. Captures screenshot,
+    uses vision to describe what changed, and posts steps to the server."""
+    if not recording_state["active"]:
+        return
+    now = time.time()
+    if now - recording_state["last_capture_time"] < recording_state["capture_interval"]:
+        return
+    recording_state["last_capture_time"] = now
+
+    env = recording_state["env"]
+    window = find_window(env)
+    if not window:
+        return
+
+    img = screenshot_window(window)
+    if img is None:
+        return
+    b64 = img_to_base64(img)
+    prev_screen = recording_state["last_screen"]
+
+    if prev_screen == b64:
+        return
+
+    description = "Screen changed"
+    screen_name = ""
+
+    if OPENROUTER_API_KEY:
+        try:
+            messages = []
+            if prev_screen:
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Previous Epic Hyperspace screen:"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{prev_screen}"}},
+                        {"type": "text", "text": "Current Epic Hyperspace screen:"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        {"type": "text", "text": "Describe in one sentence what navigation action the user took between these two screens. Also identify the current screen/activity name. Reply as JSON: {\"action\": \"...\", \"screen\": \"...\"}"},
+                    ]
+                })
+            else:
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "This is an Epic Hyperspace screen. Identify the current screen/activity name. Reply as JSON: {\"action\": \"Initial screen\", \"screen\": \"...\"}"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ]
+                })
+
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": messages,
+                    "max_tokens": 200,
+                },
+                timeout=30,
+            )
+            data = resp.json()
+            text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            json_match = re.search(r'\{[^}]+\}', text)
+            if json_match:
+                parsed = json.loads(json_match.group())
+                description = parsed.get("action", description)
+                screen_name = parsed.get("screen", "")
+        except Exception as e:
+            print(f"  [record] Vision error: {e}")
+
+    recording_state["last_screen"] = b64
+    step = {
+        "description": description,
+        "screen": screen_name,
+        "timeDelta": int(now - (recording_state.get("started_at", now))),
+    }
+    recording_state["pending_steps"].append(step)
+    print(f"  [record] Step: {description} [{screen_name}]")
+
+    if len(recording_state["pending_steps"]) >= 1:
+        try:
+            resp = requests.post(
+                f"{ORGCLOUD_URL}/api/epic/record/steps",
+                headers={
+                    "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={"steps": recording_state["pending_steps"]},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                recording_state["pending_steps"] = []
+            elif resp.status_code == 409:
+                print("  [record] Server says recording stopped, halting capture")
+                recording_state["active"] = False
+                recording_state["pending_steps"] = []
+            else:
+                print(f"  [record] Upload failed ({resp.status_code}), will retry")
+        except Exception as e:
+            print(f"  [record] Upload error: {e}")
+
+
+def execute_record_start(cmd):
+    """Start recording mode."""
+    env = cmd.get("env", "SUP").upper()
+    recording_state["active"] = True
+    recording_state["env"] = env
+    recording_state["last_screen"] = ""
+    recording_state["last_capture_time"] = 0
+    recording_state["pending_steps"] = []
+    recording_state["started_at"] = time.time()
+    print(f"  [record] Recording started for {env}")
+    post_result(cmd.get("id", "unknown"), "complete", data={"recording": True, "env": env})
+
+
+def execute_record_stop(cmd):
+    """Stop recording mode."""
+    recording_state["active"] = False
+    if recording_state["pending_steps"]:
+        try:
+            requests.post(
+                f"{ORGCLOUD_URL}/api/epic/record/steps",
+                headers={
+                    "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={"steps": recording_state["pending_steps"]},
+                timeout=10,
+            )
+            recording_state["pending_steps"] = []
+        except Exception as e:
+            print(f"  [record] Final upload error: {e}")
+    print(f"  [record] Recording stopped")
+    post_result(cmd.get("id", "unknown"), "complete", data={"recording": False})
+
+
+def execute_replay(cmd):
+    """Replay a saved workflow by navigating through each step."""
+    command_id = cmd.get("id", "unknown")
+    env = cmd.get("env", "SUP").upper()
+    steps = cmd.get("steps", [])
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No Hyperspace window found for {env}")
+        return
+
+    print(f"  [replay] Starting replay of {len(steps)} steps on {env}")
+    results = []
+    for i, step in enumerate(steps):
+        screen = step.get("screen", "")
+        desc = step.get("description", "")
+        print(f"  [replay] Step {i+1}/{len(steps)}: {desc} -> {screen}")
+
+        if screen and OPENROUTER_API_KEY:
+            img = screenshot_window(window)
+            if img:
+                b64 = img_to_base64(img)
+                try:
+                    resp = requests.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": MODEL,
+                            "messages": [{
+                                "role": "user",
+                                "content": [
+                                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                                    {"type": "text", "text": f"I need to navigate to '{screen}' in Epic Hyperspace. Looking at the current screen, what should I click or what menu should I open? Give precise coordinates or element name. Reply as JSON: {{\"action\": \"click\", \"target\": \"...\", \"x\": ..., \"y\": ...}} or {{\"action\": \"already_there\"}}"},
+                                ]
+                            }],
+                            "max_tokens": 200,
+                        },
+                        timeout=30,
+                    )
+                    data = resp.json()
+                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    json_match = re.search(r'\{[^}]+\}', text)
+                    if json_match:
+                        parsed = json.loads(json_match.group())
+                        if parsed.get("action") == "click" and parsed.get("x") and parsed.get("y"):
+                            wx, wy = window.left, window.top
+                            pyautogui.click(wx + parsed["x"], wy + parsed["y"])
+                            time.sleep(2)
+                        results.append({"step": i+1, "status": "navigated", "parsed": parsed})
+                    else:
+                        results.append({"step": i+1, "status": "no_action"})
+                except Exception as e:
+                    print(f"  [replay] Vision error at step {i+1}: {e}")
+                    results.append({"step": i+1, "status": "error", "error": str(e)})
+        else:
+            results.append({"step": i+1, "status": "skipped_no_vision"})
+
+        time.sleep(1)
+
+    final_img = screenshot_window(window)
+    final_b64 = img_to_base64(final_img) if final_img else ""
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "replay_steps": len(steps),
+        "results": results,
+    })
+    print(f"  [replay] Replay complete")
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -713,6 +931,12 @@ def execute_command(cmd):
             execute_click(cmd)
         elif cmd_type == "masterfile":
             execute_masterfile(cmd)
+        elif cmd_type == "record_start":
+            execute_record_start(cmd)
+        elif cmd_type == "record_stop":
+            execute_record_stop(cmd)
+        elif cmd_type == "replay":
+            execute_replay(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except Exception as e:
@@ -771,6 +995,8 @@ def main():
             commands = poll_commands()
             for cmd in commands:
                 execute_command(cmd)
+
+            recording_capture_tick()
 
             time.sleep(POLL_INTERVAL)
 
