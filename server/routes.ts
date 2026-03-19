@@ -782,6 +782,16 @@ export async function registerRoutes(
     const env = tree.environment.toUpperCase();
     const key = `epic_tree_${env.toLowerCase()}_${client}`;
 
+    const existing = await storage.getAgentConfig(key);
+    if (existing?.value) {
+      try {
+        const existingTree = JSON.parse(existing.value);
+        if (existingTree.locked && !tree.locked) {
+          return res.json({ ok: false, reason: "Tree is locked. Use force=true or re-crawl to overwrite.", locked: true });
+        }
+      } catch {}
+    }
+
     function countNodes(node: any): number {
       let c = 0;
       for (const child of (node.children || [])) {
@@ -793,7 +803,7 @@ export async function registerRoutes(
 
     const nodeCount = countNodes(tree);
     await storage.setAgentConfig(key, JSON.stringify(tree), "epic");
-    res.json({ ok: true, environment: env, client, nodeCount });
+    res.json({ ok: true, environment: env, client, nodeCount, locked: !!tree.locked });
   });
 
   app.get("/api/epic/tree/:env", async (req, res) => {

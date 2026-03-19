@@ -1009,73 +1009,18 @@ def uia_crawl_children(element, depth, max_depth, parent_path=""):
     return children
 
 
-def uia_find_by_name(parent, name, exact=True):
-    """Find a UI element by name, searching children."""
-    name_lower = name.lower().strip()
-    try:
-        for child in parent.children():
-            try:
-                child_name = (child.element_info.name or "").strip()
-                if exact:
-                    if child_name.lower() == name_lower:
-                        return child
-                else:
-                    if name_lower in child_name.lower():
-                        return child
-            except Exception:
-                continue
-        for child in parent.children():
-            try:
-                found = uia_find_by_name(child, name, exact)
-                if found:
-                    return found
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return None
-
-
-def uia_collect_named_children(element, max_depth=2, current_depth=0):
-    """Collect all named children of an element as a flat list."""
-    items = []
-    if current_depth >= max_depth:
-        return items
-    try:
-        for child in element.children():
-            try:
-                name = (child.element_info.name or "").strip()
-                ctrl_type = child.element_info.control_type or ""
-                if not name:
-                    sub = uia_collect_named_children(child, max_depth, current_depth + 1)
-                    items.extend(sub)
-                    continue
-                if ctrl_type in ("TitleBar", "ScrollBar", "Thumb", "Image", "Separator", "Text"):
-                    continue
-                if len(name) > 100:
-                    continue
-                items.append({"name": name, "controlType": ctrl_type, "element": child})
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return items
-
-
 def execute_menu_crawl(cmd):
-    """Crawl Epic menus by clicking the Epic button, then each menu category.
-    Uses pywinauto to programmatically click and read - no mouse control needed."""
+    """Crawl Epic menus using screenshot + vision AI.
+    Strategy: click Epic button -> screenshot -> AI reads menu items with coordinates ->
+    click each category -> screenshot -> AI reads sub-items -> repeat.
+    Results are saved permanently so you only crawl once."""
     env = cmd.get("env", "SUP")
     command_id = cmd.get("id", "unknown")
     depth = cmd.get("depth", 2)
 
     print(f"  [menu-crawl] Starting Epic menu crawl for {env} (depth={depth})")
-
-    try:
-        from pywinauto import Desktop
-    except ImportError:
-        post_result(command_id, "error", error="pywinauto not installed. Run: pip install pywinauto")
-        return
+    print(f"  [menu-crawl] NOTE: This will briefly control your mouse to click menu items.")
+    print(f"  [menu-crawl] Please don't move the mouse during the crawl.")
 
     window = find_window(env)
     if not window:
@@ -1083,209 +1028,185 @@ def execute_menu_crawl(cmd):
         return
 
     try:
-        desktop = Desktop(backend="uia")
-        uia_window = None
-        env_upper = env.upper()
-        for w in desktop.windows():
-            try:
-                title = w.element_info.name or ""
-                t = title.upper()
-                if env_upper in t and ("HYPERSPACE" in t or "EPIC" in t or "HYPERDRIVE" in t):
-                    uia_window = w
-                    break
-            except Exception:
-                continue
+        window.activate()
+        time.sleep(0.5)
+    except Exception:
+        pass
 
-        if not uia_window:
-            post_result(command_id, "error", error=f"No {env} UIA window found")
-            return
-
-        print(f"  [menu-crawl] Found UIA window: {uia_window.element_info.name}")
-
+    def safe_screenshot():
+        """Take screenshot of the Epic window."""
         try:
-            uia_window.set_focus()
-            time.sleep(0.5)
+            img = screenshot_window(window)
+            return img, img_to_base64(img)
+        except Exception as e:
+            print(f"  [menu-crawl] Screenshot error: {e}")
+            return None, None
+
+    def vision_find_epic_button(b64):
+        """Use vision to find the Epic button coordinates."""
+        prompt = (
+            "Find the Epic button in this Hyperspace window. It is typically in the top-left corner "
+            "and says 'Epic' with a logo. It opens the main application menu.\n\n"
+            "Return ONLY a JSON object: {\"x\": <number>, \"y\": <number>, \"found\": true, \"label\": \"text on button\"}\n"
+            "Coordinates should be relative to the image.\n"
+            "If you cannot find it, return: {\"found\": false, \"reason\": \"why\"}"
+        )
+        resp = ask_claude(b64, prompt)
+        if not resp:
+            return None
+        try:
+            m = re.search(r'\{[\s\S]*?\}', resp)
+            if m:
+                return json.loads(m.group())
         except Exception:
             pass
+        return None
 
-        epic_button = None
-        for search_name in ["Epic", "Epic Button", "EpicButton", "Menu"]:
-            epic_button = uia_find_by_name(uia_window, search_name)
-            if epic_button:
-                print(f"  [menu-crawl] Found Epic button: '{epic_button.element_info.name}' ({epic_button.element_info.control_type})")
-                break
+    def vision_read_menu(b64, context=""):
+        """Use vision to read all visible menu items with their coordinates."""
+        prompt = (
+            f"You are looking at an Epic Hyperspace menu{(' (' + context + ')') if context else ''}.\n"
+            "List every visible menu item, category, or clickable option you can see.\n"
+            "For EACH item, provide its name and approximate Y coordinate (pixels from top of image).\n"
+            "Also note if an item has a right-arrow or indicator suggesting it has a submenu.\n\n"
+            "Return ONLY a JSON array:\n"
+            "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false, \"category\": \"section name or null\"}]\n\n"
+            "Be thorough - list EVERY visible menu item, including separators between sections.\n"
+            "Order items from top to bottom by Y coordinate.\n"
+            "Return ONLY the JSON array, no other text."
+        )
+        resp = ask_claude(b64, prompt)
+        if not resp:
+            return []
+        try:
+            m = re.search(r'\[[\s\S]*\]', resp)
+            if m:
+                return json.loads(m.group())
+        except Exception:
+            pass
+        return []
 
-        if not epic_button:
-            print(f"  [menu-crawl] No 'Epic' button found, searching for menu/toolbar...")
-            top_items = uia_collect_named_children(uia_window, max_depth=3)
-            print(f"  [menu-crawl] Found {len(top_items)} top-level elements:")
-            for item in top_items[:30]:
-                print(f"    - '{item['name']}' ({item['controlType']})")
-
-            if not top_items:
-                post_result(command_id, "error", error="No UI elements found in window")
-                return
-
-            menu_types = ("MenuItem", "Menu", "MenuBar", "Button", "SplitButton",
-                          "ToolBar", "TabItem", "TreeItem", "ListItem", "Hyperlink",
-                          "Pane", "Group", "Custom")
-            menu_items = [i for i in top_items if i["controlType"] in menu_types]
-            if not menu_items:
-                menu_items = top_items
-
-            tree_children = []
-            for item in menu_items:
-                node = {
-                    "name": item["name"],
-                    "controlType": item["controlType"],
-                    "path": item["name"],
-                    "children": []
-                }
-                tree_children.append(node)
-
-            tree = {
-                "name": "Epic Menu",
-                "children": tree_children,
-                "client": "hyperspace",
-                "environment": env,
-                "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-
-            try:
-                requests.post(
-                    f"{ORGCLOUD_URL}/api/epic/tree",
-                    headers={
-                        "Authorization": f"Bearer {BRIDGE_TOKEN}",
-                        "Content-Type": "application/json",
-                    },
-                    json=tree,
-                    timeout=30,
-                )
-            except Exception:
-                pass
-
-            post_result(command_id, "complete", data={
-                "totalItems": len(tree_children),
-                "topLevel": len(tree_children),
-                "note": "Epic button not found - captured top-level elements only",
-            })
+    try:
+        img, b64 = safe_screenshot()
+        if not b64:
+            post_result(command_id, "error", error="Cannot take screenshot")
             return
 
-        try:
-            ct = epic_button.element_info.control_type or ""
-            if ct in ("MenuItem", "Menu"):
-                epic_button.expand()
-            else:
-                epic_button.click_input()
-            time.sleep(1.0)
-            print(f"  [menu-crawl] Epic button clicked/expanded")
-        except Exception as e:
-            print(f"  [menu-crawl] Failed to click Epic button: {e}")
-            try:
-                epic_button.click_input()
-                time.sleep(1.0)
-            except Exception as e2:
-                post_result(command_id, "error", error=f"Cannot click Epic button: {e2}")
-                return
+        print(f"  [menu-crawl] Step 1: Finding Epic button...")
+        epic_loc = vision_find_epic_button(b64)
 
-        top_menu_items = uia_collect_named_children(epic_button, max_depth=2)
-        if not top_menu_items:
-            time.sleep(0.5)
-            top_menu_items = uia_collect_named_children(uia_window, max_depth=3)
+        if not epic_loc or not epic_loc.get("found"):
+            reason = epic_loc.get("reason", "unknown") if epic_loc else "vision failed"
+            print(f"  [menu-crawl] Epic button not found: {reason}")
+            post_result(command_id, "error", error=f"Could not find Epic button: {reason}")
+            return
 
-        print(f"  [menu-crawl] Found {len(top_menu_items)} menu items after clicking Epic button")
-        for item in top_menu_items:
-            print(f"    - '{item['name']}' ({item['controlType']})")
+        print(f"  [menu-crawl] Found Epic button at ({epic_loc['x']}, {epic_loc['y']}): '{epic_loc.get('label', '?')}'")
+
+        abs_x = window.left + epic_loc["x"]
+        abs_y = window.top + epic_loc["y"]
+        pyautogui.click(abs_x, abs_y)
+        time.sleep(1.5)
+
+        print(f"  [menu-crawl] Step 2: Reading top-level menu...")
+        img, b64 = safe_screenshot()
+        if not b64:
+            post_result(command_id, "error", error="Cannot screenshot after Epic button click")
+            return
+
+        top_items = vision_read_menu(b64, "Epic button menu - top level categories")
+        print(f"  [menu-crawl] Found {len(top_items)} top-level items")
+        for item in top_items:
+            sub_flag = " [+submenu]" if item.get("hasSubmenu") else ""
+            print(f"    - '{item['name']}'{sub_flag}")
+
+        if not top_items:
+            print(f"  [menu-crawl] No items found in menu. Saving screenshot for debugging.")
+            post_result(command_id, "error", screenshot_b64=b64,
+                       error="Clicked Epic button but found no menu items. Check screenshot.")
+            return
 
         tree_children = []
         crawled_count = 0
 
-        for item in top_menu_items:
-            item_name = item["name"]
-            ctrl_type = item["controlType"]
-            element = item["element"]
+        for i, item in enumerate(top_items):
+            item_name = item.get("name", f"Item_{i}")
+            has_submenu = item.get("hasSubmenu", False)
 
             node = {
                 "name": item_name,
-                "controlType": ctrl_type,
+                "controlType": "MenuItem",
                 "path": item_name,
                 "children": []
             }
             crawled_count += 1
 
-            if depth >= 2 and ctrl_type in ("MenuItem", "Menu", "TreeItem", "ListItem", "TabItem", "Button", "Hyperlink"):
-                print(f"  [menu-crawl] Expanding '{item_name}'...")
-                try:
-                    try:
-                        element.expand()
-                        time.sleep(0.5)
-                    except Exception:
-                        try:
-                            element.click_input()
+            if depth >= 2 and has_submenu:
+                print(f"  [menu-crawl] Step 2.{i+1}: Expanding '{item_name}'...")
+                item_x = item.get("x", epic_loc["x"] + 50)
+                item_y = item.get("y", 0)
+                click_x = window.left + int(item_x)
+                click_y = window.top + int(item_y)
+
+                pyautogui.click(click_x, click_y)
+                time.sleep(1.0)
+
+                sub_img, sub_b64 = safe_screenshot()
+                if sub_b64:
+                    sub_items = vision_read_menu(sub_b64, f"submenu of '{item_name}'")
+                    print(f"  [menu-crawl]   '{item_name}' -> {len(sub_items)} sub-items")
+
+                    for si in sub_items:
+                        sub_name = si.get("name", "?")
+                        sub_node = {
+                            "name": sub_name,
+                            "controlType": "MenuItem",
+                            "path": f"{item_name} > {sub_name}",
+                            "children": []
+                        }
+
+                        if depth >= 3 and si.get("hasSubmenu", False):
+                            print(f"  [menu-crawl]     Expanding '{sub_name}'...")
+                            si_x = si.get("x", item_x + 100)
+                            si_y = si.get("y", 0)
+                            si_click_x = window.left + int(si_x)
+                            si_click_y = window.top + int(si_y)
+
+                            pyautogui.click(si_click_x, si_click_y)
+                            time.sleep(0.8)
+
+                            deep_img, deep_b64 = safe_screenshot()
+                            if deep_b64:
+                                deep_items = vision_read_menu(deep_b64, f"submenu of '{item_name} > {sub_name}'")
+                                print(f"  [menu-crawl]       '{sub_name}' -> {len(deep_items)} items")
+                                for di in deep_items:
+                                    deep_name = di.get("name", "?")
+                                    sub_node["children"].append({
+                                        "name": deep_name,
+                                        "controlType": "MenuItem",
+                                        "path": f"{item_name} > {sub_name} > {deep_name}",
+                                        "children": []
+                                    })
+                                    crawled_count += 1
+
+                            pyautogui.press("escape")
                             time.sleep(0.5)
-                        except Exception:
-                            pass
 
-                    sub_items = uia_collect_named_children(element, max_depth=2)
+                        node["children"].append(sub_node)
+                        crawled_count += 1
 
-                    if not sub_items:
-                        sub_items = uia_collect_named_children(uia_window, max_depth=2)
-                        sub_items = [s for s in sub_items if s["name"] != item_name]
+                pyautogui.press("escape")
+                time.sleep(0.5)
 
-                    if sub_items:
-                        print(f"  [menu-crawl]   '{item_name}' -> {len(sub_items)} sub-items")
-                        for si in sub_items:
-                            sub_node = {
-                                "name": si["name"],
-                                "controlType": si["controlType"],
-                                "path": f"{item_name} > {si['name']}",
-                                "children": []
-                            }
-
-                            if depth >= 3 and si["controlType"] in ("MenuItem", "Menu", "TreeItem"):
-                                try:
-                                    si["element"].expand()
-                                    time.sleep(0.3)
-                                    sub_sub = uia_collect_named_children(si["element"], max_depth=1)
-                                    if sub_sub:
-                                        for ssi in sub_sub:
-                                            sub_node["children"].append({
-                                                "name": ssi["name"],
-                                                "controlType": ssi["controlType"],
-                                                "path": f"{item_name} > {si['name']} > {ssi['name']}",
-                                                "children": []
-                                            })
-                                            crawled_count += 1
-                                    try:
-                                        si["element"].collapse()
-                                    except Exception:
-                                        pass
-                                except Exception:
-                                    pass
-
-                            node["children"].append(sub_node)
-                            crawled_count += 1
-
-                    try:
-                        element.collapse()
-                        time.sleep(0.3)
-                    except Exception:
-                        pass
-
-                except Exception as e:
-                    print(f"  [menu-crawl]   Error expanding '{item_name}': {e}")
+                pyautogui.click(abs_x, abs_y)
+                time.sleep(1.0)
 
             tree_children.append(node)
 
-        try:
-            ct = epic_button.element_info.control_type or ""
-            if ct in ("MenuItem", "Menu"):
-                epic_button.collapse()
-            else:
-                pyautogui.press("escape")
-            time.sleep(0.3)
-        except Exception:
-            pass
+        pyautogui.press("escape")
+        time.sleep(0.3)
+
+        print(f"  [menu-crawl] Step 3: Uploading tree ({crawled_count} items)...")
 
         tree = {
             "name": "Epic Menu",
@@ -1293,6 +1214,7 @@ def execute_menu_crawl(cmd):
             "client": "hyperspace",
             "environment": env,
             "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "locked": True,
         }
 
         try:
@@ -1306,7 +1228,7 @@ def execute_menu_crawl(cmd):
                 timeout=30,
             )
             if resp.status_code == 200:
-                print(f"  [menu-crawl] Tree uploaded: {crawled_count} items")
+                print(f"  [menu-crawl] Tree uploaded and locked: {crawled_count} items")
             else:
                 print(f"  [menu-crawl] Upload failed: HTTP {resp.status_code}")
         except Exception as e:
@@ -1317,8 +1239,10 @@ def execute_menu_crawl(cmd):
         post_result(command_id, "complete", screenshot_b64=final_b64, data={
             "totalItems": crawled_count,
             "topLevel": len(tree_children),
+            "locked": True,
         })
-        print(f"  [menu-crawl] Complete! {crawled_count} items across {len(tree_children)} sections")
+        print(f"  [menu-crawl] COMPLETE! {crawled_count} items across {len(tree_children)} sections")
+        print(f"  [menu-crawl] Tree is locked. Future navigation uses the saved map - no re-crawling needed.")
 
     except Exception as e:
         print(f"  [menu-crawl] Error: {e}")
