@@ -57,8 +57,13 @@ SAFE_CLOSE_PATTERNS = frozenset([
     "back", "cancel", "close", "return", "exit",
 ])
 
-MAX_DEPTH = 5
-MAX_ITEMS_PER_LEVEL = 50
+MAX_DEPTH = 10
+MAX_ITEMS_PER_LEVEL = 200
+
+CONTAINER_TYPES = frozenset([
+    "Pane", "Window", "Group", "Custom",
+    "Document", "List", "ListView",
+])
 SCAN_DELAY = 0.3
 
 
@@ -197,6 +202,14 @@ def scan_hyperspace(env):
                 continue
 
             if not is_safe_element(child):
+                ctrl_type = ""
+                try:
+                    ctrl_type = child.element_info.control_type or ""
+                except Exception:
+                    pass
+                if ctrl_type in CONTAINER_TYPES:
+                    walk_deeper = walk_element(child, path, depth + 1)
+                    children_nodes.extend(walk_deeper)
                 continue
 
             count += 1

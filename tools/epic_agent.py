@@ -508,18 +508,17 @@ def execute_navigate_path(cmd):
 
     if client == "text":
         for i, step in enumerate(steps):
-            num_match = re.match(r'^(\d+)', step)
-            if num_match:
-                keystroke = num_match.group(1)
-                print(f"  [step {i+1}/{len(steps)}] Typing: {keystroke} ({step})")
-                pyautogui.typewrite(keystroke, interval=0.05)
-                pyautogui.press("enter")
-                time.sleep(1.0)
-            else:
-                print(f"  [step {i+1}/{len(steps)}] Typing: {step}")
-                pyautogui.typewrite(step, interval=0.05)
-                pyautogui.press("enter")
-                time.sleep(1.0)
+            num_match = re.match(r'^(\d+)$', step.strip())
+            if not num_match:
+                num_match = re.match(r'^(\d+)\s', step.strip())
+            if not num_match:
+                post_result(command_id, "error", error=f"Safety block: Text step {i+1} '{step}' is not a valid numeric menu option. Only numeric selections are allowed.")
+                return
+            keystroke = num_match.group(1)
+            print(f"  [step {i+1}/{len(steps)}] Typing: {keystroke} ({step})")
+            pyautogui.typewrite(keystroke, interval=0.05)
+            pyautogui.press("enter")
+            time.sleep(1.0)
     else:
         try:
             from pywinauto import Desktop
@@ -733,9 +732,9 @@ def main():
     print()
 
     if not OPENROUTER_API_KEY:
-        print("ERROR: Set OPENROUTER_API_KEY environment variable")
-        print("  set OPENROUTER_API_KEY=your-key-here")
-        sys.exit(1)
+        print("WARNING: OPENROUTER_API_KEY not set — vision/AI commands disabled")
+        print("  Deterministic commands (navigate_path, tree-scan, masterfile) will still work")
+        print()
 
     windows = list_windows()
     if windows:
