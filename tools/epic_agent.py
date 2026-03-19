@@ -1159,12 +1159,18 @@ def execute_menu_crawl(cmd):
         """Use vision to read all visible menu items with their coordinates."""
         prompt = (
             f"You are looking at an Epic Hyperspace menu{(' (' + context + ')') if context else ''}.\n"
-            "List every visible menu item, category, or clickable option you can see.\n"
-            "For EACH item, provide its name and approximate Y coordinate (pixels from top of image).\n"
-            "Also note if an item has a right-arrow or indicator suggesting it has a submenu.\n\n"
+            "List every visible menu item, category, or clickable option you can see.\n\n"
+            "IMPORTANT STRUCTURE NOTES:\n"
+            "- The Epic button menu typically has RECENTLY ACCESSED items at the top (with pin icons).\n"
+            "- Below the recent items are the PERMANENT MENU CATEGORIES (like Patient Care, Lab, Pharmacy, Admin, etc.).\n"
+            "- Mark recently accessed/pinned items with \"section\": \"recent\".\n"
+            "- Mark the permanent navigation categories with \"section\": \"nav\".\n"
+            "- Items with a right-arrow (>) or triangle indicator have submenus.\n"
+            "- Items without arrows are terminal activities.\n\n"
+            "For EACH item, provide its name and approximate coordinates (pixels from top-left of image).\n\n"
             "Return ONLY a JSON array:\n"
-            "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false, \"category\": \"section name or null\"}]\n\n"
-            "Be thorough - list EVERY visible menu item, including separators between sections.\n"
+            "[{\"name\": \"item text\", \"y\": <number>, \"x\": <number>, \"hasSubmenu\": true/false, \"section\": \"recent\" or \"nav\" or \"other\"}]\n\n"
+            "Be thorough - list EVERY visible menu item.\n"
             "Order items from top to bottom by Y coordinate.\n"
             "Return ONLY the JSON array, no other text."
         )
@@ -1305,11 +1311,21 @@ def execute_menu_crawl(cmd):
             post_result(command_id, "error", error="Cannot screenshot after Epic button click")
             return
 
-        top_items = vision_read_menu(b64, "Epic button menu - top level categories. These are the main sections like Patient Care, Lab, Pharmacy, Admin, etc.")
+        top_items = vision_read_menu(b64, "Epic button menu - top level. The TOP section has recently accessed/pinned items. BELOW that are permanent navigation categories like Patient Care, Lab, Pharmacy, Admin, etc.")
         print(f"  [menu-crawl] Found {len(top_items)} top-level items")
-        for item in top_items:
+
+        recent_items = [i for i in top_items if i.get("section") == "recent"]
+        nav_items = [i for i in top_items if i.get("section") != "recent"]
+
+        if recent_items:
+            print(f"  [menu-crawl] Recent/pinned items ({len(recent_items)}):")
+            for item in recent_items:
+                print(f"    [recent] '{item['name']}'")
+
+        print(f"  [menu-crawl] Navigation categories ({len(nav_items)}):")
+        for item in nav_items:
             sub_flag = " [+submenu]" if item.get("hasSubmenu") else ""
-            print(f"    - '{item['name']}'{sub_flag}")
+            print(f"    [nav] '{item['name']}'{sub_flag}")
 
         if not top_items:
             print(f"  [menu-crawl] No items found in menu. Saving screenshot for debugging.")
@@ -1320,20 +1336,40 @@ def execute_menu_crawl(cmd):
         tree_children = []
         crawled_count = 0
 
-        for i, item in enumerate(top_items):
+        if recent_items:
+            recent_node = {
+                "name": "Recently Accessed",
+                "controlType": "Section",
+                "path": "Recently Accessed",
+                "children": []
+            }
+            for ri in recent_items:
+                recent_node["children"].append({
+                    "name": ri.get("name", "?"),
+                    "controlType": "Activity",
+                    "path": f"Recently Accessed > {ri.get('name', '?')}",
+                    "children": []
+                })
+                crawled_count += 1
+            tree_children.append(recent_node)
+            crawled_count += 1
+
+        items_to_crawl = nav_items if nav_items else top_items
+
+        for i, item in enumerate(items_to_crawl):
             item_name = item.get("name", f"Item_{i}")
             has_submenu = item.get("hasSubmenu", False)
 
             node = {
                 "name": item_name,
-                "controlType": "MenuItem",
+                "controlType": "MenuItem" if has_submenu else "Activity",
                 "path": item_name,
                 "children": []
             }
             crawled_count += 1
 
             if has_submenu:
-                print(f"  [menu-crawl] === Category {i+1}/{len(top_items)}: '{item_name}' ===")
+                print(f"  [menu-crawl] === Category {i+1}/{len(items_to_crawl)}: '{item_name}' ===")
                 item_x = item.get("x", epic_loc["x"] + 50)
                 item_y = item.get("y", 0)
                 click_x, click_y = vision_to_screen(window, item_x, item_y)
