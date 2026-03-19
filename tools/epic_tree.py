@@ -312,8 +312,40 @@ def scan_hyperspace(env):
     return tree
 
 
+TEXT_MENU_PATTERNS = [
+    re.compile(r'^(\d+)\s*[\.\)\-:]\s*(.+)'),
+    re.compile(r'^(\d+)\s{2,}(.+)'),
+    re.compile(r'^\s*(\d+)\s+([A-Z][A-Za-z].{2,})'),
+]
+
+TEXT_PROMPT_PATTERNS = [
+    re.compile(r'(?:choice|select|option|enter)\s*[:>]\s*$', re.IGNORECASE),
+    re.compile(r'(?:menu|command)\s*[:>]\s*$', re.IGNORECASE),
+    re.compile(r'[:>]\s*$'),
+]
+
+TEXT_SCREEN_TITLE_PATTERN = re.compile(
+    r'^[=\-\*]{3,}.*[=\-\*]{3,}$|^[A-Z][A-Z\s\-/]{5,}$'
+)
+
+TEXT_NOT_MENU_INDICATORS = frozenset([
+    "item number", "record #", "enter value", "press enter",
+    "login", "password", "username", "user id",
+])
+
+
 def scan_text(env):
-    """Walk Epic Text menus using keystroke sequences and terminal buffer reading."""
+    """Walk Epic Text (Chronicles) menus using keystroke sequences and screen reading.
+
+    Epic Text navigation conventions (VT220 terminal):
+    - Numbered menu options: type the number + Enter to navigate
+    - 0 or blank Enter: go back one level
+    - Semicolon chaining: 1;3;5 navigates 3 levels deep in one command
+    - HOME + F8: display masterfile INI and item number at current position
+    - HOME + F9: fast-forward search to a text string
+    - F1: help (or delete in edit mode - we never enter edit mode)
+    - Shift+F: exit record from any screen
+    """
     try:
         from pywinauto import Desktop
     except ImportError:
@@ -326,11 +358,14 @@ def scan_text(env):
     desktop = Desktop(backend="uia")
     target_window = None
 
+    terminal_keywords_primary = ("TEXT", "TERMINAL", "SESSION", "CACHE", "CHRONICLES")
+    terminal_keywords_fallback = ("EXCEED", "PUTTY", "TERATERM", "XTERM", "CMD", "POWERSHELL", "SSH")
+
     for w in desktop.windows():
         try:
             title = w.element_info.name or ""
             t = title.upper()
-            if env_upper in t and ("TEXT" in t or "TERMINAL" in t or "SESSION" in t or "CACHE" in t):
+            if env_upper in t and any(kw in t for kw in terminal_keywords_primary):
                 target_window = w
                 break
         except Exception:
@@ -341,7 +376,7 @@ def scan_text(env):
             try:
                 title = w.element_info.name or ""
                 t = title.upper()
-                if env_upper in t and ("EXCEED" in t or "PUTTY" in t or "TERATERM" in t or "CMD" in t or "POWERSHELL" in t):
+                if env_upper in t and any(kw in t for kw in terminal_keywords_fallback):
                     target_window = w
                     break
             except Exception:
@@ -368,93 +403,331 @@ def scan_text(env):
         print("  pip install pyautogui for Text scanning")
         return tree
 
+    import subprocess
+
     try:
         target_window.set_focus()
         time.sleep(0.5)
     except Exception:
         pass
 
-    def read_screen():
-        """Read the terminal screen content using clipboard."""
+    stats = {"screens_read": 0, "items_found": 0, "errors": 0, "back_failures": 0}
+
+    def read_clipboard():
+        """Read Windows clipboard content via PowerShell."""
         try:
-            pyautogui.hotkey("ctrl", "a")
-            time.sleep(0.2)
-            pyautogui.hotkey("ctrl", "c")
-            time.sleep(0.2)
-            import subprocess
-            result = subprocess.run(["powershell", "-command", "Get-Clipboard"],
-                                    capture_output=True, text=True, timeout=5)
+            result = subprocess.run(
+                ["powershell", "-command", "Get-Clipboard"],
+                capture_output=True, text=True, timeout=5,
+            )
             return result.stdout
         except Exception:
             return ""
 
+    def read_screen(retries=2):
+        """Read terminal screen via select-all + copy with stability check.
+
+        Reads twice with a short delay to ensure the screen has stabilized
+        (terminal emulators can be slow to render after navigation).
+        """
+        for attempt in range(retries):
+            try:
+                pyautogui.hotkey("ctrl", "a")
+                time.sleep(0.15)
+                pyautogui.hotkey("ctrl", "c")
+                time.sleep(0.15)
+                first = read_clipboard()
+
+                if attempt == 0 and retries > 1:
+                    time.sleep(0.3)
+                    pyautogui.hotkey("ctrl", "a")
+                    time.sleep(0.15)
+                    pyautogui.hotkey("ctrl", "c")
+                    time.sleep(0.15)
+                    second = read_clipboard()
+                    if second and second.strip() == first.strip():
+                        stats["screens_read"] += 1
+                        return first
+                    if second:
+                        stats["screens_read"] += 1
+                        return second
+
+                if first:
+                    stats["screens_read"] += 1
+                    return first
+            except Exception:
+                time.sleep(0.3)
+        return ""
+
+    def wait_for_screen_change(old_sig, timeout=3.0):
+        """Wait until the screen content changes from old_sig, up to timeout seconds."""
+        start = time.time()
+        while time.time() - start < timeout:
+            screen = read_screen(retries=1)
+            new_sig = screen_signature(screen)
+            if new_sig != old_sig and new_sig:
+                return screen
+            time.sleep(0.3)
+        return read_screen(retries=1)
+
+    def screen_signature(screen_text):
+        """Generate a signature for screen comparison.
+        Uses all non-blank lines joined together for reliable dedup."""
+        if not screen_text:
+            return ""
+        lines = [l.strip() for l in screen_text.strip().split("\n") if l.strip()]
+        return "\n".join(lines)
+
     def parse_menu_items(screen_text):
-        """Parse numbered menu options from Epic Text screen output."""
+        """Parse numbered menu options from Epic Text screen output.
+
+        Handles multiple formats:
+        - '1. Menu Item' / '1) Menu Item' / '1- Menu Item' / '1: Menu Item'
+        - '1  Menu Item' (space-separated, common in Chronicles)
+        - ' 1  Patient Records' (indented)
+        Deduplicates by number and filters noise.
+        """
         items = []
+        seen_numbers = set()
         for line in screen_text.split("\n"):
-            line = line.strip()
-            match = re.match(r'^(\d+)\s*[\.\)\-]\s*(.+)', line)
-            if match:
-                num = match.group(1)
-                name = match.group(2).strip()
-                if name and len(name) > 1 and not name.startswith("="):
-                    items.append({"number": num, "name": name})
+            stripped = line.strip()
+            if not stripped:
+                continue
+            for pattern in TEXT_MENU_PATTERNS:
+                match = pattern.match(stripped)
+                if match:
+                    num = match.group(1)
+                    name = match.group(2).strip()
+                    name = re.sub(r'\s{2,}.*$', '', name).strip()
+                    if (
+                        name
+                        and len(name) > 1
+                        and num not in seen_numbers
+                        and not name.startswith("=")
+                        and not name.startswith("-")
+                        and not re.match(r'^[\-=_\*]{3,}$', name)
+                    ):
+                        seen_numbers.add(num)
+                        items.append({"number": num, "name": name})
+                    break
         return items
 
-    visited_screens = set()
+    def classify_screen(screen_text):
+        """Classify what kind of screen we're looking at.
 
-    def walk_text_menu(path, depth):
-        """Walk through Text menus exhaustively by entering each numbered option."""
+        Returns one of:
+        - 'menu': has numbered menu items
+        - 'prompt': asking for input (record ID, value, etc.)
+        - 'record': displaying a record/data (no menu items)
+        - 'empty': blank or unreadable
+        """
+        if not screen_text or not screen_text.strip():
+            return "empty"
+
+        lower = screen_text.lower()
+        for indicator in TEXT_NOT_MENU_INDICATORS:
+            if indicator in lower:
+                return "prompt"
+
+        items = parse_menu_items(screen_text)
+        if len(items) >= 2:
+            return "menu"
+
+        for pattern in TEXT_PROMPT_PATTERNS:
+            if pattern.search(screen_text):
+                return "prompt"
+
+        if len(items) == 1:
+            return "menu"
+
+        return "record"
+
+    def extract_screen_title(screen_text):
+        """Try to extract a title/header from the screen."""
+        for line in screen_text.split("\n")[:5]:
+            stripped = line.strip()
+            if stripped and TEXT_SCREEN_TITLE_PATTERN.match(stripped):
+                return stripped.strip("=-* ")
+        for line in screen_text.split("\n")[:3]:
+            stripped = line.strip()
+            if stripped and len(stripped) > 3 and not re.match(r'^\d', stripped):
+                return stripped[:60]
+        return ""
+
+    def get_item_info():
+        """Press HOME + F8 to get masterfile INI and item number info.
+
+        This is a read-only operation in Chronicles that displays metadata
+        about the current position without changing state.
+        Returns the info string or empty string.
+        """
+        try:
+            pyautogui.press("home")
+            time.sleep(0.1)
+            pyautogui.press("f8")
+            time.sleep(0.5)
+            info = read_screen(retries=1)
+            pyautogui.press("enter")
+            time.sleep(0.3)
+            ini_match = re.search(r'(?:INI|Master\s*[Ff]ile)\s*[=:]\s*(\w+)', info)
+            item_match = re.search(r'(?:Item|#)\s*[=:]\s*(\d+)', info)
+            if ini_match or item_match:
+                return {
+                    "ini": ini_match.group(1) if ini_match else "",
+                    "itemNumber": item_match.group(1) if item_match else "",
+                    "raw": info.strip()[:200],
+                }
+        except Exception:
+            pass
+        return None
+
+    def go_back(current_sig):
+        """Navigate back one level by typing 0 + Enter.
+
+        Verifies the screen actually changed. If it didn't, tries
+        pressing Enter alone (some prompts just need Enter to dismiss).
+        Returns (success, new_screen_text).
+        """
+        pyautogui.typewrite("0", interval=0.05)
+        pyautogui.press("enter")
+        new_screen = wait_for_screen_change(current_sig, timeout=2.0)
+        new_sig = screen_signature(new_screen)
+        if new_sig != current_sig:
+            return True, new_screen
+
+        pyautogui.press("enter")
+        time.sleep(0.5)
+        new_screen = read_screen(retries=1)
+        new_sig = screen_signature(new_screen)
+        if new_sig != current_sig:
+            return True, new_screen
+
+        stats["back_failures"] += 1
+        return False, new_screen
+
+    def is_safe_text_item(name):
+        """Check if a menu item name is safe to navigate into."""
+        name_lower = name.lower().strip()
+        for pattern in UNSAFE_PATTERNS:
+            if pattern in name_lower:
+                return False
+        words = set(re.split(r'[\s\-_/]+', name_lower))
+        for exact in UNSAFE_EXACT:
+            if exact in words:
+                return False
+        return True
+
+    visited_sigs = set()
+    total_crawled = [0]
+
+    def walk_text_menu(path, depth, parent_screen_sig=""):
+        """Recursively walk Epic Text menus.
+
+        For each numbered menu item:
+        1. Read current screen and parse menu items
+        2. Type the item number + Enter
+        3. Wait for screen change and verify navigation worked
+        4. If new screen is a menu, recurse into it
+        5. Navigate back with '0' + Enter and verify return
+        """
         if depth > MAX_DEPTH:
+            print(f"  {'  ' * depth}[max-depth] Stopping at depth {depth}")
             return []
 
         screen = read_screen()
-        screen_sig = screen.strip()[:200]
-        if screen_sig in visited_screens:
+        sig = screen_signature(screen)
+
+        if sig in visited_sigs:
             return []
-        visited_screens.add(screen_sig)
+        visited_sigs.add(sig)
+
+        screen_type = classify_screen(screen)
+        if screen_type != "menu":
+            return []
 
         items = parse_menu_items(screen)
+        title = extract_screen_title(screen)
+        indent = "  " * (depth + 1)
+
+        path_str = " > ".join(path) if path else "(root)"
+        print(f"  [text]{indent}{path_str}: {len(items)} items ('{title}')")
+
         nodes = []
 
-        for item in items[:MAX_ITEMS_PER_LEVEL]:
-            name_lower = item["name"].lower()
-            skip = False
-            for pattern in UNSAFE_PATTERNS:
-                if pattern in name_lower:
-                    skip = True
-                    break
-            if skip:
+        for idx, item in enumerate(items[:MAX_ITEMS_PER_LEVEL]):
+            if not is_safe_text_item(item["name"]):
+                print(f"  [text]{indent}  SKIP '{item['name']}' (unsafe)")
                 continue
 
             child_path = path + [f"{item['number']} {item['name']}"]
+            chain = ";".join(p.split(" ")[0] for p in child_path)
+
             node = {
                 "name": item["name"],
                 "controlType": "TextMenuItem",
                 "menuNumber": item["number"],
                 "keystroke": item["number"],
+                "chain": chain,
                 "replayAction": "keystroke",
                 "path": " > ".join(child_path),
                 "depth": depth,
                 "children": [],
             }
+            total_crawled[0] += 1
+            stats["items_found"] += 1
 
             try:
+                before_sig = screen_signature(read_screen(retries=1))
+
                 pyautogui.typewrite(item["number"], interval=0.05)
                 pyautogui.press("enter")
-                time.sleep(1.0)
+                new_screen = wait_for_screen_change(before_sig, timeout=3.0)
+                new_sig = screen_signature(new_screen)
 
-                new_screen = read_screen()
-                new_items = parse_menu_items(new_screen)
+                if new_sig == before_sig:
+                    print(f"  [text]{indent}  '{item['name']}' ({item['number']}): no screen change (terminal/leaf)")
+                    node["controlType"] = "TextActivity"
+                    nodes.append(node)
+                    continue
 
-                if new_items and new_screen.strip()[:200] != screen_sig:
-                    sub_nodes = walk_text_menu(child_path, depth + 1)
+                new_type = classify_screen(new_screen)
+
+                if new_type == "menu":
+                    new_items = parse_menu_items(new_screen)
+                    print(f"  [text]{indent}  -> '{item['name']}' ({item['number']}): submenu with {len(new_items)} items")
+                    sub_nodes = walk_text_menu(child_path, depth + 1, before_sig)
                     node["children"] = sub_nodes
+                elif new_type == "prompt":
+                    print(f"  [text]{indent}  -> '{item['name']}' ({item['number']}): data prompt (leaf)")
+                    node["controlType"] = "TextPrompt"
+                elif new_type == "record":
+                    print(f"  [text]{indent}  -> '{item['name']}' ({item['number']}): record view (leaf)")
+                    node["controlType"] = "TextRecord"
+                    item_info = get_item_info()
+                    if item_info:
+                        node["masterfileINI"] = item_info.get("ini", "")
+                        node["itemNumber"] = item_info.get("itemNumber", "")
+                else:
+                    print(f"  [text]{indent}  -> '{item['name']}' ({item['number']}): {new_type}")
 
-                pyautogui.typewrite("0", interval=0.05)
-                pyautogui.press("enter")
-                time.sleep(0.8)
-            except Exception:
+                success, _ = go_back(screen_signature(read_screen(retries=1)))
+                if not success:
+                    print(f"  [text]{indent}  !! Could not go back after '{item['name']}' - trying harder")
+                    for recovery in range(3):
+                        pyautogui.typewrite("0", interval=0.05)
+                        pyautogui.press("enter")
+                        time.sleep(0.5)
+                    back_screen = read_screen(retries=1)
+                    back_type = classify_screen(back_screen)
+                    if back_type != "menu":
+                        print(f"  [text]{indent}  !! Recovery failed (screen type: {back_type}), aborting this level")
+                        stats["errors"] += 1
+                        nodes.append(node)
+                        break
+
+            except Exception as e:
+                print(f"  [text]{indent}  !! Error on '{item['name']}': {e}")
+                stats["errors"] += 1
                 try:
                     pyautogui.typewrite("0", interval=0.05)
                     pyautogui.press("enter")
@@ -464,11 +737,23 @@ def scan_text(env):
 
             nodes.append(node)
 
+            if (idx + 1) % 10 == 0:
+                print(f"  [text]{indent}  ... progress: {idx + 1}/{len(items)} items at this level, {total_crawled[0]} total")
+
         return nodes
 
     print("[text] Reading main menu and walking all branches...")
+    print("[text] Navigation: number+Enter to go in, 0+Enter to go back")
+    print("[text] Safety: skipping items matching unsafe patterns (save, submit, delete, etc.)")
+    print()
+
     tree["children"] = walk_text_menu([], 0)
-    print(f"[text] Scan complete: {count_nodes(tree)} items found")
+    tree["stats"] = stats
+
+    total = count_nodes(tree)
+    print()
+    print(f"[text] Scan complete: {total} items found")
+    print(f"[text] Stats: {stats['screens_read']} screens read, {stats['items_found']} items cataloged, {stats['errors']} errors, {stats['back_failures']} back-nav failures")
 
     return tree
 

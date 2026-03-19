@@ -929,15 +929,16 @@ def execute_navigate_path(cmd):
     time.sleep(0.5)
 
     if client == "text":
+        nums = []
         for i, step in enumerate(steps):
-            num_match = re.match(r'^(\d+)$', step.strip())
-            if not num_match:
-                num_match = re.match(r'^(\d+)\s', step.strip())
+            num_match = re.match(r'^(\d+)(?:\s|$)', step.strip())
             if not num_match:
                 post_result(command_id, "error", error=f"Safety block: Text step {i+1} '{step}' is not a valid numeric menu option. Only numeric selections are allowed.")
                 return
-            keystroke = num_match.group(1)
-            print(f"  [step {i+1}/{len(steps)}] Typing: {keystroke} ({step})")
+            nums.append(num_match.group(1))
+
+        for i, keystroke in enumerate(nums):
+            print(f"  [step {i+1}/{len(nums)}] Typing: {keystroke} ({steps[i]})")
             pyautogui.typewrite(keystroke, interval=0.05)
             pyautogui.press("enter")
             time.sleep(1.0)
@@ -1500,13 +1501,69 @@ EPIC_MENU_CATEGORY_POSITIONS = {
 }
 
 
+def execute_text_menu_crawl(cmd):
+    """Crawl Epic Text menus using the dedicated text scanner in epic_tree.py.
+
+    Unlike Hyperspace (vision-based), Text menus are navigated by reading the
+    terminal buffer and typing numbered menu selections. This delegates to
+    epic_tree.py scan_text() which handles the full recursive crawl.
+    """
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+
+    print(f"  [text-crawl] Starting Epic Text menu crawl for {env}")
+    print(f"  [text-crawl] This will type menu numbers into the terminal window.")
+
+    try:
+        import subprocess
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        tree_script = os.path.join(script_dir, "epic_tree.py")
+
+        if not os.path.exists(tree_script):
+            post_result(command_id, "error", error="epic_tree.py not found in tools directory")
+            return
+
+        print(f"  [text-crawl] Running text scanner...")
+        result = subprocess.run(
+            [sys.executable, tree_script, "text", env],
+            capture_output=True, text=True, timeout=600,
+            env={**os.environ, "BRIDGE_TOKEN": BRIDGE_TOKEN, "ORGCLOUD_URL": ORGCLOUD_URL},
+        )
+
+        output = result.stdout + result.stderr
+        print(f"  [text-crawl] Scanner exit code: {result.returncode}")
+        for line in output.split("\n")[-20:]:
+            if line.strip():
+                print(f"  [text-crawl] {line}")
+
+        if result.returncode == 0:
+            post_result(command_id, "complete", data={
+                "output": output[-2000:],
+                "client": "text",
+            })
+        else:
+            post_result(command_id, "error", error=f"Text scan failed (exit {result.returncode}): {output[-500:]}")
+
+    except subprocess.TimeoutExpired:
+        post_result(command_id, "error", error="Text menu crawl timed out (10 min limit)")
+    except Exception as e:
+        post_result(command_id, "error", error=f"Text crawl error: {str(e)}")
+
+
 def execute_menu_crawl(cmd):
     """Crawl Epic menus using screenshot + vision AI.
     Strategy: click Epic button -> find each known category by vision -> click ->
-    read sub-items -> repeat. Results are saved permanently so you only crawl once."""
+    read sub-items -> repeat. Results are saved permanently so you only crawl once.
+
+    For Text client, delegates to execute_text_menu_crawl which uses the
+    keystroke-based scanner instead of vision."""
     env = cmd.get("env", "SUP")
     command_id = cmd.get("id", "unknown")
     depth = cmd.get("depth", 2)
+    client = cmd.get("client", "hyperspace")
+
+    if client == "text":
+        return execute_text_menu_crawl(cmd)
 
     print(f"  [menu-crawl] Starting Epic menu crawl for {env} (depth={depth})")
     print(f"  [menu-crawl] NOTE: This will briefly control your mouse to click menu items.")

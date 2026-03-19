@@ -3366,16 +3366,24 @@ ${fullHtml}`;
     }
 
     if (args[0] === "menu-crawl") {
-      const env = (args[1] || "SUP").toUpperCase();
-      const depth = parseInt(args[2] || "4", 10);
+      const clientArg = args.find(a => a === "text" || a === "hyperspace") || "hyperspace";
+      const envArg = args.find(a => ["SUP", "POC", "TST", "PRD"].includes(a.toUpperCase()) && a !== clientArg);
+      const env = (envArg || "SUP").toUpperCase();
+      const depthArg = args.find(a => /^\d+$/.test(a) && parseInt(a) <= 10);
+      const depth = parseInt(depthArg || "4", 10);
+      const client = clientArg;
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "menu_crawl", env, depth }),
+          body: JSON.stringify({ type: "menu_crawl", env, depth, client }),
         });
         const data = await resp.json() as any;
-        if (data.ok) return ok(`Menu crawl started for ${env} (depth=${depth}). Command ID: ${data.commandId}${nl}The agent will click through each menu and use AI vision to catalog all items.${nl}This may take several minutes. Check the tree afterwards with: epic tree`);
+        if (client === "text") {
+          if (data.ok) return ok(`Text menu crawl started for ${env}. Command ID: ${data.commandId}${nl}The agent will type numbered menu options into the Epic Text terminal.${nl}This may take several minutes. Check the tree afterwards with: epic tree`);
+        } else {
+          if (data.ok) return ok(`Menu crawl started for ${env} (depth=${depth}). Command ID: ${data.commandId}${nl}The agent will click through each menu and use AI vision to catalog all items.${nl}This may take several minutes. Check the tree afterwards with: epic tree`);
+        }
         return fail(`[epic] Failed to send menu-crawl command`);
       } catch (e: any) {
         return fail(`[epic] ${e.message}`);
@@ -3922,7 +3930,8 @@ ${fullHtml}`;
       "  epic click <env> <el>     - Click an element by name",
       "",
       "  DISCOVERY",
-      "  epic menu-crawl [env]     - Auto-crawl all Epic menus (vision)",
+      "  epic menu-crawl [env]     - Auto-crawl Hyperspace menus (vision)",
+      "  epic menu-crawl text [env] - Auto-crawl Text menus (keystroke)",
       "  epic tree <env>           - Show full navigation tree",
       "  epic activities <env>     - Show cataloged activities",
       "  epic shortcuts <env>      - Discover keyboard shortcuts",
