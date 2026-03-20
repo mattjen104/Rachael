@@ -2639,6 +2639,9 @@ def execute_search_crawl(cmd):
                     consecutive_errors += 1
                     continue
 
+            prefix_lower = prefix.lower()
+            prefix_matches = []
+            fuzzy_matches = []
             new_count = 0
             for item in results:
                 name = item.get("name", "").strip()
@@ -2652,11 +2655,22 @@ def execute_search_crawl(cmd):
                         "discoveredBy": f"search:{prefix}",
                     }
                     new_count += 1
+                if name_key.startswith(prefix_lower):
+                    prefix_matches.append(name)
+                else:
+                    fuzzy_matches.append(name)
 
-            status = "TRUNCATED -> expanding" if truncated else "done"
-            print(f"  [search-crawl]   {len(results)} results, {new_count} new [{status}]")
+            real_count = len(prefix_matches)
+            is_actually_truncated = truncated and real_count >= TRUNCATION_THRESHOLD
+            if fuzzy_matches:
+                print(f"  [search-crawl]   {len(results)} results ({real_count} prefix match, {len(fuzzy_matches)} fuzzy), {new_count} new")
+            else:
+                print(f"  [search-crawl]   {len(results)} results, {new_count} new")
 
-            if truncated and len(prefix) < MAX_PREFIX_LEN:
+            status = "TRUNCATED -> expanding" if is_actually_truncated else "done"
+            print(f"  [search-crawl]   [{status}]")
+
+            if is_actually_truncated and len(prefix) < MAX_PREFIX_LEN:
                 expansions = [prefix + c for c in "abcdefghijklmnopqrstuvwxyz"]
                 added = 0
                 insert_at = 0
