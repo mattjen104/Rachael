@@ -1855,8 +1855,13 @@ def execute_menu_crawl(cmd):
         Takes the initial screenshot b64, reads visible items, then checks
         for a scrollbar. If scrollable, scrolls down and reads more items,
         deduplicating by name. Repeats until no new items appear.
+
+        Each item gets a '_scroll_round' field (0 = first screen, 1+ = after scrolling)
+        so the crawler knows which items need scroll repositioning before clicking.
         """
         all_items = vision_read_menu(b64, context, is_submenu=is_submenu)
+        for item in all_items:
+            item["_scroll_round"] = 0
         seen_names = set(item.get("name", "").lower().strip() for item in all_items)
 
         scroll_info = vision_check_scrollable(b64, context)
@@ -1898,6 +1903,7 @@ def execute_menu_crawl(cmd):
                 name_key = item.get("name", "").lower().strip()
                 if name_key and name_key not in seen_names:
                     seen_names.add(name_key)
+                    item["_scroll_round"] = scroll_round + 1
                     all_items.append(item)
                     added += 1
 
@@ -1917,7 +1923,7 @@ def execute_menu_crawl(cmd):
             pyautogui.scroll(5 * scrolls_done + 10)
             time.sleep(0.3)
 
-        return all_items
+        return all_items, scrolls_done, scroll_screen_x, scroll_screen_y
 
     def crawl_submenu(parent_path, current_depth, max_depth, reopen_epic_fn):
         """Recursively crawl a submenu. Returns (children_list, item_count).
