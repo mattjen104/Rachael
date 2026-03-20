@@ -424,51 +424,47 @@ def scan_text(env):
         except Exception:
             return ""
 
-    def read_screen(retries=2):
-        """Read terminal screen via select-all + copy with stability check.
+    def read_screen(stable=False):
+        """Read terminal screen via select-all + copy.
 
-        Reads twice with a short delay to ensure the screen has stabilized
-        (terminal emulators can be slow to render after navigation).
+        If stable=True, reads twice quickly and compares to confirm
+        the screen has settled. For most navigation this is unnecessary
+        since we already wait_for_screen_change after keystrokes.
         """
-        for attempt in range(retries):
-            try:
+        try:
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.08)
+            pyautogui.hotkey("ctrl", "c")
+            time.sleep(0.08)
+            first = read_clipboard()
+
+            if stable and first:
+                time.sleep(0.15)
                 pyautogui.hotkey("ctrl", "a")
-                time.sleep(0.15)
+                time.sleep(0.08)
                 pyautogui.hotkey("ctrl", "c")
-                time.sleep(0.15)
-                first = read_clipboard()
-
-                if attempt == 0 and retries > 1:
-                    time.sleep(0.3)
-                    pyautogui.hotkey("ctrl", "a")
-                    time.sleep(0.15)
-                    pyautogui.hotkey("ctrl", "c")
-                    time.sleep(0.15)
-                    second = read_clipboard()
-                    if second and second.strip() == first.strip():
-                        stats["screens_read"] += 1
-                        return first
-                    if second:
-                        stats["screens_read"] += 1
-                        return second
-
-                if first:
+                time.sleep(0.08)
+                second = read_clipboard()
+                if second and second.strip() != first.strip():
                     stats["screens_read"] += 1
-                    return first
-            except Exception:
-                time.sleep(0.3)
-        return ""
+                    return second
 
-    def wait_for_screen_change(old_sig, timeout=3.0):
+            if first:
+                stats["screens_read"] += 1
+            return first or ""
+        except Exception:
+            return ""
+
+    def wait_for_screen_change(old_sig, timeout=1.5):
         """Wait until the screen content changes from old_sig, up to timeout seconds."""
         start = time.time()
         while time.time() - start < timeout:
-            screen = read_screen(retries=1)
+            screen = read_screen()
             new_sig = screen_signature(screen)
             if new_sig != old_sig and new_sig:
                 return screen
-            time.sleep(0.3)
-        return read_screen(retries=1)
+            time.sleep(0.15)
+        return read_screen()
 
     def screen_signature(screen_text):
         """Generate a signature for screen comparison.
@@ -563,12 +559,11 @@ def scan_text(env):
         """
         try:
             pyautogui.press("home")
-            time.sleep(0.1)
             pyautogui.press("f8")
-            time.sleep(0.5)
-            info = read_screen(retries=1)
-            pyautogui.press("enter")
             time.sleep(0.3)
+            info = read_screen()
+            pyautogui.press("enter")
+            time.sleep(0.15)
             ini_match = re.search(r'(?:INI|Master\s*[Ff]ile)\s*[=:]\s*(\w+)', info)
             item_match = re.search(r'(?:Item|#)\s*[=:]\s*(\d+)', info)
             if ini_match or item_match:
@@ -590,14 +585,14 @@ def scan_text(env):
         """
         pyautogui.typewrite("0", interval=0.05)
         pyautogui.press("enter")
-        new_screen = wait_for_screen_change(current_sig, timeout=2.0)
+        new_screen = wait_for_screen_change(current_sig, timeout=1.5)
         new_sig = screen_signature(new_screen)
         if new_sig != current_sig:
             return True, new_screen
 
         pyautogui.press("enter")
-        time.sleep(0.5)
-        new_screen = read_screen(retries=1)
+        time.sleep(0.3)
+        new_screen = read_screen()
         new_sig = screen_signature(new_screen)
         if new_sig != current_sig:
             return True, new_screen
@@ -677,11 +672,11 @@ def scan_text(env):
             stats["items_found"] += 1
 
             try:
-                before_sig = screen_signature(read_screen(retries=1))
+                before_sig = screen_signature(read_screen())
 
                 pyautogui.typewrite(item["number"], interval=0.05)
                 pyautogui.press("enter")
-                new_screen = wait_for_screen_change(before_sig, timeout=3.0)
+                new_screen = wait_for_screen_change(before_sig, timeout=1.5)
                 new_sig = screen_signature(new_screen)
 
                 if new_sig == before_sig:
@@ -710,14 +705,14 @@ def scan_text(env):
                 else:
                     print(f"  [text]{indent}  -> '{item['name']}' ({item['number']}): {new_type}")
 
-                success, _ = go_back(screen_signature(read_screen(retries=1)))
+                success, _ = go_back(screen_signature(read_screen()))
                 if not success:
                     print(f"  [text]{indent}  !! Could not go back after '{item['name']}' - trying harder")
                     for recovery in range(3):
                         pyautogui.typewrite("0", interval=0.05)
                         pyautogui.press("enter")
                         time.sleep(0.5)
-                    back_screen = read_screen(retries=1)
+                    back_screen = read_screen()
                     back_type = classify_screen(back_screen)
                     if back_type != "menu":
                         print(f"  [text]{indent}  !! Recovery failed (screen type: {back_type}), aborting this level")
