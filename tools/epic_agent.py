@@ -2519,8 +2519,8 @@ def execute_search_crawl(cmd):
         activate_window(window)
         time.sleep(0.2)
 
-        pyautogui.hotkey("alt", "e")
-        time.sleep(0.8)
+        pyautogui.hotkey("ctrl", "space")
+        time.sleep(0.6)
 
         pyautogui.hotkey("ctrl", "a")
         time.sleep(0.05)
@@ -2582,7 +2582,7 @@ def execute_search_crawl(cmd):
 
         return results, truncated
 
-    prefix_queue = list("abcdefghijklmnopqrstuvwxyz")
+    prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
     consecutive_errors = 0
     total_searched = 0
 
@@ -2684,13 +2684,13 @@ def execute_launch(cmd):
         post_result(command_id, "error", error=f"No {env} window found")
         return
 
-    print(f"  [launch] Opening '{activity_name}' via Alt+E search in {env}")
+    print(f"  [launch] Opening '{activity_name}' via Ctrl+Space search in {env}")
 
     activate_window(window)
     time.sleep(0.3)
 
-    pyautogui.hotkey("alt", "e")
-    time.sleep(0.8)
+    pyautogui.hotkey("ctrl", "space")
+    time.sleep(0.6)
 
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.05)
