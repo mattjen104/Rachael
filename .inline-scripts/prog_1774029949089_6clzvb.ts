@@ -79,69 +79,57 @@ async function smartFetch(url: string, init?: RequestInit): Promise<Response> {
 }
 
 const NL = String.fromCharCode(10);
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || '';
+const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+const REGION = props.CL_REGION || "inlandempire";
+const KEYWORDS = (props.KEYWORDS || "furniture,electronics,tools,appliance,computer,monitor,desk,hot tub,spa").split(",").map((k: string) => k.trim());
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-const FREE_MODELS = [
-  'google/gemma-3-4b-it:free',
-  'google/gemma-3-12b-it:free',
-  'mistralai/mistral-small-3.1-24b-instruct:free',
-  'qwen/qwen3-4b:free',
-  'qwen/qwen3-8b:free',
-  'deepseek/deepseek-r1-0528:free',
-];
+interface FreeItem { title: string; url: string; location: string; }
 
-interface ModelResult {
-  model: string;
-  status: string;
-  latency: number;
-}
-
-async function testModel(model: string): Promise<ModelResult> {
-  const t0 = Date.now();
-  try {
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + OPENROUTER_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: 'Reply with only the word OK' }],
-        max_tokens: 5,
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-    const d = await r.json() as any;
-    const ms = Date.now() - t0;
-    if (d.choices?.[0]?.message?.content) {
-      return { model, status: 'OK', latency: ms };
-    }
-    if (d.error) {
-      return { model, status: 'ERR: ' + (d.error.message || '').slice(0, 60), latency: ms };
-    }
-    return { model, status: 'NO_RESPONSE', latency: ms };
-  } catch (e: any) {
-    return { model, status: 'FAIL: ' + (e.message || '').slice(0, 60), latency: Date.now() - t0 };
+async function searchFree(keyword: string): Promise<FreeItem[]> {
+  const url = "https://" + REGION + ".craigslist.org/search/zip?query=" + encodeURIComponent(keyword);
+  const br = await bridgeFetch(url, { headers: { "User-Agent": UA } });
+  if (br.error) return [];
+  const html = (typeof br.body === "string" ? br.body : br.text) || "";
+  if (!html) return [];
+  const items: FreeItem[] = [];
+  const linkRe = /<a href="(https:\/\/[^"]*craigslist[^"]*\.html)">/g;
+  const titleRe = /<div class="title">([^<]*)<\/div>/g;
+  const locRe = /<div class="location">([^<]*)<\/div>/g;
+  const links: string[] = []; const titles: string[] = []; const locs: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(html)) !== null) links.push(m[1]);
+  while ((m = titleRe.exec(html)) !== null) titles.push(m[1]);
+  while ((m = locRe.exec(html)) !== null) locs.push(m[1]);
+  for (let i = 0; i < titles.length && i < 10; i++) {
+    items.push({ title: titles[i], url: links[i] || "", location: (locs[i] || "").trim() });
   }
+  return items;
 }
 
 async function execute() {
-  const results: ModelResult[] = [];
-  for (const model of FREE_MODELS) {
-    results.push(await testModel(model));
-    await new Promise(resolve => setTimeout(resolve, 2000));
+  const allItems: FreeItem[] = [];
+  const matchedKeywords: string[] = [];
+  for (const kw of KEYWORDS) {
+    try {
+      const results = await searchFree(kw);
+      if (results.length > 0) matchedKeywords.push(kw + ":" + results.length);
+      allItems.push(...results);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch {}
   }
-  const working = results.filter(r => r.status === 'OK');
-  const lines = results.map(r => {
-    const tag = r.status === 'OK' ? '[+]' : '[-]';
-    const short = r.model.split('/').pop() || r.model;
-    return tag + ' ' + short + ' ' + r.status + ' (' + r.latency + 'ms)';
-  });
-  const summary = 'Model Scout: ' + working.length + '/' + results.length + ' free models working' + NL + lines.join(NL);
-  return { summary, metric: String(working.length) };
+  const unique = new Map<string, FreeItem>();
+  for (const item of allItems) {
+    if (!unique.has(item.title)) unique.set(item.title, item);
+  }
+  const deduped = Array.from(unique.values());
+  const lines = deduped.slice(0, 30).map(item =>
+    "  [FREE] " + item.title + (item.location ? " [" + item.location + "]" : "") + NL + "    " + item.url
+  );
+  const summary = "Free Stuff Radar: " + deduped.length + " items found (" + REGION + ")" + NL +
+    "Keywords hit: " + (matchedKeywords.length > 0 ? matchedKeywords.join(", ") : "none") + NL + NL + lines.join(NL);
+  return { summary, metric: String(deduped.length) };
 }
-
 
 async function __run() {
   if (typeof execute === 'function') return execute(__ctx);

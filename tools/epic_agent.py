@@ -2179,8 +2179,8 @@ def execute_menu_crawl(cmd):
         for i, cat_name in enumerate(cats_to_crawl):
             print(f"  [menu-crawl] === [{i+1}/{len(cats_to_crawl)}] '{cat_name}' ===")
 
-            if consecutive_failures >= 3:
-                print(f"  [menu-crawl] 3 consecutive failures - stopping crawl early to save what we have")
+            if consecutive_failures >= 5:
+                print(f"  [menu-crawl] 5 consecutive failures - stopping crawl early to save what we have")
                 break
 
             node = {
@@ -2243,9 +2243,45 @@ def execute_menu_crawl(cmd):
                     menu_confirmed_open = reopen_epic_menu()
                     consecutive_failures = 0
                 elif state_after_click == "desktop":
-                    print(f"  [menu-crawl]   Click closed the menu or hit nothing - recovering")
+                    print(f"  [menu-crawl]   Click closed the menu - reopening and retrying '{cat_name}'...")
                     menu_confirmed_open = reopen_epic_menu()
-                    consecutive_failures += 1
+                    if menu_confirmed_open:
+                        img_retry, b64_retry = safe_screenshot()
+                        if b64_retry:
+                            loc_retry = get_category_img_coords(cat_name)
+                            if not loc_retry or not loc_retry.get("found"):
+                                loc_retry = vision_find_item(b64_retry, cat_name)
+                            if loc_retry and loc_retry.get("found"):
+                                retry_x, retry_y = vision_to_screen(window, loc_retry["x"], loc_retry["y"])
+                                safe_click(retry_x, retry_y, pause_after=0.8, label=f"{cat_name} (retry)")
+                                state_retry, _ = check_screen_state(f"retry click {cat_name}")
+                                if state_retry in ("menu", "unknown"):
+                                    sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
+                                    node["children"] = sub_children
+                                    crawled_count += sub_count
+                                    pyautogui.press("escape")
+                                    time.sleep(0.3)
+                                    pyautogui.press("escape")
+                                    time.sleep(0.3)
+                                    menu_confirmed_open = reopen_epic_menu()
+                                    consecutive_failures = 0
+                                elif state_retry == "activity":
+                                    node["controlType"] = "Activity"
+                                    recover_to_menu()
+                                    menu_confirmed_open = reopen_epic_menu()
+                                    consecutive_failures = 0
+                                else:
+                                    print(f"  [menu-crawl]   Retry also failed for '{cat_name}' - moving on")
+                                    recover_to_menu()
+                                    menu_confirmed_open = reopen_epic_menu()
+                                    consecutive_failures += 1
+                            else:
+                                print(f"  [menu-crawl]   Could not relocate '{cat_name}' on retry")
+                                consecutive_failures += 1
+                        else:
+                            consecutive_failures += 1
+                    else:
+                        consecutive_failures += 1
                 elif state_after_click in ("menu", "unknown"):
                     sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
                     node["children"] = sub_children
