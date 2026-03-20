@@ -2579,9 +2579,13 @@ def execute_search_crawl(cmd):
         return True
 
     def type_prefix(prefix):
-        """Select all text with Ctrl+A and type new prefix to replace it."""
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.1)
+        """Select all text and type new prefix to replace it."""
+        pyautogui.keyDown("ctrl")
+        time.sleep(0.05)
+        pyautogui.press("a")
+        time.sleep(0.05)
+        pyautogui.keyUp("ctrl")
+        time.sleep(0.15)
         pyautogui.typewrite(prefix, interval=0.03)
         time.sleep(1.0)
 
