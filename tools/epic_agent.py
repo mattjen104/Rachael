@@ -2275,10 +2275,41 @@ def execute_menu_crawl(cmd):
             tree_children.append(node)
             print(f"  [menu-crawl]   '{cat_name}' done: {len(node.get('children', []))} children")
 
+            print(f"  [menu-crawl]   Saving progress ({len(tree_children)} categories so far)...")
+            progress_tree = {
+                "name": "Epic Menu",
+                "children": tree_children[:],
+                "client": "hyperspace",
+                "environment": env,
+                "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "locked": True,
+                "epicButtonImgX": epic_loc.get("x", 0),
+                "epicButtonImgY": epic_loc.get("y", 0),
+                "windowWidth": window.width,
+                "windowHeight": window.height,
+                "windowLeft": window.left,
+                "windowTop": window.top,
+                "imageWidth": 0,
+                "imageHeight": 0,
+                "dpiScale": DPI_SCALE,
+            }
+            save_resp = _bridge_request(
+                "post", "/api/epic/tree", "tree-progress-save", timeout=30, max_retries=2,
+                headers={
+                    "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json=progress_tree,
+            )
+            if save_resp and save_resp.status_code == 200:
+                print(f"  [menu-crawl]   Progress saved OK")
+            else:
+                print(f"  [menu-crawl]   Progress save failed (non-fatal)")
+
         pyautogui.press("escape")
         time.sleep(0.3)
 
-        print(f"  [menu-crawl] Step 3: Uploading tree ({crawled_count} items)...")
+        print(f"  [menu-crawl] Step 3: Uploading final tree ({crawled_count} items)...")
 
         crawl_img = screenshot_window(window)
         crawl_img_w, crawl_img_h = crawl_img.size if crawl_img else (0, 0)
