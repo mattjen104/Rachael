@@ -2494,7 +2494,8 @@ def execute_search_crawl(cmd):
 
     all_activities = dict(existing_activities)
 
-    prefixes = list("abcdefghijklmnopqrstuvwxyz")
+    TRUNCATION_THRESHOLD = 8
+    MAX_PREFIX_LEN = 3
 
     def save_progress(completed):
         """Upload current activity list and completed prefixes to server."""
@@ -2512,62 +2513,101 @@ def execute_search_crawl(cmd):
             json={"value": json.dumps(payload), "category": "epic"},
         )
 
-    consecutive_errors = 0
-    for prefix in prefixes:
-        if prefix in completed_prefixes:
-            print(f"  [search-crawl] Skipping '{prefix}' (already done)")
-            continue
+    def search_one_prefix(prefix):
+        """Type a prefix into the search bar, read results via vision.
+        Returns (results_list, was_truncated) or None on error."""
+        activate_window(window)
+        time.sleep(0.2)
 
-        print(f"  [search-crawl] === Searching prefix '{prefix}' ===")
+        pyautogui.hotkey("alt", "e")
+        time.sleep(0.8)
+
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.05)
+        pyautogui.typewrite(prefix, interval=0.03)
+        time.sleep(1.2)
+
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+        if not b64:
+            pyautogui.press("escape")
+            time.sleep(0.3)
+            return None
+
+        prompt = (
+            f"You are looking at an Epic Hyperspace screen where the search bar has '{prefix}' typed in.\n"
+            "There should be a dropdown or autocomplete list showing matching activities.\n\n"
+            "List EVERY activity/item shown in the autocomplete/search results dropdown.\n"
+            "These are typically shown as a vertical list below the search box.\n\n"
+            "For each item, provide:\n"
+            "- name: the full activity name as displayed\n"
+            "- category: if a category/section label is shown (like 'Patient Care', 'Lab', etc.), include it\n\n"
+            "Also check: does the dropdown appear to be TRUNCATED? Look for:\n"
+            "- A scrollbar on the dropdown list\n"
+            "- Text like 'more results', 'showing X of Y', or '...'\n"
+            "- The list being cut off at the bottom edge\n"
+            "- A large number of results (8+) that likely means more exist\n\n"
+            "Return ONLY a JSON object:\n"
+            "{\"items\": [{\"name\": \"Activity Name\", \"category\": \"Category if shown\"}], "
+            "\"truncated\": true/false, \"reason\": \"why you think truncated or not\"}\n\n"
+            "If NO autocomplete results are visible, return: {\"items\": [], \"truncated\": false, \"reason\": \"no results\"}\n"
+            "Return ONLY the JSON object, no other text."
+        )
+
+        resp_text = ask_claude(b64, prompt)
+        results = []
+        truncated = False
+        if resp_text:
+            try:
+                m = re.search(r'\{[\s\S]*\}', resp_text)
+                if m:
+                    parsed = json.loads(m.group())
+                    results = parsed.get("items", [])
+                    truncated = parsed.get("truncated", False)
+                    if not truncated and len(results) >= TRUNCATION_THRESHOLD:
+                        truncated = True
+            except Exception:
+                try:
+                    m2 = re.search(r'\[[\s\S]*\]', resp_text)
+                    if m2:
+                        results = json.loads(m2.group())
+                        truncated = len(results) >= TRUNCATION_THRESHOLD
+                except Exception:
+                    pass
+
+        pyautogui.press("escape")
+        time.sleep(0.3)
+        pyautogui.press("escape")
+        time.sleep(0.3)
+
+        return results, truncated
+
+    prefix_queue = list("abcdefghijklmnopqrstuvwxyz")
+    consecutive_errors = 0
+    total_searched = 0
+
+    while prefix_queue:
+        prefix = prefix_queue.pop(0)
+
+        if prefix in completed_prefixes:
+            continue
 
         if consecutive_errors >= 5:
             print(f"  [search-crawl] Too many consecutive errors, stopping")
             break
 
+        remaining = sum(1 for p in prefix_queue if p not in completed_prefixes)
+        print(f"  [search-crawl] === '{prefix}' === ({remaining} remaining in queue, {len(all_activities)} found so far)")
+
         try:
-            activate_window(window)
-            time.sleep(0.2)
-
-            pyautogui.hotkey("alt", "e")
-            time.sleep(0.8)
-
-            pyautogui.hotkey("ctrl", "a")
-            time.sleep(0.05)
-            pyautogui.typewrite(prefix, interval=0.03)
-            time.sleep(1.2)
-
-            img = screenshot_window(window)
-            b64 = img_to_base64(img)
-            if not b64:
+            result = search_one_prefix(prefix)
+            if result is None:
                 print(f"  [search-crawl] Screenshot failed for '{prefix}'")
                 consecutive_errors += 1
-                pyautogui.press("escape")
-                time.sleep(0.3)
                 continue
 
-            prompt = (
-                f"You are looking at an Epic Hyperspace screen where the search bar has '{prefix}' typed in.\n"
-                "There should be a dropdown or autocomplete list showing matching activities.\n\n"
-                "List EVERY activity/item shown in the autocomplete/search results dropdown.\n"
-                "These are typically shown as a vertical list below the search box.\n\n"
-                "For each item, provide:\n"
-                "- name: the full activity name as displayed\n"
-                "- category: if a category/section label is shown (like 'Patient Care', 'Lab', etc.), include it\n\n"
-                "Return ONLY a JSON array:\n"
-                "[{\"name\": \"Activity Name\", \"category\": \"Category if shown\"}]\n\n"
-                "If NO autocomplete results are visible, return: []\n"
-                "Return ONLY the JSON array, no other text."
-            )
-
-            resp_text = ask_claude(b64, prompt)
-            results = []
-            if resp_text:
-                try:
-                    m = re.search(r'\[[\s\S]*\]', resp_text)
-                    if m:
-                        results = json.loads(m.group())
-                except Exception:
-                    pass
+            results, truncated = result
+            total_searched += 1
 
             new_count = 0
             for item in results:
@@ -2583,18 +2623,26 @@ def execute_search_crawl(cmd):
                     }
                     new_count += 1
 
-            print(f"  [search-crawl] '{prefix}': {len(results)} results, {new_count} new ({len(all_activities)} total)")
+            status = "TRUNCATED - expanding" if truncated else "complete"
+            print(f"  [search-crawl] '{prefix}': {len(results)} results, {new_count} new -> {status}")
 
-            pyautogui.press("escape")
-            time.sleep(0.3)
-            pyautogui.press("escape")
-            time.sleep(0.3)
+            if truncated and len(prefix) < MAX_PREFIX_LEN:
+                expansions = [prefix + c for c in "abcdefghijklmnopqrstuvwxyz"]
+                insert_pos = 0
+                added_expansions = 0
+                for exp in expansions:
+                    if exp not in completed_prefixes:
+                        prefix_queue.insert(insert_pos, exp)
+                        insert_pos += 1
+                        added_expansions += 1
+                print(f"  [search-crawl]   Added {added_expansions} sub-prefixes: {prefix}a..{prefix}z")
 
             completed_prefixes.add(prefix)
             consecutive_errors = 0
 
-            print(f"  [search-crawl] Saving progress...")
-            save_progress(completed_prefixes)
+            if total_searched % 3 == 0:
+                print(f"  [search-crawl] Saving progress ({len(all_activities)} activities, {len(completed_prefixes)} prefixes done)...")
+                save_progress(completed_prefixes)
 
         except Exception as e:
             print(f"  [search-crawl] Error on prefix '{prefix}': {e}")
@@ -2608,7 +2656,7 @@ def execute_search_crawl(cmd):
             except Exception:
                 pass
 
-    print(f"  [search-crawl] COMPLETE! Discovered {len(all_activities)} total activities")
+    print(f"  [search-crawl] COMPLETE! Discovered {len(all_activities)} activities across {total_searched} searches")
     save_progress(completed_prefixes)
 
     final_img = screenshot_window(window)
