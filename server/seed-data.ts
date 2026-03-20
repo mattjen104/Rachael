@@ -866,6 +866,83 @@ async function execute() {
       tags: ["program"],
       code: null,
     },
+    {
+      name: "nightly-meal-recommender",
+      type: "monitor",
+      schedule: "daily",
+      cronExpression: "0 21 * * *",
+      instructions: "Nightly meal recommendation program. Generates one new dinner recipe for the household (appliance-tagged, scored by Open Food Facts for ingredients) and one new lunch item for Willa based on her bridge food strategy and acceptance history. Avoids repeating previous recommendations; factors in pantry stock and expiring items.",
+      config: { TASK_TYPE: "creative", TIMEOUT: "120" },
+      costTier: "standard",
+      tags: ["program", "meals"],
+      code: `const bridgePort = typeof __bridgePort !== "undefined" ? __bridgePort : "5000";
+
+async function execute() {
+  const today = new Date().toISOString().split("T")[0];
+
+  const configRes = await fetch("http://localhost:" + bridgePort + "/api/config/meals_dietary_prefs");
+  let prefs = { householdSize: 3, appliances: ["Instant Pot", "sous vide", "rice cooker", "stove", "toaster oven", "crockpot"], kiddoName: "Willa", kiddoCurrentFavorites: ["Go-Gurt", "chicken nuggets", "Goldfish crackers"], cuisinePreferences: ["American", "Italian", "Mexican", "Asian"] };
+  if (configRes.ok) {
+    const c = await configRes.json();
+    try { prefs = JSON.parse(c.value); } catch {}
+  }
+
+  const pastRecsRes = await fetch("http://localhost:" + bridgePort + "/api/nightly-recommendations?limit=30");
+  const pastRecs = pastRecsRes.ok ? await pastRecsRes.json() : [];
+  const pastRecipeNames = pastRecs.map((r: any) => r.recipeRecommendation?.name).filter(Boolean);
+  const pastKiddoItems = pastRecs.map((r: any) => r.kiddoLunchSuggestion?.item).filter(Boolean);
+
+  const pantryRes = await fetch("http://localhost:" + bridgePort + "/api/pantry?status=in_stock");
+  const pantry = pantryRes.ok ? await pantryRes.json() : [];
+  const expiringItems = pantry.filter((p: any) => {
+    if (!p.estimatedExpiration) return false;
+    const daysLeft = Math.round((new Date(p.estimatedExpiration).getTime() - Date.now()) / 86400000);
+    return daysLeft <= 3 && daysLeft >= 0;
+  }).map((p: any) => p.name);
+
+  const kiddoRes = await fetch("http://localhost:" + bridgePort + "/api/kiddo-food-log");
+  const kiddoLogs = kiddoRes.ok ? await kiddoRes.json() : [];
+  const acceptedFoods = kiddoLogs.filter((l: any) => l.verdict === "accepted").map((l: any) => l.itemName);
+  const rejectedFoods = kiddoLogs.filter((l: any) => l.verdict === "rejected").map((l: any) => l.itemName);
+
+  const prompt = "Generate a nightly meal recommendation as JSON with two fields:\\n" +
+    "1. recipeRecommendation: {name, appliance, ingredients: [], instructions}\\n" +
+    "2. kiddoLunchSuggestion: {item, bridgeRationale, similarTo}\\n\\n" +
+    "Appliances: " + prefs.appliances.join(", ") + "\\n" +
+    "Cuisine prefs: " + (prefs.cuisinePreferences || []).join(", ") + "\\n" +
+    "DO NOT repeat these recipes: " + pastRecipeNames.join(", ") + "\\n" +
+    "DO NOT repeat these kiddo items: " + pastKiddoItems.join(", ") + "\\n" +
+    "Expiring pantry items (prefer using): " + (expiringItems.join(", ") || "none") + "\\n" +
+    "Kiddo favorites: " + (prefs.kiddoCurrentFavorites || []).join(", ") + "\\n" +
+    "Kiddo accepted: " + acceptedFoods.join(", ") + "\\n" +
+    "Kiddo rejected: " + rejectedFoods.join(", ") + "\\n" +
+    "Return ONLY valid JSON.";
+
+  const llmRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (process.env.OPENROUTER_API_KEY || "") },
+    body: JSON.stringify({ model: "anthropic/claude-sonnet-4", messages: [{ role: "user", content: prompt }], max_tokens: 1000 }),
+  });
+  const llmData = await llmRes.json();
+  const content = llmData.choices?.[0]?.message?.content || "";
+  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/);
+  let rec = { recipeRecommendation: null as any, kiddoLunchSuggestion: null as any };
+  if (jsonMatch) {
+    try { rec = JSON.parse(jsonMatch[0]); } catch {}
+  }
+
+  await fetch("http://localhost:" + bridgePort + "/api/nightly-recommendations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recDate: today, recipeRecommendation: rec.recipeRecommendation, kiddoLunchSuggestion: rec.kiddoLunchSuggestion, status: "pending" }),
+  });
+
+  const recipeName = rec.recipeRecommendation?.name || "unknown";
+  const kiddoItem = rec.kiddoLunchSuggestion?.item || "unknown";
+  return { summary: "Nightly Meal Rec (" + today + "): Recipe: " + recipeName + " | Kiddo: " + kiddoItem, metric: "1" };
+}`,
+      codeLang: "typescript",
+    },
   ];
 
   for (const raw of programSeedInputs) {
@@ -991,6 +1068,42 @@ async function seedSiteProfiles(): Promise<void> {
         headings: "h1, h2, h3",
       },
       actions: {},
+      enabled: true,
+    },
+    {
+      name: "walmart",
+      description: "Walmart — grocery search and add-to-cart automation",
+      baseUrl: "https://www.walmart.com",
+      urlPatterns: ["walmart\\.com"],
+      extractionSelectors: {
+        searchResults: '[data-testid="list-view"]',
+        productName: '[data-automation-id="product-title"]',
+        productPrice: '[data-automation-id="product-price"] .f2',
+        addToCartButton: '[data-tl-id="ProductTileAddToCartBtn"]',
+        productImage: 'img[data-testid="productTileImage"]',
+      },
+      actions: {
+        search: { selector: 'input[aria-label="Search"]', type: "type", description: "Type product search query" },
+        addToCart: { selector: '[data-tl-id="ProductTileAddToCartBtn"]', type: "click", description: "Add product to cart" },
+      },
+      enabled: true,
+    },
+    {
+      name: "costco",
+      description: "Costco — grocery search and add-to-cart automation",
+      baseUrl: "https://www.costco.com",
+      urlPatterns: ["costco\\.com"],
+      extractionSelectors: {
+        searchResults: ".product-list",
+        productName: ".description a",
+        productPrice: ".price",
+        addToCartButton: "#add-to-cart-btn",
+        productImage: ".product-img-holder img",
+      },
+      actions: {
+        search: { selector: '#search-field', type: "type", description: "Type product search query" },
+        addToCart: { selector: '#add-to-cart-btn', type: "click", description: "Add product to cart" },
+      },
       enabled: true,
     },
   ];
@@ -1187,6 +1300,62 @@ async function seedSiteProfiles(): Promise<void> {
         { action: "extract" as const, description: "Extract all visible content" },
       ],
       extractionRules: { content: "body" },
+    },
+    {
+      name: "walmart-search",
+      description: "Search Walmart for a product and extract results",
+      siteProfileId: profileMap.get("walmart")!,
+      steps: [
+        { action: "navigate" as const, target: "https://www.walmart.com/search?q={query}", description: "Open Walmart search" },
+        { action: "wait" as const, waitMs: 4000, description: "Wait for search results to load" },
+        { action: "scroll" as const, target: '[data-testid="list-view"]', description: "Scroll results" },
+        { action: "extract" as const, description: "Extract product names, prices, and add-to-cart buttons" },
+      ],
+      extractionRules: {
+        products: '[data-testid="list-view"] [data-item-id]',
+        productName: '[data-automation-id="product-title"]',
+        productPrice: '[data-automation-id="product-price"]',
+      },
+    },
+    {
+      name: "walmart-add-to-cart",
+      description: "Add a specific Walmart product to cart",
+      siteProfileId: profileMap.get("walmart")!,
+      steps: [
+        { action: "click" as const, target: '[data-tl-id="ProductTileAddToCartBtn"]', description: "Click Add to Cart button" },
+        { action: "wait" as const, waitMs: 2000, description: "Wait for cart confirmation" },
+        { action: "extract" as const, description: "Confirm item was added" },
+      ],
+      extractionRules: { confirmation: '[data-testid="cart-confirmation"]' },
+      permissionLevel: "approval" as const,
+    },
+    {
+      name: "costco-search",
+      description: "Search Costco for a product and extract results",
+      siteProfileId: profileMap.get("costco")!,
+      steps: [
+        { action: "navigate" as const, target: "https://www.costco.com/CatalogSearch?dept=All&keyword={query}", description: "Open Costco search" },
+        { action: "wait" as const, waitMs: 4000, description: "Wait for search results to load" },
+        { action: "scroll" as const, target: ".product-list", description: "Scroll results" },
+        { action: "extract" as const, description: "Extract product names, prices" },
+      ],
+      extractionRules: {
+        products: ".product-list .product",
+        productName: ".description a",
+        productPrice: ".price",
+      },
+    },
+    {
+      name: "costco-add-to-cart",
+      description: "Add a specific Costco product to cart",
+      siteProfileId: profileMap.get("costco")!,
+      steps: [
+        { action: "click" as const, target: "#add-to-cart-btn", description: "Click Add to Cart button" },
+        { action: "wait" as const, waitMs: 2000, description: "Wait for cart confirmation" },
+        { action: "extract" as const, description: "Confirm item was added" },
+      ],
+      extractionRules: { confirmation: ".added-to-cart-confirm" },
+      permissionLevel: "approval" as const,
     },
   ];
 

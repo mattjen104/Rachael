@@ -16,6 +16,11 @@ import {
   type Transcript, type InsertTranscript, transcripts,
   type RadarSeenItem, type InsertRadarSeenItem, radarSeenItems,
   type RadarEngagement, type InsertRadarEngagement, radarEngagement,
+  type MealPlan, type InsertMealPlan, mealPlans,
+  type ShoppingList, type InsertShoppingList, shoppingLists,
+  type PantryItem, type InsertPantryItem, pantryItems,
+  type KiddoFoodLog, type InsertKiddoFoodLog, kiddoFoodLog,
+  type NightlyRecommendation, type InsertNightlyRecommendation, nightlyRecommendations,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql } from "drizzle-orm";
@@ -125,6 +130,35 @@ export interface IStorage {
   updateProgramConfig(id: number, config: Record<string, string>): Promise<Program | undefined>;
 
   searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>>;
+
+  getMealPlans(): Promise<MealPlan[]>;
+  getMealPlan(id: number): Promise<MealPlan | undefined>;
+  createMealPlan(p: InsertMealPlan): Promise<MealPlan>;
+  updateMealPlan(id: number, data: Partial<InsertMealPlan>): Promise<MealPlan | undefined>;
+  deleteMealPlan(id: number): Promise<void>;
+  getActiveMealPlan(): Promise<MealPlan | undefined>;
+
+  getShoppingLists(): Promise<ShoppingList[]>;
+  getShoppingList(id: number): Promise<ShoppingList | undefined>;
+  createShoppingList(s: InsertShoppingList): Promise<ShoppingList>;
+  updateShoppingList(id: number, data: Partial<InsertShoppingList>): Promise<ShoppingList | undefined>;
+  deleteShoppingList(id: number): Promise<void>;
+
+  getPantryItems(status?: string): Promise<PantryItem[]>;
+  getPantryItem(id: number): Promise<PantryItem | undefined>;
+  getPantryItemByName(name: string): Promise<PantryItem | undefined>;
+  createPantryItem(p: InsertPantryItem): Promise<PantryItem>;
+  updatePantryItem(id: number, data: Partial<InsertPantryItem>): Promise<PantryItem | undefined>;
+  deletePantryItem(id: number): Promise<void>;
+
+  getKiddoFoodLogs(): Promise<KiddoFoodLog[]>;
+  createKiddoFoodLog(l: InsertKiddoFoodLog): Promise<KiddoFoodLog>;
+
+  getNightlyRecommendations(limit?: number): Promise<NightlyRecommendation[]>;
+  getNightlyRecommendation(id: number): Promise<NightlyRecommendation | undefined>;
+  getNightlyRecommendationByDate(date: string): Promise<NightlyRecommendation | undefined>;
+  createNightlyRecommendation(r: InsertNightlyRecommendation): Promise<NightlyRecommendation>;
+  updateNightlyRecommendationStatus(id: number, status: string): Promise<NightlyRecommendation | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -564,6 +598,102 @@ export class DatabaseStorage implements IStorage {
 
   async updateProgramConfig(id: number, config: Record<string, string>): Promise<Program | undefined> {
     const [updated] = await db.update(programs).set({ config }).where(eq(programs.id, id)).returning();
+    return updated;
+  }
+
+  async getMealPlans(): Promise<MealPlan[]> {
+    return db.select().from(mealPlans).orderBy(desc(mealPlans.createdAt));
+  }
+  async getMealPlan(id: number): Promise<MealPlan | undefined> {
+    const [p] = await db.select().from(mealPlans).where(eq(mealPlans.id, id));
+    return p;
+  }
+  async createMealPlan(p: InsertMealPlan): Promise<MealPlan> {
+    const [created] = await db.insert(mealPlans).values(p).returning();
+    return created;
+  }
+  async updateMealPlan(id: number, data: Partial<InsertMealPlan>): Promise<MealPlan | undefined> {
+    const [updated] = await db.update(mealPlans).set(data).where(eq(mealPlans.id, id)).returning();
+    return updated;
+  }
+  async deleteMealPlan(id: number): Promise<void> {
+    await db.delete(mealPlans).where(eq(mealPlans.id, id));
+  }
+  async getActiveMealPlan(): Promise<MealPlan | undefined> {
+    const [p] = await db.select().from(mealPlans).where(eq(mealPlans.status, "active")).orderBy(desc(mealPlans.createdAt)).limit(1);
+    return p;
+  }
+
+  async getShoppingLists(): Promise<ShoppingList[]> {
+    return db.select().from(shoppingLists).orderBy(desc(shoppingLists.createdAt));
+  }
+  async getShoppingList(id: number): Promise<ShoppingList | undefined> {
+    const [s] = await db.select().from(shoppingLists).where(eq(shoppingLists.id, id));
+    return s;
+  }
+  async createShoppingList(s: InsertShoppingList): Promise<ShoppingList> {
+    const [created] = await db.insert(shoppingLists).values(s).returning();
+    return created;
+  }
+  async updateShoppingList(id: number, data: Partial<InsertShoppingList>): Promise<ShoppingList | undefined> {
+    const [updated] = await db.update(shoppingLists).set(data).where(eq(shoppingLists.id, id)).returning();
+    return updated;
+  }
+  async deleteShoppingList(id: number): Promise<void> {
+    await db.delete(shoppingLists).where(eq(shoppingLists.id, id));
+  }
+
+  async getPantryItems(status?: string): Promise<PantryItem[]> {
+    if (status) {
+      return db.select().from(pantryItems).where(eq(pantryItems.status, status)).orderBy(pantryItems.name);
+    }
+    return db.select().from(pantryItems).orderBy(pantryItems.name);
+  }
+  async getPantryItem(id: number): Promise<PantryItem | undefined> {
+    const [p] = await db.select().from(pantryItems).where(eq(pantryItems.id, id));
+    return p;
+  }
+  async getPantryItemByName(name: string): Promise<PantryItem | undefined> {
+    const [p] = await db.select().from(pantryItems).where(eq(pantryItems.name, name));
+    return p;
+  }
+  async createPantryItem(p: InsertPantryItem): Promise<PantryItem> {
+    const [created] = await db.insert(pantryItems).values(p).returning();
+    return created;
+  }
+  async updatePantryItem(id: number, data: Partial<InsertPantryItem>): Promise<PantryItem | undefined> {
+    const [updated] = await db.update(pantryItems).set(data).where(eq(pantryItems.id, id)).returning();
+    return updated;
+  }
+  async deletePantryItem(id: number): Promise<void> {
+    await db.delete(pantryItems).where(eq(pantryItems.id, id));
+  }
+
+  async getKiddoFoodLogs(): Promise<KiddoFoodLog[]> {
+    return db.select().from(kiddoFoodLog).orderBy(desc(kiddoFoodLog.logDate));
+  }
+  async createKiddoFoodLog(l: InsertKiddoFoodLog): Promise<KiddoFoodLog> {
+    const [created] = await db.insert(kiddoFoodLog).values(l).returning();
+    return created;
+  }
+
+  async getNightlyRecommendations(limit = 20): Promise<NightlyRecommendation[]> {
+    return db.select().from(nightlyRecommendations).orderBy(desc(nightlyRecommendations.createdAt)).limit(limit);
+  }
+  async getNightlyRecommendation(id: number): Promise<NightlyRecommendation | undefined> {
+    const [r] = await db.select().from(nightlyRecommendations).where(eq(nightlyRecommendations.id, id));
+    return r;
+  }
+  async getNightlyRecommendationByDate(date: string): Promise<NightlyRecommendation | undefined> {
+    const [r] = await db.select().from(nightlyRecommendations).where(eq(nightlyRecommendations.recDate, date)).orderBy(desc(nightlyRecommendations.createdAt)).limit(1);
+    return r;
+  }
+  async createNightlyRecommendation(r: InsertNightlyRecommendation): Promise<NightlyRecommendation> {
+    const [created] = await db.insert(nightlyRecommendations).values(r).returning();
+    return created;
+  }
+  async updateNightlyRecommendationStatus(id: number, status: string): Promise<NightlyRecommendation | undefined> {
+    const [updated] = await db.update(nightlyRecommendations).set({ status }).where(eq(nightlyRecommendations.id, id)).returning();
     return updated;
   }
 }

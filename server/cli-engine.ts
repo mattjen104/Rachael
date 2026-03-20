@@ -4,6 +4,7 @@ import { emitEvent } from "./event-bus";
 import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
 import { executeLLM, type LLMConfig, type LLMMessage, type LLMResponse } from "./llm-client";
 import { synthesizeBriefing, htmlToSpokenScript } from "./voice-synth";
+import { findBestProduct, getStoreProfile, computeHealthScore } from "../skills/grocery-toolkit";
 
 export interface CommandResult {
   stdout: string;
@@ -169,7 +170,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse", "meals"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -4661,6 +4662,515 @@ ${fullHtml}`;
       "Rate limited: 3-8s between requests, max 5 per session.",
     ].join(nl));
   });
+
+  registerCommand("meals", "Meal planning & grocery cart agent",
+    "meals [plan|add-recipe|list|cart|prefs|history|pantry|restock|kiddo|kiddo-log|tonight] ...",
+    async (args) => {
+      const nl = String.fromCharCode(10);
+      const sub = (args[0] || "").toLowerCase();
+
+      if (sub === "plan") {
+        const prefs = await storage.getAgentConfig("meals_dietary_prefs");
+        const dietaryPrefs = prefs ? JSON.parse(prefs.value) : {
+          householdSize: 3,
+          dietaryRestrictions: [],
+          allergies: [],
+          cuisinePreferences: ["American", "Italian", "Mexican", "Asian"],
+          appliances: ["Instant Pot", "sous vide", "rice cooker", "stove", "toaster oven", "crockpot"],
+          kiddoName: "Willa",
+          kiddoCurrentFavorites: ["Go-Gurt", "chicken nuggets", "Goldfish crackers"],
+        };
+
+        const kiddoLogs = await storage.getKiddoFoodLogs();
+        const accepted = kiddoLogs.filter(l => l.verdict === "accepted").map(l => l.itemName);
+        const rejected = kiddoLogs.filter(l => l.verdict === "rejected").map(l => l.itemName);
+
+        const pantry = await storage.getPantryItems("in_stock");
+        const pantryNames = pantry.map(p => p.name);
+
+        const today = new Date();
+        const weekStart = today.toISOString().split("T")[0];
+        const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+        const llmConfig = { defaultModel: "openrouter/anthropic/claude-sonnet-4", aliases: {}, routing: {} };
+
+        const messages: LLMMessage[] = [
+          {
+            role: "system",
+            content: `You are a meal planning assistant. Generate a weekly meal plan as valid JSON.
+The household has these appliances: ${dietaryPrefs.appliances.join(", ")}.
+Household size: ${dietaryPrefs.householdSize}.
+Dietary restrictions: ${dietaryPrefs.dietaryRestrictions.join(", ") || "none"}.
+Allergies: ${dietaryPrefs.allergies.join(", ") || "none"}.
+Cuisine preferences: ${dietaryPrefs.cuisinePreferences.join(", ")}.
+Items currently in pantry: ${pantryNames.join(", ") || "none"}.
+
+Picky eater profile for ${dietaryPrefs.kiddoName || "Willa"}:
+- Current favorites: ${(dietaryPrefs.kiddoCurrentFavorites || []).join(", ")}
+- Previously accepted new foods: ${accepted.join(", ") || "none yet"}
+- Previously rejected foods: ${rejected.join(", ") || "none yet"}
+Include one "bridge food" trial lunch for ${dietaryPrefs.kiddoName || "Willa"} during the week.
+
+Return ONLY a JSON array of 7 day objects with this structure:
+[{"day":"Monday","breakfast":{"name":"...","appliance":"stove","ingredients":["..."]},"lunch":{"name":"...","appliance":"none","ingredients":["..."]},"dinner":{"name":"...","appliance":"Instant Pot","ingredients":["..."]}}]
+One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining the bridge food strategy.`
+          },
+          { role: "user", content: `Generate a weekly meal plan starting ${weekStart} for the ${days.join(", ")} days.` }
+        ];
+
+        try {
+          const result = await executeLLM(messages, undefined, llmConfig, {});
+          let planDays: any[] = [];
+          const content = result.content || "";
+          const jsonMatch = content.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            planDays = JSON.parse(jsonMatch[0]);
+          }
+
+          if (planDays.length === 0) {
+            return fail("Failed to parse meal plan from LLM response");
+          }
+
+          const existingActive = await storage.getActiveMealPlan();
+          if (existingActive) {
+            await storage.updateMealPlan(existingActive.id, { status: "archived" });
+          }
+
+          const plan = await storage.createMealPlan({
+            weekStart,
+            days: planDays,
+            preferencesSnapshot: dietaryPrefs,
+            status: "active",
+          });
+
+          const lines = [`=== Weekly Meal Plan (${weekStart}) ===`, ""];
+          for (const d of planDays) {
+            lines.push(`📅 ${d.day}`);
+            if (d.breakfast) lines.push(`  🌅 Breakfast: ${d.breakfast.name} [${d.breakfast.appliance}]`);
+            if (d.lunch) {
+              const trial = d.lunch.isKiddoTrial ? ` ⭐ KIDDO TRIAL` : "";
+              lines.push(`  ☀️ Lunch: ${d.lunch.name} [${d.lunch.appliance || "none"}]${trial}`);
+              if (d.lunch.bridgeRationale) lines.push(`     Bridge: ${d.lunch.bridgeRationale}`);
+            }
+            if (d.dinner) lines.push(`  🌙 Dinner: ${d.dinner.name} [${d.dinner.appliance}]`);
+            lines.push("");
+          }
+          lines.push(`Plan ID: ${plan.id}`);
+          return ok(lines.join(nl));
+        } catch (err: any) {
+          return fail(`Failed to generate meal plan: ${err.message}`);
+        }
+      }
+
+      if (sub === "add-recipe") {
+        const recipeParts = args.slice(1).join(" ");
+        if (!recipeParts) return fail("Usage: meals add-recipe <day> <meal> <recipe name> [appliance]\nExample: meals add-recipe monday dinner Beef Stew Instant Pot");
+        const plan = await storage.getActiveMealPlan();
+        if (!plan) return fail("No active meal plan. Run 'meals plan' first.");
+
+        const tokens = recipeParts.split(/\s+/);
+        const day = tokens[0]?.toLowerCase();
+        const mealSlot = tokens[1]?.toLowerCase();
+        const validDays = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+        const validSlots = ["breakfast","lunch","dinner"];
+        if (!validDays.includes(day)) return fail(`Invalid day: ${day}. Use one of: ${validDays.join(", ")}`);
+        if (!validSlots.includes(mealSlot)) return fail(`Invalid meal slot: ${mealSlot}. Use one of: ${validSlots.join(", ")}`);
+
+        const remaining = tokens.slice(2).join(" ");
+        const applianceMatch = remaining.match(/\[(.+?)\]$/);
+        const appliance = applianceMatch ? applianceMatch[1] : "stove";
+        const recipeName = applianceMatch ? remaining.replace(/\[.+?\]$/, "").trim() : remaining;
+        if (!recipeName) return fail("Please provide a recipe name.");
+
+        const days = ((plan.plan as any)?.days || []) as any[];
+        let dayEntry = days.find((d: any) => d.day?.toLowerCase() === day);
+        if (!dayEntry) {
+          dayEntry = { day: day.charAt(0).toUpperCase() + day.slice(1) };
+          days.push(dayEntry);
+        }
+        dayEntry[mealSlot] = { name: recipeName, appliance, ingredients: [] };
+        await storage.updateMealPlan(plan.id, { days } as any);
+
+        return ok(`Added "${recipeName}" [${appliance}] to ${day} ${mealSlot} in plan ${plan.weekStart}.`);
+      }
+
+      if (sub === "list") {
+        const plan = await storage.getActiveMealPlan();
+        if (!plan) return ok("No active meal plan. Run 'meals plan' to generate one.");
+
+        const lines = [`=== Active Meal Plan (${plan.weekStart}) ===`, ""];
+        const days = (plan.days || []) as any[];
+        for (const d of days) {
+          lines.push(`📅 ${d.day}`);
+          if (d.breakfast) lines.push(`  🌅 Breakfast: ${d.breakfast.name} [${d.breakfast.appliance}]`);
+          if (d.lunch) {
+            const trial = d.lunch.isKiddoTrial ? ` ⭐ KIDDO TRIAL` : "";
+            lines.push(`  ☀️ Lunch: ${d.lunch.name} [${d.lunch.appliance || "none"}]${trial}`);
+          }
+          if (d.dinner) lines.push(`  🌙 Dinner: ${d.dinner.name} [${d.dinner.appliance}]`);
+          lines.push("");
+        }
+
+        const lists = await storage.getShoppingLists();
+        const activeList = lists.find(l => l.mealPlanId === plan.id);
+        if (activeList) {
+          lines.push("=== Shopping List ===");
+          const items = (activeList.items || []) as any[];
+          for (const item of items) {
+            const score = item.nutriScore ? ` [${item.nutriScore.toUpperCase()}]` : "";
+            lines.push(`  ${item.quantity} ${item.unit} ${item.name}${score}`);
+          }
+        } else {
+          lines.push("No shopping list generated yet. Ingredients from the plan:");
+          const allIngredients = new Set<string>();
+          for (const d of days) {
+            for (const meal of [d.breakfast, d.lunch, d.dinner, ...(d.snacks || [])]) {
+              if (meal?.ingredients) {
+                for (const ing of meal.ingredients) allIngredients.add(ing);
+              }
+            }
+          }
+          for (const ing of Array.from(allIngredients)) lines.push(`  - ${ing}`);
+        }
+
+        return ok(lines.join(nl));
+      }
+
+      if (sub === "cart") {
+        const store = (args[1] || "").toLowerCase();
+        if (!store || !["walmart", "costco"].includes(store)) {
+          return fail("Usage: meals cart walmart|costco");
+        }
+
+        const plan = await storage.getActiveMealPlan();
+        if (!plan) return fail("No active meal plan. Run 'meals plan' first.");
+
+        const days = (plan.days || []) as any[];
+        const allIngredients = new Map<string, { quantity: number; unit: string }>();
+        for (const d of days) {
+          for (const meal of [d.breakfast, d.lunch, d.dinner, ...(d.snacks || [])]) {
+            if (meal?.ingredients) {
+              for (const ing of meal.ingredients) {
+                const existing = allIngredients.get(ing);
+                if (existing) {
+                  existing.quantity += 1;
+                } else {
+                  allIngredients.set(ing, { quantity: 1, unit: "item" });
+                }
+              }
+            }
+          }
+        }
+
+        const pantry = await storage.getPantryItems("in_stock");
+        const pantryNames = new Set(pantry.map(p => p.name.toLowerCase()));
+
+        const shoppingItems: any[] = [];
+        const storeProfile = getStoreProfile(store);
+        for (const [name, info] of Array.from(allIngredients)) {
+          if (pantryNames.has(name.toLowerCase())) continue;
+          let healthScore: number | undefined;
+          let nutriScore: string | undefined;
+          try {
+            const scored = await findBestProduct(name, 1);
+            if (scored.length > 0) {
+              healthScore = scored[0].healthScore;
+              nutriScore = scored[0].product.nutriscore_grade || undefined;
+            }
+          } catch {}
+          shoppingItems.push({
+            name,
+            quantity: info.quantity,
+            unit: info.unit,
+            category: "grocery",
+            store,
+            healthScore,
+            nutriScore,
+          });
+        }
+
+        const list = await storage.createShoppingList({
+          mealPlanId: plan.id,
+          items: shoppingItems,
+          cartStatus: "ready",
+          store,
+        });
+
+        const lines = [
+          `=== ${store.charAt(0).toUpperCase() + store.slice(1)} Cart ===`,
+          storeProfile ? `Store: ${storeProfile.name} (${storeProfile.searchUrl})` : "",
+          `Shopping list created with ${shoppingItems.length} items (ID: ${list.id})`,
+          "",
+          "Items to cart:",
+        ].filter(Boolean);
+        for (const item of shoppingItems) {
+          const score = item.nutriScore ? ` [Nutri-Score: ${item.nutriScore.toUpperCase()}]` : "";
+          lines.push(`  ${item.quantity} ${item.unit} ${item.name}${score}`);
+        }
+        lines.push("");
+        lines.push(`Cart status: ${list.cartStatus}`);
+        lines.push("Browser automation will search each item on the store and add to cart via site profile.");
+
+        return ok(lines.join(nl));
+      }
+
+      if (sub === "prefs") {
+        const action = (args[1] || "view").toLowerCase();
+        const prefsConfig = await storage.getAgentConfig("meals_dietary_prefs");
+        let prefs = prefsConfig ? JSON.parse(prefsConfig.value) : {
+          householdSize: 3,
+          dietaryRestrictions: [],
+          allergies: [],
+          cuisinePreferences: ["American", "Italian", "Mexican", "Asian"],
+          appliances: ["Instant Pot", "sous vide", "rice cooker", "stove", "toaster oven", "crockpot"],
+          kiddoName: "Willa",
+          kiddoCurrentFavorites: ["Go-Gurt", "chicken nuggets", "Goldfish crackers"],
+        };
+
+        if (action === "set") {
+          const key = args[2];
+          const value = args.slice(3).join(" ");
+          if (!key || !value) return fail("Usage: meals prefs set <key> <value>");
+          if (key === "householdSize") {
+            prefs.householdSize = parseInt(value, 10);
+          } else if (key === "restrictions") {
+            prefs.dietaryRestrictions = value.split(",").map((s: string) => s.trim());
+          } else if (key === "allergies") {
+            prefs.allergies = value.split(",").map((s: string) => s.trim());
+          } else if (key === "cuisines") {
+            prefs.cuisinePreferences = value.split(",").map((s: string) => s.trim());
+          } else if (key === "appliances") {
+            prefs.appliances = value.split(",").map((s: string) => s.trim());
+          } else {
+            return fail(`Unknown preference key: ${key}. Valid: householdSize, restrictions, allergies, cuisines, appliances`);
+          }
+          await storage.setAgentConfig("meals_dietary_prefs", JSON.stringify(prefs), "meals");
+          return ok(`Updated ${key} = ${value}`);
+        }
+
+        const lines = [
+          "=== Dietary Preferences ===",
+          `  Household size: ${prefs.householdSize}`,
+          `  Restrictions: ${prefs.dietaryRestrictions.join(", ") || "none"}`,
+          `  Allergies: ${prefs.allergies.join(", ") || "none"}`,
+          `  Cuisines: ${prefs.cuisinePreferences.join(", ")}`,
+          `  Appliances: ${prefs.appliances.join(", ")}`,
+          "",
+          "=== Picky Eater Profile ===",
+          `  Name: ${prefs.kiddoName || "Willa"}`,
+          `  Current favorites: ${(prefs.kiddoCurrentFavorites || []).join(", ")}`,
+          "",
+          "Update: meals prefs set <key> <value>",
+          "Keys: householdSize, restrictions, allergies, cuisines, appliances",
+        ];
+        return ok(lines.join(nl));
+      }
+
+      if (sub === "history") {
+        const plans = await storage.getMealPlans();
+        if (plans.length === 0) return ok("No meal plan history.");
+        const lines = ["=== Meal Plan History ===", ""];
+        for (const p of plans.slice(0, 10)) {
+          const dayCount = Array.isArray(p.days) ? (p.days as any[]).length : 0;
+          lines.push(`  #${p.id}  ${p.weekStart}  [${p.status}]  ${dayCount} days`);
+        }
+        return ok(lines.join(nl));
+      }
+
+      if (sub === "pantry") {
+        const items = await storage.getPantryItems();
+        if (items.length === 0) return ok("Pantry is empty. Items are added when you cart/purchase groceries.");
+        const lines = ["=== Pantry Inventory ===", ""];
+        const now = new Date();
+        for (const item of items) {
+          const exp = item.estimatedExpiration ? new Date(item.estimatedExpiration) : null;
+          let expStr = "";
+          if (exp) {
+            const daysLeft = Math.round((exp.getTime() - now.getTime()) / 86400000);
+            if (daysLeft < 0) expStr = ` ⚠️ EXPIRED ${Math.abs(daysLeft)}d ago`;
+            else if (daysLeft <= 3) expStr = ` ⚠️ Expires in ${daysLeft}d`;
+            else expStr = ` (expires in ${daysLeft}d)`;
+          }
+          const consume = item.avgDaysToConsume ? ` | ~${item.avgDaysToConsume}d to consume` : "";
+          lines.push(`  ${item.name.padEnd(25)} ${item.quantity} ${item.unit}  [${item.category}]${expStr}${consume}  [${item.status}]`);
+        }
+        return ok(lines.join(nl));
+      }
+
+      if (sub === "restock") {
+        const items = await storage.getPantryItems("in_stock");
+        const now = new Date();
+        const needsRestock: Array<{ item: typeof items[0]; reason: string; priority: number }> = [];
+
+        for (const item of items) {
+          const exp = item.estimatedExpiration ? new Date(item.estimatedExpiration) : null;
+          if (exp) {
+            const daysLeft = Math.round((exp.getTime() - now.getTime()) / 86400000);
+            if (daysLeft <= 3) {
+              needsRestock.push({
+                item,
+                reason: daysLeft < 0 ? `Expired ${Math.abs(daysLeft)}d ago` : `Expires in ${daysLeft}d`,
+                priority: daysLeft < 0 ? 0 : 1,
+              });
+              continue;
+            }
+          }
+
+          if (item.avgDaysToConsume) {
+            const purchaseDate = new Date(item.purchaseDate);
+            const daysSincePurchase = Math.round((now.getTime() - purchaseDate.getTime()) / 86400000);
+            const estimatedRemaining = Math.max(0, item.avgDaysToConsume - daysSincePurchase);
+            if (estimatedRemaining <= 2) {
+              needsRestock.push({
+                item,
+                reason: `Estimated ${estimatedRemaining}d of supply left (avg ${item.avgDaysToConsume}d to consume)`,
+                priority: 2,
+              });
+            }
+          }
+        }
+
+        needsRestock.sort((a, b) => a.priority - b.priority);
+
+        if (needsRestock.length === 0) {
+          return ok("All pantry items look good. Nothing needs restocking right now.");
+        }
+
+        const lines = ["=== Restock Recommendations ===", ""];
+        for (const { item, reason } of needsRestock) {
+          lines.push(`  🔄 ${item.name} - ${reason}`);
+        }
+        lines.push("", `${needsRestock.length} item(s) need restocking.`);
+        lines.push("Run 'meals cart walmart' or 'meals cart costco' to add to cart.");
+        return ok(lines.join(nl));
+      }
+
+      if (sub === "kiddo") {
+        const prefsConfig = await storage.getAgentConfig("meals_dietary_prefs");
+        const prefs = prefsConfig ? JSON.parse(prefsConfig.value) : { kiddoName: "Willa", kiddoCurrentFavorites: ["Go-Gurt", "chicken nuggets", "Goldfish crackers"] };
+        const logs = await storage.getKiddoFoodLogs();
+        const accepted = logs.filter(l => l.verdict === "accepted");
+        const rejected = logs.filter(l => l.verdict === "rejected");
+
+        const totalTrials = accepted.length + rejected.length;
+        const acceptanceRate = totalTrials > 0 ? Math.round((accepted.length / totalTrials) * 100) : 0;
+
+        const recentRejections = rejected.filter(r => {
+          const d = new Date(r.logDate);
+          return (new Date().getTime() - d.getTime()) < 14 * 86400000;
+        });
+
+        let strategy = "normal";
+        if (recentRejections.length >= 3) strategy = "cautious (many recent rejections)";
+        else if (accepted.length > rejected.length * 2) strategy = "adventurous (good acceptance rate)";
+
+        const lines = [
+          `=== Picky Eater Profile: ${prefs.kiddoName || "Willa"} ===`,
+          "",
+          `Current favorites: ${(prefs.kiddoCurrentFavorites || []).join(", ")}`,
+          "",
+          `Accepted foods (${accepted.length}):`,
+        ];
+        for (const a of accepted.slice(0, 10)) {
+          lines.push(`  ✅ ${a.itemName}${a.similaritySource ? ` (bridge from: ${a.similaritySource})` : ""}`);
+        }
+        lines.push("", `Rejected foods (${rejected.length}):`);
+        for (const r of rejected.slice(0, 10)) {
+          lines.push(`  ❌ ${r.itemName}${r.similaritySource ? ` (bridge from: ${r.similaritySource})` : ""}`);
+        }
+        lines.push("", `Acceptance rate: ${acceptanceRate}% (${accepted.length}/${totalTrials})`);
+        lines.push(`Strategy: ${strategy}`);
+        lines.push("", "Log new trials: meals kiddo-log <item> accepted|rejected");
+        return ok(lines.join(nl));
+      }
+
+      if (sub === "kiddo-log") {
+        const itemParts: string[] = [];
+        let verdict = "";
+        for (let i = 1; i < args.length; i++) {
+          if (args[i] === "accepted" || args[i] === "rejected") {
+            verdict = args[i];
+            break;
+          }
+          itemParts.push(args[i]);
+        }
+        const itemName = itemParts.join(" ");
+        if (!itemName || !verdict) {
+          return fail("Usage: meals kiddo-log <item name> accepted|rejected");
+        }
+
+        const log = await storage.createKiddoFoodLog({
+          itemName,
+          verdict: verdict as "accepted" | "rejected",
+        });
+
+        const emoji = verdict === "accepted" ? "✅" : "❌";
+        return ok(`${emoji} Logged: ${itemName} → ${verdict} (ID: ${log.id})`);
+      }
+
+      if (sub === "tonight") {
+        const action = (args[1] || "").toLowerCase();
+        const today = new Date().toISOString().split("T")[0];
+
+        if (action === "accept" || action === "skip") {
+          const todayRec = await storage.getNightlyRecommendationByDate(today);
+          if (!todayRec) return fail("No recommendation for today to " + action);
+          if (todayRec.status !== "pending") return fail(`Today's recommendation is already ${todayRec.status}.`);
+          await storage.updateNightlyRecommendationStatus(todayRec.id, action === "accept" ? "accepted" : "skipped");
+          return ok(`Recommendation ${action}ed. (ID: ${todayRec.id})`);
+        }
+
+        const rec = await storage.getNightlyRecommendationByDate(today);
+        if (!rec) {
+          return ok("No recommendation for tonight yet. The nightly program runs automatically.");
+        }
+
+        const lines = [`=== Tonight's Recommendation (${rec.recDate}) ===`, ""];
+
+        if (rec.recipeRecommendation) {
+          const r = rec.recipeRecommendation as any;
+          lines.push("🍽️ Household Recipe:");
+          lines.push(`  ${r.name} [${r.appliance}]`);
+          if (r.ingredients) lines.push(`  Ingredients: ${r.ingredients.join(", ")}`);
+          if (r.instructions) lines.push(`  ${r.instructions.slice(0, 200)}`);
+          if (r.nutriScoreAvg) lines.push(`  Avg Nutri-Score: ${r.nutriScoreAvg}`);
+          lines.push("");
+        }
+
+        if (rec.kiddoLunchSuggestion) {
+          const k = rec.kiddoLunchSuggestion as any;
+          lines.push("🧒 Kiddo Lunch Suggestion:");
+          lines.push(`  ${k.item}`);
+          if (k.bridgeRationale) lines.push(`  Bridge: ${k.bridgeRationale}`);
+          if (k.similarTo) lines.push(`  Similar to: ${k.similarTo}`);
+          lines.push("");
+        }
+
+        lines.push(`Status: ${rec.status}`);
+        if (rec.status === "pending") {
+          lines.push("", "Accept: meals tonight accept");
+          lines.push("Skip: meals tonight skip");
+        }
+        return ok(lines.join(nl));
+      }
+
+      return ok([
+        "Meal Planning & Grocery Cart Agent",
+        "===================================",
+        "  meals plan                          - Generate weekly meal plan (appliance-tagged)",
+        "  meals add-recipe <name>             - Add a user recipe to the plan",
+        "  meals list                          - Show current meal plan & shopping list",
+        "  meals cart walmart|costco            - Build shopping list & add to store cart",
+        "  meals prefs [set <key> <value>]      - View/update dietary preferences",
+        "  meals history                       - Browse past meal plans",
+        "  meals pantry                        - View pantry inventory with expiration dates",
+        "  meals restock                       - Show items low or expiring soon",
+        "  meals kiddo                         - Willa's picky eater profile",
+        "  meals kiddo-log <item> accepted|rejected - Log food trial result",
+        "  meals tonight                       - Show nightly recommendation",
+        "  meals tonight accept|skip           - Accept or skip recommendation",
+      ].join(nl));
+    });
 }
 
 registerBuiltinCommands();

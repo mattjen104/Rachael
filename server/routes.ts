@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema } from "@shared/schema";
+import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema, insertMealPlanSchema, insertShoppingListSchema, insertPantryItemSchema, insertKiddoFoodLogSchema, insertNightlyRecommendationSchema } from "@shared/schema";
 import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
@@ -2114,6 +2114,155 @@ export async function registerRoutes(
   app.post("/api/notifications/read-all", (_req, res) => {
     notifications.forEach(n => n.read = true);
     res.json({ ok: true });
+  });
+
+  app.get("/api/meal-plans", async (_req, res) => {
+    const plans = await storage.getMealPlans();
+    res.json(plans);
+  });
+
+  app.get("/api/meal-plans/active", async (_req, res) => {
+    const plan = await storage.getActiveMealPlan();
+    if (!plan) return res.status(404).json({ message: "No active meal plan" });
+    res.json(plan);
+  });
+
+  app.get("/api/meal-plans/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const plan = await storage.getMealPlan(id);
+    if (!plan) return res.status(404).json({ message: "Meal plan not found" });
+    res.json(plan);
+  });
+
+  app.post("/api/meal-plans", async (req, res) => {
+    const parsed = insertMealPlanSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const plan = await storage.createMealPlan(parsed.data);
+    res.status(201).json(plan);
+  });
+
+  app.patch("/api/meal-plans/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const parsed = insertMealPlanSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const updated = await storage.updateMealPlan(id, parsed.data);
+    if (!updated) return res.status(404).json({ message: "Meal plan not found" });
+    res.json(updated);
+  });
+
+  app.delete("/api/meal-plans/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deleteMealPlan(id);
+    res.status(204).send();
+  });
+
+  app.get("/api/shopping-lists", async (_req, res) => {
+    const lists = await storage.getShoppingLists();
+    res.json(lists);
+  });
+
+  app.get("/api/shopping-lists/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const list = await storage.getShoppingList(id);
+    if (!list) return res.status(404).json({ message: "Shopping list not found" });
+    res.json(list);
+  });
+
+  app.post("/api/shopping-lists", async (req, res) => {
+    const parsed = insertShoppingListSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const list = await storage.createShoppingList(parsed.data);
+    res.status(201).json(list);
+  });
+
+  app.patch("/api/shopping-lists/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const parsed = insertShoppingListSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const updated = await storage.updateShoppingList(id, parsed.data);
+    if (!updated) return res.status(404).json({ message: "Shopping list not found" });
+    res.json(updated);
+  });
+
+  app.get("/api/pantry", async (req, res) => {
+    const status = req.query.status as string | undefined;
+    const items = await storage.getPantryItems(status);
+    res.json(items);
+  });
+
+  app.get("/api/pantry/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const item = await storage.getPantryItem(id);
+    if (!item) return res.status(404).json({ message: "Pantry item not found" });
+    res.json(item);
+  });
+
+  app.post("/api/pantry", async (req, res) => {
+    const parsed = insertPantryItemSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const item = await storage.createPantryItem(parsed.data);
+    res.status(201).json(item);
+  });
+
+  app.patch("/api/pantry/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const parsed = insertPantryItemSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const updated = await storage.updatePantryItem(id, parsed.data);
+    if (!updated) return res.status(404).json({ message: "Pantry item not found" });
+    res.json(updated);
+  });
+
+  app.delete("/api/pantry/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deletePantryItem(id);
+    res.status(204).send();
+  });
+
+  app.get("/api/kiddo-food-log", async (_req, res) => {
+    const logs = await storage.getKiddoFoodLogs();
+    res.json(logs);
+  });
+
+  app.post("/api/kiddo-food-log", async (req, res) => {
+    const parsed = insertKiddoFoodLogSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const log = await storage.createKiddoFoodLog(parsed.data);
+    res.status(201).json(log);
+  });
+
+  app.get("/api/nightly-recommendations", async (req, res) => {
+    const limit = parseInt(req.query.limit as string || "20", 10);
+    const recs = await storage.getNightlyRecommendations(limit);
+    res.json(recs);
+  });
+
+  app.get("/api/nightly-recommendations/tonight", async (_req, res) => {
+    const today = new Date().toISOString().split("T")[0];
+    const rec = await storage.getNightlyRecommendationByDate(today);
+    if (!rec) return res.status(404).json({ message: "No recommendation for tonight" });
+    res.json(rec);
+  });
+
+  app.post("/api/nightly-recommendations", async (req, res) => {
+    const parsed = insertNightlyRecommendationSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const rec = await storage.createNightlyRecommendation(parsed.data);
+    res.status(201).json(rec);
+  });
+
+  app.post("/api/nightly-recommendations/:id/accept", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updated = await storage.updateNightlyRecommendationStatus(id, "accepted");
+    if (!updated) return res.status(404).json({ message: "Recommendation not found" });
+    res.json(updated);
+  });
+
+  app.post("/api/nightly-recommendations/:id/skip", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updated = await storage.updateNightlyRecommendationStatus(id, "skipped");
+    if (!updated) return res.status(404).json({ message: "Recommendation not found" });
+    res.json(updated);
   });
 
   return httpServer;

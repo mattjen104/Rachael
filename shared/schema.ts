@@ -411,3 +411,144 @@ export const insertRadarEngagementSchema = z.object({
 });
 export type InsertRadarEngagement = z.infer<typeof insertRadarEngagementSchema>;
 export type RadarEngagement = typeof radarEngagement.$inferSelect;
+
+export interface MealEntry {
+  name: string;
+  appliance: string;
+  ingredients: string[];
+  instructions?: string;
+  isKiddoTrial?: boolean;
+  bridgeRationale?: string;
+}
+
+export interface DayPlan {
+  day: string;
+  breakfast?: MealEntry;
+  lunch?: MealEntry;
+  dinner?: MealEntry;
+  snacks?: MealEntry[];
+}
+
+export const mealPlans = pgTable("meal_plans", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  weekStart: text("week_start").notNull(),
+  days: jsonb("days").$type<DayPlan[]>().notNull().default([]),
+  preferencesSnapshot: jsonb("preferences_snapshot").$type<Record<string, any>>().default({}),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertMealPlanSchema = z.object({
+  weekStart: z.string(),
+  days: z.array(z.any()).default([]),
+  preferencesSnapshot: z.record(z.string(), z.any()).default({}),
+  status: z.string().default("active"),
+});
+export type InsertMealPlan = z.infer<typeof insertMealPlanSchema>;
+export type MealPlan = typeof mealPlans.$inferSelect;
+
+export interface ShoppingItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  category: string;
+  matchedProduct?: string;
+  nutriScore?: string;
+  novaGroup?: number;
+  price?: number;
+  store?: string;
+}
+
+export const shoppingLists = pgTable("shopping_lists", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  mealPlanId: integer("meal_plan_id"),
+  items: jsonb("items").$type<ShoppingItem[]>().notNull().default([]),
+  cartStatus: text("cart_status").notNull().default("pending"),
+  store: text("store"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertShoppingListSchema = z.object({
+  mealPlanId: z.number().nullable().optional(),
+  items: z.array(z.any()).default([]),
+  cartStatus: z.string().default("pending"),
+  store: z.string().nullable().optional(),
+});
+export type InsertShoppingList = z.infer<typeof insertShoppingListSchema>;
+export type ShoppingList = typeof shoppingLists.$inferSelect;
+
+export const pantryItems = pgTable("pantry_items", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  category: text("category").notNull().default("other"),
+  quantity: text("quantity").notNull().default("1"),
+  unit: text("unit").notNull().default("item"),
+  purchaseDate: timestamp("purchase_date").notNull().defaultNow(),
+  estimatedExpiration: timestamp("estimated_expiration"),
+  consumptionHistory: jsonb("consumption_history").$type<Array<{ date: string; quantity: number }>>().default([]),
+  avgDaysToConsume: integer("avg_days_to_consume"),
+  status: text("status").notNull().default("in_stock"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPantryItemSchema = z.object({
+  name: z.string(),
+  category: z.string().default("other"),
+  quantity: z.string().default("1"),
+  unit: z.string().default("item"),
+  purchaseDate: z.date().optional(),
+  estimatedExpiration: z.date().nullable().optional(),
+  consumptionHistory: z.array(z.any()).default([]),
+  avgDaysToConsume: z.number().nullable().optional(),
+  status: z.string().default("in_stock"),
+});
+export type InsertPantryItem = z.infer<typeof insertPantryItemSchema>;
+export type PantryItem = typeof pantryItems.$inferSelect;
+
+export const kiddoFoodLog = pgTable("kiddo_food_log", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  itemName: text("item_name").notNull(),
+  verdict: text("verdict").notNull(),
+  similaritySource: text("similarity_source"),
+  notes: text("notes"),
+  logDate: timestamp("log_date").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertKiddoFoodLogSchema = z.object({
+  itemName: z.string(),
+  verdict: z.enum(["accepted", "rejected"]),
+  similaritySource: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  logDate: z.date().optional(),
+});
+export type InsertKiddoFoodLog = z.infer<typeof insertKiddoFoodLogSchema>;
+export type KiddoFoodLog = typeof kiddoFoodLog.$inferSelect;
+
+export const nightlyRecommendations = pgTable("nightly_recommendations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  recDate: text("rec_date").notNull(),
+  recipeRecommendation: jsonb("recipe_recommendation").$type<{
+    name: string;
+    appliance: string;
+    ingredients: string[];
+    instructions: string;
+    nutriScoreAvg?: string;
+  }>(),
+  kiddoLunchSuggestion: jsonb("kiddo_lunch_suggestion").$type<{
+    item: string;
+    bridgeRationale: string;
+    similarTo: string;
+  }>(),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertNightlyRecommendationSchema = z.object({
+  recDate: z.string(),
+  recipeRecommendation: z.any().nullable().optional(),
+  kiddoLunchSuggestion: z.any().nullable().optional(),
+  status: z.string().default("pending"),
+});
+export type InsertNightlyRecommendation = z.infer<typeof insertNightlyRecommendationSchema>;
+export type NightlyRecommendation = typeof nightlyRecommendations.$inferSelect;
