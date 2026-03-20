@@ -159,6 +159,17 @@ const tables = [
     url_image TEXT,
     url_domain TEXT
   )`,
+  `CREATE TABLE IF NOT EXISTS agent_memories (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    program_name TEXT,
+    content TEXT NOT NULL,
+    memory_type TEXT NOT NULL DEFAULT 'fact',
+    tags TEXT[] NOT NULL DEFAULT '{}',
+    relevance_score INTEGER NOT NULL DEFAULT 100,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    last_accessed TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
 ];
 
 const extraTables = [
@@ -185,6 +196,13 @@ const alterations = [
   `ALTER TABLE navigation_paths ADD COLUMN IF NOT EXISTS permission_level TEXT NOT NULL DEFAULT 'autonomous'`,
 ];
 
+const indexes = [
+  `CREATE INDEX IF NOT EXISTS idx_agent_memories_program ON agent_memories(program_name)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_memories_type ON agent_memories(memory_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_memories_relevance ON agent_memories(relevance_score DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_memories_last_accessed ON agent_memories(last_accessed DESC)`,
+];
+
 async function pushSchema() {
   for (const ddl of tables) {
     await db.execute(sql.raw(ddl));
@@ -194,6 +212,9 @@ async function pushSchema() {
   }
   for (const alt of alterations) {
     try { await db.execute(sql.raw(alt)); } catch {}
+  }
+  for (const idx of indexes) {
+    try { await db.execute(sql.raw(idx)); } catch {}
   }
   console.log(`[push-schema] Ensured ${tables.length + extraTables.length} tables exist`);
   await pool.end();

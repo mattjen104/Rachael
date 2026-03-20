@@ -21,9 +21,10 @@ import {
   type PantryItem, type InsertPantryItem, pantryItems,
   type KiddoFoodLog, type InsertKiddoFoodLog, kiddoFoodLog,
   type NightlyRecommendation, type InsertNightlyRecommendation, nightlyRecommendations,
+  type AgentMemory, type InsertAgentMemory, agentMemories,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, or, lte, gte, ilike, sql } from "drizzle-orm";
+import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
 
 export interface IStorage {
   getPrograms(): Promise<Program[]>;
@@ -159,6 +160,15 @@ export interface IStorage {
   getNightlyRecommendationByDate(date: string): Promise<NightlyRecommendation | undefined>;
   createNightlyRecommendation(r: InsertNightlyRecommendation): Promise<NightlyRecommendation>;
   updateNightlyRecommendationStatus(id: number, status: string): Promise<NightlyRecommendation | undefined>;
+
+  createMemory(m: InsertAgentMemory): Promise<AgentMemory>;
+  getMemoriesForProgram(programName: string | null, options?: { tags?: string[]; type?: string; limit?: number; minRelevance?: number }): Promise<AgentMemory[]>;
+  updateMemoryRelevance(id: number, relevanceScore: number): Promise<void>;
+  updateMemoryAccess(id: number): Promise<void>;
+  deleteMemory(id: number): Promise<void>;
+  searchMemories(query: string, limit?: number, programName?: string): Promise<AgentMemory[]>;
+  getAllMemories(limit?: number): Promise<AgentMemory[]>;
+  consolidateOldMemories(beforeDate: Date, decayAmount?: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -695,6 +705,74 @@ export class DatabaseStorage implements IStorage {
   async updateNightlyRecommendationStatus(id: number, status: string): Promise<NightlyRecommendation | undefined> {
     const [updated] = await db.update(nightlyRecommendations).set({ status }).where(eq(nightlyRecommendations.id, id)).returning();
     return updated;
+  }
+  async createMemory(m: InsertAgentMemory): Promise<AgentMemory> {
+    const [created] = await db.insert(agentMemories).values(m).returning();
+    return created;
+  }
+
+  async getMemoriesForProgram(programName: string | null, options: { tags?: string[]; type?: string; limit?: number; minRelevance?: number } = {}): Promise<AgentMemory[]> {
+    const conditions = [];
+    if (programName) {
+      conditions.push(or(eq(agentMemories.programName, programName), sql`${agentMemories.programName} IS NULL`));
+    } else {
+      conditions.push(sql`${agentMemories.programName} IS NULL`);
+    }
+    if (options.type) {
+      conditions.push(eq(agentMemories.memoryType, options.type));
+    }
+    if (options.minRelevance !== undefined) {
+      conditions.push(gte(agentMemories.relevanceScore, options.minRelevance));
+    }
+    if (options.tags && options.tags.length > 0) {
+      conditions.push(sql`${agentMemories.tags} && ${options.tags}`);
+    }
+    const limit = options.limit || 50;
+    return db.select().from(agentMemories)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(agentMemories.relevanceScore), desc(agentMemories.lastAccessed))
+      .limit(limit);
+  }
+
+  async updateMemoryRelevance(id: number, relevanceScore: number): Promise<void> {
+    await db.update(agentMemories).set({ relevanceScore }).where(eq(agentMemories.id, id));
+  }
+
+  async updateMemoryAccess(id: number): Promise<void> {
+    await db.update(agentMemories).set({
+      accessCount: sql`${agentMemories.accessCount} + 1`,
+      lastAccessed: new Date(),
+    }).where(eq(agentMemories.id, id));
+  }
+
+  async deleteMemory(id: number): Promise<void> {
+    await db.delete(agentMemories).where(eq(agentMemories.id, id));
+  }
+
+  async searchMemories(query: string, limit = 20, programName?: string): Promise<AgentMemory[]> {
+    const q = `%${query}%`;
+    const contentMatch = or(ilike(agentMemories.content, q), sql`EXISTS (SELECT 1 FROM unnest(${agentMemories.tags}) AS t WHERE t ILIKE ${q})`);
+    const scopeFilter = programName
+      ? and(contentMatch, or(eq(agentMemories.programName, programName), sql`${agentMemories.programName} IS NULL`))
+      : contentMatch;
+    return db.select().from(agentMemories)
+      .where(scopeFilter)
+      .orderBy(desc(agentMemories.relevanceScore), desc(agentMemories.lastAccessed))
+      .limit(limit);
+  }
+
+  async getAllMemories(limit = 100): Promise<AgentMemory[]> {
+    return db.select().from(agentMemories)
+      .orderBy(desc(agentMemories.createdAt))
+      .limit(limit);
+  }
+
+  async consolidateOldMemories(beforeDate: Date, decayAmount = 10): Promise<number> {
+    const result = await db.update(agentMemories)
+      .set({ relevanceScore: sql`GREATEST(0, ${agentMemories.relevanceScore} - ${decayAmount})` })
+      .where(and(lte(agentMemories.lastAccessed, beforeDate), gte(agentMemories.relevanceScore, 1)))
+      .returning();
+    return result.length;
   }
 }
 

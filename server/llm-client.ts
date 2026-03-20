@@ -213,6 +213,7 @@ export interface MemoryContext {
   userProfile: string;
   persistentContext: string;
   sessionLog: string;
+  recallResults?: string;
 }
 
 export function buildProgramPrompt(
@@ -232,7 +233,10 @@ export function buildProgramPrompt(
       systemContent += "\n\n---\n\n## User Profile\n\n" + memory.userProfile;
     }
     if (memory.persistentContext) {
-      systemContent += "\n\n---\n\n## Persistent Context\n\nFacts you've learned:\n" + memory.persistentContext;
+      systemContent += "\n\n---\n\n## Memory\n\nRelevant memories (facts, outcomes, observations):\n" + memory.persistentContext;
+    }
+    if (memory.recallResults) {
+      systemContent += "\n\n---\n\n## Recalled Memories\n\n" + memory.recallResults;
     }
   }
 
@@ -240,7 +244,7 @@ export function buildProgramPrompt(
     systemContent += "\n\n---\n\n## Relevant Skills\n\n" + skillBodies.join("\n\n---\n\n");
   }
 
-  systemContent += `\n\n---\n\nYou are executing an autonomous program. Follow the instructions precisely. If your work produces reusable code that could run without AI, include it in a \`\`\`typescript code block with a \`// HARDENABLE\` comment on the first line. If you want to propose a change to your own configuration, prefix the suggestion with \`PROPOSE:\` on its own line. If you learn a durable fact worth remembering across sessions, prefix it with \`REMEMBER:\` on its own line.`;
+  systemContent += `\n\n---\n\nYou are executing an autonomous program. Follow the instructions precisely. If your work produces reusable code that could run without AI, include it in a \`\`\`typescript code block with a \`// HARDENABLE\` comment on the first line. If you want to propose a change to your own configuration, prefix the suggestion with \`PROPOSE:\` on its own line. If you learn a durable fact worth remembering across sessions, prefix it with \`REMEMBER:\` on its own line. If you need to look up something you might have learned before, prefix with \`RECALL:\` followed by the topic on its own line.`;
 
   messages.push({ role: "system", content: systemContent });
 

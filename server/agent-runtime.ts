@@ -43,6 +43,7 @@ const TICK_INTERVAL_MS = 60_000;
 const programRuns = new Map<string, Array<{ model: string; tokens: number; timestamp: number }>>();
 const proposalCounts = new Map<string, number>();
 const MAX_PROPOSALS_PER_ITERATION = 2;
+const pendingRecallResults = new Map<string, string>();
 
 function shortModelName(model: string): string {
   const last = model.split("/").pop() || model;
@@ -76,9 +77,87 @@ async function getSoulPrompt(): Promise<string> {
   return soul?.value || "You are a helpful autonomous agent.";
 }
 
-async function getMemoryContext(): Promise<{ persistentContext: string }> {
-  const mem = await storage.getAgentConfig("persistent_context");
-  return { persistentContext: mem?.value || "" };
+let MEMORY_TOKEN_BUDGET = 2000;
+const APPROX_CHARS_PER_TOKEN = 4;
+
+async function loadMemoryBudget(): Promise<void> {
+  try {
+    const budgetConfig = await storage.getAgentConfig("memory_token_budget");
+    if (budgetConfig?.value) {
+      const parsed = parseInt(budgetConfig.value, 10);
+      if (!isNaN(parsed) && parsed > 0) MEMORY_TOKEN_BUDGET = parsed;
+    }
+  } catch {}
+}
+
+function extractTags(content: string): string[] {
+  const tags: string[] = [];
+  const words = content.toLowerCase().split(/\s+/);
+  const stopWords = new Set(["the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can", "need", "dare", "ought", "used", "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "through", "during", "before", "after", "above", "below", "between", "out", "off", "over", "under", "again", "further", "then", "once", "and", "but", "or", "nor", "not", "so", "yet", "both", "either", "neither", "each", "every", "all", "any", "few", "more", "most", "other", "some", "such", "no", "only", "own", "same", "than", "too", "very", "just", "because", "if", "when", "where", "how", "what", "which", "who", "whom", "this", "that", "these", "those", "i", "me", "my", "we", "our", "you", "your", "he", "him", "his", "she", "her", "it", "its", "they", "them", "their"]);
+  const seen = new Set<string>();
+  for (const w of words) {
+    const clean = w.replace(/[^a-z0-9-]/g, "");
+    if (clean.length > 2 && !stopWords.has(clean) && !seen.has(clean)) {
+      seen.add(clean);
+      tags.push(clean);
+    }
+    if (tags.length >= 5) break;
+  }
+  return tags;
+}
+
+function scoreMemory(m: { relevanceScore: number; accessCount: number; lastAccessed: Date; createdAt: Date; tags: string[] }, programName?: string): number {
+  const now = Date.now();
+  const ageMs = now - m.createdAt.getTime();
+  const lastAccessMs = now - m.lastAccessed.getTime();
+  const ageDays = ageMs / 86400000;
+  const lastAccessDays = lastAccessMs / 86400000;
+
+  const relevanceWeight = m.relevanceScore / 100;
+  const recencyWeight = 1 / (1 + lastAccessDays * 0.1);
+  const accessWeight = Math.min(1, 0.5 + (m.accessCount * 0.05));
+  const tagOverlap = programName && m.tags.includes(programName) ? 1.2 : 1.0;
+
+  return relevanceWeight * recencyWeight * accessWeight * tagOverlap;
+}
+
+async function getMemoryContext(programName?: string): Promise<{ persistentContext: string; memories: Array<{ id: number; content: string }> }> {
+  await loadMemoryBudget();
+  try {
+    const memories = await storage.getMemoriesForProgram(programName || null, {
+      limit: 50,
+      minRelevance: 5,
+    });
+
+    if (memories.length === 0) {
+      const mem = await storage.getAgentConfig("persistent_context");
+      return { persistentContext: mem?.value || "", memories: [] };
+    }
+
+    const scored = memories.map(m => ({
+      memory: m,
+      score: scoreMemory(m, programName),
+    })).sort((a, b) => b.score - a.score);
+
+    const charBudget = MEMORY_TOKEN_BUDGET * APPROX_CHARS_PER_TOKEN;
+    let totalChars = 0;
+    const selected: Array<{ id: number; content: string }> = [];
+    const lines: string[] = [];
+
+    for (const { memory: m } of scored) {
+      const line = `[${m.memoryType}] ${m.content}`;
+      if (totalChars + line.length > charBudget) break;
+      totalChars += line.length;
+      lines.push(line);
+      selected.push({ id: m.id, content: m.content });
+      storage.updateMemoryAccess(m.id).catch(() => {});
+    }
+
+    return { persistentContext: lines.join("\n"), memories: selected };
+  } catch {
+    const mem = await storage.getAgentConfig("persistent_context");
+    return { persistentContext: mem?.value || "", memories: [] };
+  }
 }
 
 async function executeLLMWithCascade(
@@ -416,7 +495,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
 
     const llmConfig = await getLLMConfig();
     const soul = await getSoulPrompt();
-    const memory = await getMemoryContext();
+    const memory = await getMemoryContext(programName);
 
     let output = "";
     let modelUsed = "inline";
@@ -468,13 +547,18 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         .filter(s => prog.instructions.toLowerCase().includes(s.name.toLowerCase()))
         .map(s => `### Skill: ${s.name}\n${s.content}`);
 
+      const recallResults = pendingRecallResults.get(programName);
+      if (recallResults) {
+        pendingRecallResults.delete(programName);
+      }
+
       const messages = buildProgramPrompt(
         soul,
         skillBodies,
         prog.instructions,
         ps.iteration,
         "",
-        { userProfile: "", persistentContext: memory.persistentContext, sessionLog: "" }
+        { userProfile: "", persistentContext: memory.persistentContext, sessionLog: "", recallResults: recallResults || undefined }
       );
 
       const taskType = detectTaskType(prog.instructions, prog.config?.TASK_TYPE as string);
@@ -560,9 +644,39 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       if (output.includes("REMEMBER:")) {
         const rememberMatch = output.match(/REMEMBER:\s*([\s\S]*?)(?:\n\n|$)/);
         if (rememberMatch) {
-          const existing = await storage.getAgentConfig("persistent_context");
-          const newContext = (existing?.value || "") + "\n" + rememberMatch[1].trim();
-          await storage.setAgentConfig("persistent_context", newContext, "memory");
+          const content = rememberMatch[1].trim();
+          try {
+            const mem = await storage.createMemory({
+              programName: programName,
+              content,
+              memoryType: "fact",
+              tags: extractTags(content),
+              relevanceScore: 100,
+            });
+            emitEvent("memory", `Memory created from REMEMBER: "${content.slice(0, 80)}"`, "info", { program: programName, metadata: { memoryId: mem.id } });
+          } catch (e) {
+            console.error("[agent-runtime] Failed to create memory:", e);
+          }
+        }
+      }
+
+      if (output.includes("RECALL:")) {
+        const recallMatch = output.match(/RECALL:\s*([\s\S]*?)(?:\n\n|$)/);
+        if (recallMatch) {
+          const topic = recallMatch[1].trim();
+          try {
+            const recalled = await storage.searchMemories(topic, 5, programName);
+            if (recalled.length > 0) {
+              const recallBlock = recalled.map(m => `[${m.memoryType}] ${m.content}`).join("\n");
+              emitEvent("memory", `Recalled ${recalled.length} memories for topic: "${topic.slice(0, 50)}"`, "info", { program: programName });
+              for (const m of recalled) {
+                storage.updateMemoryAccess(m.id).catch(() => {});
+              }
+              pendingRecallResults.set(programName, recallBlock);
+            }
+          } catch (e) {
+            console.error("[agent-runtime] Failed to recall memories:", e);
+          }
         }
       }
     }
@@ -599,6 +713,20 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       console.error("[agent-runtime] Failed to store result:", e);
     }
 
+    try {
+      const outcomeContent = `Program "${programName}" iteration ${ps.iteration}: ${summaryLine}`;
+      await storage.createMemory({
+        programName,
+        content: outcomeContent,
+        memoryType: "outcome",
+        tags: [programName, "outcome", `iteration-${ps.iteration}`],
+        relevanceScore: 80,
+      });
+      emitEvent("memory", `Outcome memory created for "${programName}"`, "info", { program: programName });
+    } catch (e) {
+      console.error("[agent-runtime] Failed to create outcome memory:", e);
+    }
+
     await extractRecipeDirectives(output, programName);
 
     const nextRun = parseSchedule(prog.schedule, ps.lastRun, prog.cronExpression);
@@ -627,6 +755,18 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
           rawOutput: ps.error || "",
           status: "error",
         });
+      } catch {}
+
+      try {
+        const errorSummary = `Program "${programName}" iteration ${ps.iteration} FAILED: ${ps.error?.slice(0, 150)}`;
+        await storage.createMemory({
+          programName,
+          content: errorSummary,
+          memoryType: "outcome",
+          tags: [programName, "outcome", "error", `iteration-${ps.iteration}`],
+          relevanceScore: 90,
+        });
+        emitEvent("memory", `Failure outcome memory created for "${programName}"`, "info", { program: programName });
       } catch {}
 
       const nextRun = parseSchedule(prog.schedule, ps.lastRun, prog.cronExpression);
@@ -673,6 +813,17 @@ async function tick(): Promise<void> {
         executeProgram(prog.name).catch(err => {
           console.error(`[agent-runtime] Error executing program "${prog.name}":`, err);
         });
+      }
+    }
+
+    if (now.getHours() === 3 && now.getMinutes() < 2) {
+      try {
+        const result = await runMemoryConsolidation();
+        if (result.decayed > 0 || result.merged > 0) {
+          emitEvent("memory", `Scheduled consolidation: decayed ${result.decayed}, merged ${result.merged} groups (${result.deleted} removed)`, "info");
+        }
+      } catch (e) {
+        console.error("[agent-runtime] Scheduled consolidation error:", e);
       }
     }
   } catch (err) {
@@ -804,6 +955,99 @@ export async function manualTrigger(programName: string): Promise<ProgramState> 
   return ps;
 }
 
+export async function runMemoryConsolidation(): Promise<{ decayed: number; merged: number; deleted: number }> {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const decayed = await storage.consolidateOldMemories(sevenDaysAgo, 10);
+
+  const allMemories = await storage.getAllMemories(500);
+  const allOld = allMemories.filter(m => m.lastAccessed.getTime() < sevenDaysAgo.getTime());
+
+  const groups = new Map<string, typeof allOld>();
+  for (const m of allOld) {
+    const primaryTag = m.tags.length > 0 ? m.tags[0] : "misc";
+    const key = `${m.programName || "global"}::${m.memoryType}::${primaryTag}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(m);
+  }
+
+  let merged = 0;
+  let deleted = 0;
+  for (const [key, mems] of Array.from(groups.entries())) {
+    if (mems.length < 3) continue;
+    const [prog, mType] = key.split("::");
+    const allTags = new Set<string>();
+    for (const m of mems) {
+      for (const t of m.tags) allTags.add(t);
+    }
+
+    const combined = mems.map(m => m.content).join("\n- ");
+    let summary: string;
+    try {
+      const { executeLLM: execLLM } = await import("./llm-client");
+      const llmResult = await execLLM(
+        [
+          { role: "system", content: "You are a memory consolidator. Summarize the following memory entries into a single concise paragraph that preserves all key facts. Output ONLY the summary, no preamble." },
+          { role: "user", content: `Consolidate these ${mems.length} memory entries:\n- ${combined}` },
+        ],
+        undefined,
+        { defaultModel: "openrouter/anthropic/claude-sonnet-4", aliases: {}, routing: {} },
+        {}
+      );
+      summary = llmResult.content.trim();
+    } catch {
+      summary = combined.length > 400 ? combined.slice(0, 397) + "..." : combined;
+    }
+
+    await storage.createMemory({
+      programName: prog === "global" ? undefined : prog,
+      content: `[consolidated] ${summary}`,
+      memoryType: mType as "fact" | "outcome" | "observation",
+      tags: Array.from(allTags).slice(0, 10),
+      relevanceScore: 60,
+    });
+    merged++;
+
+    for (const m of mems) {
+      await storage.deleteMemory(m.id);
+      deleted++;
+    }
+  }
+
+  return { decayed, merged, deleted };
+}
+
+async function migratePersistentContextToMemories(): Promise<void> {
+  try {
+    const existing = await storage.getAgentConfig("persistent_context");
+    if (!existing?.value?.trim()) return;
+
+    const memories = await storage.getAllMemories(1);
+    if (memories.length > 0) return;
+
+    const lines = existing.value.split("\n").filter(l => l.trim());
+    let migrated = 0;
+    for (const line of lines) {
+      const content = line.replace(/^\[\d{4}-\d{2}-\d{2}T?\d{2}:\d{2}\]\s*/, "").trim();
+      if (!content) continue;
+      await storage.createMemory({
+        content,
+        memoryType: "fact",
+        tags: extractTags(content),
+        relevanceScore: 80,
+      });
+      migrated++;
+    }
+    if (migrated > 0) {
+      console.log(`[agent-runtime] Migrated ${migrated} persistent_context entries to episodic memory`);
+      emitEvent("memory", `Migrated ${migrated} legacy memory entries to episodic memory`, "info");
+      await storage.deleteAgentConfig("persistent_context");
+      console.log(`[agent-runtime] Cleared legacy persistent_context`);
+    }
+  } catch (e) {
+    console.error("[agent-runtime] Failed to migrate persistent_context:", e);
+  }
+}
+
 export function initRuntime(): void {
   console.log("[agent-runtime] Initialized (DB-first mode, auto-starting scheduler)");
   runtime.active = true;
@@ -811,6 +1055,8 @@ export function initRuntime(): void {
     tickInterval = setInterval(tick, TICK_INTERVAL_MS);
     setTimeout(tick, 5000);
   }
+
+  migratePersistentContextToMemories().catch(e => console.error("[agent-runtime] migration error:", e));
 
   onResume((paused: PausedExecution) => {
     if (paused.type === "program" && paused.programName) {

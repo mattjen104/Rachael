@@ -1,5 +1,5 @@
 import { storage } from "./storage";
-import { manualTrigger, getRuntimeState } from "./agent-runtime";
+import { manualTrigger, getRuntimeState, runMemoryConsolidation } from "./agent-runtime";
 import { emitEvent } from "./event-bus";
 import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
 import { executeLLM, type LLMConfig, type LLMMessage, type LLMResponse } from "./llm-client";
@@ -1329,76 +1329,101 @@ function registerBuiltinCommands(): void {
     return ok(lines.join("\n"));
   });
 
-  registerCommand("memory", "Search, store, or recall agent memory", "memory [search <query>|store <text>|recent|forget <pattern>|show]", async (args) => {
-    const sub = args[0] || "show";
+  registerCommand("memory", "Manage agent episodic memory", "memory [list [program]|search <query>|add <content>|forget <id>|consolidate|show]", async (args) => {
+    const sub = args[0] || "list";
+
+    if (sub === "list") {
+      const programFilter = args[1] || undefined;
+      const memories = programFilter
+        ? await storage.getMemoriesForProgram(programFilter, { limit: 50 })
+        : await storage.getAllMemories(50);
+      if (memories.length === 0) return ok("No memories found.");
+      const lines = ["=== AGENT MEMORIES ===", ""];
+      for (const m of memories) {
+        const prog = m.programName || "global";
+        const tags = m.tags.length > 0 ? ` [${m.tags.join(", ")}]` : "";
+        const age = Math.floor((Date.now() - m.createdAt.getTime()) / 86400000);
+        lines.push(`  #${m.id} (${m.memoryType}, ${prog}, rel:${m.relevanceScore}, ${age}d ago)${tags}`);
+        lines.push(`    ${m.content.slice(0, 120)}`);
+      }
+      lines.push("", `${memories.length} memories total`);
+      return ok(lines.join("\n"));
+    }
 
     if (sub === "show") {
-      const mem = await storage.getAgentConfig("persistent_context");
-      const text = mem?.value || "";
-      if (!text.trim()) return ok("Memory is empty.");
-      return ok(text);
+      const memories = await storage.getAllMemories(100);
+      if (memories.length === 0) {
+        const mem = await storage.getAgentConfig("persistent_context");
+        const text = mem?.value || "";
+        if (!text.trim()) return ok("Memory is empty.");
+        return ok(text);
+      }
+      const lines: string[] = [];
+      const byType: Record<string, number> = {};
+      for (const m of memories) {
+        byType[m.memoryType] = (byType[m.memoryType] || 0) + 1;
+      }
+      lines.push(`=== MEMORY SUMMARY === (${memories.length} total)`);
+      for (const [type, count] of Object.entries(byType)) {
+        lines.push(`  ${type}: ${count}`);
+      }
+      lines.push("", "Recent memories:");
+      for (const m of memories.slice(0, 10)) {
+        lines.push(`  #${m.id} [${m.memoryType}] ${m.content.slice(0, 100)}`);
+      }
+      return ok(lines.join("\n"));
     }
 
     if (sub === "search") {
       const query = args.slice(1).join(" ");
       if (!query) return fail("[error] memory search: usage: memory search <query>");
-      const mem = await storage.getAgentConfig("persistent_context");
-      const lines = (mem?.value || "").split("\n").filter(l => l.toLowerCase().includes(query.toLowerCase()));
-
-      const resultHits = await storage.getAgentResults(undefined, 50);
-      const matchedResults = resultHits
-        .filter(r => r.summary.toLowerCase().includes(query.toLowerCase()) || (r.rawOutput || "").toLowerCase().includes(query.toLowerCase()))
-        .slice(0, 10);
-
-      const output: string[] = [];
-      if (lines.length > 0) {
-        output.push("=== PERSISTENT MEMORY ===");
-        for (const l of lines) output.push(`  ${l}`);
+      const memories = await storage.searchMemories(query, 20);
+      if (memories.length === 0) return ok(`No memories matching "${query}".`);
+      const lines = [`=== MEMORIES MATCHING "${query}" ===`, ""];
+      for (const m of memories) {
+        const prog = m.programName || "global";
+        lines.push(`  #${m.id} (${m.memoryType}, ${prog}, rel:${m.relevanceScore})`);
+        lines.push(`    ${m.content.slice(0, 120)}`);
       }
-      if (matchedResults.length > 0) {
-        output.push("=== AGENT RESULTS ===");
-        for (const r of matchedResults) {
-          output.push(`  [${r.createdAt.toISOString().slice(0, 16)}] ${r.programName}: ${r.summary.slice(0, 80)}`);
-        }
-      }
-      if (output.length === 0) return ok(`No memory matching "${query}".`);
-      return ok(output.join("\n"));
+      return ok(lines.join("\n"));
     }
 
-    if (sub === "store") {
+    if (sub === "add" || sub === "store") {
       const text = args.slice(1).join(" ");
-      if (!text) return fail("[error] memory store: usage: memory store <text to remember>");
-      const existing = await storage.getAgentConfig("persistent_context");
-      const timestamp = new Date().toISOString().slice(0, 16);
-      const entry = `[${timestamp}] ${text}`;
-      const newValue = (existing?.value || "") + "\n" + entry;
-      await storage.setAgentConfig("persistent_context", newValue.trim(), "memory");
-      emitEvent("cli", `Memory stored: ${text.slice(0, 60)}`, "info", { metadata: { command: "memory store" } });
-      return ok(`Stored: ${entry}`);
-    }
-
-    if (sub === "recent") {
-      const n = parseInt(args[1] || "10", 10);
-      const mem = await storage.getAgentConfig("persistent_context");
-      const lines = (mem?.value || "").split("\n").filter(Boolean);
-      if (lines.length === 0) return ok("No memory entries.");
-      return ok(lines.slice(-n).join("\n"));
+      if (!text) return fail("[error] memory add: usage: memory add <content>");
+      const tags: string[] = [];
+      const words = text.toLowerCase().split(/\s+/);
+      for (const w of words) {
+        const clean = w.replace(/[^a-z0-9-]/g, "");
+        if (clean.length > 2 && tags.length < 5) tags.push(clean);
+      }
+      const mem = await storage.createMemory({
+        content: text,
+        memoryType: "fact",
+        tags,
+        relevanceScore: 100,
+      });
+      emitEvent("memory", `Memory manually added: "${text.slice(0, 60)}"`, "info", { metadata: { memoryId: mem.id } });
+      return ok(`Memory #${mem.id} created: ${text}`);
     }
 
     if (sub === "forget") {
-      const pattern = args.slice(1).join(" ");
-      if (!pattern) return fail("[error] memory forget: usage: memory forget <pattern>");
-      const mem = await storage.getAgentConfig("persistent_context");
-      if (!mem?.value) return ok("Memory is already empty.");
-      const lines = mem.value.split("\n");
-      const kept = lines.filter(l => !l.toLowerCase().includes(pattern.toLowerCase()));
-      const removed = lines.length - kept.length;
-      await storage.setAgentConfig("persistent_context", kept.join("\n"), "memory");
-      emitEvent("cli", `Memory: forgot ${removed} entries matching "${pattern}"`, "info", { metadata: { command: "memory forget" } });
-      return ok(`Removed ${removed} entries matching "${pattern}". ${kept.length} entries remaining.`);
+      const idStr = args[1];
+      if (!idStr) return fail("[error] memory forget: usage: memory forget <id>");
+      const id = parseInt(idStr, 10);
+      if (isNaN(id)) return fail("[error] memory forget: id must be a number");
+      await storage.deleteMemory(id);
+      emitEvent("memory", `Memory #${id} deleted`, "info", { metadata: { memoryId: id } });
+      return ok(`Memory #${id} deleted.`);
     }
 
-    return fail(`[error] memory: unknown subcommand "${sub}"\nUsage: memory [search <query>|store <text>|recent|forget <pattern>|show]`);
+    if (sub === "consolidate") {
+      const result = await runMemoryConsolidation();
+      emitEvent("memory", `Memory consolidation: decayed ${result.decayed}, merged ${result.merged} groups (${result.deleted} old records removed)`, "info");
+      return ok(`Consolidation complete. Decayed relevance for ${result.decayed} memories. Merged ${result.merged} groups (${result.deleted} old records removed).`);
+    }
+
+    return fail(`[error] memory: unknown subcommand "${sub}"\nUsage: memory [list [program]|search <query>|add <content>|forget <id>|consolidate|show]`);
   });
 
   registerCommand("scrape", "Scrape a URL or run a site profile", "scrape <url> | scrape profile <name> | scrape path <id>", async (args) => {

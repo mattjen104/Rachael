@@ -552,3 +552,25 @@ export const insertNightlyRecommendationSchema = z.object({
 });
 export type InsertNightlyRecommendation = z.infer<typeof insertNightlyRecommendationSchema>;
 export type NightlyRecommendation = typeof nightlyRecommendations.$inferSelect;
+
+export const agentMemories = pgTable("agent_memories", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  programName: text("program_name"),
+  content: text("content").notNull(),
+  memoryType: text("memory_type").notNull().default("fact"),
+  tags: text("tags").array().notNull().default([]),
+  relevanceScore: integer("relevance_score").notNull().default(100),
+  accessCount: integer("access_count").notNull().default(0),
+  lastAccessed: timestamp("last_accessed").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAgentMemorySchema = z.object({
+  programName: z.string().nullable().optional(),
+  content: z.string(),
+  memoryType: z.enum(["fact", "outcome", "observation"]).default("fact"),
+  tags: z.array(z.string()).default([]),
+  relevanceScore: z.number().default(100),
+});
+export type InsertAgentMemory = z.infer<typeof insertAgentMemorySchema>;
+export type AgentMemory = typeof agentMemories.$inferSelect;
