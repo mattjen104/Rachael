@@ -1926,7 +1926,7 @@ def execute_menu_crawl(cmd):
                     click_x, click_y = vision_to_screen(window, si_x, si_y)
 
                     safe_click(click_x, click_y, pause_after=0.8, label=f"{si_name} (submenu expand)")
-                    time.sleep(1.0)
+                    time.sleep(0.4)
 
                     state, _ = check_screen_state(f"after expanding {si_name}")
                     if state == "activity":
@@ -2241,9 +2241,11 @@ def execute_menu_crawl(cmd):
                     node["controlType"] = "Activity"
                     recover_to_menu()
                     menu_confirmed_open = reopen_epic_menu()
+                    consecutive_failures = 0
                 elif state_after_click == "desktop":
                     print(f"  [menu-crawl]   Click closed the menu or hit nothing - recovering")
                     menu_confirmed_open = reopen_epic_menu()
+                    consecutive_failures += 1
                 elif state_after_click in ("menu", "unknown"):
                     sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
                     node["children"] = sub_children
@@ -2254,12 +2256,12 @@ def execute_menu_crawl(cmd):
                     pyautogui.press("escape")
                     time.sleep(0.3)
                     menu_confirmed_open = reopen_epic_menu()
+                    consecutive_failures = 0
                 else:
                     print(f"  [menu-crawl]   Unexpected state: {state_after_click} - recovering")
                     recover_to_menu()
                     menu_confirmed_open = reopen_epic_menu()
-
-                consecutive_failures = 0
+                    consecutive_failures += 1
 
             except Exception as e:
                 print(f"  [menu-crawl] !! Error crawling '{cat_name}': {e}")
