@@ -51,12 +51,35 @@ pyautogui.PAUSE = 0.05
 pyautogui.MINIMUM_DURATION = 0
 pyautogui.MINIMUM_SLEEP = 0
 
+def _load_env_file():
+    """Load key=value pairs from .env file next to this script."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(env_path):
+        return
+    print(f"  [config] Loading {env_path}")
+    with open(env_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and v and not os.environ.get(k):
+                    os.environ[k] = v
+
+_load_env_file()
+
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ORGCLOUD_URL = os.environ.get("ORGCLOUD_URL", "https://i-cloud-sync-manager.replit.app")
 BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN", "")
 if not BRIDGE_TOKEN:
-    print("ERROR: BRIDGE_TOKEN environment variable required")
-    print("  set BRIDGE_TOKEN=<your-bridge-token>")
+    print("ERROR: BRIDGE_TOKEN not set.")
+    print("  Option 1: Create a .env file next to epic_agent.py with:")
+    print("    BRIDGE_TOKEN=your-token-here")
+    print("    OPENROUTER_API_KEY=your-key-here")
+    print("  Option 2: set BRIDGE_TOKEN=<your-bridge-token>")
     sys.exit(1)
 MODEL = "anthropic/claude-sonnet-4"
 POLL_INTERVAL = 3
