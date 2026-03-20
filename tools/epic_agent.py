@@ -2450,8 +2450,179 @@ def execute_menu_crawl(cmd):
         post_result(command_id, "error", error=str(e))
 
 
+def execute_search_crawl(cmd):
+    """Discover all Epic activities by iterating through the alphabet in the search bar.
+    Uses Alt+E to open the Epic menu (search is auto-focused), types each letter/prefix,
+    reads the autocomplete dropdown results via vision, and builds a complete activity list.
+    Saves progress after each prefix so interruptions don't lose data."""
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+
+    print(f"  [search-crawl] Starting activity discovery via search bar for {env}")
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    activate_window(window, maximize=True)
+    time.sleep(0.5)
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"Lost {env} window after maximize")
+        return
+
+    existing_key = f"epic_activities_{env.lower()}"
+    existing_activities = {}
+    completed_prefixes = set()
+    try:
+        resp = _bridge_request(
+            "get", f"/api/config/{existing_key}", "fetch-activities", timeout=10,
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+        )
+        if resp and resp.status_code == 200:
+            data = resp.json()
+            val = data.get("value", "")
+            if val:
+                existing_data = json.loads(val) if isinstance(val, str) else val
+                for act in existing_data.get("activities", []):
+                    existing_activities[act.get("name", "").lower().strip()] = act
+                completed_prefixes = set(existing_data.get("completedPrefixes", []))
+                print(f"  [search-crawl] Found {len(existing_activities)} existing activities, {len(completed_prefixes)} completed prefixes")
+    except Exception as e:
+        print(f"  [search-crawl] Could not load existing activities: {e}")
+
+    all_activities = dict(existing_activities)
+
+    prefixes = list("abcdefghijklmnopqrstuvwxyz")
+
+    def save_progress(completed):
+        """Upload current activity list and completed prefixes to server."""
+        act_list = list(all_activities.values())
+        payload = {
+            "activities": act_list,
+            "environment": env,
+            "discoveredAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "totalCount": len(act_list),
+            "completedPrefixes": sorted(list(completed)),
+        }
+        _bridge_request(
+            "put", f"/api/config/{existing_key}", "save-activities", timeout=30, max_retries=2,
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}", "Content-Type": "application/json"},
+            json={"value": json.dumps(payload), "category": "epic"},
+        )
+
+    consecutive_errors = 0
+    for prefix in prefixes:
+        if prefix in completed_prefixes:
+            print(f"  [search-crawl] Skipping '{prefix}' (already done)")
+            continue
+
+        print(f"  [search-crawl] === Searching prefix '{prefix}' ===")
+
+        if consecutive_errors >= 5:
+            print(f"  [search-crawl] Too many consecutive errors, stopping")
+            break
+
+        try:
+            activate_window(window)
+            time.sleep(0.2)
+
+            pyautogui.hotkey("alt", "e")
+            time.sleep(0.8)
+
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.05)
+            pyautogui.typewrite(prefix, interval=0.03)
+            time.sleep(1.2)
+
+            img = screenshot_window(window)
+            b64 = img_to_base64(img)
+            if not b64:
+                print(f"  [search-crawl] Screenshot failed for '{prefix}'")
+                consecutive_errors += 1
+                pyautogui.press("escape")
+                time.sleep(0.3)
+                continue
+
+            prompt = (
+                f"You are looking at an Epic Hyperspace screen where the search bar has '{prefix}' typed in.\n"
+                "There should be a dropdown or autocomplete list showing matching activities.\n\n"
+                "List EVERY activity/item shown in the autocomplete/search results dropdown.\n"
+                "These are typically shown as a vertical list below the search box.\n\n"
+                "For each item, provide:\n"
+                "- name: the full activity name as displayed\n"
+                "- category: if a category/section label is shown (like 'Patient Care', 'Lab', etc.), include it\n\n"
+                "Return ONLY a JSON array:\n"
+                "[{\"name\": \"Activity Name\", \"category\": \"Category if shown\"}]\n\n"
+                "If NO autocomplete results are visible, return: []\n"
+                "Return ONLY the JSON array, no other text."
+            )
+
+            resp_text = ask_claude(b64, prompt)
+            results = []
+            if resp_text:
+                try:
+                    m = re.search(r'\[[\s\S]*\]', resp_text)
+                    if m:
+                        results = json.loads(m.group())
+                except Exception:
+                    pass
+
+            new_count = 0
+            for item in results:
+                name = item.get("name", "").strip()
+                if not name:
+                    continue
+                name_key = name.lower()
+                if name_key not in all_activities:
+                    all_activities[name_key] = {
+                        "name": name,
+                        "category": item.get("category", ""),
+                        "discoveredBy": f"search:{prefix}",
+                    }
+                    new_count += 1
+
+            print(f"  [search-crawl] '{prefix}': {len(results)} results, {new_count} new ({len(all_activities)} total)")
+
+            pyautogui.press("escape")
+            time.sleep(0.3)
+            pyautogui.press("escape")
+            time.sleep(0.3)
+
+            completed_prefixes.add(prefix)
+            consecutive_errors = 0
+
+            print(f"  [search-crawl] Saving progress...")
+            save_progress(completed_prefixes)
+
+        except Exception as e:
+            print(f"  [search-crawl] Error on prefix '{prefix}': {e}")
+            traceback.print_exc()
+            consecutive_errors += 1
+            try:
+                pyautogui.press("escape")
+                time.sleep(0.3)
+                pyautogui.press("escape")
+                time.sleep(0.3)
+            except Exception:
+                pass
+
+    print(f"  [search-crawl] COMPLETE! Discovered {len(all_activities)} total activities")
+    save_progress(completed_prefixes)
+
+    final_img = screenshot_window(window)
+    final_b64 = img_to_base64(final_img) if final_img else None
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "totalActivities": len(all_activities),
+        "prefixesCompleted": len(completed_prefixes),
+    })
+
+
 def execute_launch(cmd):
-    """Launch an activity using Epic's search bar - fastest way to open anything."""
+    """Launch an activity using Epic's search bar - fastest way to open anything.
+    Uses Alt+E to open Epic menu (search bar is immediately focused), types the
+    activity name, and presses Enter to launch."""
     env = cmd.get("env", "SUP")
     activity_name = cmd.get("activity", "")
     command_id = cmd.get("id", "unknown")
@@ -2465,61 +2636,16 @@ def execute_launch(cmd):
         post_result(command_id, "error", error=f"No {env} window found")
         return
 
-    print(f"  [launch] Opening '{activity_name}' via search bar in {env}")
+    print(f"  [launch] Opening '{activity_name}' via Alt+E search in {env}")
 
     activate_window(window)
-    time.sleep(0.5)
+    time.sleep(0.3)
 
-    img = screenshot_window(window)
-    b64 = img_to_base64(img)
-    epic_prompt = (
-        "Find the Epic button in this Hyperspace window (top-left corner).\n"
-        f"{VISION_COORD_INSTRUCTION}\n"
-        "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
-    )
-    epic_resp = ask_claude(b64, epic_prompt)
-    epic_loc = None
-    if epic_resp:
-        try:
-            em = re.search(r'\{[\s\S]*?\}', epic_resp)
-            if em:
-                epic_loc = json.loads(em.group())
-        except Exception:
-            pass
-
-    if not epic_loc or not epic_loc.get("found"):
-        post_result(command_id, "error", error="Could not find Epic button")
-        return
-
-    ex, ey = vision_to_screen(window, epic_loc["x"], epic_loc["y"])
-    safe_click(ex, ey, pause_after=0.8, label="Epic button (launch)")
-
-    search_img = screenshot_window(window)
-    search_b64 = img_to_base64(search_img)
-    search_prompt = (
-        "Find the 'Search activities' text box at the top of this Epic menu.\n"
-        f"{VISION_COORD_INSTRUCTION}\n"
-        "Return ONLY: {\"x\": <number>, \"y\": <number>, \"found\": true}"
-    )
-    search_resp = ask_claude(search_b64, search_prompt)
-    search_loc = None
-    if search_resp:
-        try:
-            sm = re.search(r'\{[\s\S]*?\}', search_resp)
-            if sm:
-                search_loc = json.loads(sm.group())
-        except Exception:
-            pass
-
-    if not search_loc or not search_loc.get("found"):
-        post_result(command_id, "error", error="Could not find search bar")
-        return
-
-    sx, sy = vision_to_screen(window, search_loc["x"], search_loc["y"])
-    safe_click(sx, sy, pause_after=0.3, label="search bar")
+    pyautogui.hotkey("alt", "e")
+    time.sleep(0.8)
 
     pyautogui.hotkey("ctrl", "a")
-    time.sleep(0.1)
+    time.sleep(0.05)
     pyautogui.typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
 
@@ -2804,6 +2930,8 @@ def execute_command(cmd):
             execute_replay(cmd)
         elif cmd_type == "menu_crawl":
             execute_menu_crawl(cmd)
+        elif cmd_type == "search_crawl":
+            execute_search_crawl(cmd)
         elif cmd_type == "launch":
             execute_launch(cmd)
         elif cmd_type == "patient":

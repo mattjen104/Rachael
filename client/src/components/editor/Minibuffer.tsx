@@ -239,6 +239,7 @@ export default function Minibuffer({
       { id: "epic-replay", label: "epic-replay", hint: "Replay a saved workflow", action: () => { setMode("shell"); setQuery("epic replay "); setShellOutput(""); } },
       { id: "epic-menu-crawl", label: "epic-menu-crawl", hint: "Auto-crawl Hyperspace menus (vision)", action: () => { setMode("shell"); setQuery("epic menu-crawl "); setShellOutput(""); } },
       { id: "epic-menu-crawl-text", label: "epic-menu-crawl-text", hint: "Auto-crawl Text menus (keystroke)", action: () => { setMode("shell"); setQuery("epic menu-crawl text "); setShellOutput(""); } },
+      { id: "epic-search-crawl", label: "epic-search-crawl", hint: "Discover activities via A-Z search autocomplete", action: () => { setMode("shell"); setQuery("epic search-crawl "); setShellOutput(""); } },
       { id: "epic-workflow-delete", label: "epic-workflow-delete", hint: "Delete a saved workflow", action: () => { setMode("shell"); setQuery("epic workflow delete "); setShellOutput(""); } },
       { id: "pulse-scan", label: "pulse-scan", hint: "Scrape Pulse intranet links", action: () => { setMode("shell"); setQuery("pulse scan"); setShellOutput(""); executeShellCommand("pulse scan"); } },
       { id: "pulse-search", label: "pulse-search", hint: "Search intranet links", action: () => { setMode("shell"); setQuery("pulse search "); setShellOutput(""); } },

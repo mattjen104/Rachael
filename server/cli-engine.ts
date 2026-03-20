@@ -3213,9 +3213,16 @@ ${fullHtml}`;
       const cfg = await storage.getAgentConfig(key);
       let acts: any[] = [];
       if (cfg?.value) {
-        try { acts = JSON.parse(cfg.value); } catch {}
+        try {
+          const parsed = JSON.parse(cfg.value);
+          if (Array.isArray(parsed)) {
+            acts = parsed;
+          } else if (parsed.activities && Array.isArray(parsed.activities)) {
+            acts = parsed.activities;
+          }
+        } catch {}
       }
-      if (!acts.length) return ok(`No activities cataloged for ${env}.${nl}Run: python tools/epic_scan.py ${env}  on your desktop`);
+      if (!acts.length) return ok(`No activities cataloged for ${env}.${nl}Run: epic search-crawl ${env}`);
       const cats = new Map<string, string[]>();
       for (const a of acts) {
         const cat = a.parent || a.category || "General";
@@ -3418,6 +3425,23 @@ ${fullHtml}`;
           if (data.ok) return ok(`Menu crawl started for ${env} (depth=${depth}). Command ID: ${data.commandId}${nl}The agent will click through each menu and use AI vision to catalog all items.${nl}This may take several minutes. Check the tree afterwards with: epic tree`);
         }
         return fail(`[epic] Failed to send menu-crawl command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "search-crawl") {
+      const envArg = args.find(a => ["SUP", "POC", "TST", "PRD"].includes(a.toUpperCase()));
+      const env = (envArg || "SUP").toUpperCase();
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "search_crawl", env }),
+        });
+        const data = await resp.json() as any;
+        if (data.ok) return ok(`Search-based activity discovery started for ${env}. Command ID: ${data.commandId}${nl}The agent will type A-Z in the search bar and read autocomplete results.${nl}Progress saves after each letter. Check results with: epic activities ${env}`);
+        return fail(`[epic] Failed to send search-crawl command`);
       } catch (e: any) {
         return fail(`[epic] ${e.message}`);
       }
@@ -3965,6 +3989,7 @@ ${fullHtml}`;
       "  DISCOVERY",
       "  epic menu-crawl [env]     - Auto-crawl Hyperspace menus (vision)",
       "  epic menu-crawl text [env] - Auto-crawl Text menus (keystroke)",
+      "  epic search-crawl [env]   - Discover activities via A-Z search autocomplete",
       "  epic tree <env>           - Show full navigation tree",
       "  epic activities <env>     - Show cataloged activities",
       "  epic shortcuts <env>      - Discover keyboard shortcuts",
