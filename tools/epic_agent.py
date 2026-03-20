@@ -2513,81 +2513,146 @@ def execute_search_crawl(cmd):
             json={"value": json.dumps(payload), "category": "epic"},
         )
 
-    def read_search_results(prefix):
-        """Screenshot and read autocomplete dropdown via vision.
-        Returns (results_list, was_truncated) or None on error."""
+    clear_method = "ctrl_a"
+
+    def read_search_state():
+        """Screenshot and read both the search bar text AND autocomplete results.
+        Returns parsed dict or None on error."""
         img = screenshot_window(window)
         b64 = img_to_base64(img)
         if not b64:
             return None
 
         prompt = (
-            f"You are looking at an Epic Hyperspace screen where the search bar has '{prefix}' typed in.\n"
-            "There should be a dropdown or autocomplete list showing matching activities.\n\n"
-            "List EVERY activity/item shown in the autocomplete/search results dropdown.\n"
-            "These are typically shown as a vertical list below the search box.\n\n"
-            "For each item, provide:\n"
+            "You are looking at an Epic Hyperspace screen.\n\n"
+            "FIRST: Check if a SEARCH BAR is visible and focused.\n"
+            "- If yes, read the EXACT text currently in the search bar field.\n"
+            "- If no search bar is visible, set searchBarVisible to false.\n\n"
+            "SECOND: If a search dropdown/autocomplete list is showing, list every item:\n"
             "- name: the full activity name as displayed\n"
-            "- category: if a category/section label is shown (like 'Patient Care', 'Lab', etc.), include it\n\n"
-            "Also check: does the dropdown appear to be TRUNCATED? Look for:\n"
-            "- A scrollbar on the dropdown list\n"
-            "- Text like 'more results', 'showing X of Y', or '...'\n"
-            "- The list being cut off at the bottom edge\n"
-            "- A large number of results (8+) that likely means more exist\n\n"
-            "Also check: is the SEARCH BAR still focused/visible with text in it?\n"
-            "If NO search bar or dropdown is visible, set \"searchBarVisible\": false.\n\n"
+            "- category: if a category/section label is shown\n\n"
+            "THIRD: Check if the dropdown appears TRUNCATED:\n"
+            "- Scrollbar on the dropdown\n"
+            "- 'more results' or '...' text\n"
+            "- List cut off at bottom edge\n"
+            "- 8+ results suggesting more exist\n\n"
             "Return ONLY a JSON object:\n"
-            "{\"items\": [{\"name\": \"Activity Name\", \"category\": \"Category if shown\"}], "
-            "\"truncated\": true/false, \"searchBarVisible\": true/false, "
+            "{\"searchBarVisible\": true/false, "
+            "\"searchBarText\": \"exact text in search field or empty string\", "
+            "\"items\": [{\"name\": \"Activity Name\", \"category\": \"Category\"}], "
+            "\"truncated\": true/false, "
             "\"reason\": \"brief explanation\"}\n\n"
-            "If NO autocomplete results are visible but search bar IS visible: "
-            "{\"items\": [], \"truncated\": false, \"searchBarVisible\": true, \"reason\": \"no matches\"}\n"
-            "Return ONLY the JSON object, no other text."
+            "Return ONLY the JSON, no other text."
         )
 
         resp_text = ask_claude(b64, prompt)
-        results = []
-        truncated = False
-        search_visible = True
-        if resp_text:
-            try:
-                m = re.search(r'\{[\s\S]*\}', resp_text)
-                if m:
-                    parsed = json.loads(m.group())
-                    results = parsed.get("items", [])
-                    truncated = parsed.get("truncated", False)
-                    search_visible = parsed.get("searchBarVisible", True)
-                    if not truncated and len(results) >= TRUNCATION_THRESHOLD:
-                        truncated = True
-            except Exception:
-                try:
-                    m2 = re.search(r'\[[\s\S]*\]', resp_text)
-                    if m2:
-                        results = json.loads(m2.group())
-                        truncated = len(results) >= TRUNCATION_THRESHOLD
-                except Exception:
-                    pass
-
-        return results, truncated, search_visible
+        if not resp_text:
+            return None
+        try:
+            m = re.search(r'\{[\s\S]*\}', resp_text)
+            if m:
+                parsed = json.loads(m.group())
+                items = parsed.get("items", [])
+                if not parsed.get("truncated", False) and len(items) >= TRUNCATION_THRESHOLD:
+                    parsed["truncated"] = True
+                return parsed
+        except Exception:
+            pass
+        return None
 
     def ensure_search_focused():
-        """Make sure the search bar is focused. Returns True if recovered."""
+        """Open/focus the search bar with Ctrl+Space."""
         activate_window(window)
         time.sleep(0.2)
         pyautogui.hotkey("ctrl", "space")
         time.sleep(0.6)
-        return True
 
-    def type_prefix(prefix):
-        """Select all text and type new prefix to replace it."""
-        pyautogui.keyDown("ctrl")
-        time.sleep(0.05)
-        pyautogui.press("a")
-        time.sleep(0.05)
-        pyautogui.keyUp("ctrl")
-        time.sleep(0.15)
+    def clear_search_bar():
+        """Clear the search bar using the current best known method."""
+        nonlocal clear_method
+        if clear_method == "ctrl_a":
+            pyautogui.keyDown("ctrl")
+            time.sleep(0.05)
+            pyautogui.press("a")
+            time.sleep(0.05)
+            pyautogui.keyUp("ctrl")
+            time.sleep(0.1)
+            pyautogui.press("delete")
+            time.sleep(0.1)
+        elif clear_method == "home_shift_end":
+            pyautogui.press("home")
+            time.sleep(0.05)
+            pyautogui.keyDown("shift")
+            time.sleep(0.05)
+            pyautogui.press("end")
+            time.sleep(0.05)
+            pyautogui.keyUp("shift")
+            time.sleep(0.1)
+            pyautogui.press("delete")
+            time.sleep(0.1)
+        elif clear_method == "backspace":
+            for _ in range(30):
+                pyautogui.press("backspace")
+            time.sleep(0.1)
+        elif clear_method == "triple_click":
+            pyautogui.click(clicks=3, interval=0.05)
+            time.sleep(0.1)
+            pyautogui.press("delete")
+            time.sleep(0.1)
+        elif clear_method == "escape_reopen":
+            pyautogui.press("escape")
+            time.sleep(0.3)
+            pyautogui.hotkey("ctrl", "space")
+            time.sleep(0.6)
+
+    CLEAR_METHODS = ["ctrl_a", "home_shift_end", "backspace", "escape_reopen"]
+
+    def type_prefix_verified(prefix, max_attempts=3):
+        """Type a prefix and VERIFY via vision that it's correct.
+        Tries different clearing methods if text accumulates."""
+        nonlocal clear_method, search_bar_open
+
+        for attempt in range(max_attempts):
+            clear_search_bar()
+            pyautogui.typewrite(prefix, interval=0.03)
+            time.sleep(1.0)
+
+            state = read_search_state()
+            if state is None:
+                print(f"  [search-crawl]   Vision check failed on attempt {attempt+1}")
+                continue
+
+            if not state.get("searchBarVisible", True):
+                print(f"  [search-crawl]   Search bar not visible, reopening...")
+                search_bar_open = False
+                ensure_search_focused()
+                search_bar_open = True
+                continue
+
+            actual_text = state.get("searchBarText", "").strip().lower()
+            expected = prefix.lower()
+
+            if actual_text == expected:
+                if attempt > 0:
+                    print(f"  [search-crawl]   Verified '{prefix}' on attempt {attempt+1} (method: {clear_method})")
+                return state
+
+            print(f"  [search-crawl]   Expected '{prefix}' but search bar shows '{actual_text}' (method: {clear_method})")
+
+            current_idx = CLEAR_METHODS.index(clear_method) if clear_method in CLEAR_METHODS else 0
+            next_idx = (current_idx + 1) % len(CLEAR_METHODS)
+            clear_method = CLEAR_METHODS[next_idx]
+            print(f"  [search-crawl]   Switching to clear method: {clear_method}")
+
+        print(f"  [search-crawl]   All clear methods failed for '{prefix}', escaping and reopening")
+        pyautogui.press("escape")
+        time.sleep(0.3)
+        search_bar_open = False
+        ensure_search_focused()
+        search_bar_open = True
         pyautogui.typewrite(prefix, interval=0.03)
         time.sleep(1.0)
+        return read_search_state()
 
     prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
     consecutive_errors = 0
@@ -2617,31 +2682,21 @@ def execute_search_crawl(cmd):
                 ensure_search_focused()
                 search_bar_open = True
 
-            type_prefix(prefix)
-
-            result = read_search_results(prefix)
-            if result is None:
-                print(f"  [search-crawl]   Screenshot failed")
+            state = type_prefix_verified(prefix)
+            if state is None:
+                print(f"  [search-crawl]   Could not verify prefix '{prefix}'")
                 consecutive_errors += 1
                 continue
 
-            results, truncated, search_visible = result
-
-            if not search_visible:
-                print(f"  [search-crawl]   Search bar lost focus - recovering...")
+            if not state.get("searchBarVisible", True):
+                print(f"  [search-crawl]   Search bar still not visible after retries")
+                consecutive_errors += 1
                 search_bar_open = False
-                ensure_search_focused()
-                search_bar_open = True
-                type_prefix(prefix)
-                result = read_search_results(prefix)
-                if result is None:
-                    consecutive_errors += 1
-                    continue
-                results, truncated, search_visible = result
-                if not search_visible:
-                    print(f"  [search-crawl]   Recovery failed, skipping '{prefix}'")
-                    consecutive_errors += 1
-                    continue
+                continue
+
+            results = state.get("items", [])
+            truncated = state.get("truncated", False)
+            consecutive_errors = 0
 
             prefix_lower = prefix.lower()
             prefix_matches = []
