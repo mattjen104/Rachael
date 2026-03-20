@@ -2578,25 +2578,17 @@ def execute_search_crawl(cmd):
         time.sleep(0.6)
         return True
 
-    current_text = ""
-
     def type_prefix(prefix):
-        """Clear current text via backspace and type new prefix.
-        Tracks what's in the search bar so we send the right number of backspaces."""
-        nonlocal current_text
-        if current_text:
-            for _ in range(len(current_text) + 2):
-                pyautogui.press("backspace")
-            time.sleep(0.1)
+        """Select all text with Ctrl+A and type new prefix to replace it."""
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.1)
         pyautogui.typewrite(prefix, interval=0.03)
-        current_text = prefix
         time.sleep(1.0)
 
     prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
     consecutive_errors = 0
     total_searched = 0
     search_bar_open = False
-    current_text = ""
 
     print(f"  [search-crawl] Opening search bar with Ctrl+Space...")
     ensure_search_focused()
@@ -2634,7 +2626,6 @@ def execute_search_crawl(cmd):
             if not search_visible:
                 print(f"  [search-crawl]   Search bar lost focus - recovering...")
                 search_bar_open = False
-                current_text = ""
                 ensure_search_focused()
                 search_bar_open = True
                 type_prefix(prefix)
