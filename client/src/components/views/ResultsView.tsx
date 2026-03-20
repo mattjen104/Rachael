@@ -1,6 +1,51 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useResults } from "@/hooks/use-org-data";
+import { getStoredApiKey } from "@/lib/queryClient";
 import type { AgentResult } from "@shared/schema";
+
+function trackRadarEngagement(url: string, source: string, title: string) {
+  const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+  const key = getStoredApiKey();
+  if (key) hdrs["Authorization"] = `Bearer ${key}`;
+  fetch("/api/radar/engagement", {
+    method: "POST",
+    headers: hdrs,
+    body: JSON.stringify({ url, source, title, programName: "research-radar" }),
+  }).catch(() => {});
+}
+
+function renderLinkedText(text: string, programName: string): React.ReactNode {
+  if (programName !== "research-radar") return text;
+  const urlRegex = /(https?:\/\/[^\s)\]>,]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, i) => {
+    if (urlRegex.test(part)) {
+      urlRegex.lastIndex = 0;
+      const source = part.includes("reddit.com") ? "reddit" : part.includes("github.com") ? "github" : part.includes("ycombinator") ? "hn" : "other";
+      return (
+        <a
+          key={i}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid={`engagement-link-${i}`}
+          className="text-primary underline hover:text-primary/80"
+          onClick={(e) => {
+            e.stopPropagation();
+            const lineStart = text.lastIndexOf("\n", text.indexOf(part)) + 1;
+            const lineEnd = text.indexOf("\n", text.indexOf(part));
+            const line = text.slice(lineStart, lineEnd > 0 ? lineEnd : undefined).trim();
+            trackRadarEngagement(part, source, line.slice(0, 200));
+          }}
+        >
+          {part}
+        </a>
+      );
+    }
+    urlRegex.lastIndex = 0;
+    return part;
+  });
+}
 
 interface ResultsViewProps {
   selectedResultId?: number;
@@ -92,7 +137,7 @@ export default function ResultsView({ selectedResultId }: ResultsViewProps) {
               <span className="truncate flex-1">{r.summary}</span>
               {r.metric && <span className="text-muted-foreground shrink-0">={r.metric}</span>}
             </div>
-            {isExpanded && r.rawOutput && (
+            {isExpanded && (r.rawOutput || r.summary) && (
               <div
                 className="px-4 py-2 text-muted-foreground border-l-2 border-primary/30 ml-4 max-h-60 overflow-y-auto whitespace-pre-wrap text-[10px]"
                 data-testid={`result-detail-${r.id}`}
@@ -103,7 +148,7 @@ export default function ResultsView({ selectedResultId }: ResultsViewProps) {
                   <span>iter: {r.iteration || 0}</span>
                   <span>{time}</span>
                 </div>
-                {r.rawOutput.slice(0, 5000)}
+                {renderLinkedText((r.rawOutput || r.summary).slice(0, 5000), r.programName)}
               </div>
             )}
           </div>

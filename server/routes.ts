@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema } from "@shared/schema";
+import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema } from "@shared/schema";
 import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
@@ -469,8 +469,42 @@ export async function registerRoutes(
 
   app.post("/api/proposals/:id/accept", async (req, res) => {
     const id = parseInt(req.params.id, 10);
+    const proposal = await storage.getProposal(id);
+    if (!proposal) return res.status(404).json({ message: "Proposal not found" });
     const updated = await storage.updateProposalStatus(id, "accepted", new Date());
     if (!updated) return res.status(404).json({ message: "Proposal not found" });
+
+    if (proposal.targetName === "research-radar" && proposal.proposalType === "change") {
+      try {
+        const parsed = JSON.parse(proposal.proposedContent);
+        if (parsed && parsed.radarConfigAction) {
+          const prog = await storage.getProgramByName("research-radar");
+          if (prog) {
+            const config = { ...(prog.config || {}) };
+            const action = parsed.radarConfigAction;
+            if (action === "add-source" && parsed.sub) {
+              const subs = JSON.parse(config.NICHE_SUBS || "[]");
+              if (!subs.includes(parsed.sub)) subs.push(parsed.sub);
+              config.NICHE_SUBS = JSON.stringify(subs);
+            } else if (action === "drop-source" && parsed.sub) {
+              const subs = JSON.parse(config.NICHE_SUBS || "[]");
+              config.NICHE_SUBS = JSON.stringify(subs.filter((s: string) => s !== parsed.sub));
+            } else if (action === "add-interest" && parsed.interest) {
+              const interests = JSON.parse(config.INTEREST_AREAS || "[]");
+              if (!interests.includes(parsed.interest)) interests.push(parsed.interest);
+              config.INTEREST_AREAS = JSON.stringify(interests);
+            } else if (action === "adjust-threshold" && parsed.threshold) {
+              config.SCORE_THRESHOLD = String(parsed.threshold);
+            }
+            const changes = JSON.parse(config.CONFIG_CHANGES || "[]");
+            changes.push({ action: action, detail: parsed, appliedAt: new Date().toISOString(), proposalId: id });
+            config.CONFIG_CHANGES = JSON.stringify(changes.slice(-20));
+            await storage.updateProgramConfig(prog.id, config);
+          }
+        }
+      } catch {}
+    }
+
     res.json(updated);
   });
 
@@ -478,6 +512,51 @@ export async function registerRoutes(
     const id = parseInt(req.params.id, 10);
     const updated = await storage.updateProposalStatus(id, "rejected", new Date());
     if (!updated) return res.status(404).json({ message: "Proposal not found" });
+    res.json(updated);
+  });
+
+  app.get("/api/radar/seen", async (req, res) => {
+    const days = parseInt(req.query.days as string, 10) || 7;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const hashes = await storage.getRadarSeenHashes(since);
+    res.json({ hashes });
+  });
+
+  app.post("/api/radar/seen", async (req, res) => {
+    const items = req.body.items;
+    if (!Array.isArray(items)) return res.status(400).json({ message: "items must be an array" });
+    const toInsert = items.map((i: any) => ({
+      contentHash: String(i.contentHash || ""),
+      source: String(i.source || "unknown"),
+      url: i.url || null,
+      title: i.title || null,
+    })).filter((i: any) => i.contentHash);
+    await storage.createRadarSeenItems(toInsert);
+    const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    await storage.cleanOldRadarSeenItems(cutoff);
+    res.json({ stored: toInsert.length });
+  });
+
+  app.get("/api/radar/engagement", async (req, res) => {
+    const days = parseInt(req.query.days as string, 10) || 7;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const entries = await storage.getRadarEngagement(since);
+    res.json(entries);
+  });
+
+  app.post("/api/radar/engagement", async (req, res) => {
+    const parsed = insertRadarEngagementSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const entry = await storage.createRadarEngagement(parsed.data);
+    res.status(201).json(entry);
+  });
+
+  app.patch("/api/programs/:id/config", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const config = req.body.config;
+    if (!config || typeof config !== "object") return res.status(400).json({ message: "config must be an object" });
+    const updated = await storage.updateProgramConfig(id, config);
+    if (!updated) return res.status(404).json({ message: "Program not found" });
     res.json(updated);
   });
 

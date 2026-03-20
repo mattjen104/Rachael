@@ -14,6 +14,8 @@ import {
   type ActionPermission, actionPermissions,
   type Recipe, type InsertRecipe, recipes,
   type Transcript, type InsertTranscript, transcripts,
+  type RadarSeenItem, type InsertRadarSeenItem, radarSeenItems,
+  type RadarEngagement, type InsertRadarEngagement, radarEngagement,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql } from "drizzle-orm";
@@ -112,6 +114,15 @@ export interface IStorage {
   createTranscript(t: InsertTranscript): Promise<Transcript>;
   updateTranscript(id: number, data: Partial<InsertTranscript>): Promise<Transcript | undefined>;
   deleteTranscript(id: number): Promise<void>;
+
+  getRadarSeenHashes(since: Date): Promise<string[]>;
+  createRadarSeenItems(items: InsertRadarSeenItem[]): Promise<void>;
+  cleanOldRadarSeenItems(before: Date): Promise<void>;
+
+  getRadarEngagement(since: Date): Promise<RadarEngagement[]>;
+  createRadarEngagement(e: InsertRadarEngagement): Promise<RadarEngagement>;
+
+  updateProgramConfig(id: number, config: Record<string, string>): Promise<Program | undefined>;
 
   searchAll(query: string): Promise<Array<{ type: string; id: number; title: string; snippet: string }>>;
 }
@@ -522,6 +533,38 @@ export class DatabaseStorage implements IStorage {
     }
 
     return results;
+  }
+
+  async getRadarSeenHashes(since: Date): Promise<string[]> {
+    const rows = await db.select({ contentHash: radarSeenItems.contentHash })
+      .from(radarSeenItems)
+      .where(gte(radarSeenItems.createdAt, since));
+    return rows.map(r => r.contentHash);
+  }
+
+  async createRadarSeenItems(items: InsertRadarSeenItem[]): Promise<void> {
+    if (items.length === 0) return;
+    await db.insert(radarSeenItems).values(items);
+  }
+
+  async cleanOldRadarSeenItems(before: Date): Promise<void> {
+    await db.delete(radarSeenItems).where(lte(radarSeenItems.createdAt, before));
+  }
+
+  async getRadarEngagement(since: Date): Promise<RadarEngagement[]> {
+    return db.select().from(radarEngagement)
+      .where(gte(radarEngagement.createdAt, since))
+      .orderBy(desc(radarEngagement.createdAt));
+  }
+
+  async createRadarEngagement(e: InsertRadarEngagement): Promise<RadarEngagement> {
+    const [created] = await db.insert(radarEngagement).values(e).returning();
+    return created;
+  }
+
+  async updateProgramConfig(id: number, config: Record<string, string>): Promise<Program | undefined> {
+    const [updated] = await db.update(programs).set({ config }).where(eq(programs.id, id)).returning();
+    return updated;
   }
 }
 

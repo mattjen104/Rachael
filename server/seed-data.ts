@@ -94,8 +94,20 @@ async function execute() {
       type: "meta",
       schedule: "daily",
       cronExpression: "30 23 * * *",
-      instructions: "Expanded research radar — aggregates HN, GitHub trending, Lobsters, Lemmy, ArXiv CS.AI, and 12+ Reddit AI/LLM/OpenClaw subreddits (with top comments). Two-stage LLM pipeline: Claude Sonnet filters for relevance, then synthesizes briefing with actionable intel. Hardened scraping with retries, rate limiting, and graceful degradation.",
-      config: { TASK_TYPE: "research", COST_TIER: "premium", METRIC: "proposals_made", DIRECTION: "higher", OUTPUT_TYPE: "proposal", TIMEOUT: "600" },
+      instructions: "Self-improving research radar — dual-source Reddit (front page + niche subs), cross-run dedup, engagement-informed filtering, source quality scoring, and auto-proposal execution. Aggregates HN, GitHub trending, Lobsters, Lemmy, ArXiv CS.AI. Two-stage LLM pipeline with closed feedback loop.",
+      config: {
+        TASK_TYPE: "research", COST_TIER: "premium", METRIC: "proposals_made", DIRECTION: "higher", OUTPUT_TYPE: "proposal", TIMEOUT: "600",
+        NICHE_SUBS: JSON.stringify(["LocalLLaMA", "MachineLearning", "artificial", "OpenAI", "ClaudeAI", "Anthropic", "LLMDevs", "singularity", "ollama", "LangChain", "StableDiffusion", "comfyui", "SelfHosted", "OpenClaw", "agi", "ArtificialInteligence"]),
+        INTEREST_AREAS: JSON.stringify(["Autonomous agent systems (planning, tool use, memory)", "Local LLM deployment (ollama, llama.cpp, quantization)", "Browser automation and scraping", "Voice/speech interfaces", "Knowledge management and org-mode-style tools", "OpenClaw (AI governance, proposals, voting)"]),
+        SCORE_THRESHOLD: "10",
+        GITHUB_LANGS: JSON.stringify(["typescript", "python", "rust"]),
+        SOURCE_SCORES: "{}",
+        CONFIG_CHANGES: "[]",
+        FRONT_PAGE_ENABLED: "true",
+        ENABLED_SOURCES: JSON.stringify({ hn: true, github: true, lobsters: true, lemmy: true, arxiv: true, reddit: true }),
+        LEMMY_COMMUNITIES: JSON.stringify(["machinelearning", "artificial_intelligence"]),
+        ARXIV_CATEGORY: "cs.AI",
+      },
       costTier: "premium",
       tags: ["program", "meta"],
       code: `const NL = String.fromCharCode(10);
@@ -103,13 +115,7 @@ const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
 const FILTER_MODEL = "anthropic/claude-sonnet-4";
 const SYNTH_MODEL = "anthropic/claude-sonnet-4";
 const UA = "OrgCloud/2.0 (research-radar; +https://orgcloud.dev)";
-
-const SUBREDDITS = [
-  "LocalLLaMA", "MachineLearning", "artificial", "OpenAI",
-  "ClaudeAI", "Anthropic", "LLMDevs", "singularity",
-  "ollama", "LangChain", "StableDiffusion", "comfyui",
-  "SelfHosted", "OpenClaw", "agi", "ArtificialInteligence"
-];
+const SERVER_BASE = "http://localhost:" + (__bridgePort || "5000");
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -128,10 +134,7 @@ async function retryFetch(url: string, opts: any = {}, retries = 2): Promise<Res
   for (let i = 0; i <= retries; i++) {
     try {
       const r = await fetch(url, opts);
-      if (r.status === 429) {
-        await sleep(parseRetryAfter(r.headers.get("retry-after")));
-        continue;
-      }
+      if (r.status === 429) { await sleep(parseRetryAfter(r.headers.get("retry-after"))); continue; }
       if (r.ok) return r;
       if (i < retries) { await sleep(2000 * (i + 1)); continue; }
       throw new Error("HTTP " + r.status);
@@ -158,166 +161,402 @@ async function callLLM(prompt: string, model: string, maxTokens = 3000): Promise
   } catch (e: any) { return { ok: false, text: "[model unavailable: " + (e.message || "").slice(0, 80) + "]" }; }
 }
 
+function contentHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+  return "h" + (h >>> 0).toString(36);
+}
+
+interface SourceItem {
+  source: string; sub?: string; title: string; score: number; url: string;
+  selftext?: string; topComment?: string; tags?: string[]; description?: string; lang?: string;
+  channel?: string;
+}
+
+let __bridgeAvailable: boolean | null = null;
+async function checkBridge(): Promise<boolean> {
+  if (__bridgeAvailable !== null) return __bridgeAvailable;
+  try {
+    const r = await fetch(SERVER_BASE + "/api/bridge/status", {
+      headers: { "Authorization": "Bearer " + __apiKey },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) { __bridgeAvailable = false; return false; }
+    const d = await r.json() as any;
+    __bridgeAvailable = d.extension?.connected === true;
+    return __bridgeAvailable;
+  } catch { __bridgeAvailable = false; return false; }
+}
+
 const MAX_COMMENTS_PER_SUB = 3;
 
-async function fetchRedditSub(sub: string): Promise<Array<{title: string; score: number; url: string; selftext: string; topComment: string; sub: string}>> {
+async function fetchRedditBridge(sub: string): Promise<SourceItem[]> {
   try {
     await sleep(1500);
-    const r = await retryFetch("https://www.reddit.com/r/" + sub + "/hot.json?limit=10&raw_json=1", {
-      headers: { "Accept": "application/json" }
-    });
-    const d = await r.json();
-    const posts = (d.data?.children || [])
-      .filter((c: any) => c.data && !c.data.stickied && c.data.score >= 10)
-      .slice(0, 6);
-    const results: Array<{title: string; score: number; url: string; selftext: string; topComment: string; sub: string}> = [];
+    const url = "https://www.reddit.com/r/" + sub + "/hot.json?limit=15&raw_json=1";
+    const br = await bridgeFetch(url, { timeout: 20000, headers: { "Accept": "application/json" } });
+    if (br.error) return [];
+    let d: any;
+    try { d = typeof br.body === "object" && br.body !== null ? br.body : JSON.parse(br.text || "{}"); } catch { return []; }
+    const posts = (d.data?.children || []).filter((c: any) => c.data && !c.data.stickied).slice(0, 10);
+    const results: SourceItem[] = [];
     let commentsFetched = 0;
     for (const p of posts) {
       const pd = p.data;
       let topComment = "";
-      if (commentsFetched < MAX_COMMENTS_PER_SUB) {
+      if (commentsFetched < MAX_COMMENTS_PER_SUB && pd.num_comments > 0) {
         try {
           await sleep(1200);
-          const cr = await retryFetch("https://www.reddit.com/r/" + sub + "/comments/" + pd.id + ".json?limit=1&sort=top&raw_json=1", {
-            headers: { "Accept": "application/json" }
-          }, 1);
-          const cd = await cr.json();
-          const comments = cd[1]?.data?.children || [];
-          const first = comments.find((c: any) => c.kind === "t1");
-          if (first?.data?.body) {
-            topComment = first.data.body.slice(0, 500);
-            commentsFetched++;
+          const cbr = await bridgeFetch("https://www.reddit.com/r/" + sub + "/comments/" + pd.id + ".json?limit=1&sort=top&raw_json=1", { timeout: 15000, headers: { "Accept": "application/json" } });
+          if (!cbr.error) {
+            let cd: any;
+            try { cd = typeof cbr.body === "object" && cbr.body !== null ? cbr.body : JSON.parse(cbr.text || "[]"); } catch { cd = []; }
+            const first = (cd[1]?.data?.children || []).find((c: any) => c.kind === "t1");
+            if (first?.data?.body) { topComment = first.data.body.slice(0, 500); commentsFetched++; }
           }
         } catch {}
       }
-      results.push({
-        title: pd.title || "",
-        score: pd.score || 0,
-        url: pd.url || "",
-        selftext: (pd.selftext || "").slice(0, 300),
-        topComment,
-        sub,
-      });
+      results.push({ source: "reddit", sub, channel: "niche", title: pd.title || "", score: pd.score || 0, url: "https://www.reddit.com" + (pd.permalink || ""), selftext: (pd.selftext || "").slice(0, 400), topComment });
     }
     return results;
   } catch { return []; }
 }
 
-async function fetchAllReddit(): Promise<{text: string; status: string}> {
-  const allPosts: Array<{title: string; score: number; url: string; selftext: string; topComment: string; sub: string}> = [];
-  const failed: string[] = [];
-  for (const sub of SUBREDDITS) {
-    const posts = await fetchRedditSub(sub);
-    if (posts.length === 0) failed.push(sub);
-    allPosts.push(...posts);
-  }
-  allPosts.sort((a, b) => b.score - a.score);
-  const lines: string[] = [];
-  for (const p of allPosts.slice(0, 40)) {
-    let entry = "r/" + p.sub + " | " + p.title + " (" + p.score + " pts)";
-    if (p.selftext) entry += NL + "  Post: " + p.selftext.slice(0, 200);
-    if (p.topComment) entry += NL + "  Top comment: " + p.topComment.slice(0, 300);
-    lines.push(entry);
-  }
-  const status = failed.length > 0 ? "partial (" + failed.length + " failed: " + failed.join(",") + ")" : "ok";
-  return {
-    text: "REDDIT AI/LLM (" + allPosts.length + " posts from " + (SUBREDDITS.length - failed.length) + "/" + SUBREDDITS.length + " subs):" + NL + lines.join(NL + NL),
-    status,
-  };
+async function fetchRedditRSS(sub: string): Promise<SourceItem[]> {
+  try {
+    await sleep(500);
+    const r = await retryFetch("https://www.reddit.com/r/" + sub + "/.rss?limit=15", { headers: { "Accept": "application/rss+xml, application/xml, text/xml" } }, 1);
+    const xml = await r.text();
+    const entryRe = /<entry>[\\s\\S]*?<\\/entry>/g;
+    const results: SourceItem[] = [];
+    let entryMatch;
+    while ((entryMatch = entryRe.exec(xml)) !== null && results.length < 10) {
+      const entry = entryMatch[0];
+      const titleM = entry.match(/<title[^>]*>([^<]+)<\\/title>/);
+      const linkM = entry.match(/<link[^>]*href="([^"]+)"/);
+      const contentM = entry.match(/<content[^>]*>([\\s\\S]*?)<\\/content>/);
+      const title = (titleM ? titleM[1] : "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'");
+      if (!title || title.includes("updates on")) continue;
+      let selftext = "";
+      if (contentM) { selftext = contentM[1].replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/\\s+/g, " ").trim().slice(0, 400); }
+      results.push({ source: "reddit", sub, channel: "niche", title, score: 0, url: linkM ? linkM[1] : "", selftext });
+    }
+    return results;
+  } catch { return []; }
 }
 
-async function fetchHN(): Promise<string> {
+async function fetchFrontPage(): Promise<SourceItem[]> {
+  const useBridge = await checkBridge();
+  if (!useBridge) return [];
+  try {
+    await sleep(1000);
+    const br = await bridgeFetch("https://www.reddit.com/best.json?limit=25&raw_json=1", { timeout: 25000, headers: { "Accept": "application/json" } });
+    if (br.error) return [];
+    let d: any;
+    try { d = typeof br.body === "object" && br.body !== null ? br.body : JSON.parse(br.text || "{}"); } catch { return []; }
+    const posts = (d.data?.children || []).filter((c: any) => c.data && !c.data.stickied).slice(0, 20);
+    return posts.map((p: any) => {
+      const pd = p.data;
+      return { source: "reddit", sub: pd.subreddit || "frontpage", channel: "frontpage" as const, title: pd.title || "", score: pd.score || 0, url: "https://www.reddit.com" + (pd.permalink || ""), selftext: (pd.selftext || "").slice(0, 400) };
+    });
+  } catch { return []; }
+}
+
+async function fetchAllReddit(nicheSubs: string[], frontPageEnabled: boolean): Promise<{items: SourceItem[]; bySub: Record<string, SourceItem[]>; status: string; mode: string; frontPageCount: number; nicheCount: number}> {
+  const useBridge = await checkBridge();
+  const mode = useBridge ? "bridge" : "rss";
+  const bySub: Record<string, SourceItem[]> = {};
+  const failed: string[] = [];
+  let frontPageItems: SourceItem[] = [];
+
+  if (frontPageEnabled && useBridge) {
+    frontPageItems = await fetchFrontPage();
+  }
+
+  for (const sub of nicheSubs) {
+    const posts = useBridge ? await fetchRedditBridge(sub) : await fetchRedditRSS(sub);
+    if (posts.length === 0) failed.push(sub);
+    else bySub[sub] = posts;
+  }
+
+  const seen = new Set<string>();
+  const allItems: SourceItem[] = [];
+  for (const item of frontPageItems) {
+    const key = item.url || item.title;
+    if (!seen.has(key)) { seen.add(key); allItems.push(item); }
+  }
+  for (const sub of nicheSubs) {
+    if (bySub[sub]) {
+      for (const item of bySub[sub]) {
+        const key = item.url || item.title;
+        if (!seen.has(key)) { seen.add(key); allItems.push(item); }
+      }
+    }
+  }
+  if (useBridge) allItems.sort((a, b) => b.score - a.score);
+
+  let status = mode + ":ok";
+  if (failed.length > 0) status = mode + ":partial (" + failed.length + " failed: " + failed.join(",") + ")";
+  return { items: allItems, bySub, status, mode, frontPageCount: frontPageItems.length, nicheCount: allItems.length - frontPageItems.length };
+}
+
+async function fetchHN(): Promise<{items: SourceItem[]; text: string}> {
   try {
     const topIds = await retryFetch("https://hacker-news.firebaseio.com/v0/topstories.json").then(r => r.json());
-    const stories: string[] = [];
-    for (const id of topIds.slice(0, 25)) {
+    const items: SourceItem[] = [];
+    for (const id of topIds.slice(0, 30)) {
       const s = await retryFetch("https://hacker-news.firebaseio.com/v0/item/" + id + ".json").then(r => r.json());
-      if (s && s.score >= 50) stories.push(s.title + " (" + s.score + " pts)");
-      if (stories.length >= 12) break;
+      if (s && s.score >= 30) { items.push({ source: "hn", title: s.title || "", score: s.score || 0, url: s.url || ("https://news.ycombinator.com/item?id=" + s.id), description: "Comments: https://news.ycombinator.com/item?id=" + s.id }); }
+      if (items.length >= 15) break;
     }
-    return "HN Top:" + NL + stories.join(NL);
-  } catch { return "HN: [fetch failed]"; }
+    return { items, text: "HN Top:" + NL + items.map(i => i.title + " (" + i.score + " pts)").join(NL) };
+  } catch { return { items: [], text: "HN: [fetch failed]" }; }
 }
 
-async function fetchGitHub(): Promise<string> {
-  const langs = ["typescript", "python", "rust"];
-  const repos: string[] = [];
+async function fetchGitHub(langs: string[]): Promise<{items: SourceItem[]; text: string}> {
+  const items: SourceItem[] = [];
   for (const lang of langs) {
     try {
-      const r = await retryFetch("https://github.com/trending/" + lang + "?since=daily", {
-        headers: { "Accept": "text/html" }
-      });
+      const r = await retryFetch("https://github.com/trending/" + lang + "?since=daily", { headers: { "Accept": "text/html" } });
       const html = await r.text();
       const re = /class="Box-row"[\\s\\S]*?href="\\/([^"]+)"/g;
       let m;
-      while ((m = re.exec(html)) !== null && repos.length < 6) {
-        repos.push("[" + lang + "] " + m[1].replace(/\\/\\s/g, "/"));
+      while ((m = re.exec(html)) !== null && items.filter(i => i.lang === lang).length < 5) {
+        const repo = m[1].replace(/\\/\\s/g, "/");
+        items.push({ source: "github", title: repo, score: 0, url: "https://github.com/" + repo, lang });
       }
     } catch {}
   }
-  return "GitHub Trending:" + NL + repos.join(NL);
+  return { items, text: "GitHub Trending:" + NL + items.map(i => "[" + i.lang + "] " + i.title).join(NL) };
 }
 
-async function fetchLobsters(): Promise<string> {
+async function fetchLobsters(): Promise<{items: SourceItem[]; text: string}> {
   try {
     const r = await retryFetch("https://lobste.rs/hottest.json");
     const d = await r.json();
-    return "Lobsters Hot:" + NL + d.slice(0, 10).filter((p: any) => p.score >= 5)
-      .map((p: any) => p.title + " (" + p.score + " pts, " + (p.tags || []).join(",") + ")").join(NL);
-  } catch { return "Lobsters: [fetch failed]"; }
+    const items: SourceItem[] = d.slice(0, 15).filter((p: any) => p.score >= 3).map((p: any) => ({ source: "lobsters" as const, title: p.title, score: p.score, url: p.url || p.comments_url || "", tags: p.tags || [], description: p.comments_url || "" }));
+    return { items, text: "Lobsters Hot:" + NL + items.map(i => i.title + " (" + i.score + " pts, " + (i.tags || []).join(",") + ")").join(NL) };
+  } catch { return { items: [], text: "Lobsters: [fetch failed]" }; }
 }
 
-async function fetchLemmy(community: string): Promise<string> {
+async function fetchLemmy(community: string): Promise<{items: SourceItem[]; text: string}> {
   try {
     const r = await retryFetch("https://lemmy.world/api/v3/post/list?sort=Hot&limit=10&community_name=" + community);
     const d = await r.json();
-    const posts = (d.posts || []).filter((p: any) => p.counts.score >= 3).slice(0, 5)
-      .map((p: any) => p.post.name + " (" + p.counts.score + " pts)");
-    return "Lemmy c/" + community + ":" + NL + (posts.length ? posts.join(NL) : "[no recent hot posts]");
-  } catch { return "Lemmy c/" + community + ": [fetch failed]"; }
+    const items: SourceItem[] = (d.posts || []).filter((p: any) => p.counts.score >= 2).slice(0, 8).map((p: any) => ({ source: "lemmy" as const, sub: community, title: p.post.name, score: p.counts.score, url: p.post.url || p.post.ap_id || "" }));
+    return { items, text: "Lemmy c/" + community + ":" + NL + (items.length ? items.map(i => i.title + " (" + i.score + " pts)").join(NL) : "[no recent hot posts]") };
+  } catch { return { items: [], text: "Lemmy c/" + community + ": [fetch failed]" }; }
 }
 
-async function fetchArxiv(): Promise<string> {
+async function fetchArxiv(category?: string): Promise<{items: SourceItem[]; text: string}> {
+  const cat = category || "cs.AI";
   try {
-    const r = await retryFetch("https://rss.arxiv.org/rss/cs.AI");
+    const r = await retryFetch("https://rss.arxiv.org/rss/" + cat);
     const xml = await r.text();
-    const titles: string[] = [];
-    const re = /<item>[\\s\\S]*?<title>([^<]+)<\\/title>/g;
+    const items: SourceItem[] = [];
+    const re = /<item>[\\s\\S]*?<title>([^<]+)<\\/title>[\\s\\S]*?<link>([^<]+)<\\/link>/g;
     let m;
-    while ((m = re.exec(xml)) !== null && titles.length < 10) {
+    while ((m = re.exec(xml)) !== null && items.length < 12) {
       const t = m[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-      if (!t.includes("updates on arXiv")) titles.push(t.trim());
+      if (!t.includes("updates on arXiv")) items.push({ source: "arxiv", title: t.trim(), score: 0, url: m[2].trim() });
     }
-    return "ArXiv CS.AI (recent):" + NL + titles.join(NL);
-  } catch { return "ArXiv: [fetch failed]"; }
+    return { items, text: "ArXiv " + cat + " (recent):" + NL + items.map(i => i.title).join(NL) };
+  } catch { return { items: [], text: "ArXiv: [fetch failed]" }; }
 }
 
-async function execute() {
-  const [redditResult, hn, gh, lobsters, lemmyML, lemmyAI, arxiv] = await Promise.all([
-    fetchAllReddit(),
-    fetchHN(), fetchGitHub(), fetchLobsters(),
-    fetchLemmy("machinelearning"), fetchLemmy("artificial_intelligence"),
-    fetchArxiv(),
-  ]);
+async function getSeenHashes(): Promise<Set<string>> {
+  try {
+    const hdrs: Record<string, string> = {};
+    if (__apiKey) hdrs["Authorization"] = "Bearer " + __apiKey;
+    const r = await fetch(SERVER_BASE + "/api/radar/seen?days=7", { headers: hdrs, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return new Set();
+    const d = await r.json();
+    return new Set(d.hashes || []);
+  } catch { return new Set(); }
+}
 
-  const allSources = [hn, gh, lobsters, lemmyML, lemmyAI, arxiv, redditResult.text].join(NL + NL);
+async function storeSeenItems(items: Array<{contentHash: string; source: string; url?: string; title?: string}>): Promise<void> {
+  try {
+    const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+    if (__apiKey) hdrs["Authorization"] = "Bearer " + __apiKey;
+    await fetch(SERVER_BASE + "/api/radar/seen", {
+      method: "POST", headers: hdrs,
+      body: JSON.stringify({ items }), signal: AbortSignal.timeout(5000),
+    });
+  } catch {}
+}
+
+async function getEngagementSummary(): Promise<{topics: string[]; sources: string[]; count: number}> {
+  try {
+    const hdrs: Record<string, string> = {};
+    if (__apiKey) hdrs["Authorization"] = "Bearer " + __apiKey;
+    const r = await fetch(SERVER_BASE + "/api/radar/engagement?days=7", { headers: hdrs, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return { topics: [], sources: [], count: 0 };
+    const entries = await r.json();
+    const topicCounts: Record<string, number> = {};
+    const sourceCounts: Record<string, number> = {};
+    for (const e of entries) {
+      const words = (e.title || "").toLowerCase().split(/\\s+/).filter((w: string) => w.length > 4);
+      for (const w of words) topicCounts[w] = (topicCounts[w] || 0) + 1;
+      if (e.source) sourceCounts[e.source] = (sourceCounts[e.source] || 0) + 1;
+    }
+    const topics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => e[0]);
+    const sources = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
+    return { topics, sources, count: entries.length };
+  } catch { return { topics: [], sources: [], count: 0 }; }
+}
+
+async function updateProgramConfig(programName: string, updates: Record<string, string>): Promise<void> {
+  try {
+    const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    if (__apiKey) authHeaders["Authorization"] = "Bearer " + __apiKey;
+    const r = await fetch(SERVER_BASE + "/api/programs", { headers: authHeaders, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return;
+    const progs = await r.json();
+    const prog = progs.find((p: any) => p.name === programName);
+    if (!prog) return;
+    const newConfig = { ...(prog.config || {}), ...updates };
+    await fetch(SERVER_BASE + "/api/programs/" + prog.id + "/config", {
+      method: "PATCH", headers: authHeaders,
+      body: JSON.stringify({ config: newConfig }), signal: AbortSignal.timeout(5000),
+    });
+  } catch {}
+}
+
+async function execute(__ctx: any) {
+  const props = __ctx?.properties || {};
+  const nicheSubs: string[] = JSON.parse(props.NICHE_SUBS || '["LocalLLaMA","MachineLearning","artificial","OpenAI","ClaudeAI","Anthropic","LLMDevs","singularity","ollama","LangChain","StableDiffusion","comfyui","SelfHosted","OpenClaw","agi","ArtificialInteligence"]');
+  const interestAreas: string[] = JSON.parse(props.INTEREST_AREAS || '["Autonomous agent systems","Local LLM deployment","Browser automation","Voice/speech interfaces","Knowledge management","OpenClaw (AI governance)"]');
+  const scoreThreshold = parseInt(props.SCORE_THRESHOLD || "10", 10);
+  const githubLangs: string[] = JSON.parse(props.GITHUB_LANGS || '["typescript","python","rust"]');
+  const frontPageEnabled = props.FRONT_PAGE_ENABLED !== "false";
+  const prevSourceScores: Record<string, number> = JSON.parse(props.SOURCE_SCORES || "{}");
+  const configChanges: any[] = JSON.parse(props.CONFIG_CHANGES || "[]");
+  const enabledSources: Record<string, boolean> = JSON.parse(props.ENABLED_SOURCES || '{"hn":true,"github":true,"lobsters":true,"lemmy":true,"arxiv":true,"reddit":true}');
+  const lemmyCommunities: string[] = JSON.parse(props.LEMMY_COMMUNITIES || '["machinelearning","artificial_intelligence"]');
+  const arxivCategory: string = props.ARXIV_CATEGORY || "cs.AI";
+
+  const seenHashes = await getSeenHashes();
+  const engagement = await getEngagementSummary();
+
+  const fetches: Promise<any>[] = [];
+  fetches.push(enabledSources.reddit !== false ? fetchAllReddit(nicheSubs, frontPageEnabled) : Promise.resolve({ items: [], text: "", status: "disabled", frontPageCount: 0, nicheCount: 0 }));
+  fetches.push(enabledSources.hn !== false ? fetchHN() : Promise.resolve({ items: [], text: "" }));
+  fetches.push(enabledSources.github !== false ? fetchGitHub(githubLangs) : Promise.resolve({ items: [], text: "" }));
+  fetches.push(enabledSources.lobsters !== false ? fetchLobsters() : Promise.resolve({ items: [], text: "" }));
+  for (const community of lemmyCommunities) {
+    fetches.push(enabledSources.lemmy !== false ? fetchLemmy(community) : Promise.resolve({ items: [], text: "" }));
+  }
+  fetches.push(enabledSources.arxiv !== false ? fetchArxiv(arxivCategory) : Promise.resolve({ items: [], text: "" }));
+
+  const results = await Promise.all(fetches);
+  const redditResult = results[0];
+  const hnResult = results[1];
+  const ghResult = results[2];
+  const lobstersResult = results[3];
+  const lemmyResults = results.slice(4, 4 + lemmyCommunities.length);
+  const arxivResult = results[4 + lemmyCommunities.length];
+
+  const allRawItems: SourceItem[] = [
+    ...redditResult.items, ...hnResult.items, ...ghResult.items,
+    ...lobstersResult.items, ...lemmyResults.flatMap((r: any) => r.items), ...arxivResult.items,
+  ];
+
+  let dedupCount = 0;
+  const newSeenItems: Array<{contentHash: string; source: string; url?: string; title?: string}> = [];
+  const dedupedItems: SourceItem[] = [];
+  for (const item of allRawItems) {
+    const hash = contentHash(item.title + "|" + (item.url || ""));
+    if (seenHashes.has(hash)) { dedupCount++; continue; }
+    seenHashes.add(hash);
+    newSeenItems.push({ contentHash: hash, source: item.source, url: item.url, title: item.title?.slice(0, 200) });
+    dedupedItems.push(item);
+  }
+
+  await storeSeenItems(newSeenItems);
+
+  const sourceCounts: Record<string, {scraped: number; survived: number}> = {};
+  for (const item of allRawItems) {
+    const key = item.source + (item.sub ? "/" + item.sub : "");
+    if (!sourceCounts[key]) sourceCounts[key] = { scraped: 0, survived: 0 };
+    sourceCounts[key].scraped++;
+  }
+
+  const dedupedHN = dedupedItems.filter(i => i.source === "hn");
+  const dedupedGH = dedupedItems.filter(i => i.source === "github");
+  const dedupedLobsters = dedupedItems.filter(i => i.source === "lobsters");
+  const dedupedLemmy = dedupedItems.filter(i => i.source === "lemmy");
+  const dedupedArxiv = dedupedItems.filter(i => i.source === "arxiv");
+
+  const hnText = dedupedHN.length ? "HN Top:" + NL + dedupedHN.map(i => i.title + " (" + i.score + " pts)").join(NL) : "";
+  const ghText = dedupedGH.length ? "GitHub Trending:" + NL + dedupedGH.map(i => "[" + (i.lang || "") + "] " + i.title).join(NL) : "";
+  const lobstersText = dedupedLobsters.length ? "Lobsters Hot:" + NL + dedupedLobsters.map(i => i.title + " (" + i.score + " pts, " + (i.tags || []).join(",") + ")").join(NL) : "";
+  const lemmyText = dedupedLemmy.length ? "Lemmy:" + NL + dedupedLemmy.map(i => "[c/" + (i.sub || "") + "] " + i.title + " (" + i.score + " pts)").join(NL) : "";
+  const arxivText = dedupedArxiv.length ? "ArXiv " + arxivCategory + " (recent):" + NL + dedupedArxiv.map(i => i.title).join(NL) : "";
+
+  const allTextSources = [hnText, ghText, lobstersText, lemmyText, arxivText].filter((t: string) => t).join(NL + NL);
+  const redditText = dedupedItems.filter(i => i.source === "reddit" && (i.channel === "frontpage" || (i.score || 0) >= scoreThreshold)).slice(0, 40).map(p => {
+    let entry = "[" + (p.channel || "niche") + "] r/" + p.sub + " | " + p.title;
+    if (p.score > 0) entry += " (" + p.score + " pts)";
+    if (p.selftext) entry += NL + "  " + p.selftext.slice(0, 200);
+    if (p.topComment) entry += NL + "  Top comment: " + p.topComment.slice(0, 300);
+    return entry;
+  }).join(NL + NL);
+  const allSources = allTextSources + NL + NL + "REDDIT:" + NL + redditText;
+
+  let engagementPrompt = "";
+  if (engagement.count > 0) {
+    engagementPrompt = NL + "RECENT ENGAGEMENT CONTEXT (user clicked/read these topics recently, weight them higher):" + NL;
+    if (engagement.topics.length > 0) engagementPrompt += "Recently engaged topics: " + engagement.topics.join(", ") + NL;
+    if (engagement.sources.length > 0) engagementPrompt += "High-signal sources: " + engagement.sources.join(", ") + NL;
+    engagementPrompt += "Total engagements last 7 days: " + engagement.count + NL;
+  }
 
   const filterResult = await callLLM(
     "You are a research relevance filter for an AI engineer who builds:" + NL +
-    "- Autonomous agent systems (planning, tool use, memory)" + NL +
-    "- Local LLM deployment (ollama, llama.cpp, quantization)" + NL +
-    "- Browser automation and scraping" + NL +
-    "- Voice/speech interfaces" + NL +
-    "- Knowledge management and org-mode-style tools" + NL +
-    "- OpenClaw (AI governance, proposals, voting)" + NL + NL +
+    interestAreas.map(a => "- " + a).join(NL) + NL +
+    engagementPrompt + NL +
     "From this raw feed, select ONLY the 15-20 most relevant items. For each, preserve the source, title, score, and top comment if available. Drop anything generic, off-topic, political hot takes, memes, or low-signal." + NL + NL +
     "RAW FEED:" + NL + allSources + NL + NL +
     "Output ONLY the filtered items, one per line, preserving original formatting. No commentary.",
     FILTER_MODEL, 3000
   );
 
-  const synthInput = filterResult.ok ? filterResult.text : allSources.slice(0, 6000);
+  const filteredText = filterResult.ok ? filterResult.text : "";
+  for (const item of dedupedItems) {
+    const key = item.source + (item.sub ? "/" + item.sub : "");
+    if (sourceCounts[key] && filteredText.includes(item.title.slice(0, 40))) {
+      sourceCounts[key].survived++;
+    }
+  }
 
+  const engagedSourceCounts: Record<string, number> = {};
+  for (const s of engagement.sources) { engagedSourceCounts[s] = (engagedSourceCounts[s] || 0) + 1; }
+  const maxEngaged = Math.max(1, ...Object.values(engagedSourceCounts));
+
+  const sourceSignals: Record<string, number> = {};
+  for (const [key, counts] of Object.entries(sourceCounts)) {
+    if (counts.scraped > 0) {
+      const surviveRatio = counts.survived / counts.scraped;
+      const engageBoost = (engagedSourceCounts[key] || 0) / maxEngaged;
+      const blended = surviveRatio * 0.7 + engageBoost * 0.3;
+      const prev = prevSourceScores[key];
+      sourceSignals[key] = Math.round((prev !== undefined ? prev * 0.3 + blended * 0.7 : blended) * 100) / 100;
+    }
+  }
+
+  const channelSignals: Record<string, Record<string, number>> = { frontpage: {}, niche: {} };
+  for (const item of dedupedItems) {
+    if (item.source !== "reddit") continue;
+    const ch = item.channel === "frontpage" ? "frontpage" : "niche";
+    const key = item.source + "/" + (item.sub || "unknown");
+    if (!channelSignals[ch][key]) channelSignals[ch][key] = 0;
+    if (filteredText.includes(item.title.slice(0, 40))) channelSignals[ch][key]++;
+  }
+
+  await updateProgramConfig("research-radar", { SOURCE_SCORES: JSON.stringify(sourceSignals) });
+
+  const synthInput = filterResult.ok ? filterResult.text : allSources.slice(0, 6000);
   const briefingResult = await callLLM(
     "You are a senior research analyst for an AI/LLM-focused developer. Synthesize these curated items into an actionable briefing:" + NL + NL +
     synthInput + NL + NL +
@@ -327,30 +566,87 @@ async function execute() {
     "3. EXPERIMENTS: 3 concrete things to try this week with links or repo names" + NL +
     "4. LOCAL LLM WATCH: Any new models, quantizations, or deployment techniques" + NL +
     "5. LLM EXPLOITATION: Notable jailbreaks, prompt injection, security concerns" + NL +
-    "6. SYSTEM PROPOSALS: 2 improvements for an automated agent/research system" + NL + NL +
+    "6. SYSTEM PROPOSALS: Exactly 2 improvements for the research radar system. For each, output on a new line: PROPOSAL_TYPE: (one of: add-source, drop-source, add-interest, adjust-threshold) | DETAIL: (the specific value) | REASON: (why)" + NL + NL +
     "Be concise, specific, and actionable. Include Reddit community sentiment where relevant.",
     SYNTH_MODEL, 4000
   );
 
   const briefing = briefingResult.text;
-  const sourceCount = {
-    reddit: (redditResult.text.match(/r\\//g) || []).length,
-    hn: (hn.match(/pts\\)/g) || []).length,
-    arxiv: (arxiv.match(/\\n/g) || []).length,
-    github: (gh.match(/\\[/g) || []).length,
-  };
-  const statusLine = "reddit:" + sourceCount.reddit + "(" + redditResult.status + ") hn:" + sourceCount.hn + " arxiv:" + sourceCount.arxiv + " gh:" + sourceCount.github;
+
+  const recentChanges = configChanges.filter((c: any) => {
+    const d = new Date(c.appliedAt);
+    return Date.now() - d.getTime() < 7 * 24 * 60 * 60 * 1000;
+  });
+
+  let healthFooter = NL + NL + "---" + NL + "## RADAR HEALTH" + NL;
+  healthFooter += "Items deduped this run: " + dedupCount + NL;
+  healthFooter += "Front page contribution: " + redditResult.frontPageCount + " items | Niche sub contribution: " + redditResult.nicheCount + " items" + NL;
+  healthFooter += "Source signal scores (survive*0.7 + engage*0.3): " + Object.entries(sourceSignals).map(([k, v]) => k + "=" + v).join(", ") + NL;
+  const fpKeys = Object.entries(channelSignals.frontpage).filter(([, v]) => v > 0).map(([k, v]) => k + ":" + v);
+  const nicheKeys = Object.entries(channelSignals.niche).filter(([, v]) => v > 0).map(([k, v]) => k + ":" + v);
+  if (fpKeys.length || nicheKeys.length) {
+    healthFooter += "Channel breakdown — frontpage survived: " + (fpKeys.length ? fpKeys.join(", ") : "none") + " | niche survived: " + (nicheKeys.length ? nicheKeys.join(", ") : "none") + NL;
+  }
+  healthFooter += "Engagement trend: " + (engagement.count > 0 ? engagement.count + " clicks (7d)" : "no engagement data") + NL;
+  if (recentChanges.length > 0) {
+    healthFooter += "Config changes since last run: " + recentChanges.map((c: any) => c.action + " (" + new Date(c.appliedAt).toLocaleDateString() + ")").join(", ") + NL;
+  }
+
+  const redditCount = redditResult.items.length;
+  const lemmyItemCount = lemmyResults.reduce((sum: number, r: any) => sum + r.items.length, 0);
+  const statusLine = "reddit:" + redditCount + "(" + redditResult.status + ") hn:" + hnResult.items.length + " arxiv:" + arxivResult.items.length + " gh:" + ghResult.items.length + " lobsters:" + lobstersResult.items.length + " lemmy:" + lemmyItemCount + " deduped:" + dedupCount;
   const llmStatus = (filterResult.ok ? "filter:ok" : "filter:FAIL") + " " + (briefingResult.ok ? "synth:ok" : "synth:FAIL");
   const metricStr = statusLine + " | " + llmStatus;
 
   const proposals: Array<{section: string; diff: string; reason: string}> = [];
-  const re = /\\d+\\.\\s*([^:]+):\\s*([\\s\\S]*?)(?=\\d+\\.|$)/g;
-  let m;
-  while ((m = re.exec(briefing)) !== null) {
-    proposals.push({ section: m[1].trim(), diff: "", reason: m[2].trim().slice(0, 500) });
+  const proposalRe = /PROPOSAL_TYPE:\\s*(add-source|drop-source|add-interest|adjust-threshold)\\s*\\|\\s*DETAIL:\\s*([^|]+)\\|\\s*REASON:\\s*(.+)/gi;
+  let pm;
+  while ((pm = proposalRe.exec(briefing)) !== null) {
+    const pType = pm[1].trim().toLowerCase();
+    const detail = pm[2].trim();
+    const reason = pm[3].trim();
+    let proposedContent: any = { radarConfigAction: pType };
+    if (pType === "add-source" || pType === "drop-source") proposedContent.sub = detail;
+    else if (pType === "add-interest") proposedContent.interest = detail;
+    else if (pType === "adjust-threshold") proposedContent.threshold = parseInt(detail, 10) || scoreThreshold;
+    proposals.push({ section: "SYSTEM PROPOSALS", diff: JSON.stringify(proposedContent), reason: reason.slice(0, 500) });
   }
 
-  return { summary: briefing + NL + NL + "--- Sources: " + metricStr, metric: metricStr, proposals };
+  for (const [src, signal] of Object.entries(sourceSignals)) {
+    if (signal < 0.05 && (sourceCounts[src]?.scraped || 0) >= 5) {
+      const sub = src.split("/")[1];
+      if (sub && nicheSubs.includes(sub)) {
+        proposals.push({
+          section: "SYSTEM PROPOSALS",
+          diff: JSON.stringify({ radarConfigAction: "drop-source", sub }),
+          reason: "Source r/" + sub + " has signal ratio " + signal + " — consistently low relevance. Consider dropping.",
+        });
+      }
+    }
+  }
+
+  function trimItems(arr: any[], n: number) { return arr.slice(0, n).map((i: any) => ({ title: (i.title || "").slice(0, 120), url: i.url || "", score: i.score || 0, sub: i.sub || "", source: i.source, tags: i.tags, topComment: i.topComment ? i.topComment.slice(0, 200) : undefined, lang: i.lang, description: i.description, channel: i.channel })); }
+  const trimSub: Record<string, any[]> = {};
+  for (const [sub, items] of Object.entries(redditResult.bySub)) { trimSub[sub] = trimItems(items as any[], 8); }
+  const structuredData = {
+    reddit: { bySub: trimSub, mode: redditResult.mode, status: redditResult.status, frontPageCount: redditResult.frontPageCount, nicheCount: redditResult.nicheCount },
+    hn: trimItems(hnResult.items, 12),
+    github: trimItems(ghResult.items, 10),
+    lobsters: trimItems(lobstersResult.items, 10),
+    lemmy: Object.fromEntries(lemmyCommunities.map((c: string, i: number) => [c, trimItems((lemmyResults[i] || { items: [] }).items, 6)])),
+    arxiv: trimItems(arxivResult.items, 10),
+    meta: {
+      redditCount, hnCount: hnResult.items.length, ghCount: ghResult.items.length, lobstersCount: lobstersResult.items.length, lemmyCount: lemmyItemCount, arxivCount: arxivResult.items.length,
+      filterOk: filterResult.ok, synthOk: briefingResult.ok, dedupCount, frontPageCount: redditResult.frontPageCount, nicheCount: redditResult.nicheCount,
+      sourceSignals, engagementCount: engagement.count, timestamp: new Date().toISOString(),
+    },
+  };
+
+  return {
+    summary: briefing + healthFooter + NL + "--- Sources: " + metricStr + NL + "<!--STRUCTURED_DATA_START-->" + NL + JSON.stringify(structuredData) + NL + "<!--STRUCTURED_DATA_END-->",
+    metric: metricStr,
+    proposals,
+  };
 }`,
       codeLang: "typescript",
     },

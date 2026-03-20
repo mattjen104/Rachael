@@ -375,3 +375,39 @@ export const insertActionPermissionSchema = z.object({
 });
 export type InsertActionPermission = z.infer<typeof insertActionPermissionSchema>;
 export type ActionPermission = typeof actionPermissions.$inferSelect;
+
+export const radarSeenItems = pgTable("radar_seen_items", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  contentHash: text("content_hash").notNull(),
+  source: text("source").notNull(),
+  url: text("url"),
+  title: text("title"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertRadarSeenItemSchema = z.object({
+  contentHash: z.string(),
+  source: z.string(),
+  url: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+});
+export type InsertRadarSeenItem = z.infer<typeof insertRadarSeenItemSchema>;
+export type RadarSeenItem = typeof radarSeenItems.$inferSelect;
+
+export const radarEngagement = pgTable("radar_engagement", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  url: text("url").notNull(),
+  source: text("source"),
+  title: text("title"),
+  programName: text("program_name").notNull().default("research-radar"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertRadarEngagementSchema = z.object({
+  url: z.string(),
+  source: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  programName: z.string().default("research-radar"),
+});
+export type InsertRadarEngagement = z.infer<typeof insertRadarEngagementSchema>;
+export type RadarEngagement = typeof radarEngagement.$inferSelect;

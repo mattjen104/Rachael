@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useAgenda, useToggleTask } from "@/hooks/use-org-data";
+import { getStoredApiKey } from "@/lib/queryClient";
 import type { Task, AgentResult } from "@shared/schema";
 
 interface AgendaViewProps {
@@ -167,6 +168,16 @@ export default function AgendaView({ onNavigate }: AgendaViewProps) {
               }`}
               onClick={() => {
                 setSelectedIdx(idx);
+                if (r.programName === "research-radar") {
+                  const ehdrs: Record<string, string> = { "Content-Type": "application/json" };
+                  const ekey = getStoredApiKey();
+                  if (ekey) ehdrs["Authorization"] = `Bearer ${ekey}`;
+                  fetch("/api/radar/engagement", {
+                    method: "POST",
+                    headers: ehdrs,
+                    body: JSON.stringify({ url: "briefing://" + r.id, source: "briefing", title: r.summary?.slice(0, 200), programName: "research-radar" }),
+                  }).catch(() => {});
+                }
                 onNavigate?.("results", r.id);
               }}
             >
