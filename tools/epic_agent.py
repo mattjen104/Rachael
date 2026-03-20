@@ -743,6 +743,13 @@ def find_uia_element_by_name(parent, name):
     return None
 
 
+def _iter_nodes(node):
+    """Yield all nodes in a tree (depth-first) for counting."""
+    yield node
+    for child in node.get("children", []):
+        yield from _iter_nodes(child)
+
+
 def fetch_cached_tree(env, client="hyperspace"):
     """Fetch the saved Epic tree from the server (cached coordinates)."""
     resp = _bridge_request(
@@ -2092,6 +2099,16 @@ def execute_menu_crawl(cmd):
                 pass
             return None
 
+        existing_tree = fetch_cached_tree(env, "hyperspace")
+        existing_cats = {}
+        if existing_tree and existing_tree.get("children"):
+            for child in existing_tree["children"]:
+                cname = child.get("name", "")
+                if cname and child.get("children"):
+                    existing_cats[cname.lower()] = child
+            if existing_cats:
+                print(f"  [menu-crawl] Found existing tree with {len(existing_cats)} populated categories — will skip those")
+
         print(f"  [menu-crawl] Step 2b: Reading recent items from left panel...")
         recent_prompt = (
             "Look at the LEFT panel of this Epic menu. It shows 'Pinned' and 'Recent' sections.\n"
@@ -2135,12 +2152,32 @@ def execute_menu_crawl(cmd):
             tree_children.append(recent_node)
             crawled_count += 1
 
-        print(f"  [menu-crawl] Step 3: Crawling {len(EPIC_MENU_CATEGORIES)} known categories...")
+        cats_to_crawl = []
+        cats_reused = []
+        for cat_name in EPIC_MENU_CATEGORIES:
+            cached = existing_cats.get(cat_name.lower())
+            if cached and len(cached.get("children", [])) > 0:
+                tree_children.append(cached)
+                reused_count = sum(1 for _ in _iter_nodes(cached))
+                crawled_count += reused_count
+                cats_reused.append(cat_name)
+            else:
+                cats_to_crawl.append(cat_name)
+
+        if cats_reused:
+            print(f"  [menu-crawl] Reusing {len(cats_reused)} already-crawled categories: {', '.join(cats_reused)}")
+        if not cats_to_crawl:
+            print(f"  [menu-crawl] All categories already crawled! Nothing new to scan.")
+            print(f"  [menu-crawl] To force a full re-crawl, clear the tree first with: epic tree --clear {env}")
+        else:
+            print(f"  [menu-crawl] Will crawl {len(cats_to_crawl)} new categories: {', '.join(cats_to_crawl)}")
+
+        print(f"  [menu-crawl] Step 3: Crawling {len(cats_to_crawl)} categories...")
 
         consecutive_failures = 0
         menu_confirmed_open = True
-        for i, cat_name in enumerate(EPIC_MENU_CATEGORIES):
-            print(f"  [menu-crawl] === [{i+1}/{len(EPIC_MENU_CATEGORIES)}] '{cat_name}' ===")
+        for i, cat_name in enumerate(cats_to_crawl):
+            print(f"  [menu-crawl] === [{i+1}/{len(cats_to_crawl)}] '{cat_name}' ===")
 
             if consecutive_failures >= 3:
                 print(f"  [menu-crawl] 3 consecutive failures - stopping crawl early to save what we have")

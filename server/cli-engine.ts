@@ -3361,6 +3361,13 @@ ${fullHtml}`;
           return fail(`[epic] ${e.message}`);
         }
       }
+      if (args[1] === "--clear") {
+        const env = (args[2] || "SUP").toUpperCase();
+        const client = args[3] || "hyperspace";
+        const key = `epic_tree_${env.toLowerCase()}_${client}`;
+        await storage.setAgentConfig(key, "", "epic");
+        return ok(`Cleared ${client} tree for ${env}. Next menu-crawl will do a full scan.`);
+      }
       const env = (args[1] || "SUP").toUpperCase();
       const trees: Record<string, any> = {};
       for (const client of ["hyperspace", "text"]) {
