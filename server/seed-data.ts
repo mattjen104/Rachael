@@ -477,7 +477,7 @@ async function execute() {
       schedule: "daily",
       cronExpression: "0 22 * * *",
       instructions: "Nightly SoCal Craigslist estate/low-mileage car scanner.",
-      config: { REGIONS: "inlandempire,losangeles,orangecounty,sandiego", MIN_PRICE: "2000", MAX_PRICE: "15000", TOP_N: "8", TASK_TYPE: "research", METRIC: "deals_found", DIRECTION: "higher", TIMEOUT: "300" },
+      config: { REGIONS: "inlandempire,losangeles,orangecounty,sandiego", MIN_PRICE: "2000", MAX_PRICE: "25000", TOP_N: "8", TASK_TYPE: "research", METRIC: "deals_found", DIRECTION: "higher", TIMEOUT: "300" },
       costTier: "standard",
       tags: ["program"],
       code: null,
