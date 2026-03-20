@@ -2495,7 +2495,7 @@ def execute_search_crawl(cmd):
     all_activities = dict(existing_activities)
 
     TRUNCATION_THRESHOLD = 8
-    MAX_PREFIX_LEN = 3
+    MAX_PREFIX_LEN = 4
 
     def save_progress(completed):
         """Upload current activity list and completed prefixes to server."""
@@ -2513,25 +2513,12 @@ def execute_search_crawl(cmd):
             json={"value": json.dumps(payload), "category": "epic"},
         )
 
-    def search_one_prefix(prefix):
-        """Type a prefix into the search bar, read results via vision.
+    def read_search_results(prefix):
+        """Screenshot and read autocomplete dropdown via vision.
         Returns (results_list, was_truncated) or None on error."""
-        activate_window(window)
-        time.sleep(0.2)
-
-        pyautogui.hotkey("ctrl", "space")
-        time.sleep(0.6)
-
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.05)
-        pyautogui.typewrite(prefix, interval=0.03)
-        time.sleep(1.2)
-
         img = screenshot_window(window)
         b64 = img_to_base64(img)
         if not b64:
-            pyautogui.press("escape")
-            time.sleep(0.3)
             return None
 
         prompt = (
@@ -2547,16 +2534,21 @@ def execute_search_crawl(cmd):
             "- Text like 'more results', 'showing X of Y', or '...'\n"
             "- The list being cut off at the bottom edge\n"
             "- A large number of results (8+) that likely means more exist\n\n"
+            "Also check: is the SEARCH BAR still focused/visible with text in it?\n"
+            "If NO search bar or dropdown is visible, set \"searchBarVisible\": false.\n\n"
             "Return ONLY a JSON object:\n"
             "{\"items\": [{\"name\": \"Activity Name\", \"category\": \"Category if shown\"}], "
-            "\"truncated\": true/false, \"reason\": \"why you think truncated or not\"}\n\n"
-            "If NO autocomplete results are visible, return: {\"items\": [], \"truncated\": false, \"reason\": \"no results\"}\n"
+            "\"truncated\": true/false, \"searchBarVisible\": true/false, "
+            "\"reason\": \"brief explanation\"}\n\n"
+            "If NO autocomplete results are visible but search bar IS visible: "
+            "{\"items\": [], \"truncated\": false, \"searchBarVisible\": true, \"reason\": \"no matches\"}\n"
             "Return ONLY the JSON object, no other text."
         )
 
         resp_text = ask_claude(b64, prompt)
         results = []
         truncated = False
+        search_visible = True
         if resp_text:
             try:
                 m = re.search(r'\{[\s\S]*\}', resp_text)
@@ -2564,6 +2556,7 @@ def execute_search_crawl(cmd):
                     parsed = json.loads(m.group())
                     results = parsed.get("items", [])
                     truncated = parsed.get("truncated", False)
+                    search_visible = parsed.get("searchBarVisible", True)
                     if not truncated and len(results) >= TRUNCATION_THRESHOLD:
                         truncated = True
             except Exception:
@@ -2575,16 +2568,31 @@ def execute_search_crawl(cmd):
                 except Exception:
                     pass
 
-        pyautogui.press("escape")
-        time.sleep(0.3)
-        pyautogui.press("escape")
-        time.sleep(0.3)
+        return results, truncated, search_visible
 
-        return results, truncated
+    def ensure_search_focused():
+        """Make sure the search bar is focused. Returns True if recovered."""
+        activate_window(window)
+        time.sleep(0.2)
+        pyautogui.hotkey("ctrl", "space")
+        time.sleep(0.6)
+        return True
+
+    def type_prefix(prefix):
+        """Select all existing text and type a new prefix."""
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.05)
+        pyautogui.typewrite(prefix, interval=0.03)
+        time.sleep(1.0)
 
     prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
     consecutive_errors = 0
     total_searched = 0
+    search_bar_open = False
+
+    print(f"  [search-crawl] Opening search bar with Ctrl+Space...")
+    ensure_search_focused()
+    search_bar_open = True
 
     while prefix_queue:
         prefix = prefix_queue.pop(0)
@@ -2597,17 +2605,39 @@ def execute_search_crawl(cmd):
             break
 
         remaining = sum(1 for p in prefix_queue if p not in completed_prefixes)
-        print(f"  [search-crawl] === '{prefix}' === ({remaining} remaining in queue, {len(all_activities)} found so far)")
+        print(f"  [search-crawl] '{prefix}' ({remaining} left, {len(all_activities)} found)")
 
         try:
-            result = search_one_prefix(prefix)
+            if not search_bar_open:
+                print(f"  [search-crawl]   Reopening search bar...")
+                ensure_search_focused()
+                search_bar_open = True
+
+            type_prefix(prefix)
+
+            result = read_search_results(prefix)
             if result is None:
-                print(f"  [search-crawl] Screenshot failed for '{prefix}'")
+                print(f"  [search-crawl]   Screenshot failed")
                 consecutive_errors += 1
                 continue
 
-            results, truncated = result
-            total_searched += 1
+            results, truncated, search_visible = result
+
+            if not search_visible:
+                print(f"  [search-crawl]   Search bar lost focus - recovering...")
+                search_bar_open = False
+                ensure_search_focused()
+                search_bar_open = True
+                type_prefix(prefix)
+                result = read_search_results(prefix)
+                if result is None:
+                    consecutive_errors += 1
+                    continue
+                results, truncated, search_visible = result
+                if not search_visible:
+                    print(f"  [search-crawl]   Recovery failed, skipping '{prefix}'")
+                    consecutive_errors += 1
+                    continue
 
             new_count = 0
             for item in results:
@@ -2623,40 +2653,45 @@ def execute_search_crawl(cmd):
                     }
                     new_count += 1
 
-            status = "TRUNCATED - expanding" if truncated else "complete"
-            print(f"  [search-crawl] '{prefix}': {len(results)} results, {new_count} new -> {status}")
+            status = "TRUNCATED -> expanding" if truncated else "done"
+            print(f"  [search-crawl]   {len(results)} results, {new_count} new [{status}]")
 
             if truncated and len(prefix) < MAX_PREFIX_LEN:
                 expansions = [prefix + c for c in "abcdefghijklmnopqrstuvwxyz"]
-                insert_pos = 0
-                added_expansions = 0
+                added = 0
+                insert_at = 0
                 for exp in expansions:
                     if exp not in completed_prefixes:
-                        prefix_queue.insert(insert_pos, exp)
-                        insert_pos += 1
-                        added_expansions += 1
-                print(f"  [search-crawl]   Added {added_expansions} sub-prefixes: {prefix}a..{prefix}z")
+                        prefix_queue.insert(insert_at, exp)
+                        insert_at += 1
+                        added += 1
+                if added > 0:
+                    print(f"  [search-crawl]   Queued {added} sub-prefixes: {prefix}a..{prefix}z")
 
             completed_prefixes.add(prefix)
             consecutive_errors = 0
 
-            if total_searched % 3 == 0:
-                print(f"  [search-crawl] Saving progress ({len(all_activities)} activities, {len(completed_prefixes)} prefixes done)...")
+            if total_searched % 5 == 0:
                 save_progress(completed_prefixes)
+                print(f"  [search-crawl]   Progress saved ({len(all_activities)} activities)")
+
+            total_searched += 1
 
         except Exception as e:
-            print(f"  [search-crawl] Error on prefix '{prefix}': {e}")
+            print(f"  [search-crawl]   Error: {e}")
             traceback.print_exc()
             consecutive_errors += 1
+            search_bar_open = False
             try:
-                pyautogui.press("escape")
-                time.sleep(0.3)
                 pyautogui.press("escape")
                 time.sleep(0.3)
             except Exception:
                 pass
 
-    print(f"  [search-crawl] COMPLETE! Discovered {len(all_activities)} activities across {total_searched} searches")
+    pyautogui.press("escape")
+    time.sleep(0.2)
+
+    print(f"  [search-crawl] COMPLETE! {len(all_activities)} activities from {total_searched} searches")
     save_progress(completed_prefixes)
 
     final_img = screenshot_window(window)
