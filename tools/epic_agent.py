@@ -1771,17 +1771,117 @@ def execute_menu_crawl(cmd):
         reopen_epic_menu()
         return True
 
+    def vision_check_scrollable(b64, context=""):
+        """Ask vision if the current menu/panel has a scrollbar or more items below."""
+        prompt = (
+            f"Look at this Epic Hyperspace menu screenshot{(' (' + context + ')') if context else ''}.\n\n"
+            "Does this menu panel have a VERTICAL SCROLLBAR on its right edge, or a scroll indicator "
+            "(down arrow, more items below the visible area, a scroll thumb/track)?\n\n"
+            "Look specifically for:\n"
+            "- A vertical scrollbar track on the right side of the menu/submenu panel\n"
+            "- A small down-arrow at the bottom of the menu\n"
+            "- A scroll thumb that is NOT at the bottom (meaning more content below)\n"
+            "- Any visual indicator that the list continues beyond what is visible\n\n"
+            "Return ONLY a JSON object:\n"
+            "{\"scrollable\": true/false, \"scrollbarX\": <x pixel of scrollbar center or right edge of menu>, "
+            "\"menuTopY\": <top y of menu panel>, \"menuBottomY\": <bottom y of menu panel>, "
+            "\"reason\": \"brief explanation\"}\n\n"
+            "If not scrollable or no scrollbar visible, set scrollbarX/menuTopY/menuBottomY to 0."
+        )
+        resp = ask_claude(b64, prompt)
+        if not resp:
+            return {"scrollable": False}
+        try:
+            m = re.search(r'\{[\s\S]*?\}', resp)
+            if m:
+                return json.loads(m.group())
+        except Exception:
+            pass
+        return {"scrollable": False}
+
+    def scroll_and_read_all_items(b64, context, is_submenu, indent):
+        """Read all menu items including those below the scroll fold.
+
+        Takes the initial screenshot b64, reads visible items, then checks
+        for a scrollbar. If scrollable, scrolls down and reads more items,
+        deduplicating by name. Repeats until no new items appear.
+        """
+        all_items = vision_read_menu(b64, context, is_submenu=is_submenu)
+        seen_names = set(item.get("name", "").lower().strip() for item in all_items)
+
+        scroll_info = vision_check_scrollable(b64, context)
+        if not scroll_info.get("scrollable", False):
+            return all_items
+
+        scrollbar_x = scroll_info.get("scrollbarX", 0)
+        menu_top = scroll_info.get("menuTopY", 0)
+        menu_bottom = scroll_info.get("menuBottomY", 0)
+        print(f"  [menu-crawl]{indent}  Scrollbar detected ({scroll_info.get('reason', '?')}), scrolling for more items...")
+
+        if scrollbar_x > 0 and menu_top > 0 and menu_bottom > 0:
+            menu_center_x = scrollbar_x - 40
+            menu_center_y = (menu_top + menu_bottom) // 2
+            scroll_screen_x, scroll_screen_y = vision_to_screen(window, menu_center_x, menu_center_y)
+        else:
+            last_item = all_items[-1] if all_items else None
+            if last_item and last_item.get("x", 0) > 0:
+                scroll_screen_x, scroll_screen_y = vision_to_screen(window, last_item["x"], last_item["y"])
+            else:
+                return all_items
+
+        max_scrolls = 8
+        scrolls_done = 0
+        for scroll_round in range(max_scrolls):
+            pyautogui.moveTo(scroll_screen_x, scroll_screen_y)
+            time.sleep(0.1)
+            pyautogui.scroll(-5)
+            time.sleep(0.5)
+            scrolls_done += 1
+
+            new_img, new_b64 = safe_screenshot()
+            if not new_b64:
+                break
+
+            new_items = vision_read_menu(new_b64, f"{context} (scrolled {scroll_round + 1}x)", is_submenu=is_submenu)
+            added = 0
+            for item in new_items:
+                name_key = item.get("name", "").lower().strip()
+                if name_key and name_key not in seen_names:
+                    seen_names.add(name_key)
+                    all_items.append(item)
+                    added += 1
+
+            print(f"  [menu-crawl]{indent}  Scroll {scroll_round + 1}: found {added} new items ({len(all_items)} total)")
+
+            if added == 0:
+                break
+
+            still_scrollable = vision_check_scrollable(new_b64, f"{context} after scroll {scroll_round + 1}")
+            if not still_scrollable.get("scrollable", False):
+                break
+
+        if scrolls_done > 0:
+            print(f"  [menu-crawl]{indent}  Scrolling back to top...")
+            pyautogui.moveTo(scroll_screen_x, scroll_screen_y)
+            time.sleep(0.1)
+            pyautogui.scroll(5 * scrolls_done + 10)
+            time.sleep(0.3)
+
+        return all_items
+
     def crawl_submenu(parent_path, current_depth, max_depth, reopen_epic_fn):
         """Recursively crawl a submenu. Returns (children_list, item_count).
-        Self-healing: detects when clicks go wrong and recovers automatically."""
+        Self-healing: detects when clicks go wrong and recovers automatically.
+        Handles scrollable menus by scrolling down and reading additional items."""
         sub_img, sub_b64 = safe_screenshot()
         if not sub_b64:
             return [], 0
 
         context = f"submenu of '{parent_path}'" if parent_path else "Epic menu"
-        items = vision_read_menu(sub_b64, context, is_submenu=(current_depth > 1))
         indent = "  " * (current_depth + 1)
-        print(f"  [menu-crawl]{indent}'{parent_path}' -> {len(items)} items")
+
+        items = scroll_and_read_all_items(sub_b64, context, is_submenu=(current_depth > 1), indent=indent)
+        print(f"  [menu-crawl]{indent}'{parent_path}' -> {len(items)} items (after scroll check)")
 
         if len(items) == 0:
             state, _ = check_screen_state(f"after clicking {parent_path}")
