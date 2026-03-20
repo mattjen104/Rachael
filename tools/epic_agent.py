@@ -208,7 +208,7 @@ def find_text_window(env_upper):
     return None
 
 
-def activate_window(window):
+def activate_window(window, maximize=False):
     """Reliably bring a window to the foreground.
 
     Windows restricts SetForegroundWindow to prevent focus-stealing.
@@ -216,6 +216,9 @@ def activate_window(window):
     doesn't own the foreground. We use AttachThreadInput to temporarily
     attach our thread to the foreground window's thread, which bypasses
     the restriction.
+
+    If maximize=True, the window is maximized to fill the screen so all
+    UI elements (like the Epic button) are visible.
     """
     try:
         if hasattr(window, 'isMinimized') and window.isMinimized:
@@ -228,16 +231,17 @@ def activate_window(window):
         user32 = ctypes.windll.user32
         hwnd = window._hWnd
         foreground_hwnd = user32.GetForegroundWindow()
-        if foreground_hwnd == hwnd:
-            return
         current_thread = kernel32.GetCurrentThreadId()
         fg_thread = user32.GetWindowThreadProcessId(foreground_hwnd, None)
         attached = False
         try:
             if current_thread != fg_thread:
                 attached = bool(user32.AttachThreadInput(current_thread, fg_thread, True))
-            user32.BringWindowToTop(hwnd)
-            user32.ShowWindow(hwnd, 9)
+            if maximize:
+                user32.ShowWindow(hwnd, 3)
+            else:
+                user32.BringWindowToTop(hwnd)
+                user32.ShowWindow(hwnd, 9)
             result = user32.SetForegroundWindow(hwnd)
             if not result:
                 print(f"  [focus] SetForegroundWindow failed for hwnd={hwnd}, falling back")
@@ -250,6 +254,17 @@ def activate_window(window):
             window.activate()
         except Exception:
             pass
+    if maximize:
+        time.sleep(0.3)
+        try:
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(window._hWnd, 3)
+        except Exception:
+            try:
+                window.maximize()
+            except Exception:
+                pass
+        time.sleep(0.3)
 
 
 def get_dpi_scale():
@@ -1605,8 +1620,13 @@ def execute_menu_crawl(cmd):
         post_result(command_id, "error", error=f"No {env} window found")
         return
 
-    activate_window(window)
+    print(f"  [menu-crawl] Maximizing {env} window to ensure all UI is visible...")
+    activate_window(window, maximize=True)
     time.sleep(0.5)
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"Lost {env} window after maximize")
+        return
 
     print(f"  [menu-crawl] Window: '{window.title}' at ({window.left},{window.top}) size {window.width}x{window.height}")
 
