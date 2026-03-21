@@ -42,6 +42,13 @@ export function setModelRoster(roster: ModelEntry[]): void {
   activeRoster = roster;
 }
 
+function recomputeTier(cost: number): CostTier {
+  if (cost === 0) return "free";
+  if (cost < 1.0) return "cheap";
+  if (cost < 5.0) return "standard";
+  return "premium";
+}
+
 export function mergeRosterUpdates(updates: Partial<ModelEntry>[]): number {
   let merged = 0;
   for (const upd of updates) {
@@ -52,13 +59,51 @@ export function mergeRosterUpdates(updates: Partial<ModelEntry>[]): number {
       if (upd.outputCostPer1M !== undefined) existing.outputCostPer1M = upd.outputCostPer1M;
       if (upd.qualityScore !== undefined) existing.qualityScore = upd.qualityScore;
       if (upd.label) existing.label = upd.label;
+      if (upd.inputCostPer1M !== undefined) {
+        existing.tier = recomputeTier(upd.inputCostPer1M);
+      }
       merged++;
     } else if (upd.tier && upd.label && upd.strengths) {
+      if (upd.inputCostPer1M !== undefined) {
+        upd.tier = recomputeTier(upd.inputCostPer1M);
+      }
       activeRoster.push(upd as ModelEntry);
       merged++;
     }
   }
   return merged;
+}
+
+export function removeFromRoster(modelId: string): boolean {
+  const idx = activeRoster.findIndex(m => m.id === modelId);
+  if (idx === -1) return false;
+  activeRoster.splice(idx, 1);
+  return true;
+}
+
+export function persistQualityScores(storage: { setAgentConfig(key: string, value: string, category: string): Promise<any> }): void {
+  const data: Record<string, { successes: number; failures: number }> = {};
+  for (const [id, entry] of qualityTracker) {
+    data[id] = entry;
+  }
+  storage.setAgentConfig("model_quality_scores", JSON.stringify(data), "budget").catch(() => {});
+}
+
+export async function loadQualityScores(storage: { getAgentConfig(key: string): Promise<{ value: string } | undefined> }): Promise<void> {
+  try {
+    const cfg = await storage.getAgentConfig("model_quality_scores");
+    if (!cfg?.value) return;
+    const data = JSON.parse(cfg.value) as Record<string, { successes: number; failures: number }>;
+    for (const [id, entry] of Object.entries(data)) {
+      qualityTracker.set(id, entry);
+      const total = entry.successes + entry.failures;
+      if (total >= 3) {
+        const score = Math.round((entry.successes / total) * 100);
+        const model = activeRoster.find(m => m.id === id);
+        if (model) model.qualityScore = score;
+      }
+    }
+  } catch {}
 }
 
 export async function loadRosterFromConfig(storage: { getAgentConfig(key: string): Promise<{ value: string } | undefined> }): Promise<void> {

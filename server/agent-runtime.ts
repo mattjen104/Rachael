@@ -5,6 +5,7 @@ import {
   detectTaskType, pickCascadeModels, pickComparisonModels, pickCheapThenPremium,
   trackTokenUsage, trackModelQuality, parseCostTier,
   getDailyBudget, isBudgetExhausted, getBudgetStatus, getDailyTokenUsage, loadRosterFromConfig,
+  persistQualityScores, loadQualityScores, removeFromRoster,
   type TaskType, type CostTier, type BudgetStatus,
 } from "./model-router";
 import { sanitizeResultRow } from "./output-sanitizer";
@@ -599,6 +600,8 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         ps.status = "error";
         ps.error = err.message;
       }
+    } else if (prog.config?.LLM_REQUIRED === "false") {
+      output = `[Iteration ${ps.iteration}] Program "${programName}" requires code but has none. Skipping LLM (LLM_REQUIRED=false).`;
     } else if (!hasLLMKeys()) {
       output = `[Iteration ${ps.iteration}] No LLM API keys configured.`;
     } else {
@@ -889,6 +892,10 @@ async function tick(): Promise<void> {
       }
     }
 
+    if (now.getMinutes() < 2) {
+      persistQualityScores(storage);
+    }
+
     if (now.getHours() === 3 && now.getMinutes() < 2) {
       try {
         const result = await runMemoryConsolidation();
@@ -1135,6 +1142,10 @@ export function initRuntime(): void {
 
   loadRosterFromConfig(storage).then(() => {
     console.log("[agent-runtime] Model roster loaded from config");
+  }).catch(() => {});
+
+  loadQualityScores(storage).then(() => {
+    console.log("[agent-runtime] Quality scores loaded from config");
   }).catch(() => {});
 
   migratePersistentContextToMemories().catch(e => console.error("[agent-runtime] migration error:", e));

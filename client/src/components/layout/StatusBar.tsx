@@ -19,6 +19,10 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
   const pendingCount = control?.pendingTakeoverPoints?.length || 0;
   const bridgeConnected = bridgeStatus?.extension?.connected || false;
 
+  const budget = (runtime as any)?.budget;
+  const budgetPct = budget?.percentUsed ?? 0;
+  const budgetColor = budgetPct > 80 ? "text-red-400" : budgetPct > 50 ? "text-yellow-400" : "text-green-400";
+
   return (
     <div
       className={`flex items-center justify-between border-t border-border bg-background shrink-0 cursor-pointer select-none font-mono text-muted-foreground ${
@@ -47,6 +51,11 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
           </span>
         )}
         <span className="text-primary font-bold">{viewMode.toUpperCase()}</span>
+        {budget && (
+          <span className={budgetColor} data-testid="status-budget" title={`Budget: ${(budget.used || 0).toLocaleString()} / ${(budget.budget || 0).toLocaleString()} tokens (${budgetPct}%) | ~$${(budget.estimatedCostToday || 0).toFixed(4)}`}>
+            ${(budget.estimatedCostToday || 0).toFixed(2)} {budgetPct}%
+          </span>
+        )}
         <span className={bridgeConnected ? "text-green-500" : "text-muted-foreground/50"} data-testid="status-bridge" title={bridgeConnected ? "Bridge connected" : "Bridge offline"}>
           {bridgeConnected ? "⚡" : "⚡"}
         </span>

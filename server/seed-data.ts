@@ -86,7 +86,8 @@ async function execute() {
           const outputCost = parseFloat(info.pricing.completion || "0") * 1_000_000;
           rosterUpdates.push({ id: modelId, inputCostPer1M: Math.round(inputCost * 100) / 100, outputCostPer1M: Math.round(outputCost * 100) / 100 });
         } else if (!info) {
-          proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " not found on OpenRouter. Consider removing from roster.", reason: "Model offline/removed: " + modelId });
+          rosterUpdates.push({ id: modelId, tier: "free" as any, strengths: [], label: "OFFLINE", inputCostPer1M: 999, outputCostPer1M: 999 });
+          proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " not found on OpenRouter. Marking as offline (cost=999 to deprioritize).", reason: "Model offline/removed: " + modelId });
         }
       }
 
@@ -1079,9 +1080,11 @@ async function execute() {
   let budgetData = { used: 0, budget: 500000, remaining: 500000, percentUsed: 0, estimatedCostToday: 0, report: { byProgram: {}, byModel: {} } };
   let modelsData = [];
   let recentResults = [];
+  let memoriesData: any[] = [];
   try { const r = await fetch(BASE + "/api/budget"); if (r.ok) budgetData = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/models"); if (r.ok) modelsData = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/results?limit=50"); if (r.ok) recentResults = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/memories?limit=30"); if (r.ok) memoriesData = await r.json(); } catch {}
 
   const proposals: Array<{section: string; diff: string; reason: string}> = [];
   const worklog: Record<string, any> = {
@@ -1129,6 +1132,18 @@ async function execute() {
   if (budgetData.percentUsed > 80) {
     proposals.push({ section: "PROGRAMS", diff: "Budget at " + budgetData.percentUsed + "%. Recommend increasing daily_token_budget or reducing program schedules.", reason: "Budget approaching limit" });
     worklog.proposals.push("budget-warning");
+  }
+
+  const memoryPrograms = new Map<string, number>();
+  for (const mem of memoriesData) {
+    const prog = mem.programName || mem.source || "unknown";
+    memoryPrograms.set(prog, (memoryPrograms.get(prog) || 0) + 1);
+  }
+  worklog.memoryAnalysis = { totalMemories: memoriesData.length, byProgram: Object.fromEntries(memoryPrograms) };
+  const silentPrograms = Object.keys(byProg).filter(p => !memoryPrograms.has(p));
+  if (silentPrograms.length > 0) {
+    proposals.push({ section: "PROGRAMS", diff: "Programs consuming budget but producing no memories: " + silentPrograms.join(", "), reason: "Silent programs detected" });
+    worklog.proposals.push("silent:" + silentPrograms.join(","));
   }
 
   const NL = String.fromCharCode(10);
