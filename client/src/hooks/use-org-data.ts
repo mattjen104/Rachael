@@ -222,7 +222,7 @@ export function useDeleteReaderPage() {
 }
 
 export function useRuntime() {
-  return useQuery<{ active: boolean; lastTick: string | null; programs: Array<{ name: string; status: string; lastRun: string | null; nextRun: string | null; lastOutput: string | null; error: string | null; iteration: number }> }>({
+  return useQuery<{ active: boolean; lastTick: string | null; programs: Array<{ name: string; status: string; lastRun: string | null; nextRun: string | null; lastOutput: string | null; error: string | null; iteration: number }>; budget?: { used: number; budget: number; remaining: number; percentUsed: number; estimatedCostToday: number } }>({
     queryKey: ["/api/runtime"],
     refetchInterval: 10000,
   });

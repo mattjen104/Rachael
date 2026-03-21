@@ -19,7 +19,7 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
   const pendingCount = control?.pendingTakeoverPoints?.length || 0;
   const bridgeConnected = bridgeStatus?.extension?.connected || false;
 
-  const budget = (runtime as any)?.budget;
+  const budget = runtime?.budget;
   const budgetPct = budget?.percentUsed ?? 0;
   const budgetColor = budgetPct > 80 ? "text-red-400" : budgetPct > 50 ? "text-yellow-400" : "text-green-400";
 

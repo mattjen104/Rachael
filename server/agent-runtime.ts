@@ -239,7 +239,6 @@ async function executeLLMTwoStage(
       {}
     );
     trackModelQuality(cheap.id, !!cheapResult.content);
-    trackTokenUsage(cheap.id, cheapResult.tokensUsed || 0);
     triageResult = cheapResult.content || "";
 
     if (triageResult.toUpperCase().includes("ROUTINE")) {

@@ -86,8 +86,8 @@ async function execute() {
           const outputCost = parseFloat(info.pricing.completion || "0") * 1_000_000;
           rosterUpdates.push({ id: modelId, inputCostPer1M: Math.round(inputCost * 100) / 100, outputCostPer1M: Math.round(outputCost * 100) / 100 });
         } else if (!info) {
-          rosterUpdates.push({ id: modelId, tier: "free" as any, strengths: [], label: "OFFLINE", inputCostPer1M: 999, outputCostPer1M: 999 });
-          proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " not found on OpenRouter. Marking as offline (cost=999 to deprioritize).", reason: "Model offline/removed: " + modelId });
+          rosterUpdates.push({ id: modelId, _remove: true } as any);
+          proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " not found on OpenRouter. Removed from active roster.", reason: "Model offline/removed: " + modelId });
         }
       }
 
@@ -119,7 +119,8 @@ async function execute() {
         if (info?.pricing) {
           const inputCost = parseFloat(info.pricing.prompt || "0") * 1_000_000;
           if (inputCost > 20 && modelId.includes(":free")) {
-            proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " was free but now costs $" + inputCost.toFixed(2) + "/1M. Consider reclassifying.", reason: "Free model now paid" });
+            rosterUpdates.push({ id: modelId, _remove: true } as any);
+            proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " was free but now costs $" + inputCost.toFixed(2) + "/1M. Removed from roster.", reason: "Free model now paid: " + modelId });
           }
         }
       }

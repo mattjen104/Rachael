@@ -49,10 +49,15 @@ function recomputeTier(cost: number): CostTier {
   return "premium";
 }
 
-export function mergeRosterUpdates(updates: Partial<ModelEntry>[]): number {
+export function mergeRosterUpdates(updates: Partial<ModelEntry & { _remove?: boolean }>[]): number {
   let merged = 0;
   for (const upd of updates) {
     if (!upd.id) continue;
+    if (upd._remove) {
+      removeFromRoster(upd.id);
+      merged++;
+      continue;
+    }
     const existing = activeRoster.find(m => m.id === upd.id);
     if (existing) {
       if (upd.inputCostPer1M !== undefined) existing.inputCostPer1M = upd.inputCostPer1M;

@@ -6,7 +6,7 @@ import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
 import { getRuntimeState, toggleRuntime, manualTrigger, getRuntimeBudgetStatus } from "./agent-runtime";
-import { getModelRoster, getModelQuality } from "./model-router";
+import { getModelRoster, getModelQuality, loadRosterFromConfig } from "./model-router";
 import { getBridgeStatus, launchBrowser, closeBrowser, startLoginSession, getPageContent, openPage, getPageText } from "./browser-bridge";
 import { openOutlook, openTeams, getOutlookEmails, readOutlookEmail, getTeamsChats, readTeamsChat } from "./app-adapters";
 import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlValidator } from "./universal-scraper";
@@ -163,6 +163,9 @@ export async function registerRoutes(
     const { value, category } = req.body;
     if (typeof value !== "string") return res.status(400).json({ message: "value must be a string" });
     const config = await storage.setAgentConfig(req.params.key, value, category);
+    if (req.params.key === "model_roster_overrides") {
+      loadRosterFromConfig(storage).catch(() => {});
+    }
     res.json(config);
   });
 
