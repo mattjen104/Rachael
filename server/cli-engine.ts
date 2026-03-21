@@ -1295,6 +1295,26 @@ function registerBuiltinCommands(): void {
           lines.push(`  ${short.padEnd(25)} ${bs.report.byModel[name].toLocaleString().padStart(8)} tok`);
         }
       }
+      const roster = getModelRoster();
+      const tierTotals: Record<string, number> = {};
+      for (const [name, tokens] of Object.entries(bs.report.byModel)) {
+        const normalized = name.replace(/^openrouter\//, "");
+        const model = roster.find(m => m.id === normalized || m.id === name);
+        const tier = model?.tier || "unknown";
+        tierTotals[tier] = (tierTotals[tier] || 0) + tokens;
+      }
+      if (Object.keys(tierTotals).length > 0) {
+        lines.push("", "--- By Tier ---");
+        for (const [tier, tokens] of Object.entries(tierTotals).sort((a, b) => b[1] - a[1])) {
+          lines.push(`  ${tier.padEnd(10)} ${tokens.toLocaleString().padStart(8)} tok`);
+        }
+      }
+      if (bs.budget > 0 && bs.used > 0) {
+        const hoursElapsed = new Date().getHours() + new Date().getMinutes() / 60;
+        const burnRate = hoursElapsed > 0 ? bs.used / hoursElapsed : 0;
+        const projected = Math.round(burnRate * 24);
+        lines.push("", `Projected 24h: ~${projected.toLocaleString()} tokens (${Math.round((projected / bs.budget) * 100)}% of budget)`);
+      }
       return ok(lines.join("\n"));
     }
     if (sub === "models") {
