@@ -165,16 +165,25 @@ export async function refreshRosterPricing(): Promise<number> {
 
 const qualityTracker = new Map<string, { successes: number; failures: number }>();
 
-export function trackModelQuality(modelId: string, success: boolean): void {
+export function trackModelQuality(modelId: string, success: boolean, taskType?: TaskType): void {
   const normalized = modelId.replace(/^openrouter\//, "");
-  const entry = qualityTracker.get(normalized) || { successes: 0, failures: 0 };
-  if (success) entry.successes++;
-  else entry.failures++;
-  qualityTracker.set(normalized, entry);
+  const globalKey = normalized;
+  const globalEntry = qualityTracker.get(globalKey) || { successes: 0, failures: 0 };
+  if (success) globalEntry.successes++;
+  else globalEntry.failures++;
+  qualityTracker.set(globalKey, globalEntry);
 
-  const total = entry.successes + entry.failures;
+  if (taskType) {
+    const taskKey = normalized + "::" + taskType;
+    const taskEntry = qualityTracker.get(taskKey) || { successes: 0, failures: 0 };
+    if (success) taskEntry.successes++;
+    else taskEntry.failures++;
+    qualityTracker.set(taskKey, taskEntry);
+  }
+
+  const total = globalEntry.successes + globalEntry.failures;
   if (total >= 3) {
-    const score = Math.round((entry.successes / total) * 100);
+    const score = Math.round((globalEntry.successes / total) * 100);
     const model = activeRoster.find(m => m.id === normalized);
     if (model) model.qualityScore = score;
   }
@@ -187,6 +196,21 @@ export function getModelQuality(): Map<string, { successes: number; failures: nu
     result.set(id, { ...data, score: total > 0 ? Math.round((data.successes / total) * 100) : 100 });
   }
   return result;
+}
+
+export function getModelQualityForTask(modelId: string, taskType: TaskType): number {
+  const normalized = modelId.replace(/^openrouter\//, "");
+  const taskEntry = qualityTracker.get(normalized + "::" + taskType);
+  if (taskEntry) {
+    const total = taskEntry.successes + taskEntry.failures;
+    if (total >= 3) return Math.round((taskEntry.successes / total) * 100);
+  }
+  const globalEntry = qualityTracker.get(normalized);
+  if (globalEntry) {
+    const total = globalEntry.successes + globalEntry.failures;
+    if (total >= 3) return Math.round((globalEntry.successes / total) * 100);
+  }
+  return 100;
 }
 
 const TIER_ORDER: CostTier[] = ["free", "cheap", "standard", "premium"];
@@ -266,8 +290,8 @@ export function pickCascadeModels(
       const aMatch = a.strengths.includes(taskType) ? 1 : 0;
       const bMatch = b.strengths.includes(taskType) ? 1 : 0;
       if (bMatch !== aMatch) return bMatch - aMatch;
-      const aQ = a.qualityScore ?? 100;
-      const bQ = b.qualityScore ?? 100;
+      const aQ = getModelQualityForTask(a.id, taskType);
+      const bQ = getModelQualityForTask(b.id, taskType);
       return bQ - aQ;
     });
 

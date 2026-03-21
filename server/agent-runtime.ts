@@ -197,13 +197,13 @@ async function executeLLMWithCascade(
         {}
       );
       if (result.content && result.content.length > 0) {
-        trackModelQuality(model.id, true);
+        trackModelQuality(model.id, true, taskType);
         return result;
       }
-      trackModelQuality(model.id, false);
+      trackModelQuality(model.id, false, taskType);
     } catch (err: any) {
       lastError = err;
-      trackModelQuality(model.id, false);
+      trackModelQuality(model.id, false, taskType);
       if (err.message?.includes("429") || err.message?.includes("rate")) {
         rateLimited = true;
       }
@@ -238,14 +238,14 @@ async function executeLLMTwoStage(
       llmConfig,
       {}
     );
-    trackModelQuality(cheap.id, !!cheapResult.content);
+    trackModelQuality(cheap.id, !!cheapResult.content, taskType);
     triageResult = cheapResult.content || "";
 
     if (triageResult.toUpperCase().includes("ROUTINE")) {
       return { content: triageResult, model: cheapResult.model, tokensUsed: cheapResult.tokensUsed };
     }
   } catch {
-    trackModelQuality(cheap.id, false);
+    trackModelQuality(cheap.id, false, taskType);
   }
 
   if (premium && premium.id !== cheap.id) {
@@ -256,10 +256,10 @@ async function executeLLMTwoStage(
         llmConfig,
         {}
       );
-      trackModelQuality(premium.id, premiumResult.content?.length > 0);
+      trackModelQuality(premium.id, premiumResult.content?.length > 0, taskType);
       return premiumResult;
     } catch {
-      trackModelQuality(premium.id, false);
+      trackModelQuality(premium.id, false, taskType);
     }
   }
 
