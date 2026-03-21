@@ -120,6 +120,49 @@ export async function loadRosterFromConfig(storage: { getAgentConfig(key: string
   } catch {}
 }
 
+let lastPricingRefresh = 0;
+const PRICING_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
+
+export async function refreshRosterPricing(): Promise<number> {
+  const now = Date.now();
+  if (now - lastPricingRefresh < PRICING_REFRESH_INTERVAL) return 0;
+  lastPricingRefresh = now;
+
+  try {
+    const apiKey = process.env.OPENROUTER_API_KEY || "";
+    const resp = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: apiKey ? { "Authorization": "Bearer " + apiKey } : {},
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return 0;
+    const data = await resp.json();
+    const modelsMap = new Map<string, { prompt: string; completion: string }>();
+    for (const m of (data.data || [])) {
+      if (m.pricing) modelsMap.set(m.id, m.pricing);
+    }
+
+    let updated = 0;
+    for (const model of activeRoster) {
+      const pricing = modelsMap.get(model.id);
+      if (pricing) {
+        const inputCost = parseFloat(pricing.prompt || "0") * 1_000_000;
+        const outputCost = parseFloat(pricing.completion || "0") * 1_000_000;
+        const newInput = Math.round(inputCost * 100) / 100;
+        const newOutput = Math.round(outputCost * 100) / 100;
+        if (model.inputCostPer1M !== newInput || model.outputCostPer1M !== newOutput) {
+          model.inputCostPer1M = newInput;
+          model.outputCostPer1M = newOutput;
+          model.tier = recomputeTier(newInput);
+          updated++;
+        }
+      }
+    }
+    return updated;
+  } catch {
+    return 0;
+  }
+}
+
 const qualityTracker = new Map<string, { successes: number; failures: number }>();
 
 export function trackModelQuality(modelId: string, success: boolean): void {

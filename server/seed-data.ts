@@ -92,26 +92,28 @@ async function execute() {
       }
 
       const existingIds = new Set(ROSTER_MODELS);
-      const newFreeModels = allModels.filter((m: any) => {
+      const candidateModels = allModels.filter((m: any) => {
         if (existingIds.has(m.id)) return false;
         const provider = (m.id || "").split("/")[0];
         if (!INTERESTING_PROVIDERS.includes(provider)) return false;
-        const cost = parseFloat(m.pricing?.prompt || "1");
-        return cost === 0 || m.id.endsWith(":free");
+        const cost = parseFloat(m.pricing?.prompt || "99");
+        return cost * 1_000_000 <= MAX_CHEAP_COST || cost === 0 || m.id.endsWith(":free");
       });
 
-      for (const m of newFreeModels.slice(0, 5)) {
+      for (const m of candidateModels.slice(0, 5)) {
         discoveredFree++;
         const label = m.name || m.id.split("/").pop();
+        const inputCost = parseFloat(m.pricing?.prompt || "0") * 1_000_000;
+        const outputCost = parseFloat(m.pricing?.completion || "0") * 1_000_000;
         rosterUpdates.push({
           id: m.id,
-          tier: "free",
+          tier: inputCost === 0 ? "free" : "cheap",
           strengths: ["general"],
           label: label,
-          inputCostPer1M: 0,
-          outputCostPer1M: 0,
+          inputCostPer1M: Math.round(inputCost * 100) / 100,
+          outputCostPer1M: Math.round(outputCost * 100) / 100,
         });
-        proposals.push({ section: "PROGRAMS", diff: "New free model discovered: " + m.id + " (" + label + "). Added to roster.", reason: "Free model auto-discovery" });
+        proposals.push({ section: "PROGRAMS", diff: "New " + (inputCost === 0 ? "free" : "cheap ($" + inputCost.toFixed(2) + "/1M)") + " model discovered: " + m.id + " (" + label + "). Added to roster.", reason: "Model auto-discovery" });
       }
 
       for (const modelId of ROSTER_MODELS) {

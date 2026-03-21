@@ -5,7 +5,7 @@ import {
   detectTaskType, pickCascadeModels, pickComparisonModels, pickCheapThenPremium,
   trackTokenUsage, trackModelQuality, parseCostTier,
   getDailyBudget, isBudgetExhausted, getBudgetStatus, getDailyTokenUsage, loadRosterFromConfig,
-  persistQualityScores, loadQualityScores, removeFromRoster,
+  persistQualityScores, loadQualityScores, removeFromRoster, refreshRosterPricing,
   type TaskType, type CostTier, type BudgetStatus,
 } from "./model-router";
 import { sanitizeResultRow } from "./output-sanitizer";
@@ -896,6 +896,7 @@ async function tick(): Promise<void> {
 
     if (now.getMinutes() < 2) {
       persistQualityScores(storage);
+      refreshRosterPricing().catch(() => {});
     }
 
     if (now.getHours() === 3 && now.getMinutes() < 2) {
@@ -1144,6 +1145,9 @@ export function initRuntime(): void {
 
   loadRosterFromConfig(storage).then(() => {
     console.log("[agent-runtime] Model roster loaded from config");
+    return refreshRosterPricing();
+  }).then((updated) => {
+    if (updated > 0) console.log(`[agent-runtime] Roster pricing refreshed (${updated} models updated)`);
   }).catch(() => {});
 
   loadQualityScores(storage).then(() => {
