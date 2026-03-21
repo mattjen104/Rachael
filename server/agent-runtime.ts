@@ -224,18 +224,26 @@ async function executeLLMTwoStage(
     return executeLLMWithCascade(messages, taskType, costTier, undefined, llmConfig);
   }
 
+  const triageMessages: import("./llm-client").LLMMessage[] = [
+    ...messages,
+    { role: "user" as const, content: "TRIAGE: Analyze the above briefly. Respond with INTERESTING if this warrants deep analysis, or ROUTINE if this is routine/low-value. Include a 1-sentence reason. Format: INTERESTING|ROUTINE: <reason>" },
+  ];
+
+  let triageResult = "";
   try {
     const cheapResult = await executeLLM(
-      messages,
+      triageMessages,
       resolveProviderPrefix(cheap.id),
       llmConfig,
       {}
     );
-    if (cheapResult.content && cheapResult.content.length > 50) {
-      trackModelQuality(cheap.id, true);
-      return cheapResult;
+    trackModelQuality(cheap.id, !!cheapResult.content);
+    trackTokenUsage(cheap.id, cheapResult.tokensUsed || 0);
+    triageResult = cheapResult.content || "";
+
+    if (triageResult.toUpperCase().includes("ROUTINE")) {
+      return { content: triageResult, model: cheapResult.model, tokensUsed: cheapResult.tokensUsed };
     }
-    trackModelQuality(cheap.id, false);
   } catch {
     trackModelQuality(cheap.id, false);
   }

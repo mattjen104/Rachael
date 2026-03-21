@@ -46,7 +46,7 @@ async function execute() {
       type: "monitor",
       schedule: "every 12h",
       cronExpression: "0 6,18 * * *",
-      instructions: "Check model availability on OpenRouter. Tests free models, queries live pricing from /api/v1/models, and auto-updates the model roster via agent_config.",
+      instructions: "Check model availability on OpenRouter. Tests free models, queries live pricing from /api/v1/models, auto-updates roster pricing, discovers new free models, and flags offline/expensive models.",
       config: { TASK_TYPE: "research", METRIC: "free_models_working", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
       tags: ["program", "budget"],
@@ -60,10 +60,14 @@ const ROSTER_MODELS = [
   "deepseek/deepseek-chat",
   "deepseek/deepseek-reasoner",
 ];
+const INTERESTING_PROVIDERS = ["google", "meta-llama", "mistralai", "qwen", "deepseek", "microsoft"];
+const MAX_CHEAP_COST = 1.0;
 
 async function execute() {
   const results: Array<{ model: string; status: string; latency: number }> = [];
-  const pricingUpdates: Array<{ id: string; inputCostPer1M?: number; outputCostPer1M?: number }> = [];
+  const rosterUpdates: Array<{ id: string; inputCostPer1M?: number; outputCostPer1M?: number; tier?: string; strengths?: string[]; label?: string }> = [];
+  const proposals: Array<{section: string; diff: string; reason: string}> = [];
+  let discoveredFree = 0;
 
   try {
     const modelsResp = await fetch("https://openrouter.ai/api/v1/models", {
@@ -71,16 +75,51 @@ async function execute() {
     });
     if (modelsResp.ok) {
       const modelsData = await modelsResp.json();
+      const allModels = modelsData.data || [];
       const modelsMap = new Map();
-      for (const m of (modelsData.data || [])) {
-        modelsMap.set(m.id, m);
-      }
+      for (const m of allModels) modelsMap.set(m.id, m);
+
       for (const modelId of ROSTER_MODELS) {
         const info = modelsMap.get(modelId);
         if (info?.pricing) {
           const inputCost = parseFloat(info.pricing.prompt || "0") * 1_000_000;
           const outputCost = parseFloat(info.pricing.completion || "0") * 1_000_000;
-          pricingUpdates.push({ id: modelId, inputCostPer1M: Math.round(inputCost * 100) / 100, outputCostPer1M: Math.round(outputCost * 100) / 100 });
+          rosterUpdates.push({ id: modelId, inputCostPer1M: Math.round(inputCost * 100) / 100, outputCostPer1M: Math.round(outputCost * 100) / 100 });
+        } else if (!info) {
+          proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " not found on OpenRouter. Consider removing from roster.", reason: "Model offline/removed: " + modelId });
+        }
+      }
+
+      const existingIds = new Set(ROSTER_MODELS);
+      const newFreeModels = allModels.filter((m: any) => {
+        if (existingIds.has(m.id)) return false;
+        const provider = (m.id || "").split("/")[0];
+        if (!INTERESTING_PROVIDERS.includes(provider)) return false;
+        const cost = parseFloat(m.pricing?.prompt || "1");
+        return cost === 0 || m.id.endsWith(":free");
+      });
+
+      for (const m of newFreeModels.slice(0, 5)) {
+        discoveredFree++;
+        const label = m.name || m.id.split("/").pop();
+        rosterUpdates.push({
+          id: m.id,
+          tier: "free",
+          strengths: ["general"],
+          label: label,
+          inputCostPer1M: 0,
+          outputCostPer1M: 0,
+        });
+        proposals.push({ section: "PROGRAMS", diff: "New free model discovered: " + m.id + " (" + label + "). Added to roster.", reason: "Free model auto-discovery" });
+      }
+
+      for (const modelId of ROSTER_MODELS) {
+        const info = modelsMap.get(modelId);
+        if (info?.pricing) {
+          const inputCost = parseFloat(info.pricing.prompt || "0") * 1_000_000;
+          if (inputCost > 20 && modelId.includes(":free")) {
+            proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " was free but now costs $" + inputCost.toFixed(2) + "/1M. Consider reclassifying.", reason: "Free model now paid" });
+          }
         }
       }
     }
@@ -110,21 +149,25 @@ async function execute() {
     await new Promise(r => setTimeout(r, 2000));
   }
 
-  if (pricingUpdates.length > 0) {
+  if (rosterUpdates.length > 0) {
     try {
       const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
       await fetch("http://localhost:" + port + "/api/config/model_roster_overrides", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: JSON.stringify(pricingUpdates), category: "budget" }),
+        body: JSON.stringify({ value: JSON.stringify(rosterUpdates), category: "budget" }),
       });
     } catch {}
   }
 
   const working = results.filter(r => r.status === "OK");
-  const pricingNote = pricingUpdates.length > 0 ? " | Pricing updated for " + pricingUpdates.length + " models" : "";
+  const notes = [];
+  if (rosterUpdates.length > 0) notes.push("Pricing updated for " + rosterUpdates.length + " models");
+  if (discoveredFree > 0) notes.push("Discovered " + discoveredFree + " new free models");
+  if (proposals.length > 0) notes.push(proposals.length + " proposals");
+  const noteStr = notes.length > 0 ? " | " + notes.join(", ") : "";
   const summary = results.map(r => (r.status === "OK" ? "[+]" : "[-]") + " " + r.model.split("/").pop() + " " + r.status + " (" + r.latency + "ms)").join("\\n");
-  return { summary: "Model Scout: " + working.length + "/" + results.length + " free models working" + pricingNote + "\\n" + summary, metric: String(working.length) };
+  return { summary: "Model Scout: " + working.length + "/" + results.length + " free models working" + noteStr + "\\n" + summary, metric: String(working.length), proposals };
 }`,
       codeLang: "typescript",
     },
@@ -770,7 +813,7 @@ async function execute() {
       schedule: "daily",
       cronExpression: "0 9 * * *",
       instructions: "Scrape GitHub trending page for repos in specified languages.",
-      config: { LANGUAGES: "typescript,rust,python,go", SINCE: "daily", TASK_TYPE: "research", METRIC: "repos_found", DIRECTION: "higher" },
+      config: { LANGUAGES: "typescript,rust,python,go", SINCE: "daily", TASK_TYPE: "research", METRIC: "repos_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
@@ -823,7 +866,7 @@ async function execute() {
       schedule: "daily",
       cronExpression: "0 6 * * *",
       instructions: "Fetch latest values for key FRED economic series.",
-      config: { SERIES_IDS: "DGS10,DGS2,T10Y2Y,FEDFUNDS,UNRATE", TASK_TYPE: "research", METRIC: "data_points", DIRECTION: "higher" },
+      config: { SERIES_IDS: "DGS10,DGS2,T10Y2Y,FEDFUNDS,UNRATE", TASK_TYPE: "research", METRIC: "data_points", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
@@ -867,10 +910,48 @@ async function execute() {
       schedule: "daily",
       cronExpression: "0 9 * * *",
       instructions: "Search SEC EDGAR for recent filings from specific companies.",
-      config: { TICKER_LIST: "AAPL,TSLA,NVDA,MSFT,GOOG", FILING_TYPES: "10-K,10-Q,8-K", TASK_TYPE: "research", METRIC: "filings_found", DIRECTION: "higher" },
+      config: { TICKER_LIST: "AAPL,TSLA,NVDA,MSFT,GOOG", FILING_TYPES: "10-K,10-Q,8-K", TASK_TYPE: "research", METRIC: "filings_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
       tags: ["program"],
-      code: null,
+      code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+const TICKERS = (props.TICKER_LIST || "AAPL,TSLA,NVDA").split(",").map(t => t.trim());
+const FILING_TYPES = (props.FILING_TYPES || "10-K,10-Q,8-K").split(",").map(t => t.trim());
+
+async function fetchFilings(ticker: string): Promise<Array<{ticker: string; type: string; date: string; url: string}>> {
+  const filings: Array<{ticker: string; type: string; date: string; url: string}> = [];
+  try {
+    const r = await fetch("https://efts.sec.gov/LATEST/search-index?q=%22" + ticker + "%22&dateRange=custom&startdt=" + new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0] + "&enddt=" + new Date().toISOString().split("T")[0] + "&forms=" + FILING_TYPES.join(","), {
+      headers: { "User-Agent": "OrgCloud research@orgcloud.dev", "Accept": "application/json" }
+    });
+    if (!r.ok) {
+      const r2 = await fetch("https://efts.sec.gov/LATEST/search-index?q=%22" + ticker + "%22&forms=" + FILING_TYPES.join(","), {
+        headers: { "User-Agent": "OrgCloud research@orgcloud.dev", "Accept": "application/json" }
+      });
+      if (!r2.ok) return filings;
+      const d2 = await r2.json();
+      for (const hit of (d2.hits?.hits || []).slice(0, 5)) {
+        const src = hit._source || {};
+        filings.push({ ticker, type: src.form_type || "?", date: (src.file_date || "").slice(0, 10), url: "https://www.sec.gov/Archives/edgar/data/" + (src.file_num || "") });
+      }
+      return filings;
+    }
+    const d = await r.json();
+    for (const hit of (d.hits?.hits || []).slice(0, 5)) {
+      const src = hit._source || {};
+      filings.push({ ticker, type: src.form_type || "?", date: (src.file_date || "").slice(0, 10), url: "https://www.sec.gov/Archives/edgar/data/" + (src.file_num || "") });
+    }
+  } catch {}
+  return filings;
+}
+
+async function execute() {
+  const results = await Promise.all(TICKERS.map(t => fetchFilings(t)));
+  const all = results.flat();
+  let summary = "SEC EDGAR filings: " + all.length + " found for " + TICKERS.join(", ");
+  for (const f of all.slice(0, 20)) summary += "\\n  [" + f.type + "] " + f.ticker + " " + f.date + " " + f.url;
+  return { summary, metric: String(all.length) };
+}`,
+      codeLang: "typescript",
     },
     {
       name: "price-watch",
@@ -985,51 +1066,92 @@ async function execute() {
     {
       name: "budget-strategist",
       type: "meta",
-      schedule: "daily",
-      cronExpression: "0 2 * * *",
-      instructions: "Daily budget strategist: reviews token usage, model quality scores, and cost efficiency. Proposes budget adjustments and model routing changes.",
+      schedule: "every 8h",
+      cronExpression: "0 2,10,18 * * *",
+      instructions: "Budget strategist: reviews token usage, model quality, cost efficiency, and cross-program patterns. Produces structured proposals for budget adjustments, model routing, and schedule optimization.",
       config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", METRIC: "budget_efficiency", DIRECTION: "higher" },
       costTier: "free",
       tags: ["program", "budget", "meta"],
       code: `async function execute() {
   const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
   const BASE = "http://localhost:" + port;
-  let budgetData = { used: 0, budget: 500000, remaining: 500000, percentUsed: 0, report: { byProgram: {}, byModel: {} } };
-  try {
-    const resp = await fetch(BASE + "/api/budget");
-    if (resp.ok) budgetData = await resp.json();
-  } catch {}
 
-  const lines: string[] = [];
-  lines.push("=== DAILY BUDGET REPORT ===");
-  lines.push("Budget: " + budgetData.budget.toLocaleString() + " tokens");
-  lines.push("Used: " + budgetData.used.toLocaleString() + " (" + budgetData.percentUsed + "%)");
-  lines.push("Remaining: " + budgetData.remaining.toLocaleString());
+  let budgetData = { used: 0, budget: 500000, remaining: 500000, percentUsed: 0, estimatedCostToday: 0, report: { byProgram: {}, byModel: {} } };
+  let modelsData = [];
+  let recentResults = [];
+  try { const r = await fetch(BASE + "/api/budget"); if (r.ok) budgetData = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/models"); if (r.ok) modelsData = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/results?limit=50"); if (r.ok) recentResults = await r.json(); } catch {}
+
+  const proposals: Array<{section: string; diff: string; reason: string}> = [];
+  const worklog: Record<string, any> = {
+    timestamp: new Date().toISOString(),
+    budget: { used: budgetData.used, budget: budgetData.budget, percentUsed: budgetData.percentUsed, estimatedCost: budgetData.estimatedCostToday },
+    modelHealth: {} as Record<string, any>,
+    programAnalysis: {} as Record<string, any>,
+    proposals: [] as string[],
+  };
+
+  for (const m of modelsData) {
+    const q = m.quality || { successes: 0, failures: 0, score: 100 };
+    worklog.modelHealth[m.id] = { tier: m.tier, quality: q.score, successes: q.successes, failures: q.failures };
+    if (q.score < 50 && (q.successes + q.failures) >= 5) {
+      proposals.push({ section: "PROGRAMS", diff: "Deprioritize model " + m.id + " (quality " + q.score + "%, " + q.failures + " failures)", reason: "Model " + m.label + " has degraded quality score of " + q.score + "%" });
+      worklog.proposals.push("deprioritize:" + m.id);
+    }
+  }
 
   const byProg = budgetData.report?.byProgram || {};
-  const progNames = Object.keys(byProg);
-  if (progNames.length > 0) {
-    lines.push("");
-    lines.push("--- By Program ---");
-    const sorted = progNames.sort((a, b) => (byProg[b]?.tokens || 0) - (byProg[a]?.tokens || 0));
-    for (const name of sorted.slice(0, 10)) {
-      const p = byProg[name];
-      lines.push("  " + name.padEnd(25) + " " + (p.tokens || 0).toLocaleString().padStart(8) + " tok  $" + (p.cost || 0).toFixed(4) + "  (" + (p.calls || 0) + " calls)");
+  const progEntries = Object.entries(byProg);
+  const totalTokens = budgetData.used || 1;
+  for (const [name, data] of progEntries) {
+    const d = data as any;
+    const pct = Math.round((d.tokens / totalTokens) * 100);
+    worklog.programAnalysis[name] = { tokens: d.tokens, cost: d.cost, calls: d.calls, budgetShare: pct };
+    if (pct > 40) {
+      proposals.push({ section: "PROGRAMS", diff: "Program " + name + " consumes " + pct + "% of budget. Consider: reduce schedule frequency, switch to TWO_STAGE=true, or lower cost tier.", reason: "Budget concentration risk: " + name + " using " + d.tokens + " tokens (" + pct + "%)" });
+      worklog.proposals.push("reduce:" + name);
     }
   }
 
-  const byModel = budgetData.report?.byModel || {};
-  const modelNames = Object.keys(byModel);
-  if (modelNames.length > 0) {
-    lines.push("");
-    lines.push("--- By Model ---");
-    for (const name of modelNames) {
-      lines.push("  " + name.split("/").pop().padEnd(25) + " " + byModel[name].toLocaleString().padStart(8) + " tok");
+  const errorResults = recentResults.filter((r: any) => r.status === "error");
+  if (errorResults.length > 10) {
+    const errorProgs = new Set(errorResults.map((r: any) => r.programName));
+    for (const name of errorProgs) {
+      const progErrors = errorResults.filter((r: any) => r.programName === name).length;
+      if (progErrors >= 3) {
+        proposals.push({ section: "PROGRAMS", diff: "Program " + name + " has " + progErrors + " recent errors. Consider disabling or investigating.", reason: "High error rate in " + name });
+        worklog.proposals.push("investigate:" + name);
+      }
     }
   }
 
-  const efficiency = budgetData.budget > 0 ? Math.round((1 - budgetData.percentUsed / 100) * 100) : 100;
-  return { summary: lines.join(String.fromCharCode(10)), metric: String(efficiency) };
+  if (budgetData.percentUsed > 80) {
+    proposals.push({ section: "PROGRAMS", diff: "Budget at " + budgetData.percentUsed + "%. Recommend increasing daily_token_budget or reducing program schedules.", reason: "Budget approaching limit" });
+    worklog.proposals.push("budget-warning");
+  }
+
+  const NL = String.fromCharCode(10);
+  const lines = ["=== BUDGET STRATEGIST REPORT ==="];
+  lines.push("Budget: " + budgetData.used.toLocaleString() + " / " + budgetData.budget.toLocaleString() + " (" + budgetData.percentUsed + "%) | Est: $" + (budgetData.estimatedCostToday || 0).toFixed(4));
+
+  if (progEntries.length > 0) {
+    lines.push("", "--- Program Usage ---");
+    const sorted = progEntries.sort((a, b) => ((b[1] as any).tokens || 0) - ((a[1] as any).tokens || 0));
+    for (const [name, data] of sorted.slice(0, 10)) {
+      const d = data as any;
+      lines.push("  " + name.padEnd(25) + " " + (d.tokens || 0).toLocaleString().padStart(8) + " tok  $" + (d.cost || 0).toFixed(4));
+    }
+  }
+
+  if (proposals.length > 0) {
+    lines.push("", "--- Proposals (" + proposals.length + ") ---");
+    for (const p of proposals) lines.push("  * " + p.reason);
+  }
+
+  lines.push("", "WORKLOG:" + JSON.stringify(worklog));
+
+  return { summary: lines.join(NL), metric: String(proposals.length), proposals };
 }`,
       codeLang: "typescript",
     },

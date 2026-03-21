@@ -570,7 +570,8 @@ export async function registerRoutes(
 
   app.get("/api/runtime", async (_req, res) => {
     const state = getRuntimeState();
-    res.json(state);
+    const budgetStatus = await getRuntimeBudgetStatus();
+    res.json({ ...state, budget: budgetStatus });
   });
 
   app.post("/api/runtime/toggle", async (_req, res) => {
