@@ -5,7 +5,8 @@ import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSch
 import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
-import { getRuntimeState, toggleRuntime, manualTrigger } from "./agent-runtime";
+import { getRuntimeState, toggleRuntime, manualTrigger, getRuntimeBudgetStatus } from "./agent-runtime";
+import { getModelRoster, getModelQuality } from "./model-router";
 import { getBridgeStatus, launchBrowser, closeBrowser, startLoginSession, getPageContent, openPage, getPageText } from "./browser-bridge";
 import { openOutlook, openTeams, getOutlookEmails, readOutlookEmail, getTeamsChats, readTeamsChat } from "./app-adapters";
 import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlValidator } from "./universal-scraper";
@@ -575,6 +576,21 @@ export async function registerRoutes(
   app.post("/api/runtime/toggle", async (_req, res) => {
     const active = toggleRuntime();
     res.json({ active });
+  });
+
+  app.get("/api/budget", async (_req, res) => {
+    const status = await getRuntimeBudgetStatus();
+    res.json(status);
+  });
+
+  app.get("/api/models", async (_req, res) => {
+    const roster = getModelRoster();
+    const quality = getModelQuality();
+    const models = roster.map(m => ({
+      ...m,
+      quality: quality.get(m.id) || { successes: 0, failures: 0, score: 100 },
+    }));
+    res.json(models);
   });
 
   const epicCommandQueue: any[] = [];

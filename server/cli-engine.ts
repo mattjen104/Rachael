@@ -1,5 +1,6 @@
 import { storage } from "./storage";
-import { manualTrigger, getRuntimeState, runMemoryConsolidation } from "./agent-runtime";
+import { manualTrigger, getRuntimeState, runMemoryConsolidation, getRuntimeBudgetStatus } from "./agent-runtime";
+import { getModelRoster, getModelQuality, type BudgetStatus } from "./model-router";
 import { emitEvent } from "./event-bus";
 import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
 import { executeLLM, type LLMConfig, type LLMMessage, type LLMResponse } from "./llm-client";
@@ -170,7 +171,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse", "meals"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse", "meals", "budget"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -1257,6 +1258,63 @@ function registerBuiltinCommands(): void {
       return ok(lines.join("\n"));
     }
     return fail(`[error] runtime: unknown subcommand "${sub}"\nUsage: runtime [status|start|stop]`);
+  });
+
+  registerCommand("budget", "Token budget dashboard", "budget [status|models|set <tokens>]", async (args) => {
+    const sub = args[0] || "status";
+    if (sub === "status") {
+      const bs = await getRuntimeBudgetStatus();
+      const bar = (pct: number) => {
+        const filled = Math.round(pct / 5);
+        return "[" + "#".repeat(filled) + "-".repeat(20 - filled) + "]";
+      };
+      const lines = [
+        `=== TOKEN BUDGET ===`,
+        `${bar(bs.percentUsed)} ${bs.percentUsed}%`,
+        `Used:      ${bs.used.toLocaleString()} / ${bs.budget.toLocaleString()} tokens`,
+        `Remaining: ${bs.remaining.toLocaleString()} tokens`,
+        `Est. cost: $${bs.estimatedCostToday.toFixed(4)}`,
+        `Status:    ${bs.exhausted ? "!! EXHAUSTED !!" : "OK"}`,
+      ];
+      const byProg = bs.report.byProgram;
+      const progNames = Object.keys(byProg);
+      if (progNames.length > 0) {
+        lines.push("", "--- By Program ---");
+        const sorted = progNames.sort((a, b) => byProg[b].tokens - byProg[a].tokens);
+        for (const name of sorted.slice(0, 15)) {
+          const p = byProg[name];
+          lines.push(`  ${name.padEnd(25)} ${p.tokens.toLocaleString().padStart(8)} tok  $${p.cost.toFixed(4)}  (${p.calls} calls)`);
+        }
+      }
+      const modelNames = Object.keys(bs.report.byModel);
+      if (modelNames.length > 0) {
+        lines.push("", "--- By Model ---");
+        for (const name of modelNames) {
+          const short = name.replace(/^openrouter\//, "").split("/").pop() || name;
+          lines.push(`  ${short.padEnd(25)} ${bs.report.byModel[name].toLocaleString().padStart(8)} tok`);
+        }
+      }
+      return ok(lines.join("\n"));
+    }
+    if (sub === "models") {
+      const roster = getModelRoster();
+      const quality = getModelQuality();
+      const lines = ["=== MODEL ROSTER ==="];
+      for (const m of roster) {
+        const q = quality.get(m.id);
+        const qStr = q ? ` Q:${q.score}% (${q.successes}ok/${q.failures}fail)` : "";
+        const cost = m.inputCostPer1M !== undefined ? ` $${m.inputCostPer1M}/$${m.outputCostPer1M} per 1M` : "";
+        lines.push(`  [${m.tier.padEnd(8)}] ${m.label.padEnd(22)} ${m.id}${cost}${qStr}`);
+      }
+      return ok(lines.join("\n"));
+    }
+    if (sub === "set") {
+      const val = parseInt(args[1], 10);
+      if (isNaN(val) || val <= 0) return fail("[error] budget set: usage: budget set <tokens>\n  Example: budget set 1000000");
+      await storage.setAgentConfig("daily_token_budget", String(val), "budget");
+      return ok(`Daily token budget set to ${val.toLocaleString()} tokens`);
+    }
+    return fail(`[error] budget: unknown subcommand "${sub}"\nUsage: budget [status|models|set <tokens>]`);
   });
 
   registerCommand("profiles", "List site profiles", "profiles [list|info <name>]", async (args) => {

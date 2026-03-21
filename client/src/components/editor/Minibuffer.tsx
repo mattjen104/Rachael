@@ -203,6 +203,8 @@ export default function Minibuffer({
       { id: "scrape-url", label: "scrape-url", hint: "Scrape any URL", action: () => { setMode("scrape-url"); setQuery(""); setSelectedIdx(0); } },
       { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
       { id: "toggle-runtime", label: "toggle-runtime", hint: "R", action: () => exec("Runtime toggled", () => toggleRuntime.mutate()) },
+      { id: "budget-status", label: "budget-status", hint: "$", action: () => { setMode("shell"); setQuery("budget"); setShellOutput(""); executeShellCommand("budget"); } },
+      { id: "budget-models", label: "budget-models", hint: "Model roster", action: () => { setMode("shell"); setQuery("budget models"); setShellOutput(""); executeShellCommand("budget models"); } },
       { id: "toggle-tv-mode", label: "toggle-tv-mode", hint: "TV", action: () => {
         setTvMode(!isTvMode);
         onCommandExecuted("TV mode toggled");

@@ -46,22 +46,48 @@ async function execute() {
       type: "monitor",
       schedule: "every 12h",
       cronExpression: "0 6,18 * * *",
-      instructions: "Check free model availability on OpenRouter. Tests each model with a simple prompt.",
-      config: { TASK_TYPE: "research", METRIC: "free_models_working", DIRECTION: "higher" },
+      instructions: "Check model availability on OpenRouter. Tests free models, queries live pricing from /api/v1/models, and auto-updates the model roster via agent_config.",
+      config: { TASK_TYPE: "research", METRIC: "free_models_working", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
-      tags: ["program"],
+      tags: ["program", "budget"],
       code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
-const FREE_MODELS = [
+const ROSTER_MODELS = [
   "google/gemma-3-4b-it:free",
   "google/gemma-3-12b-it:free",
   "mistralai/mistral-small-3.1-24b-instruct:free",
   "meta-llama/llama-3.2-3b-instruct:free",
   "qwen/qwen3-4b:free",
+  "deepseek/deepseek-chat",
+  "deepseek/deepseek-reasoner",
 ];
 
 async function execute() {
   const results: Array<{ model: string; status: string; latency: number }> = [];
-  for (const model of FREE_MODELS) {
+  const pricingUpdates: Array<{ id: string; inputCostPer1M?: number; outputCostPer1M?: number }> = [];
+
+  try {
+    const modelsResp = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: OPENROUTER_KEY ? { "Authorization": "Bearer " + OPENROUTER_KEY } : {},
+    });
+    if (modelsResp.ok) {
+      const modelsData = await modelsResp.json();
+      const modelsMap = new Map();
+      for (const m of (modelsData.data || [])) {
+        modelsMap.set(m.id, m);
+      }
+      for (const modelId of ROSTER_MODELS) {
+        const info = modelsMap.get(modelId);
+        if (info?.pricing) {
+          const inputCost = parseFloat(info.pricing.prompt || "0") * 1_000_000;
+          const outputCost = parseFloat(info.pricing.completion || "0") * 1_000_000;
+          pricingUpdates.push({ id: modelId, inputCostPer1M: Math.round(inputCost * 100) / 100, outputCostPer1M: Math.round(outputCost * 100) / 100 });
+        }
+      }
+    }
+  } catch {}
+
+  const freeModels = ROSTER_MODELS.filter(m => m.includes(":free"));
+  for (const model of freeModels) {
     const t0 = Date.now();
     try {
       const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -83,9 +109,22 @@ async function execute() {
     }
     await new Promise(r => setTimeout(r, 2000));
   }
+
+  if (pricingUpdates.length > 0) {
+    try {
+      const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
+      await fetch("http://localhost:" + port + "/api/config/model_roster_overrides", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: JSON.stringify(pricingUpdates), category: "budget" }),
+      });
+    } catch {}
+  }
+
   const working = results.filter(r => r.status === "OK");
+  const pricingNote = pricingUpdates.length > 0 ? " | Pricing updated for " + pricingUpdates.length + " models" : "";
   const summary = results.map(r => (r.status === "OK" ? "[+]" : "[-]") + " " + r.model.split("/").pop() + " " + r.status + " (" + r.latency + "ms)").join("\\n");
-  return { summary: "Model Scout: " + working.length + "/" + results.length + " free models working\\n" + summary, metric: String(working.length) };
+  return { summary: "Model Scout: " + working.length + "/" + results.length + " free models working" + pricingNote + "\\n" + summary, metric: String(working.length) };
 }`,
       codeLang: "typescript",
     },
@@ -940,6 +979,57 @@ async function execute() {
   const recipeName = rec.recipeRecommendation?.name || "unknown";
   const kiddoItem = rec.kiddoLunchSuggestion?.item || "unknown";
   return { summary: "Nightly Meal Rec (" + today + "): Recipe: " + recipeName + " | Kiddo: " + kiddoItem, metric: "1" };
+}`,
+      codeLang: "typescript",
+    },
+    {
+      name: "budget-strategist",
+      type: "meta",
+      schedule: "daily",
+      cronExpression: "0 2 * * *",
+      instructions: "Daily budget strategist: reviews token usage, model quality scores, and cost efficiency. Proposes budget adjustments and model routing changes.",
+      config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", METRIC: "budget_efficiency", DIRECTION: "higher" },
+      costTier: "free",
+      tags: ["program", "budget", "meta"],
+      code: `async function execute() {
+  const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
+  const BASE = "http://localhost:" + port;
+  let budgetData = { used: 0, budget: 500000, remaining: 500000, percentUsed: 0, report: { byProgram: {}, byModel: {} } };
+  try {
+    const resp = await fetch(BASE + "/api/budget");
+    if (resp.ok) budgetData = await resp.json();
+  } catch {}
+
+  const lines: string[] = [];
+  lines.push("=== DAILY BUDGET REPORT ===");
+  lines.push("Budget: " + budgetData.budget.toLocaleString() + " tokens");
+  lines.push("Used: " + budgetData.used.toLocaleString() + " (" + budgetData.percentUsed + "%)");
+  lines.push("Remaining: " + budgetData.remaining.toLocaleString());
+
+  const byProg = budgetData.report?.byProgram || {};
+  const progNames = Object.keys(byProg);
+  if (progNames.length > 0) {
+    lines.push("");
+    lines.push("--- By Program ---");
+    const sorted = progNames.sort((a, b) => (byProg[b]?.tokens || 0) - (byProg[a]?.tokens || 0));
+    for (const name of sorted.slice(0, 10)) {
+      const p = byProg[name];
+      lines.push("  " + name.padEnd(25) + " " + (p.tokens || 0).toLocaleString().padStart(8) + " tok  $" + (p.cost || 0).toFixed(4) + "  (" + (p.calls || 0) + " calls)");
+    }
+  }
+
+  const byModel = budgetData.report?.byModel || {};
+  const modelNames = Object.keys(byModel);
+  if (modelNames.length > 0) {
+    lines.push("");
+    lines.push("--- By Model ---");
+    for (const name of modelNames) {
+      lines.push("  " + name.split("/").pop().padEnd(25) + " " + byModel[name].toLocaleString().padStart(8) + " tok");
+    }
+  }
+
+  const efficiency = budgetData.budget > 0 ? Math.round((1 - budgetData.percentUsed / 100) * 100) : 100;
+  return { summary: lines.join(String.fromCharCode(10)), metric: String(efficiency) };
 }`,
       codeLang: "typescript",
     },

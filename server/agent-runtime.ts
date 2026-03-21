@@ -2,9 +2,10 @@ import { storage } from "./storage";
 import { executeLLM, buildProgramPrompt, hasLLMKeys, type LLMResponse, type LLMConfig } from "./llm-client";
 import { runHardenedSkill } from "./skill-runner";
 import {
-  detectTaskType, pickCascadeModels, pickComparisonModels,
-  trackTokenUsage, parseCostTier,
-  type TaskType, type CostTier,
+  detectTaskType, pickCascadeModels, pickComparisonModels, pickCheapThenPremium,
+  trackTokenUsage, trackModelQuality, parseCostTier,
+  getDailyBudget, isBudgetExhausted, getBudgetStatus, getDailyTokenUsage, loadRosterFromConfig,
+  type TaskType, type CostTier, type BudgetStatus,
 } from "./model-router";
 import { sanitizeResultRow } from "./output-sanitizer";
 import { emitEvent } from "./event-bus";
@@ -194,9 +195,14 @@ async function executeLLMWithCascade(
         llmConfig,
         {}
       );
-      if (result.content && result.content.length > 0) return result;
+      if (result.content && result.content.length > 0) {
+        trackModelQuality(model.id, true);
+        return result;
+      }
+      trackModelQuality(model.id, false);
     } catch (err: any) {
       lastError = err;
+      trackModelQuality(model.id, false);
       if (err.message?.includes("429") || err.message?.includes("rate")) {
         rateLimited = true;
       }
@@ -205,6 +211,51 @@ async function executeLLMWithCascade(
   }
 
   throw lastError || new Error("All models in cascade failed");
+}
+
+async function executeLLMTwoStage(
+  messages: import("./llm-client").LLMMessage[],
+  taskType: TaskType,
+  costTier: CostTier,
+  llmConfig: LLMConfig
+): Promise<LLMResponse> {
+  const { cheap, premium } = pickCheapThenPremium(taskType, costTier);
+  if (!cheap) {
+    return executeLLMWithCascade(messages, taskType, costTier, undefined, llmConfig);
+  }
+
+  try {
+    const cheapResult = await executeLLM(
+      messages,
+      resolveProviderPrefix(cheap.id),
+      llmConfig,
+      {}
+    );
+    if (cheapResult.content && cheapResult.content.length > 50) {
+      trackModelQuality(cheap.id, true);
+      return cheapResult;
+    }
+    trackModelQuality(cheap.id, false);
+  } catch {
+    trackModelQuality(cheap.id, false);
+  }
+
+  if (premium && premium.id !== cheap.id) {
+    try {
+      const premiumResult = await executeLLM(
+        messages,
+        resolveProviderPrefix(premium.id),
+        llmConfig,
+        {}
+      );
+      trackModelQuality(premium.id, premiumResult.content?.length > 0);
+      return premiumResult;
+    } catch {
+      trackModelQuality(premium.id, false);
+    }
+  }
+
+  return executeLLMWithCascade(messages, taskType, costTier, undefined, llmConfig);
 }
 
 function makeProgramState(prog: Program): ProgramState {
@@ -287,6 +338,7 @@ async function executeInlineCode(code: string, config: Record<string, string>): 
   const bridgePort = process.env.PORT || "5000";
   const wrappedCode = `
 const __ctx = JSON.parse(process.env.__INLINE_CTX || '{}');
+const config = __ctx.properties || {};
 const __projectRoot = process.env.__PROJECT_ROOT || process.cwd();
 const __skillPath = (name: string) => __projectRoot + "/skills/" + name;
 const __bridgePort = process.env.__BRIDGE_PORT || "5000";
@@ -506,7 +558,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       output = resumeCtx.llmContent;
       modelUsed = resumeCtx.llmModel;
       tokensUsed = resumeCtx.llmTokens;
-      trackTokenUsage(modelUsed, tokensUsed);
+      trackTokenUsage(modelUsed, tokensUsed, programName);
       emitEvent("agent-runtime", `Resumed with saved LLM result for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
     } else if (prog.code) {
       try {
@@ -574,8 +626,13 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         return;
       }
 
-      emitEvent("agent-runtime", `Calling LLM for "${programName}" (${taskType})`, "action", { program: programName });
-      const llmResult = await executeLLMWithCascade(messages, taskType, costTier, modelOverride, llmConfig);
+      const useTwoStage = (prog.config as Record<string, string>)?.TWO_STAGE === "true";
+      emitEvent("agent-runtime", `Calling LLM for "${programName}" (${taskType}${useTwoStage ? ", two-stage" : ""})`, "action", { program: programName });
+      const llmResult = modelOverride
+        ? await executeLLM(messages, modelOverride, llmConfig, {})
+        : useTwoStage
+          ? await executeLLMTwoStage(messages, taskType, costTier, llmConfig)
+          : await executeLLMWithCascade(messages, taskType, costTier, undefined, llmConfig);
 
       if (shouldYield()) {
         ps.status = "idle";
@@ -598,7 +655,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       output = llmResult.content;
       modelUsed = llmResult.model;
       tokensUsed = llmResult.tokensUsed || 0;
-      trackTokenUsage(modelUsed, tokensUsed);
+      trackTokenUsage(modelUsed, tokensUsed, programName);
       emitEvent("agent-runtime", `LLM response received for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
 
       const outputType = (prog.config?.OUTPUT_TYPE as string || "").toLowerCase();
@@ -785,6 +842,9 @@ async function tick(): Promise<void> {
     const allPrograms = await storage.getPrograms();
     const now = new Date();
 
+    const budget = await getDailyBudget(storage);
+    const budgetExhausted = isBudgetExhausted(budget);
+
     const knownNames = new Set(allPrograms.map(p => p.name));
     Array.from(runtime.programs.keys()).forEach(name => {
       if (!knownNames.has(name)) runtime.programs.delete(name);
@@ -809,6 +869,11 @@ async function tick(): Promise<void> {
         (!prog.schedule && ps.iteration === 0 && !ps.lastRun);
 
       if (shouldRun) {
+        const isCodeOnly = !!prog.code && (prog.config as Record<string, string>)?.LLM_REQUIRED === "false";
+        if (budgetExhausted && !isCodeOnly) {
+          emitEvent("agent-runtime", `Budget exhausted, skipping LLM program "${prog.name}"`, "info", { program: prog.name });
+          continue;
+        }
         ps.status = "queued";
         executeProgram(prog.name).catch(err => {
           console.error(`[agent-runtime] Error executing program "${prog.name}":`, err);
@@ -918,6 +983,10 @@ export function getRuntimeState(): {
     lastTick: runtime.lastTick,
     programs: Array.from(runtime.programs.values()),
   };
+}
+
+export async function getRuntimeBudgetStatus(): Promise<BudgetStatus> {
+  return getBudgetStatus(storage);
 }
 
 export function toggleRuntime(): boolean {
@@ -1055,6 +1124,10 @@ export function initRuntime(): void {
     tickInterval = setInterval(tick, TICK_INTERVAL_MS);
     setTimeout(tick, 5000);
   }
+
+  loadRosterFromConfig(storage).then(() => {
+    console.log("[agent-runtime] Model roster loaded from config");
+  }).catch(() => {});
 
   migratePersistentContextToMemories().catch(e => console.error("[agent-runtime] migration error:", e));
 

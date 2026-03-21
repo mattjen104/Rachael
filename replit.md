@@ -80,9 +80,22 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - **Branch suppression**: When `&&`/`||` skips a segment, downstream `|` pipes in the same branch are also skipped
 - **Two-layer output**: `executeChainRaw()` returns raw stdout/stderr/exitCode (for pipes, recipes, internal use); `executeChain()` wraps with presentation (truncation, exit codes, duration)
 - **Progressive discovery**: `command --help` for usage, error messages point to correct commands
-- **30+ built-in commands**: help, programs, results, tasks, notes, captures, capture, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, profiles, proposals, agenda, memory, scrape, propose-recipe, bridge, bridge-status, bridge-token, notify, standup, outlook
+- **30+ built-in commands**: help, programs, results, tasks, notes, captures, capture, search, grep, head, tail, wc, sort, uniq, echo, cat, recipe, config, skills, runtime, budget, profiles, proposals, agenda, memory, scrape, propose-recipe, bridge, bridge-status, bridge-token, notify, standup, outlook
 - **Cockpit events**: CLI commands emit events to the cockpit activity stream (recipe save/run/approve, memory store/forget, scrape)
-- **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`
+- **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`, `GET /api/budget`, `GET /api/models`
+
+## Token Budget & Model Router (server/model-router.ts)
+
+- **Dynamic model roster**: DeepSeek V3 (`deepseek/deepseek-chat`), DeepSeek R1 (`deepseek/deepseek-reasoner`), plus free/cheap/standard/premium tiers
+- **Live pricing**: `inputCostPer1M` / `outputCostPer1M` per model; auto-updated by `openrouter-model-scout` via OpenRouter `/api/v1/models`
+- **Quality tracking**: Per-model success/fail ratio stored in `qualityTracker`; models with low quality deprioritized in cascade
+- **Daily token budget**: `daily_token_budget` agent_config key (default 500K tokens); enforced in tick loop — LLM programs skipped when exhausted
+- **Code-only programs**: Programs with `config.LLM_REQUIRED = "false"` always run even when budget exhausted
+- **Two-stage pipeline**: Programs with `config.TWO_STAGE = "true"` try cheap model first, escalate to premium only if cheap fails
+- **Roster overrides**: `model_roster_overrides` agent_config key (JSON array) merged at startup
+- **Budget CLI**: `budget [status|models|set <tokens>]`; Minibuffer entries: `budget-status`, `budget-models`
+- **Budget API**: `GET /api/budget` returns `BudgetStatus`, `GET /api/models` returns roster with quality scores
+- **Strategist program**: `budget-strategist` runs daily at 2AM, produces budget efficiency report
 
 ## Recipes (server/cli-engine.ts + shared/schema.ts)
 
