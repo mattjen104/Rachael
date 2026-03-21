@@ -65,7 +65,7 @@ const MAX_CHEAP_COST = 1.0;
 
 async function execute() {
   const results: Array<{ model: string; status: string; latency: number }> = [];
-  const rosterUpdates: Array<{ id: string; inputCostPer1M?: number; outputCostPer1M?: number; tier?: string; strengths?: string[]; label?: string }> = [];
+  const rosterUpdates: Array<{ id: string; inputCostPer1M?: number; outputCostPer1M?: number; tier?: string; strengths?: string[]; label?: string; _remove?: boolean }> = [];
   const proposals: Array<{section: string; diff: string; reason: string}> = [];
   let discoveredFree = 0;
 
@@ -86,7 +86,7 @@ async function execute() {
           const outputCost = parseFloat(info.pricing.completion || "0") * 1_000_000;
           rosterUpdates.push({ id: modelId, inputCostPer1M: Math.round(inputCost * 100) / 100, outputCostPer1M: Math.round(outputCost * 100) / 100 });
         } else if (!info) {
-          rosterUpdates.push({ id: modelId, _remove: true } as any);
+          rosterUpdates.push({ id: modelId, _remove: true });
           proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " not found on OpenRouter. Removed from active roster.", reason: "Model offline/removed: " + modelId });
         }
       }
@@ -119,7 +119,7 @@ async function execute() {
         if (info?.pricing) {
           const inputCost = parseFloat(info.pricing.prompt || "0") * 1_000_000;
           if (inputCost > 20 && modelId.includes(":free")) {
-            rosterUpdates.push({ id: modelId, _remove: true } as any);
+            rosterUpdates.push({ id: modelId, _remove: true });
             proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " was free but now costs $" + inputCost.toFixed(2) + "/1M. Removed from roster.", reason: "Free model now paid: " + modelId });
           }
         }

@@ -881,8 +881,9 @@ async function tick(): Promise<void> {
 
       if (shouldRun) {
         const progCfg = prog.config as Record<string, string>;
-        const isCodeOnly = !!prog.code && (progCfg?.LLM_REQUIRED === "false" || progCfg?.llmRequired === "false");
-        if (budgetExhausted && !isCodeOnly) {
+        const isNoLlm = progCfg?.LLM_REQUIRED === "false" || progCfg?.llmRequired === "false";
+        const currentlyExhausted = isBudgetExhausted(await getDailyBudget(storage));
+        if (currentlyExhausted && !isNoLlm) {
           emitEvent("agent-runtime", `Budget exhausted, skipping LLM program "${prog.name}"`, "info", { program: prog.name });
           continue;
         }
