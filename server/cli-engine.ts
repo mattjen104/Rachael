@@ -1265,7 +1265,8 @@ function registerBuiltinCommands(): void {
     if (sub === "status") {
       const bs = await getRuntimeBudgetStatus();
       const bar = (pct: number) => {
-        const filled = Math.round(pct / 5);
+        const clamped = Math.max(0, Math.min(100, pct));
+        const filled = Math.round(clamped / 5);
         return "[" + "#".repeat(filled) + "-".repeat(20 - filled) + "]";
       };
       const lines = [
@@ -1720,12 +1721,19 @@ function registerBuiltinCommands(): void {
 
     const recipeSection = recipesRun.map(r => `${r.name} (ran ${r.runCount}x, last: ${r.lastRun?.toISOString().slice(0, 16)})`).join("\n") || "None.";
 
+    let budgetSection = "";
+    try {
+      const bs = await getRuntimeBudgetStatus();
+      budgetSection = `BUDGET: ${bs.used.toLocaleString()} / ${bs.budget.toLocaleString()} tokens (${bs.percentUsed}%) | Est. $${bs.estimatedCostToday.toFixed(4)}${bs.exhausted ? " !! EXHAUSTED !!" : ""}`;
+    } catch {}
+
     if (raw) {
       const lines: string[] = [`=== STANDUP (${sinceStr} → ${today}) ===`, ""];
       for (const r of agentReports) lines.push(r);
       if (errorReports.length) { lines.push("ERRORS:"); for (const e of errorReports) lines.push(e); }
       lines.push(`TASKS:\n${taskSection}`);
       lines.push(`RECIPES:\n${recipeSection}`);
+      if (budgetSection) lines.push("", budgetSection);
       return ok(lines.join("\n"));
     }
 
@@ -1782,6 +1790,8 @@ ${errorReports.length > 0 ? `AGENT ERRORS:\n${errorReports.join("\n---\n")}` : "
 TASKS:\n${taskSection}
 
 RECIPES FIRED:\n${recipeSection}
+
+${budgetSection ? budgetSection : ""}
 
 Write the HTML briefing now.`;
 

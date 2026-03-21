@@ -599,7 +599,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         ps.status = "error";
         ps.error = err.message;
       }
-    } else if (prog.config?.LLM_REQUIRED === "false") {
+    } else if (prog.config?.LLM_REQUIRED === "false" || prog.config?.llmRequired === "false") {
       output = `[Iteration ${ps.iteration}] Program "${programName}" requires code but has none. Skipping LLM (LLM_REQUIRED=false).`;
     } else if (!hasLLMKeys()) {
       output = `[Iteration ${ps.iteration}] No LLM API keys configured.`;
@@ -636,7 +636,8 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         return;
       }
 
-      const useTwoStage = (prog.config as Record<string, string>)?.TWO_STAGE === "true";
+      const cfgMap = prog.config as Record<string, string>;
+      const useTwoStage = cfgMap?.TWO_STAGE === "true" || cfgMap?.twoStage === "true";
       emitEvent("agent-runtime", `Calling LLM for "${programName}" (${taskType}${useTwoStage ? ", two-stage" : ""})`, "action", { program: programName });
       const llmResult = modelOverride
         ? await executeLLM(messages, modelOverride, llmConfig, {})
@@ -879,7 +880,8 @@ async function tick(): Promise<void> {
         (!prog.schedule && ps.iteration === 0 && !ps.lastRun);
 
       if (shouldRun) {
-        const isCodeOnly = !!prog.code && (prog.config as Record<string, string>)?.LLM_REQUIRED === "false";
+        const progCfg = prog.config as Record<string, string>;
+        const isCodeOnly = !!prog.code && (progCfg?.LLM_REQUIRED === "false" || progCfg?.llmRequired === "false");
         if (budgetExhausted && !isCodeOnly) {
           emitEvent("agent-runtime", `Budget exhausted, skipping LLM program "${prog.name}"`, "info", { program: prog.name });
           continue;
