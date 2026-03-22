@@ -557,6 +557,25 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
     const soul = await getSoulPrompt();
     const memory = await getMemoryContext(programName);
 
+    const recentObservations = await storage.getMemoriesForProgram(programName, {
+      limit: 3,
+      type: "observation",
+    });
+    const recentOutcomes = await storage.getMemoriesForProgram(programName, {
+      limit: 3,
+      type: "outcome",
+    });
+    const recentMemories = [...recentObservations, ...recentOutcomes];
+    const recallContext = recentObservations.length > 0
+      ? recentObservations.map(m => m.content).join(" | ")
+      : "";
+    if (recallContext) {
+      emitEvent("memory", `Recall for "${programName}": ${recallContext.slice(0, 120)}`, "info", { program: programName });
+      memory.persistentContext = memory.persistentContext
+        ? memory.persistentContext + "\n\n[Previous findings for " + programName + "]: " + recallContext
+        : "[Previous findings for " + programName + "]: " + recallContext;
+    }
+
     let output = "";
     let modelUsed = "inline";
     let tokensUsed = 0;
@@ -782,17 +801,51 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
     }
 
     try {
-      const outcomeContent = `Program "${programName}" iteration ${ps.iteration}: ${summaryLine}`;
-      await storage.createMemory({
-        programName,
-        content: outcomeContent,
-        memoryType: "outcome",
-        tags: [programName, "outcome", `iteration-${ps.iteration}`],
-        relevanceScore: 80,
-      });
-      emitEvent("memory", `Outcome memory created for "${programName}"`, "info", { program: programName });
+      const metricNum = metric ? parseFloat(metric) : NaN;
+      const hasResults = !isNaN(metricNum) && metricNum > 0;
+      const isError = output.startsWith("[Inline code error]") || output.startsWith("[Iteration");
+      const isNovel = hasResults && !recentObservations.some(m =>
+        m.content.includes(summaryLine.slice(0, 60))
+      );
+
+      if (hasResults && isNovel && !isError) {
+        const distilled = `[${new Date().toISOString().slice(0, 10)}] ${programName}: ${summaryLine} (metric: ${metric})`;
+        await storage.createMemory({
+          programName,
+          content: distilled,
+          memoryType: "observation",
+          tags: [programName, "evaluate", `iteration-${ps.iteration}`],
+          relevanceScore: 90,
+        });
+        emitEvent("memory", `Novel finding filed for "${programName}": ${distilled.slice(0, 100)}`, "info", { program: programName });
+      } else if (isError) {
+        const errorDistilled = `[${new Date().toISOString().slice(0, 10)}] ${programName} ERROR: ${summaryLine.slice(0, 150)}`;
+        await storage.createMemory({
+          programName,
+          content: errorDistilled,
+          memoryType: "outcome",
+          tags: [programName, "error", `iteration-${ps.iteration}`],
+          relevanceScore: 70,
+        });
+        emitEvent("memory", `Error outcome filed for "${programName}"`, "info", { program: programName });
+      } else if (!hasResults) {
+        const zeroCount = recentOutcomes.filter(m => m.content.includes("metric: 0") || m.content.includes("no results")).length;
+        if (zeroCount >= 2) {
+          emitEvent("memory", `Skipped memory for "${programName}": ${zeroCount + 1} consecutive zero-result runs`, "info", { program: programName });
+        } else {
+          await storage.createMemory({
+            programName,
+            content: `[${new Date().toISOString().slice(0, 10)}] ${programName}: no results (metric: 0)`,
+            memoryType: "outcome",
+            tags: [programName, "outcome", `iteration-${ps.iteration}`],
+            relevanceScore: 50,
+          });
+        }
+      } else {
+        emitEvent("memory", `Skipped memory for "${programName}": output matches recent memory (not novel)`, "info", { program: programName });
+      }
     } catch (e) {
-      console.error("[agent-runtime] Failed to create outcome memory:", e);
+      console.error("[agent-runtime] Failed evaluate phase:", e);
     }
 
     await extractRecipeDirectives(output, programName);

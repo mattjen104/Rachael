@@ -5,12 +5,11 @@ export async function seedDatabase(): Promise<void> {
   await seedSiteProfiles();
 
   const existingPrograms = await storage.getPrograms();
-  if (existingPrograms.length > 0) {
-    console.log("[seed] Database already has programs, skipping seed");
-    return;
-  }
+  const isFirstRun = existingPrograms.length === 0;
 
-  console.log("[seed] Seeding database with programs, skills, config...");
+  if (isFirstRun) {
+    console.log("[seed] Seeding database with programs, skills, config...");
+  }
 
   const programSeedInputs = [
     {
@@ -1440,14 +1439,153 @@ async function execute() {
 }`,
       codeLang: "typescript",
     },
+    {
+      name: "overnight-digest",
+      type: "meta",
+      schedule: "daily",
+      cronExpression: "0 13 * * *",
+      instructions: "Morning digest: synthesizes overnight program results and recent memories into an actionable briefing with proposals. Runs at 6 AM PT.",
+      config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", OUTPUT_TYPE: "proposal", METRIC: "proposals_generated", DIRECTION: "higher" },
+      costTier: "free",
+      tags: ["program", "meta", "digest"],
+      code: `async function execute() {
+  const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
+  const BASE = "http://localhost:" + port;
+  const NL = String.fromCharCode(10);
+
+  let results: any[] = [];
+  let memories: any[] = [];
+  let proposals: any[] = [];
+  let programs: any[] = [];
+  try { const r = await fetch(BASE + "/api/results?limit=100"); if (r.ok) results = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/memories?limit=50"); if (r.ok) memories = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/proposals?status=pending"); if (r.ok) proposals = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/programs"); if (r.ok) programs = await r.json(); } catch {}
+
+  const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+  const recentResults = results.filter((r: any) => new Date(r.createdAt || r.timestamp || 0).getTime() > twelveHoursAgo);
+  const recentMemories = memories.filter((m: any) => new Date(m.createdAt || m.lastAccessed || 0).getTime() > twelveHoursAgo);
+
+  if (recentResults.length === 0 && recentMemories.length === 0) {
+    return { summary: "Overnight Digest: No activity in the last 12 hours. All systems idle.", metric: "0" };
+  }
+
+  const byProgram: Record<string, { runs: number; errors: number; lastMetric: string; summaries: string[] }> = {};
+  for (const r of recentResults) {
+    const name = r.programName || "unknown";
+    if (!byProgram[name]) byProgram[name] = { runs: 0, errors: 0, lastMetric: "0", summaries: [] };
+    byProgram[name].runs++;
+    if (r.status === "error") byProgram[name].errors++;
+    if (r.metric) byProgram[name].lastMetric = r.metric;
+    if (r.summary) byProgram[name].summaries.push(r.summary.slice(0, 200));
+  }
+
+  const observationMemories = recentMemories.filter((m: any) => m.memoryType === "observation");
+
+  const lines: string[] = [];
+  lines.push("=== OVERNIGHT DIGEST ===");
+  lines.push("Generated: " + new Date().toISOString());
+  lines.push("Coverage: last 12 hours | " + recentResults.length + " results from " + Object.keys(byProgram).length + " programs");
+  lines.push("");
+
+  lines.push("--- PROGRAM ACTIVITY ---");
+  for (const [name, data] of Object.entries(byProgram).sort((a, b) => b[1].runs - a[1].runs)) {
+    const status = data.errors > 0 ? " [" + data.errors + " errors]" : "";
+    lines.push("  " + name + ": " + data.runs + " runs, metric=" + data.lastMetric + status);
+    const lastSummary = data.summaries[data.summaries.length - 1];
+    if (lastSummary) lines.push("    > " + lastSummary.slice(0, 150));
+  }
+
+  if (observationMemories.length > 0) {
+    lines.push("");
+    lines.push("--- KEY FINDINGS (from evaluate loop) ---");
+    for (const m of observationMemories.slice(0, 10)) {
+      lines.push("  * " + (m.content || "").slice(0, 200));
+    }
+  }
+
+  const errorProgs = Object.entries(byProgram).filter(([, d]) => d.errors > 0);
+  const idleProgs = programs.filter((p: any) => p.enabled && !byProgram[p.name]);
+
+  const digestProposals: Array<{section: string; diff: string; reason: string}> = [];
+
+  for (const [name, data] of errorProgs) {
+    if (data.errors >= 2) {
+      digestProposals.push({
+        section: "PROGRAMS",
+        diff: "Program " + name + " had " + data.errors + " errors in the last 12h. Consider investigating or reducing schedule frequency.",
+        reason: "High error rate: " + name,
+      });
+    }
+  }
+
+  if (idleProgs.length > 3) {
+    digestProposals.push({
+      section: "PROGRAMS",
+      diff: idleProgs.length + " enabled programs had no runs in 12h: " + idleProgs.map((p: any) => p.name).join(", "),
+      reason: "Idle programs detected",
+    });
+  }
+
+  const zeroMetricProgs = Object.entries(byProgram).filter(([, d]) => d.lastMetric === "0" && d.runs >= 2);
+  for (const [name] of zeroMetricProgs) {
+    digestProposals.push({
+      section: "PROGRAMS",
+      diff: "Program " + name + " returned 0 results across " + byProgram[name].runs + " runs. Consider adjusting config or disabling.",
+      reason: "Persistent zero results: " + name,
+    });
+  }
+
+  if (proposals.length > 0) {
+    lines.push("");
+    lines.push("--- PENDING PROPOSALS (" + proposals.length + ") ---");
+    for (const p of proposals.slice(0, 8)) {
+      lines.push("  [" + p.section + "] " + (p.reason || "").slice(0, 120));
+    }
+  }
+
+  if (digestProposals.length > 0) {
+    lines.push("");
+    lines.push("--- NEW PROPOSALS FROM DIGEST ---");
+    for (const p of digestProposals) {
+      lines.push("  * " + p.reason + ": " + p.diff.slice(0, 150));
+    }
+  }
+
+  lines.push("");
+  lines.push("Total pending proposals: " + (proposals.length + digestProposals.length));
+
+  return { summary: lines.join(NL), metric: String(digestProposals.length), proposals: digestProposals };
+}`,
+      codeLang: "typescript",
+    },
   ];
 
-  for (const raw of programSeedInputs) {
-    try {
-      const p = insertProgramSchema.parse(raw);
-      await storage.createProgram(p);
-    } catch (e) {
-      console.error(`[seed] Failed to create program ${raw.name}:`, e);
+  if (isFirstRun) {
+    for (const raw of programSeedInputs) {
+      try {
+        const p = insertProgramSchema.parse(raw);
+        await storage.createProgram(p);
+      } catch (e) {
+        console.error(`[seed] Failed to create program ${raw.name}:`, e);
+      }
+    }
+  } else {
+    const existingNames = new Set(existingPrograms.map(p => p.name));
+    let reconciled = 0;
+    for (const raw of programSeedInputs) {
+      if (existingNames.has(raw.name)) continue;
+      try {
+        const p = insertProgramSchema.parse(raw);
+        await storage.createProgram(p);
+        reconciled++;
+        console.log(`[seed] Reconciled missing program: ${raw.name}`);
+      } catch (e) {
+        console.error(`[seed] Failed to reconcile program ${raw.name}:`, e);
+      }
+    }
+    if (reconciled > 0) {
+      console.log(`[seed] Reconciled ${reconciled} missing programs into existing database`);
     }
   }
 
@@ -1466,33 +1604,35 @@ async function execute() {
     },
   ];
 
-  for (const raw of skillSeedInputs) {
-    try {
-      const s = insertSkillSchema.parse(raw);
-      await storage.createSkill(s);
-    } catch (e) {
-      console.error(`[seed] Failed to create skill ${raw.name}:`, e);
+  if (isFirstRun) {
+    for (const raw of skillSeedInputs) {
+      try {
+        const s = insertSkillSchema.parse(raw);
+        await storage.createSkill(s);
+      } catch (e) {
+        console.error(`[seed] Failed to create skill ${raw.name}:`, e);
+      }
     }
-  }
 
-  const configSeeds = [
-    { key: "soul", value: "Be genuinely helpful, not performatively helpful. Have opinions. Be resourceful before asking. Earn trust through competence.", category: "soul" },
-    { key: "default_model", value: "openrouter/google/gemma-3-4b-it:free", category: "agents" },
-    { key: "max_concurrent", value: "5", category: "agents" },
-    { key: "user_timezone", value: "America/Los_Angeles", category: "user" },
-    { key: "user_preferences", value: "CRT aesthetic, Doom Emacs-inspired UI, autonomous agents, org-mode workflows", category: "user" },
-    { key: "persistent_context", value: "Craigslist regions are subdomains. HN API is free. Working free OpenRouter models: gemma-3-4b-it:free, mistral-small-3.1-24b-instruct:free, qwen3-4b:free, llama-3.2-3b-instruct:free, gemma-3-12b-it:free.", category: "memory" },
-  ];
+    const configSeeds = [
+      { key: "soul", value: "Be genuinely helpful, not performatively helpful. Have opinions. Be resourceful before asking. Earn trust through competence.", category: "soul" },
+      { key: "default_model", value: "openrouter/google/gemma-3-4b-it:free", category: "agents" },
+      { key: "max_concurrent", value: "5", category: "agents" },
+      { key: "user_timezone", value: "America/Los_Angeles", category: "user" },
+      { key: "user_preferences", value: "CRT aesthetic, Doom Emacs-inspired UI, autonomous agents, org-mode workflows", category: "user" },
+      { key: "persistent_context", value: "Craigslist regions are subdomains. HN API is free. Working free OpenRouter models: gemma-3-4b-it:free, mistral-small-3.1-24b-instruct:free, qwen3-4b:free, llama-3.2-3b-instruct:free, gemma-3-12b-it:free.", category: "memory" },
+    ];
 
-  for (const c of configSeeds) {
-    try {
-      await storage.setAgentConfig(c.key, c.value, c.category);
-    } catch (e) {
-      console.error(`[seed] Failed to set config ${c.key}:`, e);
+    for (const c of configSeeds) {
+      try {
+        await storage.setAgentConfig(c.key, c.value, c.category);
+      } catch (e) {
+        console.error(`[seed] Failed to set config ${c.key}:`, e);
+      }
     }
-  }
 
-  console.log(`[seed] Seeded ${programSeedInputs.length} programs, ${skillSeedInputs.length} skills, ${configSeeds.length} config entries`);
+    console.log(`[seed] Seeded ${programSeedInputs.length} programs, ${skillSeedInputs.length} skills, ${configSeeds.length} config entries`);
+  }
 }
 
 async function seedSiteProfiles(): Promise<void> {
