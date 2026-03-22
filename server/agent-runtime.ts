@@ -565,9 +565,8 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       limit: 3,
       type: "outcome",
     });
-    const recentMemories = [...recentObservations, ...recentOutcomes];
-    const recallContext = recentObservations.length > 0
-      ? recentObservations.map(m => m.content).join(" | ")
+    const recallContext = (recentObservations.length > 0 || recentOutcomes.length > 0)
+      ? [...recentObservations, ...recentOutcomes].map(m => `[${m.memoryType}] ${m.content}`).join(" | ")
       : "";
     if (recallContext) {
       emitEvent("memory", `Recall for "${programName}": ${recallContext.slice(0, 120)}`, "info", { program: programName });
