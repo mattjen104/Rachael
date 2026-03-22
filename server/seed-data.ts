@@ -64,7 +64,7 @@ async function execute() {
   const results: Array<{ model: string; status: string; latency: number }> = [];
   const rosterUpdates: Array<{ id: string; inputCostPer1M?: number; outputCostPer1M?: number; tier?: string; strengths?: string[]; label?: string; _remove?: boolean }> = [];
   const proposals: Array<{section: string; diff: string; reason: string}> = [];
-  let discoveredFree = 0;
+  let discoveredNew = 0;
 
   try {
     const modelsResp = await fetch("https://openrouter.ai/api/v1/models", {
@@ -98,7 +98,7 @@ async function execute() {
       });
 
       for (const m of candidateModels.slice(0, 5)) {
-        discoveredFree++;
+        discoveredNew++;
         const label = m.name || m.id.split("/").pop();
         const inputCost = parseFloat(m.pricing?.prompt || "0") * 1_000_000;
         const outputCost = parseFloat(m.pricing?.completion || "0") * 1_000_000;
@@ -162,7 +162,7 @@ async function execute() {
   const working = results.filter(r => r.status === "OK");
   const notes = [];
   if (rosterUpdates.length > 0) notes.push("Pricing updated for " + rosterUpdates.length + " models");
-  if (discoveredFree > 0) notes.push("Discovered " + discoveredFree + " new models");
+  if (discoveredNew > 0) notes.push("Discovered " + discoveredNew + " new models");
   if (proposals.length > 0) notes.push(proposals.length + " proposals");
   const noteStr = notes.length > 0 ? " | " + notes.join(", ") : "";
   const summary = results.map(r => (r.status === "OK" ? "[+]" : "[-]") + " " + r.model.split("/").pop() + " " + r.status + " (" + r.latency + "ms)").join("\\n");
