@@ -804,8 +804,12 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       const metricNum = metric ? parseFloat(metric) : NaN;
       const hasResults = !isNaN(metricNum) && metricNum > 0;
       const isError = output.startsWith("[Inline code error]") || output.startsWith("[Iteration");
+      const summaryPrefix = summaryLine.slice(0, 60);
+      const metricStr = metric || "";
       const isNovel = hasResults && !recentObservations.some(m =>
-        m.content.includes(summaryLine.slice(0, 60))
+        m.content.includes(summaryPrefix) || (metricStr && m.content.includes("metric: " + metricStr))
+      ) && !recentOutcomes.some(m =>
+        m.content.includes(summaryPrefix)
       );
 
       if (hasResults && isNovel && !isError) {
@@ -829,18 +833,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         });
         emitEvent("memory", `Error outcome filed for "${programName}"`, "info", { program: programName });
       } else if (!hasResults) {
-        const zeroCount = recentOutcomes.filter(m => m.content.includes("metric: 0") || m.content.includes("no results")).length;
-        if (zeroCount >= 2) {
-          emitEvent("memory", `Skipped memory for "${programName}": ${zeroCount + 1} consecutive zero-result runs`, "info", { program: programName });
-        } else {
-          await storage.createMemory({
-            programName,
-            content: `[${new Date().toISOString().slice(0, 10)}] ${programName}: no results (metric: 0)`,
-            memoryType: "outcome",
-            tags: [programName, "outcome", `iteration-${ps.iteration}`],
-            relevanceScore: 50,
-          });
-        }
+        emitEvent("memory", `Skipped memory for "${programName}": zero results (metric: ${metric || "none"})`, "info", { program: programName });
       } else {
         emitEvent("memory", `Skipped memory for "${programName}": output matches recent memory (not novel)`, "info", { program: programName });
       }

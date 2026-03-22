@@ -1448,18 +1448,39 @@ async function execute() {
       config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", OUTPUT_TYPE: "proposal", METRIC: "proposals_generated", DIRECTION: "higher" },
       costTier: "free",
       tags: ["program", "meta", "digest"],
-      code: `async function execute() {
+      code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+
+async function callLLM(prompt: string, maxTokens = 2000): Promise<{ok: boolean; text: string}> {
+  const models = ["openrouter/google/gemma-3-12b-it:free", "openrouter/qwen/qwen3-4b:free", "openrouter/meta-llama/llama-3.2-3b-instruct:free"];
+  for (const model of models) {
+    try {
+      const modelId = model.replace("openrouter/", "");
+      const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelId, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0.3 }),
+        signal: AbortSignal.timeout(60000),
+      });
+      const d = await r.json();
+      const text = d.choices?.[0]?.message?.content?.trim();
+      if (text) return { ok: true, text };
+    } catch {}
+  }
+  return { ok: false, text: "[LLM unavailable for digest synthesis]" };
+}
+
+async function execute() {
   const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
   const BASE = "http://localhost:" + port;
   const NL = String.fromCharCode(10);
 
   let results: any[] = [];
   let memories: any[] = [];
-  let proposals: any[] = [];
+  let pendingProposals: any[] = [];
   let programs: any[] = [];
   try { const r = await fetch(BASE + "/api/results?limit=100"); if (r.ok) results = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/memories?limit=50"); if (r.ok) memories = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/proposals?status=pending"); if (r.ok) proposals = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/proposals?status=pending"); if (r.ok) pendingProposals = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/programs"); if (r.ok) programs = await r.json(); } catch {}
 
   const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
@@ -1482,78 +1503,89 @@ async function execute() {
 
   const observationMemories = recentMemories.filter((m: any) => m.memoryType === "observation");
 
+  const dataLines: string[] = [];
+  dataLines.push("PROGRAM ACTIVITY (last 12h):");
+  for (const [name, data] of Object.entries(byProgram).sort((a, b) => b[1].runs - a[1].runs)) {
+    const status = data.errors > 0 ? " [" + data.errors + " errors]" : "";
+    dataLines.push("  " + name + ": " + data.runs + " runs, metric=" + data.lastMetric + status);
+    const lastSummary = data.summaries[data.summaries.length - 1];
+    if (lastSummary) dataLines.push("    > " + lastSummary.slice(0, 150));
+  }
+  if (observationMemories.length > 0) {
+    dataLines.push("");
+    dataLines.push("KEY FINDINGS (from evaluate loop):");
+    for (const m of observationMemories.slice(0, 10)) {
+      dataLines.push("  * " + (m.content || "").slice(0, 200));
+    }
+  }
+  if (pendingProposals.length > 0) {
+    dataLines.push("");
+    dataLines.push("PENDING PROPOSALS (" + pendingProposals.length + "):");
+    for (const p of pendingProposals.slice(0, 8)) {
+      dataLines.push("  [" + p.section + "] " + (p.reason || "").slice(0, 120));
+    }
+  }
+  const enabledCount = programs.filter((p: any) => p.enabled).length;
+  const idleProgs = programs.filter((p: any) => p.enabled && !byProgram[p.name]);
+  dataLines.push("");
+  dataLines.push("SYSTEM: " + enabledCount + " programs enabled, " + idleProgs.length + " idle in last 12h");
+
+  const llmPrompt = "You are a morning briefing synthesizer for an autonomous agent system. Analyze the overnight data below and produce a structured briefing." + NL + NL +
+    "DATA:" + NL + dataLines.join(NL) + NL + NL +
+    "Produce these sections:" + NL +
+    "1. EXECUTIVE SUMMARY: 2-3 sentence overview of overnight activity" + NL +
+    "2. KEY FINDINGS: Most important results or trends across programs" + NL +
+    "3. CONCERNS: Any errors, persistent zero-result programs, or anomalies" + NL +
+    "4. PROPOSALS: 1-3 specific, actionable proposals for schedule changes, config adjustments, or program improvements. Format each as: PROPOSAL: <description>" + NL +
+    "Be concise and actionable. This briefing is for the system operator reviewing overnight results at 6 AM.";
+
+  const llmResult = await callLLM(llmPrompt);
+
+  const digestProposals: Array<{section: string; diff: string; reason: string}> = [];
+
+  const errorProgs = Object.entries(byProgram).filter(([, d]) => d.errors >= 2);
+  for (const [name, data] of errorProgs) {
+    digestProposals.push({
+      section: "PROGRAMS",
+      diff: "Program " + name + " had " + data.errors + " errors in the last 12h. Investigate or reduce schedule frequency.",
+      reason: "High error rate: " + name,
+    });
+  }
+  const zeroMetricProgs = Object.entries(byProgram).filter(([, d]) => d.lastMetric === "0" && d.runs >= 2);
+  for (const [name] of zeroMetricProgs) {
+    digestProposals.push({
+      section: "PROGRAMS",
+      diff: "Program " + name + " returned 0 results across " + byProgram[name].runs + " runs. Adjust config or disable.",
+      reason: "Persistent zero results: " + name,
+    });
+  }
+
+  if (llmResult.ok) {
+    const proposalRe = /PROPOSAL:\\s*(.+)/gi;
+    let pm;
+    while ((pm = proposalRe.exec(llmResult.text)) !== null) {
+      digestProposals.push({
+        section: "DIGEST",
+        diff: pm[1].trim().slice(0, 500),
+        reason: "LLM-synthesized overnight proposal",
+      });
+    }
+  }
+
   const lines: string[] = [];
   lines.push("=== OVERNIGHT DIGEST ===");
   lines.push("Generated: " + new Date().toISOString());
   lines.push("Coverage: last 12 hours | " + recentResults.length + " results from " + Object.keys(byProgram).length + " programs");
   lines.push("");
-
-  lines.push("--- PROGRAM ACTIVITY ---");
-  for (const [name, data] of Object.entries(byProgram).sort((a, b) => b[1].runs - a[1].runs)) {
-    const status = data.errors > 0 ? " [" + data.errors + " errors]" : "";
-    lines.push("  " + name + ": " + data.runs + " runs, metric=" + data.lastMetric + status);
-    const lastSummary = data.summaries[data.summaries.length - 1];
-    if (lastSummary) lines.push("    > " + lastSummary.slice(0, 150));
-  }
-
-  if (observationMemories.length > 0) {
+  if (llmResult.ok) {
+    lines.push(llmResult.text);
+  } else {
+    lines.push("[LLM synthesis unavailable - raw data follows]");
     lines.push("");
-    lines.push("--- KEY FINDINGS (from evaluate loop) ---");
-    for (const m of observationMemories.slice(0, 10)) {
-      lines.push("  * " + (m.content || "").slice(0, 200));
-    }
+    for (const dl of dataLines) lines.push(dl);
   }
-
-  const errorProgs = Object.entries(byProgram).filter(([, d]) => d.errors > 0);
-  const idleProgs = programs.filter((p: any) => p.enabled && !byProgram[p.name]);
-
-  const digestProposals: Array<{section: string; diff: string; reason: string}> = [];
-
-  for (const [name, data] of errorProgs) {
-    if (data.errors >= 2) {
-      digestProposals.push({
-        section: "PROGRAMS",
-        diff: "Program " + name + " had " + data.errors + " errors in the last 12h. Consider investigating or reducing schedule frequency.",
-        reason: "High error rate: " + name,
-      });
-    }
-  }
-
-  if (idleProgs.length > 3) {
-    digestProposals.push({
-      section: "PROGRAMS",
-      diff: idleProgs.length + " enabled programs had no runs in 12h: " + idleProgs.map((p: any) => p.name).join(", "),
-      reason: "Idle programs detected",
-    });
-  }
-
-  const zeroMetricProgs = Object.entries(byProgram).filter(([, d]) => d.lastMetric === "0" && d.runs >= 2);
-  for (const [name] of zeroMetricProgs) {
-    digestProposals.push({
-      section: "PROGRAMS",
-      diff: "Program " + name + " returned 0 results across " + byProgram[name].runs + " runs. Consider adjusting config or disabling.",
-      reason: "Persistent zero results: " + name,
-    });
-  }
-
-  if (proposals.length > 0) {
-    lines.push("");
-    lines.push("--- PENDING PROPOSALS (" + proposals.length + ") ---");
-    for (const p of proposals.slice(0, 8)) {
-      lines.push("  [" + p.section + "] " + (p.reason || "").slice(0, 120));
-    }
-  }
-
-  if (digestProposals.length > 0) {
-    lines.push("");
-    lines.push("--- NEW PROPOSALS FROM DIGEST ---");
-    for (const p of digestProposals) {
-      lines.push("  * " + p.reason + ": " + p.diff.slice(0, 150));
-    }
-  }
-
   lines.push("");
-  lines.push("Total pending proposals: " + (proposals.length + digestProposals.length));
+  lines.push("Total proposals: " + digestProposals.length + " | Pending: " + pendingProposals.length);
 
   return { summary: lines.join(NL), metric: String(digestProposals.length), proposals: digestProposals };
 }`,
