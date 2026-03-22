@@ -1453,7 +1453,7 @@ async function execute() {
       tags: ["program", "meta", "digest"],
       code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
 
-async function callLLM(prompt: string, maxTokens = 2000): Promise<{ok: boolean; text: string}> {
+async function callLLM(prompt: string, maxTokens = 3000): Promise<{ok: boolean; text: string}> {
   const models = ["openrouter/google/gemma-3-12b-it:free", "openrouter/qwen/qwen3-4b:free", "openrouter/meta-llama/llama-3.2-3b-instruct:free"];
   for (const model of models) {
     try {
@@ -1472,6 +1472,71 @@ async function callLLM(prompt: string, maxTokens = 2000): Promise<{ok: boolean; 
   return { ok: false, text: "[LLM unavailable for digest synthesis]" };
 }
 
+function extractRadarReddit(rawOutput: string): string {
+  const NL = String.fromCharCode(10);
+  const sdStart = rawOutput.indexOf("STRUCTURED_DATA_START");
+  const sdEnd = rawOutput.indexOf("STRUCTURED_DATA_END");
+  if (sdStart === -1 || sdEnd === -1) return "";
+  try {
+    const chunk = rawOutput.substring(sdStart, sdEnd);
+    const jsonStart = chunk.indexOf(NL) + 1;
+    let jsonStr = chunk.substring(jsonStart).trim();
+    const lastBrace = jsonStr.lastIndexOf("}");
+    if (lastBrace > 0) jsonStr = jsonStr.substring(0, lastBrace + 1);
+    const parsed = JSON.parse(jsonStr);
+    if (!parsed.reddit || !parsed.reddit.bySub) return "";
+    const subs = Object.keys(parsed.reddit.bySub);
+    const lines: string[] = [];
+    lines.push("REDDIT ACROSS " + subs.length + " SUBREDDITS (via research-radar, mode=" + (parsed.reddit.mode || "unknown") + "):");
+    for (const sub of subs) {
+      const posts = parsed.reddit.bySub[sub] || [];
+      if (posts.length === 0) continue;
+      lines.push("");
+      lines.push("r/" + sub + " (" + posts.length + " posts):");
+      for (const p of posts.slice(0, 5)) {
+        let line = "  " + (p.title || "").slice(0, 120);
+        if (p.score > 0) line += " (" + p.score + " pts)";
+        if (p.url) line += NL + "    " + p.url;
+        if (p.topComment) line += NL + "    Top comment: " + p.topComment.slice(0, 200);
+        lines.push(line);
+      }
+    }
+    if (parsed.hn && parsed.hn.length > 0) {
+      lines.push("");
+      lines.push("HACKER NEWS TOP (" + parsed.hn.length + " items):");
+      for (const h of parsed.hn.slice(0, 8)) {
+        lines.push("  " + (h.title || "").slice(0, 120) + " (" + (h.score || 0) + " pts)");
+        if (h.url) lines.push("    " + h.url);
+      }
+    }
+    if (parsed.github && parsed.github.length > 0) {
+      lines.push("");
+      lines.push("GITHUB TRENDING (" + parsed.github.length + " repos):");
+      for (const g of parsed.github.slice(0, 6)) {
+        lines.push("  [" + (g.lang || "?") + "] " + (g.title || ""));
+        if (g.url) lines.push("    " + g.url);
+      }
+    }
+    if (parsed.lobsters && parsed.lobsters.length > 0) {
+      lines.push("");
+      lines.push("LOBSTERS (" + parsed.lobsters.length + " items):");
+      for (const l of parsed.lobsters.slice(0, 5)) {
+        lines.push("  " + (l.title || "").slice(0, 120) + " (" + (l.score || 0) + " pts)");
+        if (l.url) lines.push("    " + l.url);
+      }
+    }
+    if (parsed.arxiv && parsed.arxiv.length > 0) {
+      lines.push("");
+      lines.push("ARXIV CS.AI (" + parsed.arxiv.length + " papers):");
+      for (const a of parsed.arxiv.slice(0, 5)) {
+        lines.push("  " + (a.title || "").slice(0, 120));
+        if (a.url) lines.push("    " + a.url);
+      }
+    }
+    return lines.join(NL);
+  } catch { return ""; }
+}
+
 async function execute() {
   const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
   const BASE = "http://localhost:" + port;
@@ -1483,10 +1548,12 @@ async function execute() {
   let memories: any[] = [];
   let pendingProposals: any[] = [];
   let programs: any[] = [];
+  let radarResults: any[] = [];
   try { const r = await fetch(BASE + "/api/results?limit=100", { headers: hdrs }); if (r.ok) results = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/memories?limit=50", { headers: hdrs }); if (r.ok) memories = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/proposals?status=pending", { headers: hdrs }); if (r.ok) pendingProposals = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/programs", { headers: hdrs }); if (r.ok) programs = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/results?program=research-radar&limit=1", { headers: hdrs }); if (r.ok) radarResults = await r.json(); } catch {}
 
   const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
   const recentResults = results.filter((r: any) => new Date(r.createdAt || r.timestamp || 0).getTime() > twelveHoursAgo);
@@ -1496,6 +1563,11 @@ async function execute() {
     return { summary: "Overnight Digest: No activity in the last 12 hours. All systems idle.", metric: "0" };
   }
 
+  let radarRedditSection = "";
+  if (radarResults.length > 0 && radarResults[0].rawOutput) {
+    radarRedditSection = extractRadarReddit(radarResults[0].rawOutput);
+  }
+
   const byProgram: Record<string, { runs: number; errors: number; lastMetric: string; summaries: string[] }> = {};
   for (const r of recentResults) {
     const name = r.programName || "unknown";
@@ -1503,7 +1575,7 @@ async function execute() {
     byProgram[name].runs++;
     if (r.status === "error") byProgram[name].errors++;
     if (r.metric) byProgram[name].lastMetric = r.metric;
-    if (r.summary) byProgram[name].summaries.push(r.summary.slice(0, 200));
+    if (r.summary) byProgram[name].summaries.push(r.summary.slice(0, 300));
   }
 
   const observationMemories = recentMemories.filter((m: any) => m.memoryType === "observation");
@@ -1514,7 +1586,7 @@ async function execute() {
     const status = data.errors > 0 ? " [" + data.errors + " errors]" : "";
     dataLines.push("  " + name + ": " + data.runs + " runs, metric=" + data.lastMetric + status);
     const lastSummary = data.summaries[data.summaries.length - 1];
-    if (lastSummary) dataLines.push("    > " + lastSummary.slice(0, 150));
+    if (lastSummary) dataLines.push("    > " + lastSummary.slice(0, 250));
   }
   if (observationMemories.length > 0) {
     dataLines.push("");
@@ -1537,14 +1609,17 @@ async function execute() {
 
   const llmPrompt = "You are a morning briefing synthesizer for an autonomous agent system. Analyze the overnight data below and produce a structured briefing." + NL + NL +
     "DATA:" + NL + dataLines.join(NL) + NL + NL +
+    (radarRedditSection ? "RESEARCH FEED (most recent research-radar scan):" + NL + radarRedditSection + NL + NL : "") +
     "Produce these sections:" + NL +
     "1. EXECUTIVE SUMMARY: 2-3 sentence overview of overnight activity" + NL +
     "2. KEY FINDINGS: Most important results or trends across programs" + NL +
-    "3. CONCERNS: Any errors, persistent zero-result programs, or anomalies" + NL +
-    "4. PROPOSALS: 1-3 specific, actionable proposals for schedule changes, config adjustments, or program improvements. Format each as: PROPOSAL: <description>" + NL +
-    "Be concise and actionable. This briefing is for the system operator reviewing overnight results at 6 AM.";
+    "3. REDDIT & COMMUNITY PULSE: Summarize notable threads from MULTIPLE subreddits. Include the subreddit name, post title, and URL for at least 8-10 notable items across different subs. Highlight community sentiment and top comments where available." + NL +
+    "4. LINKS ROUNDUP: List the top 15-20 most interesting links from ALL sources (Reddit, HN, GitHub, Lobsters, ArXiv) with source label, title, and URL. Spread across diverse sources." + NL +
+    "5. CONCERNS: Any errors, persistent zero-result programs, or anomalies" + NL +
+    "6. PROPOSALS: 1-3 specific, actionable proposals for schedule changes, config adjustments, or program improvements. Format each as: PROPOSAL: <description>" + NL +
+    "Be concise and actionable. Include URLs. This briefing is for the system operator reviewing overnight results at 6 AM.";
 
-  const llmResult = await callLLM(llmPrompt);
+  const llmResult = await callLLM(llmPrompt, 3000);
 
   const digestProposals: Array<{section: string; diff: string; reason: string}> = [];
 
@@ -1581,6 +1656,7 @@ async function execute() {
   lines.push("=== OVERNIGHT DIGEST ===");
   lines.push("Generated: " + new Date().toISOString());
   lines.push("Coverage: last 12 hours | " + recentResults.length + " results from " + Object.keys(byProgram).length + " programs");
+  if (radarRedditSection) lines.push("Research feed: " + (radarRedditSection.split(NL).length) + " lines from latest radar scan");
   lines.push("");
   if (llmResult.ok) {
     lines.push(llmResult.text);
@@ -1588,6 +1664,10 @@ async function execute() {
     lines.push("[LLM synthesis unavailable - raw data follows]");
     lines.push("");
     for (const dl of dataLines) lines.push(dl);
+    if (radarRedditSection) {
+      lines.push("");
+      lines.push(radarRedditSection);
+    }
   }
   lines.push("");
   lines.push("Total proposals: " + digestProposals.length + " | Pending: " + pendingProposals.length);
