@@ -7,7 +7,7 @@ async function main() {
   const nameToId = new Map<string, number>();
   for (const r of rows) nameToId.set(r.name, r.id);
 
-  const targets = ["estate-car-finder", "free-stuff-radar", "price-watch", "foreclosure-monitor", "mandela-berenstain", "overnight-digest", "budget-strategist", "openrouter-model-scout", "hn-pulse", "hn-deep-digest"];
+  const targets = ["estate-car-finder", "free-stuff-radar", "price-watch", "foreclosure-monitor", "mandela-berenstain", "overnight-digest", "budget-strategist", "openrouter-model-scout", "hn-pulse", "hn-deep-digest", "github-trending"];
 
   const fs = await import("fs");
   const seedSource = fs.readFileSync("server/seed-data.ts", "utf-8");
@@ -77,11 +77,14 @@ async function main() {
     const cronMatch = seedSource.slice(nameIdx, nameIdx + 300).match(/cronExpression: "([^"]+)"/);
     const cronExpression = cronMatch ? cronMatch[1] : undefined;
 
+    const enabledMatch = seedSource.slice(nameIdx, nameIdx + 300).match(/enabled: (true|false)/);
+
     const updateData: Record<string, unknown> = { code, codeLang: "typescript" };
     if (config) updateData.config = config;
     if (instructions) updateData.instructions = instructions;
     if (schedule) updateData.schedule = schedule;
     if (cronExpression) updateData.cronExpression = cronExpression;
+    if (enabledMatch) updateData.enabled = enabledMatch[1] === "true";
 
     const firstChar = code.charCodeAt(0);
     if (firstChar === 96) {

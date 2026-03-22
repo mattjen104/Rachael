@@ -1846,8 +1846,8 @@ async function execute() {
         { name: "Personal finance & deals", keywords: ["finance", "budget", "deal", "sale", "discount", "investment", "savings", "frugal", "craigslist", "estate-sale", "foreclosure", "fed-rate", "interest-rate"], priority: 3 },
         { name: "Meal planning & nutrition", keywords: ["meal", "recipe", "nutrition", "cooking", "food", "diet", "grocery", "pantry", "kiddo", "toddler-food"], priority: 3 },
       ]), category: "goals" },
-      { key: "notify_channel", value: "orgcloud-standup", category: "notifications" },
-      { key: "notify_email", value: "Matthew.e.jensen@gmail.com", category: "notifications" },
+      { key: "notify_channel", value: process.env.NTFY_CHANNEL || "orgcloud-standup", category: "notifications" },
+      { key: "notify_email", value: process.env.NOTIFY_EMAIL || "", category: "notifications" },
     ];
 
     for (const c of configSeeds) {
