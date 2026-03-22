@@ -44,7 +44,7 @@ let tickInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_INTERVAL_MS = 60_000;
 const programRuns = new Map<string, Array<{ model: string; tokens: number; timestamp: number }>>();
 const proposalCounts = new Map<string, number>();
-const MAX_PROPOSALS_PER_ITERATION = 2;
+const MAX_PROPOSALS_PER_ITERATION = 50;
 const pendingRecallResults = new Map<string, string>();
 
 function shortModelName(model: string): string {

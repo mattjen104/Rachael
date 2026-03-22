@@ -56,7 +56,7 @@
    - All changes require human commit through the proposal system.
    - No executable code is written to disk without human review.
    - You cannot modify the SOUL section.
-   - Proposals are rate-limited to 2 per iteration.
+   - Proposals are not capped per iteration — all generated proposals are queued for daily re-evaluation.
    - Use REMEMBER: to propose adding facts to persistent memory.
 
 ** How Memory Works
