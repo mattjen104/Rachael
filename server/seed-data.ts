@@ -1346,14 +1346,17 @@ async function execute() {
   const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
   const BASE = "http://localhost:" + port;
 
+  const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+  if (__apiKey) hdrs["Authorization"] = "Bearer " + __apiKey;
+
   let budgetData = { used: 0, budget: 500000, remaining: 500000, percentUsed: 0, estimatedCostToday: 0, report: { byProgram: {}, byModel: {} } };
   let modelsData = [];
   let recentResults = [];
   let memoriesData: any[] = [];
-  try { const r = await fetch(BASE + "/api/budget"); if (r.ok) budgetData = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/models"); if (r.ok) modelsData = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/results?limit=50"); if (r.ok) recentResults = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/memories?limit=30"); if (r.ok) memoriesData = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/budget", { headers: hdrs }); if (r.ok) budgetData = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/models", { headers: hdrs }); if (r.ok) modelsData = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/results?limit=50", { headers: hdrs }); if (r.ok) recentResults = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/memories?limit=30", { headers: hdrs }); if (r.ok) memoriesData = await r.json(); } catch {}
 
   const proposals: Array<{section: string; diff: string; reason: string}> = [];
   const worklog: Record<string, any> = {
@@ -1473,15 +1476,17 @@ async function execute() {
   const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
   const BASE = "http://localhost:" + port;
   const NL = String.fromCharCode(10);
+  const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+  if (__apiKey) hdrs["Authorization"] = "Bearer " + __apiKey;
 
   let results: any[] = [];
   let memories: any[] = [];
   let pendingProposals: any[] = [];
   let programs: any[] = [];
-  try { const r = await fetch(BASE + "/api/results?limit=100"); if (r.ok) results = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/memories?limit=50"); if (r.ok) memories = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/proposals?status=pending"); if (r.ok) pendingProposals = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/programs"); if (r.ok) programs = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/results?limit=100", { headers: hdrs }); if (r.ok) results = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/memories?limit=50", { headers: hdrs }); if (r.ok) memories = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/proposals?status=pending", { headers: hdrs }); if (r.ok) pendingProposals = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/programs", { headers: hdrs }); if (r.ok) programs = await r.json(); } catch {}
 
   const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
   const recentResults = results.filter((r: any) => new Date(r.createdAt || r.timestamp || 0).getTime() > twelveHoursAgo);
