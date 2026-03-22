@@ -613,6 +613,23 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
             }
           }
         }
+
+        const inlineOutputType = (prog.config?.OUTPUT_TYPE as string || "").toLowerCase();
+        if (inlineOutputType === "proposal" && output.trim()) {
+          try {
+            await storage.createProposal({
+              section: "PROGRAMS",
+              targetName: programName,
+              reason: `Produced by "${programName}" (iteration ${ps.iteration}, inline-code)`,
+              currentContent: "",
+              proposedContent: output.trim().slice(0, 50000),
+              source: "agent",
+              proposalType: "change",
+            });
+          } catch (e) {
+            console.error("[agent-runtime] Failed to create inline OUTPUT_TYPE=proposal:", e);
+          }
+        }
       } catch (err: any) {
         output = `[Inline code error] ${err.message}`;
         ps.status = "error";
@@ -802,7 +819,9 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
 
     try {
       const metricNum = metric ? parseFloat(metric) : NaN;
-      const hasResults = !isNaN(metricNum) && metricNum > 0;
+      const hasNumericResults = !isNaN(metricNum) && metricNum > 0;
+      const hasNonNumericMetric = metric !== undefined && metric !== null && metric !== "" && isNaN(metricNum);
+      const hasResults = hasNumericResults || hasNonNumericMetric;
       const isError = output.startsWith("[Inline code error]") || output.startsWith("[Iteration");
       const summaryPrefix = summaryLine.slice(0, 60);
       const metricStr = metric || "";
