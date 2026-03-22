@@ -538,6 +538,49 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
     }
   }
 
+  const activateNode = useCallback((node: TreeNode) => {
+    if (node.type === "task") toggleTask.mutate(node.id);
+    else if (node.type === "program") onNavigate?.("programs", node.id);
+    else if (node.type === "reader") onNavigate?.("reader", node.id);
+    else if (node.type === "note") onNavigate?.("tree", node.id);
+    else if (node.type === "bridge-info" && node.actionCmd && onRunCommand) {
+      onRunCommand(node.actionCmd);
+    }
+    else if (node.type === "mail" && onRunCommand) {
+      onRunCommand(`outlook read ${node.index + 1}`);
+    }
+    else if (node.type === "appLink") {
+      const href = node.href && node.href !== "#" ? node.href : "";
+      if (href && href.startsWith("http")) {
+        window.open(href, "_blank");
+      } else {
+        launchCitrixApp(node.name, node.portalName);
+      }
+    }
+    else if (node.type === "chat") {}
+    else if (node.type === "snow-item" && node.url) {
+      window.open(node.url, "_blank");
+    }
+    else if (node.type === "snow-item" && onRunCommand) {
+      onRunCommand(`snow detail ${node.number}`);
+    }
+    else if (node.type === "epicActivity" && onRunCommand) {
+      onRunCommand(`epic navigate ${node.env} ${node.name}`);
+    }
+    else if (node.type === "epicTreeNode" && onRunCommand) {
+      onRunCommand(`epic go ${node.env} ${node.navPath}`);
+    }
+    else if (node.type === "epicWorkflow" && onRunCommand) {
+      onRunCommand(`epic replay ${node.key}`);
+    }
+    else if (node.type === "pulseLink") {
+      window.open(node.url, "_blank");
+    }
+    else if (node.type === "galaxyGuide") {
+      onNavigate?.("reader", node.id);
+    }
+  }, [toggleTask, onNavigate, onRunCommand, launchCitrixApp]);
+
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const tag = (document.activeElement as HTMLElement)?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -599,51 +642,12 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
             }
             snowRecords.refetch();
           }
-        }
-        else if (node?.type === "task") toggleTask.mutate(node.id);
-        else if (node?.type === "program") onNavigate?.("programs", node.id);
-        else if (node?.type === "reader") onNavigate?.("reader", node.id);
-        else if (node?.type === "note") onNavigate?.("tree", node.id);
-        else if (node?.type === "bridge-info" && node.actionCmd && onRunCommand) {
-          onRunCommand(node.actionCmd);
-        }
-        else if (node?.type === "mail" && onRunCommand) {
-          onRunCommand(`outlook read ${node.index + 1}`);
-        }
-        else if (node?.type === "appLink") {
-          const href = node.href && node.href !== "#" ? node.href : "";
-          if (href && href.startsWith("http")) {
-            window.open(href, "_blank");
-          } else {
-            launchCitrixApp(node.name, node.portalName);
-          }
-        }
-        else if (node?.type === "chat") {
-        }
-        else if (node?.type === "snow-item" && node.url) {
-          window.open(node.url, "_blank");
-        }
-        else if (node?.type === "snow-item" && onRunCommand) {
-          onRunCommand(`snow detail ${node.number}`);
-        }
-        else if (node?.type === "epicActivity" && onRunCommand) {
-          onRunCommand(`epic navigate ${node.env} ${node.name}`);
-        }
-        else if (node?.type === "epicTreeNode" && onRunCommand) {
-          onRunCommand(`epic go ${node.env} ${node.navPath}`);
-        }
-        else if (node?.type === "epicWorkflow" && onRunCommand) {
-          onRunCommand(`epic replay ${node.key}`);
-        }
-        else if (node?.type === "pulseLink") {
-          window.open(node.url, "_blank");
-        }
-        else if (node?.type === "galaxyGuide") {
-          onNavigate?.("reader", node.id);
+        } else if (node) {
+          activateNode(node);
         }
         break;
     }
-  }, [nodes, selectedIdx, toggleTask, onNavigate, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched, launchCitrixApp]);
+  }, [nodes, selectedIdx, activateNode, onRunCommand, expanded, mailInbox, teamsChats, mailFetched, chatFetched]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -660,7 +664,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
     <div ref={containerRef} className="flex flex-col h-full overflow-y-auto font-mono text-xs" data-testid="tree-view">
       <div className="px-2 py-1 text-muted-foreground border-b border-border sticky top-0 bg-background z-10 flex justify-between">
         <span>TREE -- All Data</span>
-        <span className="text-[10px]">Enter:open  c:capture  j/k:nav</span>
+        <span className="text-[10px]">2x/Enter:open  c:capture  j/k:nav</span>
       </div>
       {nodes.map((node, idx) => {
         const sel = idx === selectedIdx;
@@ -816,37 +820,8 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
             className={`px-2 py-0.5 pl-4 cursor-pointer select-none flex items-center gap-1 ${
               sel ? "bg-primary/20" : ""
             } ${node.type === "task" && node.status === "DONE" ? "text-muted-foreground line-through" : ""}`}
-            onClick={() => {
-              setSelectedIdx(idx);
-              if (node.type === "bridge-info" && node.actionCmd && onRunCommand) {
-                onRunCommand(node.actionCmd);
-              } else if (node.type === "mail" && onRunCommand) {
-                onRunCommand(`outlook read ${node.index + 1}`);
-              } else if (node.type === "appLink") {
-                const href = node.href && node.href !== "#" ? node.href : "";
-                if (href && href.startsWith("http")) {
-                  window.open(href, "_blank");
-                } else {
-                  launchCitrixApp(node.name, node.portalName);
-                }
-              } else if (node.type === "epicActivity" && onRunCommand) {
-                onRunCommand(`epic navigate ${node.env} ${node.name}`);
-              } else if (node.type === "epicTreeNode" && onRunCommand) {
-                onRunCommand(`epic go ${node.env} ${node.navPath}`);
-              } else if (node.type === "epicWorkflow" && onRunCommand) {
-                onRunCommand(`epic replay ${node.key}`);
-              } else if (node.type === "pulseLink") {
-                window.open(node.url, "_blank");
-              } else if (node.type === "galaxyGuide") {
-                onNavigate?.("reader", node.id);
-              } else if (node.type === "snow-item") {
-                if (node.url) {
-                  window.open(node.url, "_blank");
-                } else if (onRunCommand) {
-                  onRunCommand(`snow detail ${node.number}`);
-                }
-              }
-            }}
+            onClick={() => setSelectedIdx(idx)}
+            onDoubleClick={() => activateNode(node)}
           >
             <span className="w-4 shrink-0 text-center">{icon}</span>
             <span className="truncate flex-1">{label}</span>
