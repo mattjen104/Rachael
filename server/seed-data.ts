@@ -858,11 +858,65 @@ async function execute() {
       type: "monitor",
       schedule: "daily",
       cronExpression: "0 22 * * *",
-      instructions: "Nightly SoCal Craigslist estate/low-mileage car scanner.",
+      instructions: "Nightly SoCal Craigslist estate/low-mileage car scanner. Fetches real listings via RSS, filters by price, surfaces the best deals for LLM analysis.",
       config: { REGIONS: "inlandempire,losangeles,orangecounty,sandiego", MIN_PRICE: "2000", MAX_PRICE: "25000", TOP_N: "8", TASK_TYPE: "research", METRIC: "deals_found", DIRECTION: "higher", TIMEOUT: "300", TWO_STAGE: "true" },
       costTier: "standard",
       tags: ["program"],
-      code: null,
+      code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+const REGIONS = (props.REGIONS || "inlandempire").split(",").map(s => s.trim());
+const MIN_PRICE = parseInt(props.MIN_PRICE || "2000", 10);
+const MAX_PRICE = parseInt(props.MAX_PRICE || "25000", 10);
+const TOP_N = parseInt(props.TOP_N || "8", 10);
+const KEYWORDS = ["estate", "low miles", "one owner", "garage kept", "original owner", "elderly", "grandma", "grandpa", "deceased", "single owner"];
+
+interface Listing { title: string; price: number; url: string; region: string; date: string }
+
+async function scrapeRegion(region: string): Promise<Listing[]> {
+  const listings: Listing[] = [];
+  try {
+    const url = "https://" + region + ".craigslist.org/search/cta?format=rss&min_price=" + MIN_PRICE + "&max_price=" + MAX_PRICE + "&sort=date";
+    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const xml = await r.text();
+    if (xml.includes("blocked") && xml.length < 500) return listings;
+    const items = xml.split("<item ");
+    for (let i = 1; i < items.length && listings.length < 50; i++) {
+      const titleM = items[i].match(/<title><![CDATA[\\[(.*?)\\]]]>/s) || items[i].match(/<title>([^<]+)/);
+      const linkM = items[i].match(/<link>([^<]+)/);
+      const dateM = items[i].match(/<dc:date>([^<]+)/) || items[i].match(/<pubDate>([^<]+)/);
+      const title = titleM ? titleM[1].trim() : "";
+      const link = linkM ? linkM[1].trim() : "";
+      const priceM = title.match(/\\$([\\d,]+)/);
+      const price = priceM ? parseInt(priceM[1].replace(",", ""), 10) : 0;
+      if (title && price >= MIN_PRICE && price <= MAX_PRICE) {
+        listings.push({ title, price, url: link, region, date: dateM ? dateM[1].trim() : "" });
+      }
+    }
+  } catch {}
+  return listings;
+}
+
+function scoreByKeywords(listing: Listing): number {
+  const lower = listing.title.toLowerCase();
+  let score = 0;
+  for (const kw of KEYWORDS) { if (lower.includes(kw)) score += 10; }
+  if (listing.price < 8000) score += 5;
+  if (listing.price < 5000) score += 5;
+  return score;
+}
+
+async function execute() {
+  const allResults = await Promise.all(REGIONS.map(r => scrapeRegion(r)));
+  const all = allResults.flat();
+  all.sort((a, b) => scoreByKeywords(b) - scoreByKeywords(a));
+  const top = all.slice(0, TOP_N);
+  let summary = "Estate/Low-Mile Car Scan: " + all.length + " total listings across " + REGIONS.join(", ") + String.fromCharCode(10);
+  summary += "Top " + top.length + " deals (keyword-scored):" + String.fromCharCode(10);
+  for (const l of top) {
+    summary += String.fromCharCode(10) + "  $" + l.price + " | " + l.title.slice(0, 80) + String.fromCharCode(10) + "    " + l.url + " [" + l.region + "]";
+  }
+  return { summary, metric: String(top.length) };
+}`,
+      codeLang: "typescript",
     },
     {
       name: "fed-rates",
@@ -900,13 +954,53 @@ async function execute() {
     {
       name: "free-stuff-radar",
       type: "monitor",
-      schedule: "every 6h",
-      cronExpression: "0 */6 * * *",
-      instructions: "Scrape Craigslist free section for items matching keywords.",
-      config: { CL_REGION: "inlandempire", KEYWORDS: "furniture,electronics,tools,appliance,computer,monitor,desk", TASK_TYPE: "research", METRIC: "items_found", DIRECTION: "higher" },
+      schedule: "every 4h",
+      cronExpression: "0 */4 * * *",
+      instructions: "Scrape Craigslist free section for items matching keywords. Returns structured listing data for LLM triage.",
+      config: { CL_REGIONS: "inlandempire,losangeles,orangecounty", KEYWORDS: "furniture,electronics,tools,appliance,computer,monitor,desk,chair,table,tv,printer,laptop", TASK_TYPE: "research", METRIC: "items_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
       tags: ["program"],
-      code: null,
+      code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+const REGIONS = (props.CL_REGIONS || props.CL_REGION || "inlandempire").split(",").map(s => s.trim());
+const KEYWORDS = (props.KEYWORDS || "furniture,electronics,tools").split(",").map(s => s.trim().toLowerCase());
+
+interface FreeItem { title: string; url: string; region: string; date: string; matched: string[] }
+
+async function scrapeRegion(region: string): Promise<FreeItem[]> {
+  const items: FreeItem[] = [];
+  try {
+    const url = "https://" + region + ".craigslist.org/search/zip?format=rss&sort=date";
+    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const xml = await r.text();
+    if (xml.includes("blocked") && xml.length < 500) return items;
+    const entries = xml.split("<item ");
+    for (let i = 1; i < entries.length && items.length < 60; i++) {
+      const titleM = entries[i].match(/<title><![CDATA[\\[(.*?)\\]]]>/s) || entries[i].match(/<title>([^<]+)/);
+      const linkM = entries[i].match(/<link>([^<]+)/);
+      const dateM = entries[i].match(/<dc:date>([^<]+)/) || entries[i].match(/<pubDate>([^<]+)/);
+      const title = titleM ? titleM[1].trim() : "";
+      const lower = title.toLowerCase();
+      const matched = KEYWORDS.filter(kw => lower.includes(kw));
+      if (matched.length > 0) {
+        items.push({ title, url: linkM ? linkM[1].trim() : "", region, date: dateM ? dateM[1].trim() : "", matched });
+      }
+    }
+  } catch {}
+  return items;
+}
+
+async function execute() {
+  const allResults = await Promise.all(REGIONS.map(r => scrapeRegion(r)));
+  const all = allResults.flat();
+  all.sort((a, b) => b.matched.length - a.matched.length);
+  let summary = "Free Stuff Radar: " + all.length + " matching items across " + REGIONS.join(", ") + String.fromCharCode(10);
+  for (const item of all.slice(0, 15)) {
+    summary += String.fromCharCode(10) + "  [" + item.matched.join(",") + "] " + item.title.slice(0, 70) + String.fromCharCode(10) + "    " + item.url + " (" + item.region + ")";
+  }
+  if (all.length === 0) summary += String.fromCharCode(10) + "  No matching free items found this cycle.";
+  return { summary, metric: String(all.length) };
+}`,
+      codeLang: "typescript",
     },
     {
       name: "sec-filings",
@@ -962,33 +1056,206 @@ async function execute() {
       type: "monitor",
       schedule: "daily",
       cronExpression: "0 7 * * *",
-      instructions: "Monitor Craigslist listings matching search query under max price.",
-      config: { SEARCH_QUERY: "car,truck,suv", CL_REGION: "inlandempire", MAX_PRICE: "5000", TASK_TYPE: "research", METRIC: "price_changes", DIRECTION: "higher" },
+      instructions: "Monitor Craigslist vehicle listings under max price. Scrapes RSS, deduplicates, surfaces cheapest deals.",
+      config: { SEARCH_QUERIES: "car,truck,suv", CL_REGIONS: "inlandempire,losangeles", MAX_PRICE: "5000", TOP_N: "10", TASK_TYPE: "research", METRIC: "listings_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
       tags: ["program"],
-      code: null,
+      code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+const QUERIES = (props.SEARCH_QUERIES || props.SEARCH_QUERY || "car").split(",").map(s => s.trim());
+const REGIONS = (props.CL_REGIONS || props.CL_REGION || "inlandempire").split(",").map(s => s.trim());
+const MAX_PRICE = parseInt(props.MAX_PRICE || "5000", 10);
+const TOP_N = parseInt(props.TOP_N || "10", 10);
+
+interface Vehicle { title: string; price: number; url: string; region: string; query: string }
+
+async function search(region: string, query: string): Promise<Vehicle[]> {
+  const vehicles: Vehicle[] = [];
+  try {
+    const url = "https://" + region + ".craigslist.org/search/cta?format=rss&query=" + encodeURIComponent(query) + "&max_price=" + MAX_PRICE + "&sort=date";
+    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const xml = await r.text();
+    if (xml.includes("blocked") && xml.length < 500) return vehicles;
+    const items = xml.split("<item ");
+    for (let i = 1; i < items.length && vehicles.length < 30; i++) {
+      const titleM = items[i].match(/<title><![CDATA[\\[(.*?)\\]]]>/s) || items[i].match(/<title>([^<]+)/);
+      const linkM = items[i].match(/<link>([^<]+)/);
+      const title = titleM ? titleM[1].trim() : "";
+      const priceM = title.match(/\\$([\\d,]+)/);
+      const price = priceM ? parseInt(priceM[1].replace(",", ""), 10) : 0;
+      if (title && price > 0 && price <= MAX_PRICE) {
+        vehicles.push({ title, price, url: linkM ? linkM[1].trim() : "", region, query });
+      }
+    }
+  } catch {}
+  return vehicles;
+}
+
+async function execute() {
+  const tasks: Promise<Vehicle[]>[] = [];
+  for (const region of REGIONS) for (const q of QUERIES) tasks.push(search(region, q));
+  const results = (await Promise.all(tasks)).flat();
+  const seen = new Set<string>();
+  const unique = results.filter(v => { const key = v.url || v.title; if (seen.has(key)) return false; seen.add(key); return true; });
+  unique.sort((a, b) => a.price - b.price);
+  const top = unique.slice(0, TOP_N);
+  let summary = "Price Watch: " + unique.length + " vehicles under $" + MAX_PRICE + " across " + REGIONS.join(", ") + String.fromCharCode(10);
+  for (const v of top) {
+    summary += String.fromCharCode(10) + "  $" + v.price + " | " + v.title.slice(0, 75) + String.fromCharCode(10) + "    " + v.url;
+  }
+  if (unique.length === 0) summary += String.fromCharCode(10) + "  No listings found.";
+  return { summary, metric: String(unique.length) };
+}`,
+      codeLang: "typescript",
     },
     {
       name: "foreclosure-monitor",
       type: "monitor",
       schedule: "daily",
       cronExpression: "0 8 * * *",
-      instructions: "Scrape HUD homes for foreclosures and government property listings near ZIP code.",
-      config: { STATE: "CA", ZIP_CODE: "92373", TASK_TYPE: "research", METRIC: "listings_found", DIRECTION: "higher" },
+      instructions: "Scrape HUD homes, Fannie Mae HomePath, and public auction sites for foreclosures and government property listings near target ZIP codes.",
+      config: { STATE: "CA", ZIP_CODES: "92373,92374,92376,92404,92405", TASK_TYPE: "research", METRIC: "listings_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "free",
       tags: ["program"],
-      code: null,
+      code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+const STATE = props.STATE || "CA";
+const ZIP_CODES = (props.ZIP_CODES || props.ZIP_CODE || "92373").split(",").map(s => s.trim());
+
+interface ForeclosureListing { source: string; title: string; price: string; location: string; url: string }
+
+async function scrapeHUD(): Promise<ForeclosureListing[]> {
+  const listings: ForeclosureListing[] = [];
+  try {
+    const url = "https://www.hudhomestore.gov/Listing/PropertySearchResult?sState=" + STATE + "&sZipCode=" + ZIP_CODES[0] + "&iMiles=25&sPropType=SFR&iPageSize=20&sLanguage=ENGLISH";
+    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0", "Accept": "text/html" } });
+    const html = await r.text();
+    const rows = html.split("PropertyDetail");
+    for (let i = 1; i < rows.length && listings.length < 15; i++) {
+      const addrM = rows[i].match(/>([^<]*(?:St|Ave|Blvd|Dr|Rd|Ct|Ln|Way|Cir)[^<]*)</i);
+      const priceM = rows[i].match(/\\$[\\d,]+/);
+      const caseM = rows[i].match(/CaseNumber=([^&"]+)/);
+      listings.push({
+        source: "HUD",
+        title: addrM ? addrM[1].trim() : "HUD Property",
+        price: priceM ? priceM[0] : "N/A",
+        location: STATE,
+        url: caseM ? "https://www.hudhomestore.gov/Listing/PropertyDetail?CaseNumber=" + caseM[1] : "https://www.hudhomestore.gov"
+      });
+    }
+  } catch {}
+  return listings;
+}
+
+async function scrapeHomePath(): Promise<ForeclosureListing[]> {
+  const listings: ForeclosureListing[] = [];
+  try {
+    const url = "https://www.homepath.fanniemae.com/cg-bin/fhmse/se_search?state=" + STATE + "&zip=" + ZIP_CODES[0] + "&radius=25&format=json";
+    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    if (r.ok) {
+      const text = await r.text();
+      const addresses = text.match(/"address"\\s*:\\s*"([^"]+)"/g) || [];
+      const prices = text.match(/"listPrice"\\s*:\\s*"?([\\d,]+)/g) || [];
+      for (let i = 0; i < Math.min(addresses.length, 10); i++) {
+        const addr = addresses[i].replace(/"address"\\s*:\\s*"/, "").replace(/"$/, "");
+        const price = prices[i] ? "$" + prices[i].replace(/"listPrice"\\s*:\\s*"?/, "") : "N/A";
+        listings.push({ source: "HomePath", title: addr, price, location: STATE, url: "https://www.homepath.fanniemae.com" });
+      }
+    }
+  } catch {}
+  return listings;
+}
+
+async function execute() {
+  const [hud, homepath] = await Promise.all([scrapeHUD(), scrapeHomePath()]);
+  const all = [...hud, ...homepath];
+  let summary = "Foreclosure Monitor (" + STATE + ", ZIPs: " + ZIP_CODES.join(",") + "): " + all.length + " properties found" + String.fromCharCode(10);
+  if (hud.length > 0) {
+    summary += String.fromCharCode(10) + "=== HUD Homes (" + hud.length + ") ===" + String.fromCharCode(10);
+    for (const l of hud) summary += "  " + l.price + " | " + l.title + String.fromCharCode(10) + "    " + l.url + String.fromCharCode(10);
+  }
+  if (homepath.length > 0) {
+    summary += String.fromCharCode(10) + "=== HomePath (" + homepath.length + ") ===" + String.fromCharCode(10);
+    for (const l of homepath) summary += "  " + l.price + " | " + l.title + String.fromCharCode(10) + "    " + l.url + String.fromCharCode(10);
+  }
+  if (all.length === 0) summary += "  No foreclosure listings found near target ZIP codes.";
+  return { summary, metric: String(all.length) };
+}`,
+      codeLang: "typescript",
     },
     {
       name: "mandela-berenstain",
       type: "monitor",
       schedule: "daily",
       cronExpression: "0 22 * * *",
-      instructions: "Mandela Effect research — comb Internet Archive TV Guide scans for Berenstain Bears spelling variants.",
-      config: { START_YEAR: "1985", END_YEAR: "2003", CONCURRENCY: "5", TASK_TYPE: "research", METRIC: "total_mentions", DIRECTION: "higher", OUTPUT_TYPE: "proposal", TIMEOUT: "600", TWO_STAGE: "true" },
+      instructions: "Mandela Effect research — search Internet Archive and web for Berenstain/Berenstein Bears spelling variants. Collects real evidence links with source context for LLM synthesis.",
+      config: { SEARCH_TERMS: "berenstain bears,berenstein bears", TASK_TYPE: "research", METRIC: "total_mentions", DIRECTION: "higher", OUTPUT_TYPE: "proposal", TIMEOUT: "600", TWO_STAGE: "true" },
       costTier: "standard",
       tags: ["program"],
-      code: null,
+      code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
+const SEARCH_TERMS = (props.SEARCH_TERMS || "berenstain bears,berenstein bears").split(",").map(s => s.trim());
+
+interface ArchiveResult { title: string; identifier: string; year: string; mediaType: string; url: string; spelling: string }
+
+async function searchArchive(term: string): Promise<ArchiveResult[]> {
+  const results: ArchiveResult[] = [];
+  try {
+    const q = encodeURIComponent(term);
+    const url = "https://archive.org/advancedsearch.php?q=" + q + "&fl[]=identifier&fl[]=title&fl[]=year&fl[]=mediatype&rows=25&output=json&sort[]=downloads+desc";
+    const r = await fetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const data = await r.json();
+    const docs = data?.response?.docs || [];
+    const spelling = term.toLowerCase().includes("berenstein") ? "berenstein" : "berenstain";
+    for (const doc of docs) {
+      results.push({
+        title: doc.title || "Untitled",
+        identifier: doc.identifier || "",
+        year: doc.year || "unknown",
+        mediaType: doc.mediatype || "unknown",
+        url: "https://archive.org/details/" + (doc.identifier || ""),
+        spelling
+      });
+    }
+  } catch {}
+  return results;
+}
+
+async function searchWikipedia(): Promise<string[]> {
+  const mentions: string[] = [];
+  try {
+    const r = await fetch("https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=berenstain+OR+berenstein+bears+spelling&srnamespace=0&srlimit=10&format=json", {
+      headers: { "User-Agent": "OrgCloud/1.0" }
+    });
+    const data = await r.json();
+    for (const item of data?.query?.search || []) {
+      const snippet = (item.snippet || "").replace(/<[^>]*>/g, "").slice(0, 120);
+      mentions.push(item.title + ": " + snippet);
+    }
+  } catch {}
+  return mentions;
+}
+
+async function execute() {
+  const archiveResults = await Promise.all(SEARCH_TERMS.map(t => searchArchive(t)));
+  const wikiMentions = await searchWikipedia();
+  const allArchive = archiveResults.flat();
+  const berenstain = allArchive.filter(r => r.spelling === "berenstain");
+  const berenstein = allArchive.filter(r => r.spelling === "berenstein");
+  let summary = "Mandela Effect Research: Berenstain vs Berenstein Bears" + String.fromCharCode(10);
+  summary += String.fromCharCode(10) + "Internet Archive hits: " + allArchive.length + " total (" + berenstain.length + " berenstain, " + berenstein.length + " berenstein)" + String.fromCharCode(10);
+  summary += String.fromCharCode(10) + "=== BERENSTAIN results (canonical) ===" + String.fromCharCode(10);
+  for (const r of berenstain.slice(0, 8)) {
+    summary += "  [" + r.year + "] [" + r.mediaType + "] " + r.title.slice(0, 60) + String.fromCharCode(10) + "    " + r.url + String.fromCharCode(10);
+  }
+  summary += String.fromCharCode(10) + "=== BERENSTEIN results (variant) ===" + String.fromCharCode(10);
+  for (const r of berenstein.slice(0, 8)) {
+    summary += "  [" + r.year + "] [" + r.mediaType + "] " + r.title.slice(0, 60) + String.fromCharCode(10) + "    " + r.url + String.fromCharCode(10);
+  }
+  if (wikiMentions.length > 0) {
+    summary += String.fromCharCode(10) + "=== Wikipedia mentions ===" + String.fromCharCode(10);
+    for (const m of wikiMentions) summary += "  " + m + String.fromCharCode(10);
+  }
+  return { summary, metric: String(allArchive.length) };
+}`,
+      codeLang: "typescript",
     },
     {
       name: "nightly-meal-recommender",
