@@ -1198,6 +1198,48 @@ function registerBuiltinCommands(): void {
     return fail(`[error] recipe: unknown subcommand "${sub}"\nUsage: recipe [list|save|run|info|delete|enable|disable]`);
   });
 
+  registerCommand("goals", "Manage user goals/priorities for digest", "goals [list|add <name> --keywords k1,k2|remove <name>]", async (args) => {
+    const sub = args[0] || "list";
+    const goalsConfig = await storage.getAgentConfig("user_goals");
+    let goals: Array<{ name: string; keywords: string[]; priority: number }> = [];
+    if (goalsConfig?.value) {
+      try { goals = JSON.parse(goalsConfig.value); } catch {}
+    }
+
+    if (sub === "list") {
+      if (goals.length === 0) return ok("No goals configured. Use: goals add <name> --keywords k1,k2,k3");
+      const lines = goals.map((g, i) => `${(i + 1 + ".").padEnd(4)} ${g.name.padEnd(35)} [P${g.priority}] keywords: ${g.keywords.join(", ")}`);
+      return ok("=== USER GOALS ===\n" + lines.join("\n"));
+    }
+
+    if (sub === "add") {
+      const kwIdx = args.indexOf("--keywords");
+      const name = args.slice(1, kwIdx > 0 ? kwIdx : undefined).join(" ");
+      if (!name) return fail("[error] goals add: usage: goals add <name> --keywords k1,k2,k3");
+      const keywords = kwIdx > 0 ? args[kwIdx + 1]?.split(",").map(k => k.trim()).filter(Boolean) || [] : [];
+      const prioIdx = args.indexOf("--priority");
+      const priority = prioIdx > 0 ? parseInt(args[prioIdx + 1] || "3", 10) : 3;
+      if (goals.find(g => g.name.toLowerCase() === name.toLowerCase())) {
+        return fail("[error] goals add: goal '" + name + "' already exists");
+      }
+      goals.push({ name, keywords, priority });
+      await storage.setAgentConfig("user_goals", JSON.stringify(goals), "goals");
+      return ok("Added goal: " + name + " (P" + priority + ", keywords: " + keywords.join(", ") + ")");
+    }
+
+    if (sub === "remove") {
+      const name = args.slice(1).join(" ");
+      if (!name) return fail("[error] goals remove: usage: goals remove <name>");
+      const idx = goals.findIndex(g => g.name.toLowerCase() === name.toLowerCase());
+      if (idx === -1) return fail("[error] goals remove: goal '" + name + "' not found");
+      goals.splice(idx, 1);
+      await storage.setAgentConfig("user_goals", JSON.stringify(goals), "goals");
+      return ok("Removed goal: " + name);
+    }
+
+    return fail("[error] goals: unknown subcommand '" + sub + "'\nUsage: goals [list|add <name> --keywords k1,k2|remove <name>]");
+  });
+
   registerCommand("config", "View or set agent config", "config [list|get <key>|set <key> <value>]", async (args) => {
     const sub = args[0] || "list";
 

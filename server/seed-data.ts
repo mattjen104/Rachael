@@ -809,8 +809,8 @@ async function execute() {
     {
       name: "github-trending",
       type: "monitor",
-      schedule: "daily",
-      cronExpression: "0 9 * * *",
+      schedule: "every 8h",
+      cronExpression: "0 6,14,22 * * *",
       instructions: "Scrape GitHub trending page for repos in specified languages.",
       config: { LANGUAGES: "typescript,rust,python,go", SINCE: "daily", TASK_TYPE: "research", METRIC: "repos_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "cheap",
@@ -951,7 +951,8 @@ async function execute() {
       type: "monitor",
       schedule: "every 4h",
       cronExpression: "0 */4 * * *",
-      instructions: "Scrape Craigslist free section for items matching keywords. Returns structured listing data for LLM triage.",
+      enabled: false,
+      instructions: "Scrape Craigslist free section for items matching keywords. Returns structured listing data for LLM triage. DISABLED: Craigslist blocks server IPs without Chrome bridge.",
       config: { CL_REGIONS: "inlandempire,losangeles,orangecounty", KEYWORDS: "furniture,electronics,tools,appliance,computer,monitor,desk,chair,table,tv,printer,laptop", TASK_TYPE: "research", METRIC: "items_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
       costTier: "cheap",
       tags: ["program"],
@@ -1443,13 +1444,14 @@ async function execute() {
       type: "meta",
       schedule: "daily",
       cronExpression: "0 13 * * *",
-      instructions: "Morning digest: synthesizes overnight program results and recent memories into an actionable briefing with proposals. Runs at 6 AM PT.",
-      config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", OUTPUT_TYPE: "proposal", METRIC: "proposals_generated", DIRECTION: "higher" },
+      instructions: "Goal-oriented daily intelligence brief. Matches research findings to user goals, generates wiki-style HTML briefing, and auto-sends via ntfy. Runs at 6 AM PT.",
+      config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", OUTPUT_TYPE: "proposal", METRIC: "proposals_generated", DIRECTION: "higher", TIMEOUT: "300" },
       costTier: "cheap",
       tags: ["program", "meta", "digest"],
       code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+const NL = String.fromCharCode(10);
 
-async function callLLM(prompt: string, maxTokens = 3000): Promise<{ok: boolean; text: string}> {
+async function callLLM(prompt: string, maxTokens = 4000): Promise<{ok: boolean; text: string}> {
   const models = ["deepseek/deepseek-chat", "anthropic/claude-sonnet-4"];
   for (const modelId of models) {
     try {
@@ -1457,7 +1459,7 @@ async function callLLM(prompt: string, maxTokens = 3000): Promise<{ok: boolean; 
         method: "POST",
         headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
         body: JSON.stringify({ model: modelId, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0.3 }),
-        signal: AbortSignal.timeout(90000),
+        signal: AbortSignal.timeout(120000),
       });
       const d = await r.json();
       const text = d.choices?.[0]?.message?.content?.trim();
@@ -1467,11 +1469,17 @@ async function callLLM(prompt: string, maxTokens = 3000): Promise<{ok: boolean; 
   return { ok: false, text: "[LLM unavailable for digest synthesis]" };
 }
 
-function extractRadarReddit(rawOutput: string): string {
-  const NL = String.fromCharCode(10);
+interface ResearchItem {
+  source: string; sub?: string; title: string; score: number; url: string;
+  selftext?: string; topComment?: string; lang?: string; tags?: string[];
+}
+
+function parseRadarData(rawOutput: string): { items: ResearchItem[]; sources: Record<string, ResearchItem[]> } {
+  const items: ResearchItem[] = [];
+  const sources: Record<string, ResearchItem[]> = {};
   const sdStart = rawOutput.indexOf("STRUCTURED_DATA_START");
   const sdEnd = rawOutput.indexOf("STRUCTURED_DATA_END");
-  if (sdStart === -1 || sdEnd === -1) return "";
+  if (sdStart === -1 || sdEnd === -1) return { items, sources };
   try {
     const chunk = rawOutput.substring(sdStart, sdEnd);
     const jsonStart = chunk.indexOf(NL) + 1;
@@ -1479,89 +1487,141 @@ function extractRadarReddit(rawOutput: string): string {
     const lastBrace = jsonStr.lastIndexOf("}");
     if (lastBrace > 0) jsonStr = jsonStr.substring(0, lastBrace + 1);
     const parsed = JSON.parse(jsonStr);
-    if (!parsed.reddit || !parsed.reddit.bySub) return "";
-    const subs = Object.keys(parsed.reddit.bySub);
-    const lines: string[] = [];
-    lines.push("REDDIT ACROSS " + subs.length + " SUBREDDITS (via research-radar, mode=" + (parsed.reddit.mode || "unknown") + "):");
-    for (const sub of subs) {
-      const posts = parsed.reddit.bySub[sub] || [];
-      if (posts.length === 0) continue;
-      lines.push("");
-      lines.push("r/" + sub + " (" + posts.length + " posts):");
-      for (const p of posts.slice(0, 5)) {
-        let line = "  " + (p.title || "").slice(0, 120);
-        if (p.score > 0) line += " (" + p.score + " pts)";
-        if (p.url) line += NL + "    " + p.url;
-        if (p.topComment) line += NL + "    Top comment: " + p.topComment.slice(0, 200);
-        lines.push(line);
+    if (parsed.reddit?.bySub) {
+      for (const [sub, posts] of Object.entries(parsed.reddit.bySub)) {
+        const postArr = Array.isArray(posts) ? posts : [];
+        for (const p of postArr) {
+          const item: ResearchItem = { source: "reddit", sub, title: p.title || "", score: p.score || 0, url: p.url || "", selftext: p.selftext, topComment: p.topComment };
+          items.push(item);
+          if (!sources["reddit/" + sub]) sources["reddit/" + sub] = [];
+          sources["reddit/" + sub].push(item);
+        }
       }
     }
-    if (parsed.hn && parsed.hn.length > 0) {
-      lines.push("");
-      lines.push("HACKER NEWS TOP (" + parsed.hn.length + " items):");
-      for (const h of parsed.hn.slice(0, 8)) {
-        lines.push("  " + (h.title || "").slice(0, 120) + " (" + (h.score || 0) + " pts)");
-        if (h.url) lines.push("    " + h.url);
-      }
+    if (parsed.hn) for (const h of parsed.hn) { const item: ResearchItem = { source: "hn", title: h.title || "", score: h.score || 0, url: h.url || "" }; items.push(item); (sources["hn"] = sources["hn"] || []).push(item); }
+    if (parsed.github) for (const g of parsed.github) { const item: ResearchItem = { source: "github", title: g.title || "", score: 0, url: g.url || "", lang: g.lang }; items.push(item); (sources["github"] = sources["github"] || []).push(item); }
+    if (parsed.lobsters) for (const l of parsed.lobsters) { const item: ResearchItem = { source: "lobsters", title: l.title || "", score: l.score || 0, url: l.url || "", tags: l.tags }; items.push(item); (sources["lobsters"] = sources["lobsters"] || []).push(item); }
+    if (parsed.arxiv) for (const a of parsed.arxiv) { const item: ResearchItem = { source: "arxiv", title: a.title || "", score: 0, url: a.url || "" }; items.push(item); (sources["arxiv"] = sources["arxiv"] || []).push(item); }
+  } catch {}
+  return { items, sources };
+}
+
+function matchItemsToGoals(items: ResearchItem[], goals: Array<{name: string; keywords: string[]; priority: number}>): Record<string, ResearchItem[]> {
+  const matched: Record<string, ResearchItem[]> = {};
+  for (const goal of goals) matched[goal.name] = [];
+  const unmatched: ResearchItem[] = [];
+  for (const item of items) {
+    const text = (item.title + " " + (item.selftext || "") + " " + (item.topComment || "") + " " + (item.tags || []).join(" ")).toLowerCase();
+    let found = false;
+    for (const goal of goals) {
+      const hits = goal.keywords.filter(kw => text.includes(kw.toLowerCase()));
+      if (hits.length > 0) { matched[goal.name].push(item); found = true; }
     }
-    if (parsed.github && parsed.github.length > 0) {
-      lines.push("");
-      lines.push("GITHUB TRENDING (" + parsed.github.length + " repos):");
-      for (const g of parsed.github.slice(0, 6)) {
-        lines.push("  [" + (g.lang || "?") + "] " + (g.title || ""));
-        if (g.url) lines.push("    " + g.url);
+    if (!found) unmatched.push(item);
+  }
+  matched["_unmatched"] = unmatched;
+  return matched;
+}
+
+function generateHtml(briefingText: string, dateStamp: string): string {
+  const escaped = briefingText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const sectionSplitRe = new RegExp(NL + "(?=## )");
+  const sections = escaped.split(sectionSplitRe);
+  let body = "";
+  for (const section of sections) {
+    const headerMatch = section.match(/^## (.+)/);
+    if (headerMatch) {
+      const title = headerMatch[1];
+      const content = section.substring(headerMatch[0].length).trim();
+      const sectionId = title.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+      body += '<details open id="' + sectionId + '"><summary>' + title + "</summary><div class=\\"section-content\\">" + NL;
+      const lines = content.split(NL);
+      for (const line of lines) {
+        const urlRe = /(https?:\\/\\/[^\\s)]+)/g;
+        const linked = line.replace(urlRe, '<a href="$1" target="_blank">$1</a>');
+        if (line.startsWith("- ") || line.startsWith("* ")) {
+          body += "<li>" + linked.substring(2) + "</li>" + NL;
+        } else if (line.startsWith("### ")) {
+          body += "<h3>" + line.substring(4) + "</h3>" + NL;
+        } else if (line.trim()) {
+          body += "<p>" + linked + "</p>" + NL;
+        }
       }
+      body += "</div></details>" + NL;
+    } else {
+      const urlRe = /(https?:\\/\\/[^\\s)]+)/g;
+      const nlRe = new RegExp(NL, "g");
+      body += "<p>" + section.replace(urlRe, '<a href="$1" target="_blank">$1</a>').replace(nlRe, "<br>") + "</p>" + NL;
     }
-    if (parsed.lobsters && parsed.lobsters.length > 0) {
-      lines.push("");
-      lines.push("LOBSTERS (" + parsed.lobsters.length + " items):");
-      for (const l of parsed.lobsters.slice(0, 5)) {
-        lines.push("  " + (l.title || "").slice(0, 120) + " (" + (l.score || 0) + " pts)");
-        if (l.url) lines.push("    " + l.url);
-      }
-    }
-    if (parsed.arxiv && parsed.arxiv.length > 0) {
-      lines.push("");
-      lines.push("ARXIV CS.AI (" + parsed.arxiv.length + " papers):");
-      for (const a of parsed.arxiv.slice(0, 5)) {
-        lines.push("  " + (a.title || "").slice(0, 120));
-        if (a.url) lines.push("    " + a.url);
-      }
-    }
-    return lines.join(NL);
-  } catch { return ""; }
+  }
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    "<title>Daily Brief - " + dateStamp + "</title>" +
+    '<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">' +
+    "<style>" +
+    "*{box-sizing:border-box}body{font-family:'IBM Plex Mono',monospace;background:#0a0a0f;color:#b8c4b8;margin:0;padding:20px;line-height:1.6}" +
+    "h1{color:#00ff41;border-bottom:1px solid #00ff41;padding-bottom:8px;font-size:1.4em;text-shadow:0 0 10px rgba(0,255,65,0.3)}" +
+    "h2,summary{color:#00ff41;font-size:1.1em;cursor:pointer;padding:8px 0}" +
+    "h3{color:#4fc3f7;font-size:1em;margin:12px 0 4px}" +
+    "details{border:1px solid #1a3a1a;border-radius:4px;margin:12px 0;padding:8px 16px;background:#0d1117}" +
+    "details[open] summary{border-bottom:1px solid #1a3a1a;margin-bottom:8px}" +
+    "summary:hover{text-shadow:0 0 8px rgba(0,255,65,0.5)}" +
+    "a{color:#4fc3f7;text-decoration:none}a:hover{text-decoration:underline;text-shadow:0 0 5px rgba(79,195,247,0.3)}" +
+    "li{margin:4px 0;list-style-type:none}li::before{content:'> ';color:#00ff41}" +
+    "p{margin:6px 0}" +
+    ".meta{color:#666;font-size:0.85em;border-top:1px solid #1a3a1a;padding-top:8px;margin-top:24px}" +
+    "@media(max-width:600px){body{padding:10px}details{padding:6px 10px}}" +
+    "</style></head><body>" +
+    "<h1>[orgcloud] Daily Intelligence Brief</h1>" +
+    "<p style=\\"color:#666;font-size:0.85em\\">" + dateStamp + " | OrgCloud Autonomous Agent System</p>" +
+    body +
+    '<div class="meta">Generated by overnight-digest | OrgCloud Space</div>' +
+    "</body></html>";
 }
 
 async function execute() {
   const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
   const BASE = "http://localhost:" + port;
-  const NL = String.fromCharCode(10);
   const hdrs: Record<string, string> = { "Content-Type": "application/json" };
   if (__apiKey) hdrs["Authorization"] = "Bearer " + __apiKey;
 
   let results: any[] = [];
-  let memories: any[] = [];
+  let allMemories: any[] = [];
   let pendingProposals: any[] = [];
   let programs: any[] = [];
   let radarResults: any[] = [];
+  let goalsData: Array<{name: string; keywords: string[]; priority: number}> = [];
+  let olderDigests: any[] = [];
+
   try { const r = await fetch(BASE + "/api/results?limit=100", { headers: hdrs }); if (r.ok) results = await r.json(); } catch {}
-  try { const r = await fetch(BASE + "/api/memories?limit=50", { headers: hdrs }); if (r.ok) memories = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/memories?limit=100", { headers: hdrs }); if (r.ok) allMemories = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/proposals?status=pending", { headers: hdrs }); if (r.ok) pendingProposals = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/programs", { headers: hdrs }); if (r.ok) programs = await r.json(); } catch {}
   try { const r = await fetch(BASE + "/api/results?program=research-radar&limit=1", { headers: hdrs }); if (r.ok) radarResults = await r.json(); } catch {}
+  try { const r = await fetch(BASE + "/api/config/user_goals", { headers: hdrs }); if (r.ok) { const d = await r.json(); goalsData = JSON.parse(d.value || "[]"); } } catch {}
+  try { const r = await fetch(BASE + "/api/results?program=overnight-digest&limit=3", { headers: hdrs }); if (r.ok) olderDigests = await r.json(); } catch {}
 
   const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+  const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
   const recentResults = results.filter((r: any) => new Date(r.createdAt || r.timestamp || 0).getTime() > twelveHoursAgo);
-  const recentMemories = memories.filter((m: any) => new Date(m.createdAt || m.lastAccessed || 0).getTime() > twelveHoursAgo);
+  const recentMemories = allMemories.filter((m: any) => new Date(m.createdAt || m.lastAccessed || 0).getTime() > twelveHoursAgo);
+  const threeDayMemories = allMemories.filter((m: any) => {
+    const t = new Date(m.createdAt || m.lastAccessed || 0).getTime();
+    return t > threeDaysAgo && t <= twelveHoursAgo;
+  });
 
   if (recentResults.length === 0 && recentMemories.length === 0) {
-    return { summary: "Overnight Digest: No activity in the last 12 hours. All systems idle.", metric: "0" };
+    return { summary: "Daily Brief: No activity in the last 12 hours. All systems idle.", metric: "0" };
   }
 
-  let radarRedditSection = "";
+  let radarItems: ResearchItem[] = [];
+  let radarSources: Record<string, ResearchItem[]> = {};
   if (radarResults.length > 0 && radarResults[0].rawOutput) {
-    radarRedditSection = extractRadarReddit(radarResults[0].rawOutput);
+    const parsed = parseRadarData(radarResults[0].rawOutput);
+    radarItems = parsed.items;
+    radarSources = parsed.sources;
   }
+
+  const goalMatches = goalsData.length > 0 ? matchItemsToGoals(radarItems, goalsData) : {};
 
   const byProgram: Record<string, { runs: number; errors: number; lastMetric: string; summaries: string[] }> = {};
   for (const r of recentResults) {
@@ -1575,99 +1635,145 @@ async function execute() {
 
   const observationMemories = recentMemories.filter((m: any) => m.memoryType === "observation");
 
-  const dataLines: string[] = [];
-  dataLines.push("PROGRAM ACTIVITY (last 12h):");
-  for (const [name, data] of Object.entries(byProgram).sort((a, b) => b[1].runs - a[1].runs)) {
-    const status = data.errors > 0 ? " [" + data.errors + " errors]" : "";
-    dataLines.push("  " + name + ": " + data.runs + " runs, metric=" + data.lastMetric + status);
-    const lastSummary = data.summaries[data.summaries.length - 1];
-    if (lastSummary) dataLines.push("    > " + lastSummary.slice(0, 250));
-  }
-  if (observationMemories.length > 0) {
-    dataLines.push("");
-    dataLines.push("KEY FINDINGS (from evaluate loop):");
-    for (const m of observationMemories.slice(0, 10)) {
-      dataLines.push("  * " + (m.content || "").slice(0, 200));
+  const goalSection: string[] = [];
+  if (goalsData.length > 0) {
+    for (const goal of goalsData.sort((a, b) => a.priority - b.priority)) {
+      const matched = goalMatches[goal.name] || [];
+      goalSection.push("GOAL [P" + goal.priority + "]: " + goal.name);
+      if (matched.length > 0) {
+        goalSection.push("  Matched " + matched.length + " items from research feed:");
+        for (const item of matched.slice(0, 8)) {
+          goalSection.push("  - [" + item.source + (item.sub ? "/r/" + item.sub : "") + "] " + item.title.slice(0, 120));
+          if (item.url) goalSection.push("    " + item.url);
+          if (item.topComment) goalSection.push("    Top comment: " + item.topComment.slice(0, 150));
+        }
+      } else {
+        goalSection.push("  No matching items in latest research scan.");
+      }
+      const goalObs = observationMemories.filter((m: any) => {
+        const content = (m.content || "").toLowerCase();
+        return goal.keywords.some(kw => content.includes(kw.toLowerCase()));
+      });
+      if (goalObs.length > 0) {
+        goalSection.push("  Agent observations:");
+        for (const m of goalObs.slice(0, 3)) {
+          goalSection.push("  * " + (m.content || "").slice(0, 200));
+        }
+      }
+      goalSection.push("");
     }
+  }
+
+  const prevContext: string[] = [];
+  if (threeDayMemories.length > 0) {
+    prevContext.push("PREVIOUS DAYS OBSERVATIONS (" + threeDayMemories.length + " memories from last 3 days):");
+    for (const m of threeDayMemories.filter((m: any) => m.memoryType === "observation").slice(0, 15)) {
+      prevContext.push("  [" + new Date(m.createdAt || m.lastAccessed).toISOString().slice(0, 10) + "] " + (m.content || "").slice(0, 200));
+    }
+  }
+  if (olderDigests.length > 0) {
+    prevContext.push("");
+    prevContext.push("PREVIOUS DIGEST SUMMARIES:");
+    for (const d of olderDigests.slice(0, 2)) {
+      const date = new Date(d.createdAt || d.timestamp || 0).toISOString().slice(0, 10);
+      prevContext.push("  [" + date + "] " + (d.summary || "").slice(0, 500));
+    }
+  }
+
+  const systemHealth: string[] = [];
+  systemHealth.push("SYSTEM STATUS:");
+  const enabledCount = programs.filter((p: any) => p.enabled).length;
+  systemHealth.push("  " + enabledCount + " programs enabled, " + Object.keys(byProgram).length + " ran in last 12h");
+  const errorProgs = Object.entries(byProgram).filter(([, d]) => d.errors >= 2);
+  if (errorProgs.length > 0) {
+    systemHealth.push("  Errors: " + errorProgs.map(([n, d]) => n + " (" + d.errors + ")").join(", "));
   }
   if (pendingProposals.length > 0) {
-    dataLines.push("");
-    dataLines.push("PENDING PROPOSALS (" + pendingProposals.length + "):");
-    for (const p of pendingProposals.slice(0, 8)) {
-      dataLines.push("  [" + p.section + "] " + (p.reason || "").slice(0, 120));
-    }
+    systemHealth.push("  Pending proposals: " + pendingProposals.length);
   }
-  const enabledCount = programs.filter((p: any) => p.enabled).length;
-  const idleProgs = programs.filter((p: any) => p.enabled && !byProgram[p.name]);
-  dataLines.push("");
-  dataLines.push("SYSTEM: " + enabledCount + " programs enabled, " + idleProgs.length + " idle in last 12h");
 
-  const llmPrompt = "You are a morning briefing synthesizer for an autonomous agent system. Analyze the overnight data below and produce a structured briefing." + NL + NL +
-    "DATA:" + NL + dataLines.join(NL) + NL + NL +
-    (radarRedditSection ? "RESEARCH FEED (most recent research-radar scan):" + NL + radarRedditSection + NL + NL : "") +
-    "Produce these sections:" + NL +
-    "1. EXECUTIVE SUMMARY: 2-3 sentence overview of overnight activity" + NL +
-    "2. KEY FINDINGS: Most important results or trends across programs" + NL +
-    "3. REDDIT & COMMUNITY PULSE: Summarize notable threads from MULTIPLE subreddits. Include the subreddit name, post title, and URL for at least 8-10 notable items across different subs. Highlight community sentiment and top comments where available." + NL +
-    "4. LINKS ROUNDUP: List the top 15-20 most interesting links from ALL sources (Reddit, HN, GitHub, Lobsters, ArXiv) with source label, title, and URL. Spread across diverse sources." + NL +
-    "5. CONCERNS: Any errors, persistent zero-result programs, or anomalies" + NL +
-    "6. PROPOSALS: 1-3 specific, actionable proposals for schedule changes, config adjustments, or program improvements. Format each as: PROPOSAL: <description>" + NL +
-    "Be concise and actionable. Include URLs. This briefing is for the system operator reviewing overnight results at 6 AM.";
+  const unmatchedItems = goalMatches["_unmatched"] || [];
+  const highScoreUnmatched = unmatchedItems.filter(i => i.score > 50 || i.source === "arxiv" || i.source === "github").slice(0, 15);
 
-  const llmResult = await callLLM(llmPrompt, 3000);
+  const llmPrompt = "You are a personal intelligence briefing writer. The user has an autonomous agent system that monitors Reddit, HN, GitHub, Lobsters, ArXiv, and more. Your job is to write a GOAL-ORIENTED daily brief, NOT a system status report." + NL + NL +
+    "USER GOALS (in priority order):" + NL + goalsData.map(g => "- [P" + g.priority + "] " + g.name + " (keywords: " + g.keywords.slice(0, 8).join(", ") + ")").join(NL) + NL + NL +
+    "RESEARCH ITEMS MATCHED TO GOALS:" + NL + goalSection.join(NL) + NL + NL +
+    "HIGH-VALUE UNMATCHED ITEMS (" + highScoreUnmatched.length + "):" + NL +
+    highScoreUnmatched.map(i => "- [" + i.source + "] " + i.title.slice(0, 120) + (i.url ? NL + "  " + i.url : "")).join(NL) + NL + NL +
+    (prevContext.length > 0 ? "CROSS-DAY CONTEXT:" + NL + prevContext.join(NL) + NL + NL : "") +
+    systemHealth.join(NL) + NL + NL +
+    "Write the brief in Markdown using these EXACT section headers:" + NL +
+    "## Goal Progress" + NL + "For each goal, 2-3 bullets on what the overnight research revealed. Connect findings to goals. Skip goals with no relevant findings." + NL + NL +
+    "## Deep Reads" + NL + "3-5 links genuinely worth reading. For each, include the URL and a paragraph explaining WHY it matters to the user's specific goals. Be selective, not exhaustive." + NL + NL +
+    "## Developing Threads" + NL + "Topics that span multiple days. Connect today's findings to previous days' observations. If no cross-day connections exist, note emerging topics to watch." + NL + NL +
+    "## Agent Activity" + NL + "2-3 sentences max. What agents learned overnight, what they propose. Compressed, not program-by-program." + NL + NL +
+    "## Action Items" + NL + "3-5 concrete, goal-tied actions. 'Read this paper because...', 'Try this technique for...', 'This OpenClaw proposal needs...'. NOT operational housekeeping." + NL + NL +
+    "## System Health" + NL + "Brief operational status. Errors, budget, model availability. Keep to 2-3 lines. Operational proposals go here, not in Action Items." + NL + NL +
+    "CRITICAL: Include actual URLs from the data. Be specific, not vague. Write for a busy engineer who wants to know what matters TODAY.";
+
+  const llmResult = await callLLM(llmPrompt, 4000);
 
   const digestProposals: Array<{section: string; diff: string; reason: string}> = [];
-
-  const errorProgs = Object.entries(byProgram).filter(([, d]) => d.errors >= 2);
   for (const [name, data] of errorProgs) {
-    digestProposals.push({
-      section: "PROGRAMS",
-      diff: "Program " + name + " had " + data.errors + " errors in the last 12h. Investigate or reduce schedule frequency.",
-      reason: "High error rate: " + name,
-    });
-  }
-  const zeroMetricProgs = Object.entries(byProgram).filter(([, d]) => d.lastMetric === "0" && d.runs >= 2);
-  for (const [name] of zeroMetricProgs) {
-    digestProposals.push({
-      section: "PROGRAMS",
-      diff: "Program " + name + " returned 0 results across " + byProgram[name].runs + " runs. Adjust config or disable.",
-      reason: "Persistent zero results: " + name,
-    });
+    digestProposals.push({ section: "PROGRAMS", diff: "Program " + name + " had " + data.errors + " errors in the last 12h.", reason: "High error rate: " + name });
   }
 
-  if (llmResult.ok) {
-    const proposalRe = /PROPOSAL:\\s*(.+)/gi;
-    let pm;
-    while ((pm = proposalRe.exec(llmResult.text)) !== null) {
-      digestProposals.push({
-        section: "DIGEST",
-        diff: pm[1].trim().slice(0, 500),
-        reason: "LLM-synthesized overnight proposal",
-      });
+  const briefingText = llmResult.ok ? llmResult.text : "## Daily Brief" + NL + NL + "[LLM synthesis unavailable]" + NL + NL + "## Raw Data" + NL + goalSection.join(NL);
+
+  const now = new Date();
+  const dateStamp = now.toISOString().slice(0, 10);
+  let htmlUrl = "";
+  let briefingPath = "";
+
+  try {
+    const fs = await import("fs");
+    const pathMod = await import("path");
+    const briefingsDir = pathMod.join(process.cwd(), ".briefings");
+    if (!fs.existsSync(briefingsDir)) fs.mkdirSync(briefingsDir, { recursive: true });
+    const htmlContent = generateHtml(briefingText, dateStamp);
+    const htmlFilename = "digest-" + dateStamp + ".html";
+    briefingPath = pathMod.join(briefingsDir, htmlFilename);
+    fs.writeFileSync(briefingPath, htmlContent);
+    const domain = (process.env.REPLIT_DOMAINS || "").split(",")[0].trim();
+    const baseUrl = domain ? "https://" + domain : "http://localhost:5000";
+    htmlUrl = baseUrl + "/briefings/" + htmlFilename;
+  } catch {}
+
+  let notifyStatus = "";
+  try {
+    let notifyChannel = "";
+    let notifyEmail = "";
+    try { const r = await fetch(BASE + "/api/config/notify_channel", { headers: hdrs }); if (r.ok) { const d = await r.json(); notifyChannel = d.value || ""; } } catch {}
+    try { const r = await fetch(BASE + "/api/config/notify_email", { headers: hdrs }); if (r.ok) { const d = await r.json(); notifyEmail = d.value || ""; } } catch {}
+
+    if (notifyChannel) {
+      const execSummary = briefingText.split("## Deep Reads")[0] || briefingText.slice(0, 1500);
+      const actionItems = briefingText.match(/## Action Items[\\s\\S]*?(?=## |$)/)?.[0] || "";
+      let ntfyBody = execSummary.replace(/^## /gm, "").replace(/\\*\\*/g, "").trim();
+      if (actionItems) ntfyBody += NL + NL + "---" + NL + actionItems.replace(/^## /gm, "").replace(/\\*\\*/g, "").trim();
+      if (htmlUrl) ntfyBody += NL + NL + "Full brief: " + htmlUrl;
+      ntfyBody = ntfyBody.slice(0, 3900);
+
+      const ntfyHeaders: Record<string, string> = { "Title": "OrgCloud Daily Brief - " + dateStamp, "Priority": "default", "Tags": "briefcase,radio" };
+      if (htmlUrl) { ntfyHeaders["Click"] = htmlUrl; ntfyHeaders["Actions"] = "view, Read Full Brief, " + htmlUrl; }
+      if (notifyEmail) ntfyHeaders["Email"] = notifyEmail;
+
+      const resp = await fetch("https://ntfy.sh/" + notifyChannel, { method: "POST", headers: ntfyHeaders, body: ntfyBody, signal: AbortSignal.timeout(15000) });
+      notifyStatus = resp.ok ? "sent to " + notifyChannel + (notifyEmail ? " + " + notifyEmail : "") : "ntfy error: " + resp.status;
+    } else {
+      notifyStatus = "no notify_channel configured";
     }
-  }
+  } catch (e: any) { notifyStatus = "notify error: " + (e.message || "").slice(0, 80); }
 
-  const lines: string[] = [];
-  lines.push("=== OVERNIGHT DIGEST ===");
-  lines.push("Generated: " + new Date().toISOString());
-  lines.push("Coverage: last 12 hours | " + recentResults.length + " results from " + Object.keys(byProgram).length + " programs");
-  if (radarRedditSection) lines.push("Research feed: " + (radarRedditSection.split(NL).length) + " lines from latest radar scan");
-  lines.push("");
-  if (llmResult.ok) {
-    lines.push(llmResult.text);
-  } else {
-    lines.push("[LLM synthesis unavailable - raw data follows]");
-    lines.push("");
-    for (const dl of dataLines) lines.push(dl);
-    if (radarRedditSection) {
-      lines.push("");
-      lines.push(radarRedditSection);
-    }
-  }
-  lines.push("");
-  lines.push("Total proposals: " + digestProposals.length + " | Pending: " + pendingProposals.length);
+  const summaryLines: string[] = [];
+  summaryLines.push("=== DAILY INTELLIGENCE BRIEF ===");
+  summaryLines.push("Generated: " + now.toISOString() + " | " + recentResults.length + " results, " + radarItems.length + " research items");
+  if (htmlUrl) summaryLines.push("HTML: " + htmlUrl);
+  summaryLines.push("Notify: " + notifyStatus);
+  summaryLines.push("");
+  summaryLines.push(briefingText);
 
-  return { summary: lines.join(NL), metric: String(digestProposals.length), proposals: digestProposals };
+  return { summary: summaryLines.join(NL), metric: String(digestProposals.length), proposals: digestProposals };
 }`,
       codeLang: "typescript",
     },
@@ -1733,6 +1839,15 @@ async function execute() {
       { key: "user_timezone", value: "America/Los_Angeles", category: "user" },
       { key: "user_preferences", value: "CRT aesthetic, Doom Emacs-inspired UI, autonomous agents, org-mode workflows", category: "user" },
       { key: "persistent_context", value: "Craigslist regions are subdomains. HN API is free. Core models: DeepSeek V3 (cheap default), Qwen 2.5 72B (cheap backup), DeepSeek R1 (standard reasoning), Claude 3.5 Sonnet (standard), Claude Sonnet 4 (premium).", category: "memory" },
+      { key: "user_goals", value: JSON.stringify([
+        { name: "OpenClaw & agentic AI", keywords: ["openclaw", "agentic", "agent", "autonomous", "llm", "claude", "gpt", "openai", "anthropic", "langchain", "autogpt", "crew", "swarm", "tool-use", "function-calling", "mcp"], priority: 1 },
+        { name: "Autonomous agent architecture", keywords: ["agent-runtime", "planning", "memory", "tool-use", "reasoning", "self-improvement", "feedback-loop", "orchestration", "multi-agent", "reflection"], priority: 1 },
+        { name: "Epic Hyperspace agent", keywords: ["epic", "hyperspace", "ehr", "emr", "healthcare", "citrix", "selenium", "pyautogui", "vision", "screen-reading", "rpa", "automation"], priority: 2 },
+        { name: "Personal finance & deals", keywords: ["finance", "budget", "deal", "sale", "discount", "investment", "savings", "frugal", "craigslist", "estate-sale", "foreclosure", "fed-rate", "interest-rate"], priority: 3 },
+        { name: "Meal planning & nutrition", keywords: ["meal", "recipe", "nutrition", "cooking", "food", "diet", "grocery", "pantry", "kiddo", "toddler-food"], priority: 3 },
+      ]), category: "goals" },
+      { key: "notify_channel", value: "orgcloud-standup", category: "notifications" },
+      { key: "notify_email", value: "Matthew.e.jensen@gmail.com", category: "notifications" },
     ];
 
     for (const c of configSeeds) {
