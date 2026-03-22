@@ -12,24 +12,13 @@ export interface ModelEntry {
 }
 
 const DEFAULT_ROSTER: ModelEntry[] = [
-  { id: "google/gemma-3-4b-it:free", tier: "free", strengths: ["general", "reasoning"], label: "Gemma 3 4B", inputCostPer1M: 0, outputCostPer1M: 0 },
-  { id: "mistralai/mistral-small-3.1-24b-instruct:free", tier: "free", strengths: ["general", "extraction", "research"], label: "Mistral Small 3.1", inputCostPer1M: 0, outputCostPer1M: 0 },
-  { id: "qwen/qwen3-4b:free", tier: "free", strengths: ["general", "reasoning"], label: "Qwen3 4B", inputCostPer1M: 0, outputCostPer1M: 0 },
-  { id: "meta-llama/llama-3.2-3b-instruct:free", tier: "free", strengths: ["general", "extraction"], label: "Llama 3.2 3B", inputCostPer1M: 0, outputCostPer1M: 0 },
-  { id: "google/gemma-3-12b-it:free", tier: "free", strengths: ["reasoning", "research", "general"], label: "Gemma 3 12B", inputCostPer1M: 0, outputCostPer1M: 0 },
-
-  { id: "deepseek/deepseek-chat", tier: "cheap", strengths: ["code", "reasoning", "research", "general"], label: "DeepSeek V3", inputCostPer1M: 0.27, outputCostPer1M: 1.10 },
-  { id: "meta-llama/llama-3.1-70b-instruct", tier: "cheap", strengths: ["research", "reasoning", "general"], label: "Llama 3.1 70B", inputCostPer1M: 0.39, outputCostPer1M: 0.39 },
-  { id: "mistralai/mixtral-8x7b-instruct", tier: "cheap", strengths: ["code", "reasoning", "general"], label: "Mixtral 8x7B", inputCostPer1M: 0.24, outputCostPer1M: 0.24 },
+  { id: "deepseek/deepseek-chat", tier: "cheap", strengths: ["code", "reasoning", "research", "general", "extraction"], label: "DeepSeek V3", inputCostPer1M: 0.27, outputCostPer1M: 1.10 },
   { id: "qwen/qwen-2.5-72b-instruct", tier: "cheap", strengths: ["code", "reasoning", "research"], label: "Qwen 2.5 72B", inputCostPer1M: 0.36, outputCostPer1M: 0.36 },
 
   { id: "deepseek/deepseek-reasoner", tier: "standard", strengths: ["reasoning", "code", "research"], label: "DeepSeek R1", inputCostPer1M: 0.55, outputCostPer1M: 2.19 },
   { id: "anthropic/claude-3.5-sonnet", tier: "standard", strengths: ["code", "reasoning", "research"], label: "Claude 3.5 Sonnet", inputCostPer1M: 3.0, outputCostPer1M: 15.0 },
-  { id: "openai/gpt-4o-mini", tier: "standard", strengths: ["general", "extraction", "code"], label: "GPT-4o Mini", inputCostPer1M: 0.15, outputCostPer1M: 0.60 },
-  { id: "google/gemini-pro-1.5", tier: "standard", strengths: ["research", "reasoning", "extraction"], label: "Gemini Pro 1.5", inputCostPer1M: 1.25, outputCostPer1M: 5.0 },
 
-  { id: "anthropic/claude-sonnet-4-6", tier: "premium", strengths: ["code", "reasoning", "research"], label: "Claude Sonnet", inputCostPer1M: 3.0, outputCostPer1M: 15.0 },
-  { id: "openai/gpt-4o", tier: "premium", strengths: ["code", "reasoning", "research", "general"], label: "GPT-4o", inputCostPer1M: 2.50, outputCostPer1M: 10.0 },
+  { id: "anthropic/claude-sonnet-4", tier: "premium", strengths: ["code", "reasoning", "research", "general", "extraction"], label: "Claude Sonnet 4", inputCostPer1M: 3.0, outputCostPer1M: 15.0 },
 ];
 
 let activeRoster: ModelEntry[] = [...DEFAULT_ROSTER];
@@ -247,7 +236,7 @@ export function detectTaskType(instructions: string, explicitType?: string): Tas
 
 export function pickModel(
   taskType: TaskType,
-  maxTier: CostTier = "free",
+  maxTier: CostTier = "cheap",
   excludeModels: string[] = []
 ): ModelEntry | null {
   const maxTierIdx = TIER_ORDER.indexOf(maxTier);
@@ -274,7 +263,7 @@ export function pickModel(
 
 export function pickCascadeModels(
   taskType: TaskType,
-  maxTier: CostTier = "free"
+  maxTier: CostTier = "cheap"
 ): ModelEntry[] {
   const maxTierIdx = TIER_ORDER.indexOf(maxTier);
   const result: ModelEntry[] = [];
@@ -318,7 +307,7 @@ export function pickCheapThenPremium(
 
 export function pickComparisonModels(
   taskType: TaskType,
-  maxTier: CostTier = "free"
+  maxTier: CostTier = "cheap"
 ): [ModelEntry, ModelEntry] | null {
   const maxTierIdx = TIER_ORDER.indexOf(maxTier);
   const candidates = activeRoster.filter(
@@ -457,10 +446,10 @@ export async function getBudgetStatus(storage: { getAgentConfig(key: string): Pr
 }
 
 export function parseCostTier(tier: string | undefined): CostTier {
-  if (!tier) return "free";
+  if (!tier) return "cheap";
   const normalized = tier.toLowerCase().trim() as CostTier;
   if (TIER_ORDER.includes(normalized)) return normalized;
-  return "free";
+  return "cheap";
 }
 
 export function estimateTokenCost(model: string, tokens: number): number {

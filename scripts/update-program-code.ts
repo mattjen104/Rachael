@@ -7,7 +7,7 @@ async function main() {
   const nameToId = new Map<string, number>();
   for (const r of rows) nameToId.set(r.name, r.id);
 
-  const targets = ["estate-car-finder", "free-stuff-radar", "price-watch", "foreclosure-monitor", "mandela-berenstain", "overnight-digest", "budget-strategist"];
+  const targets = ["estate-car-finder", "free-stuff-radar", "price-watch", "foreclosure-monitor", "mandela-berenstain", "overnight-digest", "budget-strategist", "openrouter-model-scout", "hn-pulse", "hn-deep-digest"];
 
   const fs = await import("fs");
   const seedSource = fs.readFileSync("server/seed-data.ts", "utf-8");

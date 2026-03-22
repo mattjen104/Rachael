@@ -19,7 +19,7 @@ export async function seedDatabase(): Promise<void> {
       cronExpression: "0 7,19 * * *",
       instructions: "Monitor Hacker News for top stories. Uses free Firebase HN API.",
       config: { SCORE_THRESHOLD: "100", MAX_STORIES: "10", TASK_TYPE: "research", METRIC: "stories_found", DIRECTION: "higher" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const SCORE_THRESHOLD = parseInt(props.SCORE_THRESHOLD || "100", 10);
@@ -45,22 +45,20 @@ async function execute() {
       type: "monitor",
       schedule: "every 12h",
       cronExpression: "0 6,18 * * *",
-      instructions: "Check model availability on OpenRouter. Tests free models, queries live pricing from /api/v1/models, auto-updates roster pricing, discovers new free models, and flags offline/expensive models.",
-      config: { TASK_TYPE: "research", METRIC: "free_models_working", DIRECTION: "higher", LLM_REQUIRED: "false" },
-      costTier: "free",
+      instructions: "Check model availability on OpenRouter. Tests core models (DeepSeek, Claude), queries live pricing from /api/v1/models, auto-updates roster pricing, and flags offline models.",
+      config: { TASK_TYPE: "research", METRIC: "models_working", DIRECTION: "higher", LLM_REQUIRED: "false" },
+      costTier: "cheap",
       tags: ["program", "budget"],
       code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
 const ROSTER_MODELS = [
-  "google/gemma-3-4b-it:free",
-  "google/gemma-3-12b-it:free",
-  "mistralai/mistral-small-3.1-24b-instruct:free",
-  "meta-llama/llama-3.2-3b-instruct:free",
-  "qwen/qwen3-4b:free",
   "deepseek/deepseek-chat",
   "deepseek/deepseek-reasoner",
+  "qwen/qwen-2.5-72b-instruct",
+  "anthropic/claude-3.5-sonnet",
+  "anthropic/claude-sonnet-4",
 ];
-const INTERESTING_PROVIDERS = ["google", "meta-llama", "mistralai", "qwen", "deepseek", "microsoft"];
-const MAX_CHEAP_COST = 1.0;
+const INTERESTING_PROVIDERS = ["deepseek", "anthropic", "qwen"];
+const MAX_CHEAP_COST = 5.0;
 
 async function execute() {
   const results: Array<{ model: string; status: string; latency: number }> = [];
@@ -96,7 +94,7 @@ async function execute() {
         const provider = (m.id || "").split("/")[0];
         if (!INTERESTING_PROVIDERS.includes(provider)) return false;
         const cost = parseFloat(m.pricing?.prompt || "99");
-        return cost * 1_000_000 <= MAX_CHEAP_COST || cost === 0 || m.id.endsWith(":free");
+        return cost * 1_000_000 <= MAX_CHEAP_COST;
       });
 
       for (const m of candidateModels.slice(0, 5)) {
@@ -106,30 +104,28 @@ async function execute() {
         const outputCost = parseFloat(m.pricing?.completion || "0") * 1_000_000;
         rosterUpdates.push({
           id: m.id,
-          tier: inputCost === 0 ? "free" : "cheap",
+          tier: "cheap",
           strengths: ["general"],
           label: label,
           inputCostPer1M: Math.round(inputCost * 100) / 100,
           outputCostPer1M: Math.round(outputCost * 100) / 100,
         });
-        proposals.push({ section: "PROGRAMS", diff: "New " + (inputCost === 0 ? "free" : "cheap ($" + inputCost.toFixed(2) + "/1M)") + " model discovered: " + m.id + " (" + label + "). Added to roster.", reason: "Model auto-discovery" });
+        proposals.push({ section: "PROGRAMS", diff: "New cheap model ($" + inputCost.toFixed(2) + "/1M) discovered: " + m.id + " (" + label + "). Added to roster.", reason: "Model auto-discovery" });
       }
 
       for (const modelId of ROSTER_MODELS) {
         const info = modelsMap.get(modelId);
         if (info?.pricing) {
           const inputCost = parseFloat(info.pricing.prompt || "0") * 1_000_000;
-          if (inputCost > 20 && modelId.includes(":free")) {
-            rosterUpdates.push({ id: modelId, _remove: true });
-            proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " was free but now costs $" + inputCost.toFixed(2) + "/1M. Removed from roster.", reason: "Free model now paid: " + modelId });
+          if (inputCost > 20) {
+            proposals.push({ section: "PROGRAMS", diff: "Model " + modelId + " pricing increased to $" + inputCost.toFixed(2) + "/1M. Review budget impact.", reason: "Pricing alert: " + modelId });
           }
         }
       }
     }
   } catch {}
 
-  const freeModels = ROSTER_MODELS.filter(m => m.includes(":free"));
-  for (const model of freeModels) {
+  for (const model of ROSTER_MODELS) {
     const t0 = Date.now();
     try {
       const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -166,11 +162,11 @@ async function execute() {
   const working = results.filter(r => r.status === "OK");
   const notes = [];
   if (rosterUpdates.length > 0) notes.push("Pricing updated for " + rosterUpdates.length + " models");
-  if (discoveredFree > 0) notes.push("Discovered " + discoveredFree + " new free models");
+  if (discoveredFree > 0) notes.push("Discovered " + discoveredFree + " new models");
   if (proposals.length > 0) notes.push(proposals.length + " proposals");
   const noteStr = notes.length > 0 ? " | " + notes.join(", ") : "";
   const summary = results.map(r => (r.status === "OK" ? "[+]" : "[-]") + " " + r.model.split("/").pop() + " " + r.status + " (" + r.latency + "ms)").join("\\n");
-  return { summary: "Model Scout: " + working.length + "/" + results.length + " free models working" + noteStr + "\\n" + summary, metric: String(working.length), proposals };
+  return { summary: "Model Scout: " + working.length + "/" + results.length + " core models working" + noteStr + "\\n" + summary, metric: String(working.length), proposals };
 }`,
       codeLang: "typescript",
     },
@@ -747,7 +743,7 @@ async function execute(__ctx: any) {
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const TOP_N = parseInt(props.TOP_N || "8", 10);
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
-const MODELS = ["openai/gpt-4o-mini", "anthropic/claude-sonnet-4-20250514", "google/gemma-3-12b-it:free"];
+const MODELS = ["deepseek/deepseek-chat", "anthropic/claude-sonnet-4"];
 
 async function fetchHN(path: string) {
   return fetch("https://hacker-news.firebaseio.com/v0/" + path + ".json").then(r => r.json());
@@ -817,7 +813,7 @@ async function execute() {
       cronExpression: "0 9 * * *",
       instructions: "Scrape GitHub trending page for repos in specified languages.",
       config: { LANGUAGES: "typescript,rust,python,go", SINCE: "daily", TASK_TYPE: "research", METRIC: "repos_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const LANGUAGES = (props.LANGUAGES || "typescript,rust,python").split(",").map(l => l.trim());
@@ -924,7 +920,7 @@ async function execute() {
       cronExpression: "0 6 * * *",
       instructions: "Fetch latest values for key FRED economic series.",
       config: { SERIES_IDS: "DGS10,DGS2,T10Y2Y,FEDFUNDS,UNRATE", TASK_TYPE: "research", METRIC: "data_points", DIRECTION: "higher", LLM_REQUIRED: "false" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const SERIES = (props.SERIES_IDS || "DGS10,DGS2,FEDFUNDS").split(",").map(s => s.trim());
@@ -957,7 +953,7 @@ async function execute() {
       cronExpression: "0 */4 * * *",
       instructions: "Scrape Craigslist free section for items matching keywords. Returns structured listing data for LLM triage.",
       config: { CL_REGIONS: "inlandempire,losangeles,orangecounty", KEYWORDS: "furniture,electronics,tools,appliance,computer,monitor,desk,chair,table,tv,printer,laptop", TASK_TYPE: "research", METRIC: "items_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const REGIONS = (props.CL_REGIONS || props.CL_REGION || "inlandempire").split(",").map(s => s.trim());
@@ -1008,7 +1004,7 @@ async function execute() {
       cronExpression: "0 9 * * *",
       instructions: "Search SEC EDGAR for recent filings from specific companies.",
       config: { TICKER_LIST: "AAPL,TSLA,NVDA,MSFT,GOOG", FILING_TYPES: "10-K,10-Q,8-K", TASK_TYPE: "research", METRIC: "filings_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const TICKERS = (props.TICKER_LIST || "AAPL,TSLA,NVDA").split(",").map(t => t.trim());
@@ -1057,7 +1053,7 @@ async function execute() {
       cronExpression: "0 7 * * *",
       instructions: "Monitor Craigslist vehicle listings under max price. Scrapes RSS, deduplicates, surfaces cheapest deals.",
       config: { SEARCH_QUERIES: "car,truck,suv", CL_REGIONS: "inlandempire,losangeles", MAX_PRICE: "5000", TOP_N: "10", TASK_TYPE: "research", METRIC: "listings_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const QUERIES = (props.SEARCH_QUERIES || props.SEARCH_QUERY || "car").split(",").map(s => s.trim());
@@ -1113,7 +1109,7 @@ async function execute() {
       cronExpression: "0 8 * * *",
       instructions: "Scrape HUD homes, Fannie Mae HomePath, and public auction sites for foreclosures and government property listings near target ZIP codes.",
       config: { STATE: "CA", ZIP_CODES: "92373,92374,92376,92404,92405", TASK_TYPE: "research", METRIC: "listings_found", DIRECTION: "higher", LLM_REQUIRED: "false" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const STATE = props.STATE || "CA";
@@ -1340,7 +1336,7 @@ async function execute() {
       cronExpression: "0 2,10,18 * * *",
       instructions: "Budget strategist: reviews token usage, model quality, cost efficiency, and cross-program patterns. Produces structured proposals for budget adjustments, model routing, and schedule optimization.",
       config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", METRIC: "budget_efficiency", DIRECTION: "higher" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program", "budget", "meta"],
       code: `async function execute() {
   const port = process.env.__BRIDGE_PORT || process.env.PORT || "5000";
@@ -1449,15 +1445,13 @@ async function execute() {
       cronExpression: "0 13 * * *",
       instructions: "Morning digest: synthesizes overnight program results and recent memories into an actionable briefing with proposals. Runs at 6 AM PT.",
       config: { TASK_TYPE: "reasoning", LLM_REQUIRED: "false", OUTPUT_TYPE: "proposal", METRIC: "proposals_generated", DIRECTION: "higher" },
-      costTier: "free",
+      costTier: "cheap",
       tags: ["program", "meta", "digest"],
       code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
 
 async function callLLM(prompt: string, maxTokens = 3000): Promise<{ok: boolean; text: string}> {
-  const freeModels = ["google/gemma-3-12b-it:free", "qwen/qwen3-4b:free", "meta-llama/llama-3.2-3b-instruct:free"];
-  const paidModels = ["deepseek/deepseek-chat", "qwen/qwen-2.5-72b-instruct", "anthropic/claude-sonnet-4"];
-  const allModels = [...freeModels, ...paidModels];
-  for (const modelId of allModels) {
+  const models = ["deepseek/deepseek-chat", "anthropic/claude-sonnet-4"];
+  for (const modelId of models) {
     try {
       const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -1734,11 +1728,11 @@ async function execute() {
 
     const configSeeds = [
       { key: "soul", value: "Be genuinely helpful, not performatively helpful. Have opinions. Be resourceful before asking. Earn trust through competence.", category: "soul" },
-      { key: "default_model", value: "openrouter/google/gemma-3-4b-it:free", category: "agents" },
+      { key: "default_model", value: "openrouter/deepseek/deepseek-chat", category: "agents" },
       { key: "max_concurrent", value: "5", category: "agents" },
       { key: "user_timezone", value: "America/Los_Angeles", category: "user" },
       { key: "user_preferences", value: "CRT aesthetic, Doom Emacs-inspired UI, autonomous agents, org-mode workflows", category: "user" },
-      { key: "persistent_context", value: "Craigslist regions are subdomains. HN API is free. Working free OpenRouter models: gemma-3-4b-it:free, mistral-small-3.1-24b-instruct:free, qwen3-4b:free, llama-3.2-3b-instruct:free, gemma-3-12b-it:free.", category: "memory" },
+      { key: "persistent_context", value: "Craigslist regions are subdomains. HN API is free. Core models: DeepSeek V3 (cheap default), Qwen 2.5 72B (cheap backup), DeepSeek R1 (standard reasoning), Claude 3.5 Sonnet (standard), Claude Sonnet 4 (premium).", category: "memory" },
     ];
 
     for (const c of configSeeds) {

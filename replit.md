@@ -86,7 +86,7 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 
 ## Token Budget & Model Router (server/model-router.ts)
 
-- **Dynamic model roster**: DeepSeek V3 (`deepseek/deepseek-chat`), DeepSeek R1 (`deepseek/deepseek-reasoner`), plus free/cheap/standard/premium tiers
+- **Dynamic model roster**: DeepSeek V3 (cheap default), Qwen 2.5 72B (cheap backup), DeepSeek R1 (standard reasoning), Claude 3.5 Sonnet (standard), Claude Sonnet 4 (premium). No free-tier models — all programs default to "cheap" tier (DeepSeek V3)
 - **Live pricing**: `inputCostPer1M` / `outputCostPer1M` per model; auto-updated by `openrouter-model-scout` via OpenRouter `/api/v1/models`
 - **Quality tracking**: Per-model success/fail ratio stored in `qualityTracker`; models with low quality deprioritized in cascade
 - **Daily token budget**: `daily_token_budget` agent_config key (default 500K tokens); enforced in tick loop — LLM programs skipped when exhausted
