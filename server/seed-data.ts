@@ -1454,15 +1454,16 @@ async function execute() {
       code: `const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
 
 async function callLLM(prompt: string, maxTokens = 3000): Promise<{ok: boolean; text: string}> {
-  const models = ["openrouter/google/gemma-3-12b-it:free", "openrouter/qwen/qwen3-4b:free", "openrouter/meta-llama/llama-3.2-3b-instruct:free"];
-  for (const model of models) {
+  const freeModels = ["google/gemma-3-12b-it:free", "qwen/qwen3-4b:free", "meta-llama/llama-3.2-3b-instruct:free"];
+  const paidModels = ["deepseek/deepseek-chat", "qwen/qwen-2.5-72b-instruct", "anthropic/claude-sonnet-4"];
+  const allModels = [...freeModels, ...paidModels];
+  for (const modelId of allModels) {
     try {
-      const modelId = model.replace("openrouter/", "");
       const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: { "Authorization": "Bearer " + OPENROUTER_KEY, "Content-Type": "application/json" },
         body: JSON.stringify({ model: modelId, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0.3 }),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(90000),
       });
       const d = await r.json();
       const text = d.choices?.[0]?.message?.content?.trim();
