@@ -3335,7 +3335,7 @@ ${fullHtml}`;
     return ok(lines.join(nl));
   });
 
-  registerCommand("epic", "Epic Hyperspace activity tools", "epic [activities|navigate|screenshot|click|status|setup|scan|clear] <env> [target]", async (args) => {
+  registerCommand("epic", "Epic Hyperspace activity tools", "epic [search|activities|navigate|screenshot|click|status|setup|scan|clear] <env> [target]", async (args) => {
     const nl = String.fromCharCode(10);
     if (args[0] === "activities") {
       const env = (args[1] || "SUP").toUpperCase();
@@ -3475,6 +3475,7 @@ ${fullHtml}`;
         "  - Clicks buttons/menus by name",
         "",
         "Commands:",
+        "  epic search SUP patient     - fuzzy search and return results",
         "  epic navigate SUP Patient Lookup",
         "  epic screenshot SUP",
         "  epic click SUP Orders",
@@ -3555,6 +3556,57 @@ ${fullHtml}`;
           if (data.ok) return ok(`Menu crawl started for ${env} (depth=${depth}). Command ID: ${data.commandId}${nl}The agent will click through each menu and use AI vision to catalog all items.${nl}This may take several minutes. Check the tree afterwards with: epic tree`);
         }
         return fail(`[epic] Failed to send menu-crawl command`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "search") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const queryText = args.slice(2).join(" ");
+      if (!queryText) return fail("[epic] Usage: epic search SUP patient lookup");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "search", env, query: queryText }),
+        });
+        const sendData = await resp.json() as any;
+        if (!sendData.ok) return fail("[epic] Failed to send search command");
+        const cmdId = sendData.commandId;
+        const maxWait = 30000;
+        const pollInterval = 1500;
+        let elapsed = 0;
+        while (elapsed < maxWait) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          elapsed += pollInterval;
+          const pollResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const result = await pollResp.json() as any;
+          if (result.status === "pending") continue;
+          if (result.status === "error") {
+            return fail(`[epic] Search failed: ${result.error || "unknown error"}`);
+          }
+          if (result.status === "complete" && result.data) {
+            const d = result.data;
+            const items = d.items || [];
+            if (items.length === 0) {
+              return ok(`No results for "${queryText}" in ${env}.`);
+            }
+            const header = `=== EPIC SEARCH: "${queryText}" (${env}) === ${items.length} result${items.length !== 1 ? "s" : ""}${d.truncated ? " (truncated)" : ""}`;
+            const rows: string[] = [header, ""];
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              const cat = item.category ? ` [${item.category}]` : "";
+              rows.push(`  ${String(i + 1).padStart(2)}. ${item.name}${cat}`);
+            }
+            if (d.truncated) {
+              rows.push("");
+              rows.push("  (more results may exist - refine your query)");
+            }
+            return ok(rows.join(nl));
+          }
+        }
+        return fail(`[epic] Search timed out after ${maxWait / 1000}s. Command ID: ${cmdId}`);
       } catch (e: any) {
         return fail(`[epic] ${e.message}`);
       }

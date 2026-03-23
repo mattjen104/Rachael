@@ -3699,6 +3699,145 @@ def execute_shortcuts(cmd):
     print(f"  [shortcuts] Found {len(shortcuts)} shortcuts")
 
 
+def execute_search(cmd):
+    """One-shot search: open search bar, type query, read fuzzy results, return them."""
+    env = cmd.get("env", "SUP")
+    query_text = cmd.get("query", "")
+    command_id = cmd.get("id", "unknown")
+
+    if not query_text:
+        post_result(command_id, "error", error="Missing query parameter")
+        return
+
+    print(f"  [search] Searching '{query_text}' in {env}")
+
+    window = find_window(env)
+    if not window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    activate_window(window)
+    time.sleep(0.3)
+
+    existing_key = f"epic_activities_{env.lower()}"
+    search_method = "sendinput_ctrl_space"
+    try:
+        cfg_raw = _bridge_request(
+            "get",
+            f"/api/agent-config/{existing_key}",
+            "config",
+            timeout=10,
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+        )
+        if cfg_raw:
+            cfg_data = cfg_raw.json()
+            if cfg_data.get("value"):
+                parsed = json.loads(cfg_data["value"])
+                if isinstance(parsed, dict):
+                    search_method = parsed.get("searchMethod", search_method)
+    except Exception:
+        pass
+
+    def _launch_kbd_ctrl_space():
+        set_keyboard_backend("keybd_event")
+        sendinput_hotkey("ctrl", "space")
+        set_keyboard_backend("sendinput")
+
+    def _launch_kbd_alt_space():
+        set_keyboard_backend("keybd_event")
+        sendinput_hotkey("alt", "space")
+        set_keyboard_backend("sendinput")
+
+    SEARCH_FNS = {
+        "sendinput_ctrl_space": lambda: sendinput_hotkey("ctrl", "space"),
+        "keybd_event_ctrl_space": _launch_kbd_ctrl_space,
+        "pyautogui_ctrl_space": lambda: pyautogui.hotkey("ctrl", "space"),
+        "sendinput_alt_space": lambda: sendinput_hotkey("alt", "space"),
+        "keybd_event_alt_space": _launch_kbd_alt_space,
+        "pyautogui_alt_space": lambda: pyautogui.hotkey("alt", "space"),
+        "sendinput_ctrl_f": lambda: sendinput_hotkey("ctrl", "f"),
+        "sendinput_f3": lambda: sendinput_press("f3"),
+        "ctrl_space": lambda: sendinput_hotkey("ctrl", "space"),
+        "alt_space": lambda: sendinput_hotkey("alt", "space"),
+        "epic_button_e": lambda: sendinput_hotkey("alt", "e"),
+        "f3": lambda: sendinput_press("f3"),
+        "ctrl_f": lambda: sendinput_hotkey("ctrl", "f"),
+    }
+
+    open_search = SEARCH_FNS.get(search_method, SEARCH_FNS["sendinput_ctrl_space"])
+    open_search()
+    time.sleep(0.6)
+
+    cleared = adaptive_clear_search_bar(window, open_search_fn=open_search)
+    if not cleared:
+        print(f"  [search] Clear failed, attempting escape+reopen recovery")
+        pyautogui.press("escape")
+        time.sleep(0.5)
+        open_search()
+        time.sleep(0.8)
+        adaptive_clear_search_bar(window, open_search_fn=open_search)
+
+    pyautogui.typewrite(query_text, interval=0.04)
+    time.sleep(1.2)
+
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+    if not b64:
+        post_result(command_id, "error", error="Failed to capture screenshot")
+        return
+
+    prompt = (
+        "You are looking at an Epic Hyperspace screen.\n\n"
+        "FIRST: Check if the SEARCH BAR at the top is EXPANDED (wide/lengthened).\n"
+        "- When activated (Ctrl+Space), the search bar expands horizontally to become much wider.\n"
+        "- An expanded/wide search bar = active and focused (searchBarVisible: true).\n"
+        "- A narrow/collapsed search bar or no search bar = NOT active (searchBarVisible: false).\n"
+        "- If the search bar is expanded, read the EXACT text currently in it.\n\n"
+        "SECOND: If a search dropdown/autocomplete list is showing, list every item:\n"
+        "- name: the full activity name as displayed\n"
+        "- category: if a category/section label is shown\n\n"
+        "THIRD: Check if the dropdown appears TRUNCATED:\n"
+        "- Scrollbar on the dropdown\n"
+        "- 'more results' or '...' text\n"
+        "- List cut off at bottom edge\n"
+        "- 8+ results suggesting more exist\n\n"
+        "Return ONLY a JSON object:\n"
+        "{\"searchBarVisible\": true/false, "
+        "\"searchBarText\": \"exact text in search field or empty string\", "
+        "\"items\": [{\"name\": \"Activity Name\", \"category\": \"Category\"}], "
+        "\"truncated\": true/false, "
+        "\"reason\": \"brief explanation\"}\n\n"
+        "Return ONLY the JSON, no other text."
+    )
+
+    resp_text = ask_claude(b64, prompt)
+    items = []
+    truncated = False
+    bar_text = ""
+    if resp_text:
+        try:
+            m = re.search(r'\{[\s\S]*\}', resp_text)
+            if m:
+                parsed = json.loads(m.group())
+                items = parsed.get("items", [])
+                truncated = parsed.get("truncated", False)
+                bar_text = parsed.get("searchBarText", "")
+        except Exception:
+            pass
+
+    pyautogui.press("escape")
+    time.sleep(0.3)
+
+    post_result(command_id, "complete", screenshot_b64=b64, data={
+        "query": query_text,
+        "barText": bar_text,
+        "items": items,
+        "truncated": truncated,
+        "resultCount": len(items),
+    })
+    print(f"  [search] Found {len(items)} results for '{query_text}'")
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -3730,6 +3869,8 @@ def execute_command(cmd):
             execute_search_crawl(cmd)
         elif cmd_type == "launch":
             execute_launch(cmd)
+        elif cmd_type == "search":
+            execute_search(cmd)
         elif cmd_type == "patient":
             execute_patient(cmd)
         elif cmd_type == "read_screen":

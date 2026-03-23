@@ -223,6 +223,7 @@ export default function Minibuffer({
       { id: "citrix-portal-add", label: "citrix-portal-add", hint: "Add Citrix portal", action: () => { setMode("shell"); setQuery("citrix portal add "); setShellOutput(""); } },
       { id: "citrix-portal-scan", label: "citrix-portal-scan", hint: "Scan portal for apps", action: () => { setMode("shell"); setQuery("citrix portal scan "); setShellOutput(""); } },
       { id: "citrix-portal-remove", label: "citrix-portal-remove", hint: "Remove portal", action: () => { setMode("shell"); setQuery("citrix portal remove "); setShellOutput(""); } },
+      { id: "epic-search", label: "epic-search", hint: "Search Epic activities", action: () => { setMode("shell"); setQuery("epic search SUP "); setShellOutput(""); } },
       { id: "epic-status", label: "epic-status", hint: "Desktop agent status", action: () => { setMode("shell"); setQuery("epic status"); setShellOutput(""); executeShellCommand("epic status"); } },
       { id: "epic-screenshot", label: "epic-screenshot", hint: "Capture Hyperspace screen", action: () => { setMode("shell"); setQuery("epic screenshot "); setShellOutput(""); } },
       { id: "epic-navigate", label: "epic-navigate", hint: "Navigate Hyperspace to activity", action: () => { setMode("shell"); setQuery("epic navigate "); setShellOutput(""); } },
