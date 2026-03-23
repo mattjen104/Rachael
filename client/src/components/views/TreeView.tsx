@@ -565,10 +565,14 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       onRunCommand(`snow detail ${node.number}`);
     }
     else if (node.type === "epicActivity" && onRunCommand) {
-      onRunCommand(`epic navigate ${node.env} ${node.name}`);
+      onRunCommand(`epic launch ${node.env} ${node.name}`);
     }
     else if (node.type === "epicTreeNode" && onRunCommand) {
-      onRunCommand(`epic go ${node.env} ${node.navPath}`);
+      if (node.navPath) {
+        onRunCommand(`epic go ${node.env} ${node.navPath}`);
+      } else {
+        onRunCommand(`epic launch ${node.env} ${node.name}`);
+      }
     }
     else if (node.type === "epicWorkflow" && onRunCommand) {
       onRunCommand(`epic replay ${node.key}`);

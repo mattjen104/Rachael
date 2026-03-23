@@ -2451,10 +2451,12 @@ def execute_menu_crawl(cmd):
 
 
 def execute_search_crawl(cmd):
-    """Discover all Epic activities by iterating through the alphabet in the search bar.
-    Uses Alt+E to open the Epic menu (search is auto-focused), types each letter/prefix,
-    reads the autocomplete dropdown results via vision, and builds a complete activity list.
-    Saves progress after each prefix so interruptions don't lose data."""
+    """Discover all Epic activities by iterating through prefixes in the search bar.
+    Phase 1: Calibrate text clearing - tries each method and uses vision to confirm
+             which one actually clears the search bar in this Citrix session.
+    Phase 2: Smart prefix search - starts with single letters, expands to 2-4 chars
+             only where results are truncated. Skips prefixes already covered by
+             discovered activities. Saves progress after every batch."""
     env = cmd.get("env", "SUP")
     command_id = cmd.get("id", "unknown")
 
@@ -2475,6 +2477,7 @@ def execute_search_crawl(cmd):
     existing_key = f"epic_activities_{env.lower()}"
     existing_activities = {}
     completed_prefixes = set()
+    proven_clear_method = None
     try:
         resp = _bridge_request(
             "get", f"/api/config/{existing_key}", "fetch-activities", timeout=10,
@@ -2488,7 +2491,10 @@ def execute_search_crawl(cmd):
                 for act in existing_data.get("activities", []):
                     existing_activities[act.get("name", "").lower().strip()] = act
                 completed_prefixes = set(existing_data.get("completedPrefixes", []))
-                print(f"  [search-crawl] Found {len(existing_activities)} existing activities, {len(completed_prefixes)} completed prefixes")
+                proven_clear_method = existing_data.get("clearMethod", None)
+                print(f"  [search-crawl] Resumed: {len(existing_activities)} activities, {len(completed_prefixes)} prefixes done")
+                if proven_clear_method:
+                    print(f"  [search-crawl] Previously proven clear method: {proven_clear_method}")
     except Exception as e:
         print(f"  [search-crawl] Could not load existing activities: {e}")
 
@@ -2498,7 +2504,6 @@ def execute_search_crawl(cmd):
     MAX_PREFIX_LEN = 4
 
     def save_progress(completed):
-        """Upload current activity list and completed prefixes to server."""
         act_list = list(all_activities.values())
         payload = {
             "activities": act_list,
@@ -2506,6 +2511,7 @@ def execute_search_crawl(cmd):
             "discoveredAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "totalCount": len(act_list),
             "completedPrefixes": sorted(list(completed)),
+            "clearMethod": proven_clear_method,
         }
         _bridge_request(
             "put", f"/api/config/{existing_key}", "save-activities", timeout=30, max_retries=2,
@@ -2513,16 +2519,36 @@ def execute_search_crawl(cmd):
             json={"value": json.dumps(payload), "category": "epic"},
         )
 
-    clear_method = "ctrl_a"
-
-    def read_search_state():
-        """Screenshot and read both the search bar text AND autocomplete results.
-        Returns parsed dict or None on error."""
+    def read_search_bar_text():
+        """Lightweight vision call that ONLY reads the search bar text (no item listing).
+        Used during calibration to minimize cost."""
         img = screenshot_window(window)
         b64 = img_to_base64(img)
         if not b64:
             return None
+        prompt = (
+            "Look at this Epic Hyperspace screen. "
+            "Is there a search bar or text input field visible? "
+            "If yes, read the EXACT text currently in that field. "
+            "Return ONLY: {\"visible\": true/false, \"text\": \"exact contents or empty string\"}"
+        )
+        resp_text = ask_claude(b64, prompt)
+        if not resp_text:
+            return None
+        try:
+            m = re.search(r'\{[\s\S]*?\}', resp_text)
+            if m:
+                return json.loads(m.group())
+        except Exception:
+            pass
+        return None
 
+    def read_search_results():
+        """Full vision call that reads search bar text AND autocomplete dropdown items."""
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+        if not b64:
+            return None
         prompt = (
             "You are looking at an Epic Hyperspace screen.\n\n"
             "FIRST: Check if a SEARCH BAR is visible and focused.\n"
@@ -2544,7 +2570,6 @@ def execute_search_crawl(cmd):
             "\"reason\": \"brief explanation\"}\n\n"
             "Return ONLY the JSON, no other text."
         )
-
         resp_text = ask_claude(b64, prompt)
         if not resp_text:
             return None
@@ -2561,107 +2586,193 @@ def execute_search_crawl(cmd):
         return None
 
     def ensure_search_focused():
-        """Open/focus the search bar with Ctrl+Space."""
         activate_window(window)
         time.sleep(0.2)
         pyautogui.hotkey("ctrl", "space")
         time.sleep(0.6)
 
-    def clear_search_bar():
-        """Clear the search bar using the current best known method."""
-        nonlocal clear_method
-        if clear_method == "ctrl_a":
-            pyautogui.keyDown("ctrl")
-            time.sleep(0.05)
-            pyautogui.press("a")
-            time.sleep(0.05)
-            pyautogui.keyUp("ctrl")
-            time.sleep(0.1)
-            pyautogui.press("delete")
-            time.sleep(0.1)
-        elif clear_method == "home_shift_end":
-            pyautogui.press("home")
-            time.sleep(0.05)
-            pyautogui.keyDown("shift")
-            time.sleep(0.05)
-            pyautogui.press("end")
-            time.sleep(0.05)
-            pyautogui.keyUp("shift")
-            time.sleep(0.1)
-            pyautogui.press("delete")
-            time.sleep(0.1)
-        elif clear_method == "backspace":
-            for _ in range(30):
-                pyautogui.press("backspace")
-            time.sleep(0.1)
-        elif clear_method == "triple_click":
-            pyautogui.click(clicks=3, interval=0.05)
-            time.sleep(0.1)
-            pyautogui.press("delete")
-            time.sleep(0.1)
-        elif clear_method == "escape_reopen":
-            pyautogui.press("escape")
-            time.sleep(0.3)
-            pyautogui.hotkey("ctrl", "space")
-            time.sleep(0.6)
+    CLEAR_METHODS = {
+        "escape_reopen": lambda: (
+            pyautogui.press("escape"),
+            time.sleep(0.3),
+            pyautogui.hotkey("ctrl", "space"),
+            time.sleep(0.6),
+        ),
+        "triple_click_del": lambda: (
+            pyautogui.click(clicks=3, interval=0.05),
+            time.sleep(0.1),
+            pyautogui.press("delete"),
+            time.sleep(0.1),
+        ),
+        "home_shift_end_del": lambda: (
+            pyautogui.press("home"),
+            time.sleep(0.05),
+            pyautogui.keyDown("shift"),
+            time.sleep(0.05),
+            pyautogui.press("end"),
+            time.sleep(0.05),
+            pyautogui.keyUp("shift"),
+            time.sleep(0.1),
+            pyautogui.press("delete"),
+            time.sleep(0.1),
+        ),
+        "ctrl_a_del": lambda: (
+            pyautogui.keyDown("ctrl"),
+            time.sleep(0.05),
+            pyautogui.press("a"),
+            time.sleep(0.05),
+            pyautogui.keyUp("ctrl"),
+            time.sleep(0.1),
+            pyautogui.press("delete"),
+            time.sleep(0.1),
+        ),
+        "backspace_30": lambda: (
+            [pyautogui.press("backspace") for _ in range(30)],
+            time.sleep(0.1),
+        ),
+    }
 
-    CLEAR_METHODS = ["ctrl_a", "home_shift_end", "backspace", "escape_reopen"]
-
-    def type_prefix_verified(prefix, max_attempts=3):
-        """Type a prefix and VERIFY via vision that it's correct.
-        Tries different clearing methods if text accumulates."""
-        nonlocal clear_method, search_bar_open
-
-        for attempt in range(max_attempts):
-            clear_search_bar()
-            pyautogui.typewrite(prefix, interval=0.03)
-            time.sleep(1.0)
-
-            state = read_search_state()
-            if state is None:
-                print(f"  [search-crawl]   Vision check failed on attempt {attempt+1}")
-                continue
-
-            if not state.get("searchBarVisible", True):
-                print(f"  [search-crawl]   Search bar not visible, reopening...")
-                search_bar_open = False
-                ensure_search_focused()
-                search_bar_open = True
-                continue
-
-            actual_text = state.get("searchBarText", "").strip().lower()
-            expected = prefix.lower()
-
-            if actual_text == expected:
-                if attempt > 0:
-                    print(f"  [search-crawl]   Verified '{prefix}' on attempt {attempt+1} (method: {clear_method})")
-                return state
-
-            print(f"  [search-crawl]   Expected '{prefix}' but search bar shows '{actual_text}' (method: {clear_method})")
-
-            current_idx = CLEAR_METHODS.index(clear_method) if clear_method in CLEAR_METHODS else 0
-            next_idx = (current_idx + 1) % len(CLEAR_METHODS)
-            clear_method = CLEAR_METHODS[next_idx]
-            print(f"  [search-crawl]   Switching to clear method: {clear_method}")
-
-        print(f"  [search-crawl]   All clear methods failed for '{prefix}', escaping and reopening")
-        pyautogui.press("escape")
-        time.sleep(0.3)
-        search_bar_open = False
+    # ── PHASE 1: CALIBRATE TEXT CLEARING ──
+    # Type a known string, then try each clear method and use vision to confirm
+    # which one actually empties the search bar in this Citrix session.
+    if not proven_clear_method:
+        print(f"  [search-crawl] === PHASE 1: CALIBRATING TEXT CLEAR METHOD ===")
         ensure_search_focused()
-        search_bar_open = True
-        pyautogui.typewrite(prefix, interval=0.03)
-        time.sleep(1.0)
-        return read_search_state()
 
-    prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
+        pyautogui.typewrite("testclear", interval=0.03)
+        time.sleep(0.5)
+
+        check = read_search_bar_text()
+        if not check or not check.get("visible", False):
+            print(f"  [search-crawl]   Search bar not visible after typing test text, trying Ctrl+Space again")
+            ensure_search_focused()
+            pyautogui.typewrite("testclear", interval=0.03)
+            time.sleep(0.5)
+
+        for method_name, method_fn in CLEAR_METHODS.items():
+            print(f"  [search-crawl]   Testing clear method: {method_name}")
+
+            if method_name != "escape_reopen":
+                pyautogui.typewrite("testclear", interval=0.03)
+                time.sleep(0.3)
+
+            method_fn()
+            time.sleep(0.3)
+
+            state = read_search_bar_text()
+            if state is None:
+                print(f"  [search-crawl]     Vision failed, skipping")
+                if method_name == "escape_reopen":
+                    ensure_search_focused()
+                continue
+
+            bar_text = state.get("text", "").strip()
+            is_visible = state.get("visible", False)
+
+            if method_name == "escape_reopen":
+                if is_visible and len(bar_text) == 0:
+                    print(f"  [search-crawl]     escape_reopen: WORKS (bar visible, empty)")
+                    proven_clear_method = method_name
+                    break
+                else:
+                    print(f"  [search-crawl]     escape_reopen: bar text='{bar_text}', visible={is_visible}")
+                    if not is_visible:
+                        ensure_search_focused()
+                    continue
+
+            if len(bar_text) == 0:
+                print(f"  [search-crawl]     {method_name}: WORKS (bar is empty)")
+                proven_clear_method = method_name
+                break
+            else:
+                print(f"  [search-crawl]     {method_name}: FAILED (bar still shows '{bar_text}')")
+
+        if not proven_clear_method:
+            proven_clear_method = "escape_reopen"
+            print(f"  [search-crawl]   No method confirmed, defaulting to escape_reopen")
+        else:
+            print(f"  [search-crawl]   === PROVEN CLEAR METHOD: {proven_clear_method} ===")
+
+        save_progress(completed_prefixes)
+    else:
+        print(f"  [search-crawl] Using previously proven clear method: {proven_clear_method}")
+
+    LEGACY_METHOD_MAP = {
+        "ctrl_a": "ctrl_a_del",
+        "home_shift_end": "home_shift_end_del",
+        "backspace": "backspace_30",
+        "triple_click": "triple_click_del",
+    }
+
+    if proven_clear_method in LEGACY_METHOD_MAP:
+        old_name = proven_clear_method
+        proven_clear_method = LEGACY_METHOD_MAP[old_name]
+        print(f"  [search-crawl] Migrated legacy clear method '{old_name}' -> '{proven_clear_method}'")
+    elif proven_clear_method and proven_clear_method not in CLEAR_METHODS:
+        print(f"  [search-crawl] Unknown clear method '{proven_clear_method}', recalibrating")
+        proven_clear_method = None
+
+    def clear_search_bar():
+        CLEAR_METHODS.get(proven_clear_method, CLEAR_METHODS["escape_reopen"])()
+
+    search_bar_open = False
+
+    def type_and_read(prefix, verify=False):
+        """Clear the bar, type prefix, read results. If verify=True, also
+        confirm the search bar shows the correct text (costs an extra vision call
+        only on first use per session or after errors)."""
+        nonlocal search_bar_open
+
+        if not search_bar_open:
+            ensure_search_focused()
+            search_bar_open = True
+
+        clear_search_bar()
+        if proven_clear_method == "escape_reopen":
+            search_bar_open = True
+
+        pyautogui.typewrite(prefix, interval=0.03)
+        time.sleep(0.8)
+
+        state = read_search_results()
+        if state is None:
+            return None
+
+        if not state.get("searchBarVisible", True):
+            search_bar_open = False
+            ensure_search_focused()
+            search_bar_open = True
+            clear_search_bar()
+            if proven_clear_method == "escape_reopen":
+                search_bar_open = True
+            pyautogui.typewrite(prefix, interval=0.03)
+            time.sleep(0.8)
+            state = read_search_results()
+
+        if verify and state:
+            actual = state.get("searchBarText", "").strip().lower()
+            if actual != prefix.lower():
+                print(f"  [search-crawl]   Verify mismatch: expected '{prefix}' got '{actual}', retrying")
+                clear_search_bar()
+                if proven_clear_method == "escape_reopen":
+                    search_bar_open = True
+                pyautogui.typewrite(prefix, interval=0.03)
+                time.sleep(0.8)
+                state = read_search_results()
+
+        return state
+
+    # ── PHASE 2: SMART PREFIX SEARCH ──
+    # Start with single letters (a-z). If a letter returns truncated results,
+    # expand to 2-letter prefixes (aa-az). Continue up to MAX_PREFIX_LEN.
+    # Skip prefixes where all possible activities are already known.
+    print(f"  [search-crawl] === PHASE 2: ACTIVITY DISCOVERY ===")
+
+    prefix_queue = list("abcdefghijklmnopqrstuvwxyz")
     consecutive_errors = 0
     total_searched = 0
     search_bar_open = False
-
-    print(f"  [search-crawl] Opening search bar with Ctrl+Space...")
-    ensure_search_focused()
-    search_bar_open = True
+    verify_next = True
 
     while prefix_queue:
         prefix = prefix_queue.pop(0)
@@ -2670,28 +2781,36 @@ def execute_search_crawl(cmd):
             continue
 
         if consecutive_errors >= 5:
-            print(f"  [search-crawl] Too many consecutive errors, stopping")
+            print(f"  [search-crawl] Too many consecutive errors ({consecutive_errors}), stopping")
             break
 
+        known_covering = sum(1 for name in all_activities if name.startswith(prefix.lower()))
         remaining = sum(1 for p in prefix_queue if p not in completed_prefixes)
-        print(f"  [search-crawl] '{prefix}' ({remaining} left, {len(all_activities)} found)")
+
+        if len(prefix) >= 2 and known_covering > 0 and known_covering < TRUNCATION_THRESHOLD:
+            parent = prefix[:-1]
+            if parent in completed_prefixes:
+                print(f"  [search-crawl] '{prefix}' skipped ({known_covering} already known, parent '{parent}' was not truncated)")
+                completed_prefixes.add(prefix)
+                continue
+
+        print(f"  [search-crawl] '{prefix}' ({remaining} left, {len(all_activities)} total, {known_covering} known for this prefix)")
 
         try:
-            if not search_bar_open:
-                print(f"  [search-crawl]   Reopening search bar...")
-                ensure_search_focused()
-                search_bar_open = True
+            state = type_and_read(prefix, verify=verify_next)
+            verify_next = False
 
-            state = type_prefix_verified(prefix)
             if state is None:
-                print(f"  [search-crawl]   Could not verify prefix '{prefix}'")
+                print(f"  [search-crawl]   Vision failed for '{prefix}'")
                 consecutive_errors += 1
+                verify_next = True
                 continue
 
             if not state.get("searchBarVisible", True):
-                print(f"  [search-crawl]   Search bar still not visible after retries")
+                print(f"  [search-crawl]   Search bar not visible, marking error")
                 consecutive_errors += 1
                 search_bar_open = False
+                verify_next = True
                 continue
 
             results = state.get("items", [])
@@ -2700,7 +2819,6 @@ def execute_search_crawl(cmd):
 
             prefix_lower = prefix.lower()
             prefix_matches = []
-            fuzzy_matches = []
             new_count = 0
             for item in results:
                 name = item.get("name", "").strip()
@@ -2716,18 +2834,12 @@ def execute_search_crawl(cmd):
                     new_count += 1
                 if name_key.startswith(prefix_lower):
                     prefix_matches.append(name)
-                else:
-                    fuzzy_matches.append(name)
 
             real_count = len(prefix_matches)
             is_actually_truncated = truncated and real_count >= TRUNCATION_THRESHOLD
-            if fuzzy_matches:
-                print(f"  [search-crawl]   {len(results)} results ({real_count} prefix match, {len(fuzzy_matches)} fuzzy), {new_count} new")
-            else:
-                print(f"  [search-crawl]   {len(results)} results, {new_count} new")
 
-            status = "TRUNCATED -> expanding" if is_actually_truncated else "done"
-            print(f"  [search-crawl]   [{status}]")
+            print(f"  [search-crawl]   {len(results)} results ({real_count} prefix-match), {new_count} new"
+                  f"{' [TRUNCATED]' if is_actually_truncated else ''}")
 
             if is_actually_truncated and len(prefix) < MAX_PREFIX_LEN:
                 expansions = [prefix + c for c in "abcdefghijklmnopqrstuvwxyz"]
@@ -2742,11 +2854,10 @@ def execute_search_crawl(cmd):
                     print(f"  [search-crawl]   Queued {added} sub-prefixes: {prefix}a..{prefix}z")
 
             completed_prefixes.add(prefix)
-            consecutive_errors = 0
 
-            if total_searched % 5 == 0:
+            if total_searched % 3 == 0:
                 save_progress(completed_prefixes)
-                print(f"  [search-crawl]   Progress saved ({len(all_activities)} activities)")
+                print(f"  [search-crawl]   Saved ({len(all_activities)} activities, {len(completed_prefixes)} prefixes)")
 
             total_searched += 1
 
@@ -2755,14 +2866,18 @@ def execute_search_crawl(cmd):
             traceback.print_exc()
             consecutive_errors += 1
             search_bar_open = False
+            verify_next = True
             try:
                 pyautogui.press("escape")
                 time.sleep(0.3)
             except Exception:
                 pass
 
-    pyautogui.press("escape")
-    time.sleep(0.2)
+    try:
+        pyautogui.press("escape")
+        time.sleep(0.2)
+    except Exception:
+        pass
 
     print(f"  [search-crawl] COMPLETE! {len(all_activities)} activities from {total_searched} searches")
     save_progress(completed_prefixes)
@@ -2772,12 +2887,14 @@ def execute_search_crawl(cmd):
     post_result(command_id, "complete", screenshot_b64=final_b64, data={
         "totalActivities": len(all_activities),
         "prefixesCompleted": len(completed_prefixes),
+        "clearMethod": proven_clear_method,
     })
 
 
 def execute_launch(cmd):
     """Launch an activity using Epic's search bar - fastest way to open anything.
-    Uses Alt+E to open Epic menu (search bar is immediately focused), types the
+    Uses Ctrl+Space to open the search bar, clears any existing text using the
+    proven clear method (from search-crawl calibration if available), types the
     activity name, and presses Enter to launch."""
     env = cmd.get("env", "SUP")
     activity_name = cmd.get("activity", "")
@@ -2794,14 +2911,61 @@ def execute_launch(cmd):
 
     print(f"  [launch] Opening '{activity_name}' via Ctrl+Space search in {env}")
 
+    clear_method = None
+    existing_key = f"epic_activities_{env.lower()}"
+    try:
+        resp = _bridge_request(
+            "get", f"/api/config/{existing_key}", "fetch-clear-method", timeout=5,
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+        )
+        if resp and resp.status_code == 200:
+            data = resp.json()
+            val = data.get("value", "")
+            if val:
+                existing_data = json.loads(val) if isinstance(val, str) else val
+                clear_method = existing_data.get("clearMethod")
+                if clear_method:
+                    print(f"  [launch] Using proven clear method: {clear_method}")
+    except Exception:
+        pass
+
     activate_window(window)
     time.sleep(0.3)
 
     pyautogui.hotkey("ctrl", "space")
     time.sleep(0.6)
 
-    pyautogui.hotkey("ctrl", "a")
-    time.sleep(0.05)
+    if clear_method == "escape_reopen":
+        pyautogui.press("escape")
+        time.sleep(0.3)
+        pyautogui.hotkey("ctrl", "space")
+        time.sleep(0.6)
+    elif clear_method == "triple_click_del":
+        pyautogui.click(clicks=3, interval=0.05)
+        time.sleep(0.1)
+        pyautogui.press("delete")
+        time.sleep(0.1)
+    elif clear_method == "home_shift_end_del":
+        pyautogui.press("home")
+        time.sleep(0.05)
+        pyautogui.keyDown("shift")
+        time.sleep(0.05)
+        pyautogui.press("end")
+        time.sleep(0.05)
+        pyautogui.keyUp("shift")
+        time.sleep(0.1)
+        pyautogui.press("delete")
+        time.sleep(0.1)
+    elif clear_method == "backspace_30":
+        for _ in range(30):
+            pyautogui.press("backspace")
+        time.sleep(0.1)
+    else:
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.05)
+        pyautogui.press("delete")
+        time.sleep(0.1)
+
     pyautogui.typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
 
