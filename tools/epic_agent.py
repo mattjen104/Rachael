@@ -2535,8 +2535,12 @@ def execute_search_crawl(cmd):
             return None
         prompt = (
             "Look at this Epic Hyperspace screen. "
-            "Is there a search bar or text input field visible? "
-            "If yes, read the EXACT text currently in that field. "
+            "Is there a WIDE/EXPANDED search bar at the top of the screen? "
+            "When the search bar is activated (via Ctrl+Space), it expands/lengthens horizontally "
+            "to become much wider than its resting state. "
+            "A wide, expanded search bar means it is active and focused. "
+            "A narrow/short search bar or no search bar means it is NOT active. "
+            "If an expanded search bar is visible, read the EXACT text in it. "
             "Return ONLY: {\"visible\": true/false, \"text\": \"exact contents or empty string\"}"
         )
         resp_text = ask_claude(b64, prompt)
@@ -2558,9 +2562,11 @@ def execute_search_crawl(cmd):
             return None
         prompt = (
             "You are looking at an Epic Hyperspace screen.\n\n"
-            "FIRST: Check if a SEARCH BAR is visible and focused.\n"
-            "- If yes, read the EXACT text currently in the search bar field.\n"
-            "- If no search bar is visible, set searchBarVisible to false.\n\n"
+            "FIRST: Check if the SEARCH BAR at the top is EXPANDED (wide/lengthened).\n"
+            "- When activated (Ctrl+Space), the search bar expands horizontally to become much wider.\n"
+            "- An expanded/wide search bar = active and focused (searchBarVisible: true).\n"
+            "- A narrow/collapsed search bar or no search bar = NOT active (searchBarVisible: false).\n"
+            "- If the search bar is expanded, read the EXACT text currently in it.\n\n"
             "SECOND: If a search dropdown/autocomplete list is showing, list every item:\n"
             "- name: the full activity name as displayed\n"
             "- category: if a category/section label is shown\n\n"
