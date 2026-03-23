@@ -2480,6 +2480,7 @@ def execute_search_crawl(cmd):
     existing_activities = {}
     completed_prefixes = set()
     proven_clear_method = None
+    proven_search_method_saved = None
     try:
         resp = _bridge_request(
             "get", f"/api/config/{existing_key}", "fetch-activities", timeout=10,
@@ -2494,9 +2495,12 @@ def execute_search_crawl(cmd):
                     existing_activities[act.get("name", "").lower().strip()] = act
                 completed_prefixes = set(existing_data.get("completedPrefixes", []))
                 proven_clear_method = existing_data.get("clearMethod", None)
+                proven_search_method_saved = existing_data.get("searchMethod", None)
                 print(f"  [search-crawl] Resumed: {len(existing_activities)} activities, {len(completed_prefixes)} prefixes done")
                 if proven_clear_method:
                     print(f"  [search-crawl] Previously proven clear method: {proven_clear_method}")
+                if proven_search_method_saved:
+                    print(f"  [search-crawl] Previously proven search method: {proven_search_method_saved}")
     except Exception as e:
         print(f"  [search-crawl] Could not load existing activities: {e}")
 
@@ -2514,6 +2518,7 @@ def execute_search_crawl(cmd):
             "totalCount": len(act_list),
             "completedPrefixes": sorted(list(completed)),
             "clearMethod": proven_clear_method,
+            "searchMethod": proven_search_method,
         }
         _bridge_request(
             "put", f"/api/config/{existing_key}", "save-activities", timeout=30, max_retries=2,
@@ -2587,7 +2592,7 @@ def execute_search_crawl(cmd):
             pass
         return None
 
-    proven_search_method = None
+    proven_search_method = proven_search_method_saved
 
     SEARCH_OPENERS = [
         ("ctrl_space", lambda: pyautogui.hotkey("ctrl", "space")),
@@ -2633,11 +2638,20 @@ def execute_search_crawl(cmd):
         pyautogui.hotkey("ctrl", "space")
         time.sleep(0.6)
 
+    def _open_search_bar():
+        """Use the proven search opener or default to ctrl+space."""
+        if proven_search_method:
+            for name, fn in SEARCH_OPENERS:
+                if name == proven_search_method:
+                    fn()
+                    return
+        pyautogui.hotkey("ctrl", "space")
+
     CLEAR_METHODS = {
         "escape_reopen": lambda: (
             pyautogui.press("escape"),
             time.sleep(0.3),
-            pyautogui.hotkey("ctrl", "space"),
+            _open_search_bar(),
             time.sleep(0.6),
         ),
         "triple_click_del": lambda: (
@@ -3015,13 +3029,14 @@ def execute_launch(cmd):
         post_result(command_id, "error", error=f"No {env} window found")
         return
 
-    print(f"  [launch] Opening '{activity_name}' via Ctrl+Space search in {env}")
+    print(f"  [launch] Opening '{activity_name}' via search bar in {env}")
 
     clear_method = None
+    search_method = None
     existing_key = f"epic_activities_{env.lower()}"
     try:
         resp = _bridge_request(
-            "get", f"/api/config/{existing_key}", "fetch-clear-method", timeout=5,
+            "get", f"/api/config/{existing_key}", "fetch-methods", timeout=5,
             headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
         )
         if resp and resp.status_code == 200:
@@ -3030,21 +3045,33 @@ def execute_launch(cmd):
             if val:
                 existing_data = json.loads(val) if isinstance(val, str) else val
                 clear_method = existing_data.get("clearMethod")
+                search_method = existing_data.get("searchMethod")
                 if clear_method:
-                    print(f"  [launch] Using proven clear method: {clear_method}")
+                    print(f"  [launch] Proven clear method: {clear_method}")
+                if search_method:
+                    print(f"  [launch] Proven search method: {search_method}")
     except Exception:
         pass
+
+    SEARCH_FNS = {
+        "ctrl_space": lambda: pyautogui.hotkey("ctrl", "space"),
+        "alt_space": lambda: pyautogui.hotkey("alt", "space"),
+        "epic_button_e": lambda: pyautogui.hotkey("alt", "e"),
+        "f3": lambda: pyautogui.press("f3"),
+        "ctrl_f": lambda: pyautogui.hotkey("ctrl", "f"),
+    }
 
     activate_window(window)
     time.sleep(0.3)
 
-    pyautogui.hotkey("ctrl", "space")
+    open_search = SEARCH_FNS.get(search_method, SEARCH_FNS["ctrl_space"])
+    open_search()
     time.sleep(0.6)
 
     if clear_method == "escape_reopen":
         pyautogui.press("escape")
         time.sleep(0.3)
-        pyautogui.hotkey("ctrl", "space")
+        open_search()
         time.sleep(0.6)
     elif clear_method == "triple_click_del":
         pyautogui.click(clicks=3, interval=0.05)
