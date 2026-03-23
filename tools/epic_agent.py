@@ -4099,15 +4099,74 @@ def execute_view(cmd):
 
     _vimium_element_maps[env_upper] = hint_map
 
+    activity_label = cmd.get("_activity_label", "") or _detect_activity_name(window_title)
+
     post_result(command_id, "complete", data={
         "window": window_title,
         "focus": focus_label,
+        "activity": activity_label,
         "elements": elements,
         "hintMap": hint_map,
         "elementCount": len(elements),
         "interactiveCount": len(interactive_elements),
     })
-    print(f"  [view] Found {len(interactive_elements)} interactive, {len(elements)} total elements")
+    print(f"  [view] Found {len(interactive_elements)} interactive, {len(elements)} total elements" +
+          (f" (activity: {activity_label})" if activity_label else ""))
+
+
+def _detect_activity_name(window_title):
+    """Try to extract the current Epic activity name from the window title."""
+    if not window_title:
+        return ""
+    parts = window_title.split(" - ")
+    if len(parts) >= 2:
+        candidate = parts[-1].strip()
+        skip = {"Epic", "Hyperspace", "Hyperdrive", "SUP", "POC", "TST", "PRD"}
+        if candidate.upper() not in {s.upper() for s in skip} and len(candidate) > 1:
+            return candidate
+    for part in reversed(parts):
+        part = part.strip()
+        if part and len(part) > 2:
+            upper = part.upper()
+            if not any(k in upper for k in ["EPIC", "HYPERSPACE", "HYPERDRIVE"]):
+                return part
+    return ""
+
+
+def execute_screen(cmd):
+    """Navigate to a scraped activity, read the accessibility tree, and return fields."""
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+    activity = cmd.get("activity", "")
+
+    if not activity:
+        post_result(command_id, "error", error="Missing activity name")
+        return
+
+    print(f"  [screen] Navigate to '{activity}' in {env}, then read tree")
+
+    nav_id = f"screen-nav-{command_id}"
+    nav_cmd = {"id": nav_id, "type": "navigate_path", "env": env}
+
+    nav_cmd["path"] = activity
+    nav_cmd["client"] = "hyperspace"
+
+    try:
+        execute_navigate_path(nav_cmd)
+    except Exception as e:
+        print(f"  [screen] Navigation error (continuing to read tree): {e}")
+
+    time.sleep(1.5)
+
+    print(f"  [screen] Navigation sent, reading accessibility tree...")
+    view_cmd = {
+        "id": command_id,
+        "env": env,
+        "showAll": cmd.get("showAll", False),
+        "focus": cmd.get("focus", ""),
+        "_activity_label": activity,
+    }
+    execute_view(view_cmd)
 
 
 def execute_do(cmd):
@@ -4297,6 +4356,8 @@ def execute_command(cmd):
             execute_view(cmd)
         elif cmd_type == "do":
             execute_do(cmd)
+        elif cmd_type == "screen":
+            execute_screen(cmd)
         elif cmd_type == "patient":
             execute_patient(cmd)
         elif cmd_type == "read_screen":
