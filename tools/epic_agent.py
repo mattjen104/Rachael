@@ -2741,8 +2741,8 @@ def execute_menu_crawl(cmd):
 
 def execute_search_crawl(cmd):
     """Discover all Epic activities by iterating through prefixes in the search bar.
-    Phase 1: Calibrate text clearing - tries each method and uses vision to confirm
-             which one actually clears the search bar in this Citrix session.
+    Phase 1: Discover working search opener shortcut and verify bar can be cleared
+             using shared adaptive_clear_search_bar (end+bksp, shift-select, escape+reopen, delete).
     Phase 2: Smart prefix search - starts with 2-letter combos (aa-zz) since
              Epic search requires minimum 2 chars. Expands to 3-4 char prefixes
              only where results are truncated. Search is FUZZY so all returned
