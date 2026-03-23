@@ -3708,6 +3708,261 @@ ${fullHtml}`;
       }
     }
 
+    if (args[0] === "view") {
+      const envSet = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
+      const firstArg = (args[1] || "").toUpperCase();
+      const env = envSet.has(firstArg) ? firstArg : "SUP";
+      const restArgs = envSet.has(firstArg) ? args.slice(2) : args.slice(1);
+      const showAll = restArgs.includes("--all");
+      let focus = "";
+      const focusIdx = restArgs.indexOf("--focus");
+      if (focusIdx !== -1 && restArgs[focusIdx + 1]) {
+        focus = restArgs.slice(focusIdx + 1).filter(a => a !== "--all").join(" ");
+      }
+
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "view", env, showAll, focus }),
+        });
+        const sendData = await resp.json() as any;
+        if (!sendData.ok) return fail("[epic] Failed to send view command");
+        const cmdId = sendData.commandId;
+
+        let result: any = null;
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const pollData = await poll.json() as any;
+          if (pollData.status && pollData.status !== "pending") {
+            result = pollData;
+            break;
+          }
+        }
+
+        if (!result) return fail("[epic] View timed out (10s). Is the desktop agent running?");
+        if (result.status === "error") return fail(`[epic] ${result.error || "View failed"}`);
+
+        const d = result.data || {};
+        const elements = d.elements || [];
+        const window = d.window || "Unknown";
+        const focusLabel = d.focus || "";
+
+        if (!elements.length) {
+          return ok(`=== EPIC VIEW: ${env} ===${nl}Window: ${window}${focusLabel ? `${nl}Focus: ${focusLabel}` : ""}${nl}${nl}No interactive elements found.`);
+        }
+
+        const groups = new Map<string, any[]>();
+        for (const el of elements) {
+          const group = el.parent || "Window";
+          if (!groups.has(group)) groups.set(group, []);
+          groups.get(group)!.push(el);
+        }
+
+        const lines: string[] = [];
+        lines.push(`=== EPIC VIEW: ${env} ===`);
+        lines.push(`Window: ${window}`);
+        if (focusLabel) lines.push(`Focus: ${focusLabel}`);
+        lines.push(`Elements: ${d.interactiveCount || 0} interactive` + (showAll ? `, ${elements.length} total` : ""));
+        lines.push("");
+
+        for (const [group, items] of groups) {
+          lines.push(`--- ${group} ---`);
+          for (const el of items) {
+            const hint = el.hint ? `[${el.hint}]` : "    ";
+            const ct = el.controlType || "";
+            const name = el.name || "";
+            const enabled = el.enabled === false ? " (disabled)" : "";
+            let suffix = "";
+            if (el.value) suffix = ` = "${el.value}"`;
+            if (el.checked === true) suffix = " [x]";
+            if (el.checked === false) suffix = " [ ]";
+            if (el.static) {
+              lines.push(`     ${ct.padEnd(12)} ${name}${suffix}`);
+            } else {
+              lines.push(`  ${hint.padEnd(5)} ${ct.padEnd(12)} ${name}${enabled}${suffix}`);
+            }
+          }
+          lines.push("");
+        }
+
+        lines.push(`Interact: epic do ${env} <hint> [value]`);
+        lines.push(`Refresh:  epic view ${env}`);
+        return ok(lines.join(nl));
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "do") {
+      const envSet = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
+      const firstArg = (args[1] || "").toUpperCase();
+      const hasEnv = envSet.has(firstArg);
+      const env = hasEnv ? firstArg : "SUP";
+      const hint = (hasEnv ? args[2] || "" : args[1] || "").toLowerCase();
+      const value = (hasEnv ? args.slice(3) : args.slice(2)).join(" ");
+      if (!hint) return fail(`[epic] Usage: epic do [env] <hint> [value]${nl}Run 'epic view' first to see available hints.`);
+
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "do", env, hint, value }),
+        });
+        const sendData = await resp.json() as any;
+        if (!sendData.ok) return fail("[epic] Failed to send do command");
+        const cmdId = sendData.commandId;
+
+        let result: any = null;
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const pollData = await poll.json() as any;
+          if (pollData.status && pollData.status !== "pending") {
+            result = pollData;
+            break;
+          }
+        }
+
+        if (!result) return fail("[epic] Action timed out (10s). Is the desktop agent running?");
+        if (result.status === "error") return fail(`[epic] ${result.error || "Action failed"}`);
+
+        const d = result.data || {};
+        const elements = d.elements || [];
+        const window = d.window || "Unknown";
+
+        const lines: string[] = [];
+        lines.push(`=== EPIC DO: ${env} [${hint}]${value ? ` = "${value}"` : ""} ===`);
+        lines.push(`Window: ${window}`);
+        lines.push(`Action: complete`);
+        lines.push("");
+
+        if (elements.length) {
+          const groups = new Map<string, any[]>();
+          for (const el of elements) {
+            const group = el.parent || "Window";
+            if (!groups.has(group)) groups.set(group, []);
+            groups.get(group)!.push(el);
+          }
+
+          lines.push("--- Updated View ---");
+          for (const [group, items] of groups) {
+            lines.push(`--- ${group} ---`);
+            for (const el of items) {
+              const hintLabel = el.hint ? `[${el.hint}]` : "    ";
+              const ct = el.controlType || "";
+              const name = el.name || "";
+              const enabled = el.enabled === false ? " (disabled)" : "";
+              let suffix = "";
+              if (el.value) suffix = ` = "${el.value}"`;
+              if (el.checked === true) suffix = " [x]";
+              if (el.checked === false) suffix = " [ ]";
+              if (el.static) {
+                lines.push(`     ${ct.padEnd(12)} ${name}${suffix}`);
+              } else {
+                lines.push(`  ${hintLabel.padEnd(5)} ${ct.padEnd(12)} ${name}${enabled}${suffix}`);
+              }
+            }
+            lines.push("");
+          }
+        }
+
+        lines.push(`Next: epic do ${env} <hint> [value]`);
+        return ok(lines.join(nl));
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "menu") {
+      const envSet = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
+      const firstArg = (args[1] || "").toUpperCase();
+      const hasEnv = envSet.has(firstArg);
+      const envArg = hasEnv ? firstArg : "SUP";
+      const restArgs = hasEnv ? args.slice(2) : args.slice(1);
+      const goFlag = restArgs.includes("--go");
+      const indices = restArgs.filter(a => a !== "--go" && /^\d+$/.test(a)).map(Number);
+
+      let tree: any = null;
+      let clientType = "";
+      for (const client of ["hyperspace", "text"]) {
+        const key = `epic_tree_${envArg.toLowerCase()}_${client}`;
+        const cfg = await storage.getAgentConfig(key);
+        if (cfg?.value) {
+          try {
+            tree = JSON.parse(cfg.value);
+            clientType = client;
+            break;
+          } catch {}
+        }
+      }
+
+      if (!tree) return fail(`[epic] No stored tree for ${envArg}. Run: epic tree --refresh ${envArg}`);
+
+      let current = tree;
+      const breadcrumbs = [tree.client || clientType];
+
+      for (const idx of indices) {
+        const children = current.children || [];
+        if (idx < 1 || idx > children.length) {
+          return fail(`[epic] Invalid index ${idx}. Range: 1-${children.length}`);
+        }
+        current = children[idx - 1];
+        breadcrumbs.push(current.name || `[${idx}]`);
+      }
+
+      if (goFlag && current.path) {
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "navigate_path", env: envArg, path: current.path, client: clientType }),
+          });
+          const data = await resp.json() as any;
+          if (data.ok) {
+            return ok(`Navigating: ${current.name}${nl}Path: ${current.path}${nl}Client: ${clientType}${nl}Command ID: ${data.commandId}`);
+          }
+          return fail("[epic] Failed to send navigation command");
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+
+      const children = current.children || [];
+      const lines: string[] = [];
+      lines.push(`=== EPIC MENU: ${envArg} (${clientType}) ===`);
+      lines.push(`Path: ${breadcrumbs.join(" > ")}`);
+      lines.push("");
+
+      if (!children.length) {
+        if (current.name) {
+          lines.push(`  Leaf: ${current.name}`);
+          if (current.path) {
+            lines.push(`  Path: ${current.path}`);
+            lines.push("");
+            lines.push(`Navigate: epic menu ${envArg} ${indices.join(" ")} --go`);
+          }
+        } else {
+          lines.push("  (empty)");
+        }
+      } else {
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          const subCount = (child.children || []).length;
+          const arrow = subCount > 0 ? ` (${subCount})` : "";
+          const ct = child.controlType ? ` [${child.controlType}]` : "";
+          lines.push(`  ${String(i + 1).padStart(3)}. ${child.name}${ct}${arrow}`);
+        }
+        lines.push("");
+        const idxStr = indices.length > 0 ? indices.join(" ") + " " : "";
+        lines.push(`Drill: epic menu ${envArg} ${idxStr}<number>`);
+        lines.push(`Go:    epic menu ${envArg} ${idxStr}<number> --go`);
+      }
+
+      return ok(lines.join(nl));
+    }
+
     if (args[0] === "search") {
       const query = args.slice(1).join(" ");
       if (!query) return fail("[epic] Usage: epic search Patient Lookup");
@@ -4184,6 +4439,16 @@ ${fullHtml}`;
       "  epic recipe save <n> <json> - Save a multi-step recipe",
       "  epic recipes              - List saved recipes",
       "  epic run <env> <recipe>   - Execute a recipe",
+      "",
+      "  VIMIUM (Live Accessibility Tree)",
+      "  epic view [env]           - Read live UI tree with hint keys",
+      "  epic view [env] --all     - Include static text/labels",
+      "  epic view [env] --focus X - Scope to panel/group X",
+      "  epic do [env] <hint>      - Click/select element by hint",
+      "  epic do [env] <hint> <val>- Type value into field by hint",
+      "  epic menu [env]           - Browse stored nav tree",
+      "  epic menu [env] 3 2       - Drill into tree by numbers",
+      "  epic menu [env] 3 --go    - Navigate to tree item",
       "",
       "  WORKFLOWS",
       "  epic record start [env]   - Start recording workflow",

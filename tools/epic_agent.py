@@ -3838,6 +3838,428 @@ def execute_search(cmd):
     print(f"  [search] Found {len(items)} results for '{query_text}'")
 
 
+INTERACTIVE_CONTROL_TYPES = frozenset([
+    "Button", "Edit", "MenuItem", "Menu", "MenuBar",
+    "TabItem", "TabControl", "CheckBox", "ComboBox",
+    "Hyperlink", "ListItem", "TreeItem", "DataItem",
+    "RadioButton", "Slider", "Spinner", "SplitButton",
+    "ToolBar",
+])
+
+CONTAINER_CONTROL_TYPES = frozenset([
+    "Pane", "Window", "Group", "Custom", "Document",
+    "List", "ListView", "TreeView", "Table", "DataGrid",
+    "Tab", "ToolBar", "StatusBar",
+])
+
+_vimium_element_maps = {}
+
+
+def _generate_hint_keys(count):
+    """Generate Vimium-style hint keys: a-z, then aa-az, ba-bz, etc."""
+    keys = []
+    singles = "asdfghjklqwertyuiopzxcvbnm"
+    for ch in singles:
+        keys.append(ch)
+        if len(keys) >= count:
+            return keys[:count]
+    for first in singles:
+        for second in singles:
+            keys.append(first + second)
+            if len(keys) >= count:
+                return keys[:count]
+    return keys[:count]
+
+
+def _walk_uia_tree(element, depth, max_depth, show_all, parent_name=""):
+    """Walk the UI Automation tree and collect elements with metadata."""
+    if depth > max_depth:
+        return []
+    results = []
+    try:
+        children = element.children()
+    except Exception:
+        return []
+
+    for child in children:
+        try:
+            info = child.element_info
+            ctrl_type = info.control_type or ""
+            name = (info.name or "").strip()
+            auto_id = getattr(info, "automation_id", "") or ""
+            class_name = getattr(info, "class_name", "") or ""
+            is_enabled = True
+            try:
+                is_enabled = info.enabled
+            except Exception:
+                pass
+        except Exception:
+            continue
+
+        is_interactive = ctrl_type in INTERACTIVE_CONTROL_TYPES
+        is_container = ctrl_type in CONTAINER_CONTROL_TYPES
+
+        value = ""
+        if ctrl_type in ("Edit", "ComboBox", "Spinner"):
+            try:
+                iface = child.iface_value
+                if iface:
+                    value = iface.CurrentValue or ""
+            except Exception:
+                try:
+                    value = child.window_text() or ""
+                except Exception:
+                    pass
+
+        is_checked = None
+        if ctrl_type in ("CheckBox", "RadioButton"):
+            try:
+                toggle = child.iface_toggle
+                if toggle:
+                    state = toggle.CurrentToggleState
+                    is_checked = (state == 1)
+            except Exception:
+                pass
+
+        rect = None
+        try:
+            r = info.rectangle
+            if r and r.width() > 0 and r.height() > 0:
+                rect = {"left": r.left, "top": r.top, "right": r.right, "bottom": r.bottom,
+                        "cx": (r.left + r.right) // 2, "cy": (r.top + r.bottom) // 2}
+        except Exception:
+            pass
+
+        container_label = parent_name
+        display_name = name if name else f"({ctrl_type})"
+
+        if is_interactive and (name or ctrl_type in ("Edit", "ComboBox")):
+            entry = {
+                "name": display_name,
+                "controlType": ctrl_type,
+                "automationId": auto_id,
+                "className": class_name,
+                "enabled": is_enabled,
+                "value": value,
+                "checked": is_checked,
+                "rect": rect,
+                "depth": depth,
+                "parent": container_label,
+            }
+            results.append(entry)
+
+        if show_all and not is_interactive and not is_container and name:
+            entry = {
+                "name": display_name,
+                "controlType": ctrl_type,
+                "automationId": auto_id,
+                "className": class_name,
+                "enabled": is_enabled,
+                "value": value,
+                "checked": is_checked,
+                "rect": rect,
+                "depth": depth,
+                "parent": container_label,
+                "static": True,
+            }
+            results.append(entry)
+
+        if is_container or (not is_interactive and depth < max_depth):
+            sub_parent = name if name else container_label
+            sub = _walk_uia_tree(child, depth + 1, max_depth, show_all, sub_parent)
+            results.extend(sub)
+        elif is_interactive and ctrl_type in ("Menu", "MenuBar", "TreeItem", "TabControl") and depth < max_depth:
+            sub = _walk_uia_tree(child, depth + 1, max_depth, show_all, name or container_label)
+            results.extend(sub)
+
+    return results
+
+
+def _find_subtree_by_focus(element, focus_term, depth=0, max_search=5):
+    """Find a subtree element matching focus_term by name or automation_id."""
+    if depth > max_search:
+        return None
+    try:
+        children = element.children()
+    except Exception:
+        return []
+    for child in children:
+        try:
+            info = child.element_info
+            name = (info.name or "").lower()
+            auto_id = (getattr(info, "automation_id", "") or "").lower()
+            term = focus_term.lower()
+            if term in name or term in auto_id:
+                return child
+        except Exception:
+            continue
+        found = _find_subtree_by_focus(child, focus_term, depth + 1, max_search)
+        if found:
+            return found
+    return None
+
+
+def execute_view(cmd):
+    """Read the live UI Automation accessibility tree and return Vimium-style hint keys."""
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+    show_all = cmd.get("showAll", False)
+    focus_target = cmd.get("focus", "")
+    max_depth = 5
+
+    print(f"  [view] Reading accessibility tree for {env}")
+
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        post_result(command_id, "error", error="pywinauto not installed. pip install pywinauto")
+        return
+
+    desktop = Desktop(backend="uia")
+    env_upper = env.upper()
+    target_window = None
+
+    for w in desktop.windows():
+        try:
+            title = w.element_info.name or ""
+            t = title.upper()
+            if env_upper in t and ("HYPERSPACE" in t or "EPIC" in t or "HYPERDRIVE" in t):
+                target_window = w
+                break
+        except Exception:
+            continue
+
+    if not target_window:
+        for w in desktop.windows():
+            try:
+                title = w.element_info.name or ""
+                if env_upper in title.upper():
+                    target_window = w
+                    break
+            except Exception:
+                continue
+
+    if not target_window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    window_title = target_window.element_info.name or "Unknown"
+    print(f"  [view] Window: {window_title}")
+
+    try:
+        target_window.set_focus()
+        time.sleep(0.3)
+    except Exception:
+        pass
+
+    root_element = target_window
+    focus_label = ""
+    if focus_target:
+        focused = _find_subtree_by_focus(target_window, focus_target)
+        if focused:
+            root_element = focused
+            try:
+                focus_label = focused.element_info.name or focus_target
+            except Exception:
+                focus_label = focus_target
+            print(f"  [view] Focused on: {focus_label}")
+        else:
+            print(f"  [view] Focus target '{focus_target}' not found, showing full window")
+
+    elements = _walk_uia_tree(root_element, 0, max_depth, show_all, "")
+    if not elements:
+        post_result(command_id, "complete", data={
+            "window": window_title,
+            "focus": focus_label,
+            "elements": [],
+            "hintMap": {},
+            "elementCount": 0,
+        })
+        print(f"  [view] No elements found")
+        return
+
+    interactive_elements = [e for e in elements if not e.get("static", False)]
+    hint_keys = _generate_hint_keys(len(interactive_elements))
+
+    hint_map = {}
+    for i, elem in enumerate(interactive_elements):
+        key = hint_keys[i] if i < len(hint_keys) else f"z{i}"
+        elem["hint"] = key
+        hint_map[key] = {
+            "name": elem["name"],
+            "controlType": elem["controlType"],
+            "automationId": elem["automationId"],
+            "rect": elem["rect"],
+            "value": elem.get("value", ""),
+        }
+
+    for elem in elements:
+        if elem.get("static"):
+            elem["hint"] = ""
+
+    _vimium_element_maps[env_upper] = hint_map
+
+    post_result(command_id, "complete", data={
+        "window": window_title,
+        "focus": focus_label,
+        "elements": elements,
+        "hintMap": hint_map,
+        "elementCount": len(elements),
+        "interactiveCount": len(interactive_elements),
+    })
+    print(f"  [view] Found {len(interactive_elements)} interactive, {len(elements)} total elements")
+
+
+def execute_do(cmd):
+    """Interact with an element by its Vimium hint key, then auto re-view."""
+    env = cmd.get("env", "SUP")
+    command_id = cmd.get("id", "unknown")
+    hint = cmd.get("hint", "").lower().strip()
+    value = cmd.get("value", "")
+
+    if not hint:
+        post_result(command_id, "error", error="Missing hint key")
+        return
+
+    env_upper = env.upper()
+    hint_map = _vimium_element_maps.get(env_upper, {})
+    if not hint_map:
+        post_result(command_id, "error", error=f"No element map for {env}. Run 'epic view {env}' first.")
+        return
+
+    elem_info = hint_map.get(hint)
+    if not elem_info:
+        available = ", ".join(sorted(hint_map.keys())[:20])
+        post_result(command_id, "error", error=f"Unknown hint '{hint}'. Available: {available}")
+        return
+
+    ctrl_type = elem_info.get("controlType", "")
+    name = elem_info.get("name", "")
+    rect = elem_info.get("rect")
+
+    print(f"  [do] {hint} -> {ctrl_type} '{name}'" + (f" = '{value}'" if value else ""))
+
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        post_result(command_id, "error", error="pywinauto not installed")
+        return
+
+    desktop = Desktop(backend="uia")
+    target_window = None
+    for w in desktop.windows():
+        try:
+            title = w.element_info.name or ""
+            t = title.upper()
+            if env_upper in t and ("HYPERSPACE" in t or "EPIC" in t or "HYPERDRIVE" in t):
+                target_window = w
+                break
+        except Exception:
+            continue
+    if not target_window:
+        for w in desktop.windows():
+            try:
+                title = w.element_info.name or ""
+                if env_upper in title.upper():
+                    target_window = w
+                    break
+            except Exception:
+                continue
+
+    if not target_window:
+        post_result(command_id, "error", error=f"No {env} window found")
+        return
+
+    try:
+        target_window.set_focus()
+        time.sleep(0.2)
+    except Exception:
+        pass
+
+    auto_id = elem_info.get("automationId", "")
+    uia_element = None
+    if auto_id:
+        try:
+            found = target_window.child_window(auto_id=auto_id, control_type=ctrl_type)
+            if found.exists():
+                uia_element = found
+        except Exception:
+            pass
+
+    if not uia_element and name:
+        try:
+            found = target_window.child_window(title=name, control_type=ctrl_type)
+            if found.exists():
+                uia_element = found
+        except Exception:
+            pass
+
+    action_taken = "none"
+    try:
+        if uia_element:
+            if ctrl_type in ("Edit", "ComboBox", "Spinner") and value:
+                try:
+                    uia_element.set_edit_text(value)
+                    action_taken = f"typed '{value}'"
+                except Exception:
+                    uia_element.click_input()
+                    time.sleep(0.2)
+                    pyautogui.hotkey("ctrl", "a")
+                    time.sleep(0.05)
+                    pyautogui.typewrite(value, interval=0.03)
+                    action_taken = f"typed '{value}' (fallback)"
+            elif ctrl_type in ("CheckBox", "RadioButton"):
+                try:
+                    uia_element.toggle()
+                    action_taken = "toggled"
+                except Exception:
+                    uia_element.click_input()
+                    action_taken = "clicked (toggle fallback)"
+            elif ctrl_type in ("ListItem", "TreeItem"):
+                try:
+                    uia_element.select()
+                    action_taken = "selected"
+                except Exception:
+                    uia_element.click_input()
+                    action_taken = "clicked (select fallback)"
+            else:
+                uia_element.click_input()
+                action_taken = "clicked"
+        elif rect:
+            cx, cy = rect["cx"], rect["cy"]
+            print(f"  [do] UIA element not found, falling back to coordinate click ({cx}, {cy})")
+            safe_click(cx, cy, pause_after=0.5, label=f"vimium-{hint}")
+            if ctrl_type in ("Edit", "ComboBox") and value:
+                time.sleep(0.2)
+                pyautogui.hotkey("ctrl", "a")
+                time.sleep(0.05)
+                pyautogui.typewrite(value, interval=0.03)
+                action_taken = f"clicked+typed '{value}'"
+            else:
+                action_taken = "clicked (coordinates)"
+        else:
+            post_result(command_id, "error", error=f"Cannot interact with '{name}': no UIA element or coordinates")
+            return
+    except Exception as e:
+        print(f"  [do] Interaction error: {e}")
+        if rect:
+            cx, cy = rect["cx"], rect["cy"]
+            safe_click(cx, cy, pause_after=0.5, label=f"vimium-fallback-{hint}")
+            if ctrl_type in ("Edit", "ComboBox") and value:
+                time.sleep(0.2)
+                pyautogui.typewrite(value, interval=0.03)
+            action_taken = f"clicked (error fallback at {cx},{cy})"
+        else:
+            post_result(command_id, "error", error=f"Interaction failed: {e}")
+            return
+
+    print(f"  [do] Action: {action_taken}")
+    time.sleep(0.5)
+
+    print(f"  [do] Auto re-reading screen...")
+    execute_view({"env": env, "id": command_id, "showAll": False})
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -3871,6 +4293,10 @@ def execute_command(cmd):
             execute_launch(cmd)
         elif cmd_type == "search":
             execute_search(cmd)
+        elif cmd_type == "view":
+            execute_view(cmd)
+        elif cmd_type == "do":
+            execute_do(cmd)
         elif cmd_type == "patient":
             execute_patient(cmd)
         elif cmd_type == "read_screen":
