@@ -2753,11 +2753,15 @@ def execute_search_crawl(cmd):
 
     search_bar_open = False
 
+    verified_streak = 0
+    VERIFY_THRESHOLD = 3
+
     def type_and_read(prefix, max_attempts=3):
-        """Clear the bar, type prefix, read results with vision verification.
-        Always checks that the search bar is visible and shows the expected
-        prefix before collecting results. Retries with recovery on mismatch."""
-        nonlocal search_bar_open
+        """Clear the bar, type prefix, read results.
+        Verifies search bar text matches for the first few prefixes until a
+        streak of VERIFY_THRESHOLD consecutive successes is reached. After that,
+        trusts the pattern and only re-verifies if an error resets the streak."""
+        nonlocal search_bar_open, verified_streak
 
         for attempt in range(max_attempts):
             if not search_bar_open:
@@ -2775,19 +2779,27 @@ def execute_search_crawl(cmd):
             if state is None:
                 print(f"  [search-crawl]   Vision failed on attempt {attempt+1}/{max_attempts}")
                 search_bar_open = False
+                verified_streak = 0
                 continue
 
             if not state.get("searchBarVisible", True):
                 print(f"  [search-crawl]   Search bar not visible on attempt {attempt+1}, reopening...")
                 search_bar_open = False
+                verified_streak = 0
                 continue
 
             actual = state.get("searchBarText", "").strip().lower()
             expected = prefix.lower()
+
+            if verified_streak >= VERIFY_THRESHOLD:
+                return state
+
             if actual == expected:
+                verified_streak += 1
                 return state
 
             print(f"  [search-crawl]   Search bar shows '{actual}' but expected '{expected}' (attempt {attempt+1})")
+            verified_streak = 0
 
             if attempt < max_attempts - 1:
                 print(f"  [search-crawl]   Escaping and reopening search bar...")
