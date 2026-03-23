@@ -1,0 +1,44 @@
+  [search-crawl] 538 plausible 2-letter prefixes (skipped 138 rare combos)
+  [search-crawl] 'aa' (537 left, 0 total, 0 known for this prefix)
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space: confirmed working
+  [search-crawl]   Search bar shows 'zzqaqa' but expected 'aa' (attempt 1)
+  [search-crawl]   Garbled text — focus may be wrong. Trying escape+reopen...
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space: confirmed working
+  [search-crawl]   Search bar shows 'zzqqaaaa' but expected 'aa' (attempt 2)
+  [search-crawl]   Text accumulated — Ctrl+A didn't select all. Trying escape+reopen...
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space FAILED — search bar NOT visible
+  [search-crawl]   Clearing saved method, will re-discover...
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space
+  [search-crawl]     sendinput_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]     keybd_event_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: pyautogui_ctrl_space
+  [search-crawl]     === pyautogui_ctrl_space: WORKS (search bar visible) ===
+  [search-crawl]   Search bar shows 'zzzqaaaa aa' but expected 'aa' (attempt 3)
+  [search-crawl]   Text accumulated — Ctrl+A didn't select all. Trying escape+reopen...
+  [search-crawl]   Using saved search method: pyautogui_ctrl_space
+  [search-crawl]   Saved method pyautogui_ctrl_space: confirmed working
+  [search-crawl]   Search bar shows 'zzzqaaaa aai' but expected 'aa' (attempt 4)
+  [search-crawl]   Text accumulated — Ctrl+A didn't select all. Trying escape+reopen...
+  [search-crawl]   Could not get 'aa' into search bar after 4 attempts
+  [search-crawl]   Could not verify 'aa' in search bar
+  [search-crawl] 'ab' (536 left, 0 total, 0 known for this prefix)
+  [search-crawl]   Using saved search method: pyautogui_ctrl_space
+  [search-crawl]   Saved method pyautogui_ctrl_space: confirmed working
+
+
+
+
+
+
+
+
+
+
+
