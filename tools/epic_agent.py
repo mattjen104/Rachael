@@ -2761,49 +2761,57 @@ def execute_search_crawl(cmd):
         """Try a single search opener, return True if search bar appeared."""
         print(f"  [search-crawl]     Trying: {name}")
         fn()
-        time.sleep(0.8)
+        time.sleep(1.0)
         state = read_search_bar_text()
         if state and state.get("visible", False):
-            print(f"  [search-crawl]     === {name}: WORKS ===")
+            print(f"  [search-crawl]     === {name}: WORKS (search bar visible) ===")
             return True
-        print(f"  [search-crawl]     {name}: no search bar visible")
+        visible = state.get("visible", False) if state else "vision_failed"
+        print(f"  [search-crawl]     {name}: FAILED (visible={visible})")
         sendinput_press("escape")
         time.sleep(0.3)
         return False
 
     def ensure_search_focused():
+        """Try to open the search bar. Returns True if confirmed open, False if all methods failed."""
         nonlocal proven_search_method
         activate_window(window)
-        time.sleep(0.2)
+        time.sleep(0.3)
 
         if proven_search_method:
+            found_in_list = False
             for name, fn in SEARCH_OPENERS:
                 if name == proven_search_method:
+                    found_in_list = True
                     print(f"  [search-crawl]   Using saved search method: {name}")
                     fn()
-                    time.sleep(0.6)
+                    time.sleep(1.0)
                     state = read_search_bar_text()
                     if state and state.get("visible", False):
-                        return
-                    print(f"  [search-crawl]   Saved method {name} FAILED this time, re-discovering...")
+                        print(f"  [search-crawl]   Saved method {name}: confirmed working")
+                        return True
+                    print(f"  [search-crawl]   Saved method {name} FAILED — search bar NOT visible")
+                    print(f"  [search-crawl]   Clearing saved method, will re-discover...")
                     sendinput_press("escape")
                     time.sleep(0.3)
                     proven_search_method = None
                     break
-            if proven_search_method:
-                print(f"  [search-crawl]   Saved method '{proven_search_method}' not found in openers, re-discovering...")
+            if not found_in_list:
+                print(f"  [search-crawl]   Saved method '{proven_search_method}' not in current openers, clearing...")
                 proven_search_method = None
 
-        print(f"  [search-crawl]   Discovering search bar shortcut...")
+        print(f"  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT ({len(SEARCH_OPENERS)} methods to try) ===")
+        tried = []
         for name, fn in SEARCH_OPENERS:
+            tried.append(name)
             if _try_search_opener(name, fn):
                 proven_search_method = name
-                return
+                return True
 
-        print(f"  [search-crawl]   WARNING: No shortcut opened the search bar, falling back to sendinput ctrl+space")
-        proven_search_method = "sendinput_ctrl_space"
-        sendinput_hotkey("ctrl", "space")
-        time.sleep(0.6)
+        print(f"  [search-crawl]   FAILED: All {len(tried)} methods tried, none opened the search bar:")
+        for t in tried:
+            print(f"  [search-crawl]     - {t}: failed")
+        return False
 
     def _open_search_bar():
         """Use the proven search opener or default to sendinput ctrl+space."""
@@ -2847,27 +2855,35 @@ def execute_search_crawl(cmd):
         ),
     }
 
-    # ── PHASE 1: CALIBRATE TEXT CLEARING ──
-    # Type a known string, then try each clear method and use vision to confirm
-    # which one actually empties the search bar in this Citrix session.
+    # ── PHASE 1: CALIBRATE SEARCH BAR OPENING + TEXT CLEARING ──
+    # First discover which keyboard shortcut opens the search bar,
+    # then discover which method clears text from it.
     if not proven_clear_method:
-        print(f"  [search-crawl] === PHASE 1: CALIBRATING TEXT CLEAR METHOD ===")
+        print(f"  [search-crawl] === PHASE 1: CALIBRATING SEARCH BAR + TEXT CLEAR ===")
 
-        print(f"  [search-crawl]   Step 1: Opening search bar with Ctrl+Space...")
-        ensure_search_focused()
+        print(f"  [search-crawl]   Step 1: Finding a working method to open the search bar...")
+        search_ok = ensure_search_focused()
 
-        state0 = read_search_bar_text()
-        if not state0 or not state0.get("visible", False):
-            print(f"  [search-crawl]   Search bar NOT visible after Ctrl+Space, retrying...")
-            time.sleep(0.5)
-            ensure_search_focused()
-            time.sleep(0.5)
-            state0 = read_search_bar_text()
-            if not state0 or not state0.get("visible", False):
-                print(f"  [search-crawl]   FATAL: Cannot open search bar. Aborting calibration.")
-                post_result(command_id, "error", error="Cannot open search bar with Ctrl+Space")
-                return
-        print(f"  [search-crawl]   Search bar confirmed visible (text: '{state0.get('text', '')}')")
+        if not search_ok:
+            print(f"  [search-crawl]   First attempt failed. Waiting 2s and retrying all methods...")
+            time.sleep(2.0)
+            search_ok = ensure_search_focused()
+
+        if not search_ok:
+            methods_tried = [name for name, _ in SEARCH_OPENERS]
+            error_msg = (
+                f"FATAL: Cannot open Epic search bar. "
+                f"Tried {len(methods_tried)} keyboard methods: {', '.join(methods_tried)}. "
+                f"None produced a visible expanded search bar. "
+                f"Please verify: (1) Epic Hyperspace window is in the foreground, "
+                f"(2) You are on the main Epic menu (not inside an activity), "
+                f"(3) The search bar shortcut works when you press it manually."
+            )
+            print(f"  [search-crawl]   {error_msg}")
+            post_result(command_id, "error", error=error_msg)
+            return
+
+        print(f"  [search-crawl]   Search bar opened successfully using: {proven_search_method}")
 
         print(f"  [search-crawl]   Step 2: Typing 'zz' to put known text in search bar...")
         sendinput_typewrite("zz", interval=0.05)
@@ -2982,7 +2998,10 @@ def execute_search_crawl(cmd):
 
         for attempt in range(max_attempts):
             if not search_bar_open:
-                ensure_search_focused()
+                if not ensure_search_focused():
+                    print(f"  [search-crawl]   Cannot reopen search bar on attempt {attempt+1}")
+                    time.sleep(1.0)
+                    continue
                 search_bar_open = True
 
             clear_search_bar()
