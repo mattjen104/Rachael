@@ -853,63 +853,265 @@ async function execute() {
       type: "monitor",
       schedule: "daily",
       cronExpression: "0 22 * * *",
-      instructions: "Nightly SoCal Craigslist estate/low-mileage car scanner. Fetches real listings via RSS, filters by price, surfaces the best deals for LLM analysis.",
-      config: { REGIONS: "inlandempire,losangeles,orangecounty,sandiego", MIN_PRICE: "2000", MAX_PRICE: "25000", TOP_N: "8", TASK_TYPE: "research", METRIC: "deals_found", DIRECTION: "higher", TIMEOUT: "300", TWO_STAGE: "true" },
+      instructions: "Nightly SoCal Craigslist targeted vehicle finder. Searches for specific Japanese makes/models (Subaru Forester, Toyota Camry/Avalon/Prius/Venza, Honda CR-V/Odyssey, Nissan Rogue) plus estate/low-mileage deals. Uses craigslist-toolkit for targeted searches, scam detection, and tiered scoring.",
+      config: { REGIONS: "inlandempire,losangeles,orangecounty,sandiego", MIN_PRICE: "2000", MAX_PRICE: "30000", TOP_N: "15", TARGET_MAKES: "subaru,toyota,honda,nissan", TARGET_MODELS: "forester:subaru:10000,camry:toyota:10000,avalon:toyota:10000,prius:toyota:8000,venza:toyota:12000,cr-v:honda:10000,odyssey:honda:8000,rogue:nissan:9000", TASK_TYPE: "research", METRIC: "deals_found", DIRECTION: "higher", TIMEOUT: "300", TWO_STAGE: "true" },
       costTier: "standard",
       tags: ["program"],
       code: `const props = (typeof __ctx !== "undefined" && __ctx.properties) || {};
 const REGIONS = (props.REGIONS || "inlandempire").split(",").map(s => s.trim());
 const MIN_PRICE = parseInt(props.MIN_PRICE || "2000", 10);
-const MAX_PRICE = parseInt(props.MAX_PRICE || "25000", 10);
-const TOP_N = parseInt(props.TOP_N || "8", 10);
-const KEYWORDS = ["estate", "low miles", "one owner", "garage kept", "original owner", "elderly", "grandma", "grandpa", "deceased", "single owner"];
+const MAX_PRICE = parseInt(props.MAX_PRICE || "30000", 10);
+const TOP_N = parseInt(props.TOP_N || "15", 10);
 
-interface Listing { title: string; price: number; url: string; region: string; date: string }
+const DEFAULT_MODELS = "forester:subaru:10000,camry:toyota:10000,avalon:toyota:10000,prius:toyota:8000,venza:toyota:12000,cr-v:honda:10000,odyssey:honda:8000,rogue:nissan:9000";
+const TARGET_VEHICLES: Array<{ make: string; model: string; typicalMinPrice: number }> =
+  (props.TARGET_MODELS || DEFAULT_MODELS).split(",").map((entry: string) => {
+    const [model, make, minPrice] = entry.trim().split(":");
+    return { make: (make || "").toLowerCase(), model: (model || "").toLowerCase(), typicalMinPrice: parseInt(minPrice || "8000", 10) };
+  }).filter((v: { make: string; model: string }) => v.make && v.model);
 
-async function scrapeRegion(region: string): Promise<Listing[]> {
-  const listings: Listing[] = [];
-  try {
-    const url = "https://" + region + ".craigslist.org/search/cta?format=rss&min_price=" + MIN_PRICE + "&max_price=" + MAX_PRICE + "&sort=date";
-    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
-    const xml = await r.text();
-    if (xml.includes("blocked") && xml.length < 500) return listings;
-    const items = xml.split("<item ");
-    for (let i = 1; i < items.length && listings.length < 50; i++) {
-      const titleM = items[i].match(/<title><![CDATA[\\[(.*?)\\]]]>/s) || items[i].match(/<title>([^<]+)/);
-      const linkM = items[i].match(/<link>([^<]+)/);
-      const dateM = items[i].match(/<dc:date>([^<]+)/) || items[i].match(/<pubDate>([^<]+)/);
-      const title = titleM ? titleM[1].trim() : "";
-      const link = linkM ? linkM[1].trim() : "";
-      const priceM = title.match(/\\$([\\d,]+)/);
-      const price = priceM ? parseInt(priceM[1].replace(",", ""), 10) : 0;
-      if (title && price >= MIN_PRICE && price <= MAX_PRICE) {
-        listings.push({ title, price, url: link, region, date: dateM ? dateM[1].trim() : "" });
-      }
-    }
-  } catch {}
-  return listings;
+const DEFAULT_MAKES = "subaru,toyota,honda,nissan";
+const TARGET_MAKES = new Set(
+  (props.TARGET_MAKES || DEFAULT_MAKES).split(",").map((s: string) => s.trim().toLowerCase())
+);
+
+const ESTATE_KEYWORDS = ["estate", "low miles", "one owner", "garage kept", "original owner", "elderly", "grandma", "grandpa", "deceased", "single owner"];
+const SCAM_PHRASES = ["we finance", "no credit check", "buy here pay here", "in-house financing", "everyone approved", "bad credit ok", "no credit no problem", "guaranteed approval", "ez financing", "easy financing"];
+
+const NL = String.fromCharCode(10);
+
+interface Listing {
+  id: string;
+  title: string;
+  price: number;
+  url: string;
+  region: string;
+  date: string;
+  isTargetVehicle: boolean;
+  matchedMake: string;
+  matchedModel: string;
+  score: number;
+  scamFlags: string[];
 }
 
-function scoreByKeywords(listing: Listing): number {
+const { searchCraigslist } = await import(__skillPath("craigslist-toolkit"));
+
+function detectMakeModel(title: string): { make: string; model: string } | null {
+  const lower = title.toLowerCase();
+  for (const v of TARGET_VEHICLES) {
+    const modelVariants = [v.model];
+    if (v.model === "cr-v") modelVariants.push("crv", "cr v");
+    const makeFound = lower.includes(v.make);
+    const modelFound = modelVariants.some(mv => lower.includes(mv));
+    if (makeFound && modelFound) return { make: v.make, model: v.model };
+    if (modelFound) return { make: v.make, model: v.model };
+  }
+  for (const make of TARGET_MAKES) {
+    if (lower.includes(make)) return { make, model: "" };
+  }
+  return null;
+}
+
+function detectScamFlags(listing: { title: string; price: number }): string[] {
+  const flags: string[] = [];
   const lower = listing.title.toLowerCase();
+  for (const phrase of SCAM_PHRASES) {
+    if (lower.includes(phrase)) flags.push(phrase);
+  }
+  const detected = detectMakeModel(listing.title);
+  if (detected && detected.model) {
+    const vehicle = TARGET_VEHICLES.find(v => v.make === detected.make && v.model === detected.model);
+    if (vehicle && listing.price > 0 && listing.price < vehicle.typicalMinPrice * 0.4) {
+      flags.push("price suspiciously low for " + detected.make + " " + detected.model);
+    }
+  }
+  if (lower.includes("multiple") && lower.includes("available")) flags.push("multiple vehicles listed");
+  if (lower.match(/\\d{3}[-.\\s]?\\d{3}[-.\\s]?\\d{4}.*\\d{3}[-.\\s]?\\d{3}[-.\\s]?\\d{4}/)) flags.push("multiple phone numbers");
+  const genericPatterns = ["great car", "runs great", "must see", "won't last", "call now", "act fast"];
+  let genericCount = 0;
+  for (const gp of genericPatterns) { if (lower.includes(gp)) genericCount++; }
+  if (genericCount >= 3) flags.push("suspiciously generic description");
+  return flags;
+}
+
+function scoreListing(listing: Listing): number {
   let score = 0;
-  for (const kw of KEYWORDS) { if (lower.includes(kw)) score += 10; }
-  if (listing.price < 8000) score += 5;
-  if (listing.price < 5000) score += 5;
+  const lower = listing.title.toLowerCase();
+
+  if (listing.matchedModel) {
+    score += 50;
+  } else if (listing.matchedMake) {
+    score += 25;
+  }
+
+  for (const kw of ESTATE_KEYWORDS) {
+    if (lower.includes(kw)) score += 10;
+  }
+
+  if (lower.includes("low miles") || lower.includes("low mileage")) score += 5;
+  if (lower.includes("certified") || lower.includes("cpo")) score += 8;
+  if (lower.includes("clean title")) score += 5;
+  if (lower.includes("one owner") || lower.includes("single owner")) score += 5;
+
+  if (!listing.isTargetVehicle) {
+    if (listing.price < 8000) score += 5;
+    if (listing.price < 5000) score += 5;
+  }
+
+  if (listing.scamFlags.length > 0) {
+    score -= listing.scamFlags.length * 15;
+  }
+
   return score;
 }
 
-async function execute() {
-  const allResults = await Promise.all(REGIONS.map(r => scrapeRegion(r)));
-  const all = allResults.flat();
-  all.sort((a, b) => scoreByKeywords(b) - scoreByKeywords(a));
-  const top = all.slice(0, TOP_N);
-  let summary = "Estate/Low-Mile Car Scan: " + all.length + " total listings across " + REGIONS.join(", ") + String.fromCharCode(10);
-  summary += "Top " + top.length + " deals (keyword-scored):" + String.fromCharCode(10);
-  for (const l of top) {
-    summary += String.fromCharCode(10) + "  $" + l.price + " | " + l.title.slice(0, 80) + String.fromCharCode(10) + "    " + l.url + " [" + l.region + "]";
+let searchFailures = 0;
+
+async function searchTargetedQueries(): Promise<Listing[]> {
+  const allListings: Listing[] = [];
+  const seenIds = new Set<string>();
+
+  const searchQueries: Array<{ query: string; make: string; model: string }> = [];
+  for (const v of TARGET_VEHICLES) {
+    searchQueries.push({ query: v.make + " " + v.model, make: v.make, model: v.model });
   }
-  return { summary, metric: String(top.length) };
+
+  for (const region of REGIONS) {
+    for (const sq of searchQueries) {
+      try {
+        const results = await searchCraigslist({
+          region,
+          category: "cta",
+          query: sq.query,
+          params: { min_price: String(MIN_PRICE), max_price: String(MAX_PRICE) },
+          maxPages: 1,
+          delayMs: 1200,
+          warmUp: false,
+        });
+        for (const r of results) {
+          if (seenIds.has(r.id)) continue;
+          seenIds.add(r.id);
+          const price = r.price || 0;
+          if (price < MIN_PRICE || price > MAX_PRICE) continue;
+          const detected = detectMakeModel(r.title);
+          const scamFlags = detectScamFlags({ title: r.title, price });
+          const listing: Listing = {
+            id: r.id,
+            title: r.title,
+            price,
+            url: r.url,
+            region,
+            date: r.date || "",
+            isTargetVehicle: !!(detected && detected.model),
+            matchedMake: detected?.make || "",
+            matchedModel: detected?.model || "",
+            score: 0,
+            scamFlags,
+          };
+          listing.score = scoreListing(listing);
+          allListings.push(listing);
+        }
+      } catch { searchFailures++; }
+    }
+  }
+  return allListings;
+}
+
+async function searchGeneralEstate(): Promise<Listing[]> {
+  const allListings: Listing[] = [];
+  const seenIds = new Set<string>();
+
+  for (const region of REGIONS) {
+    for (const kw of ["estate sale car", "low miles one owner", "elderly owner car"]) {
+      try {
+        const results = await searchCraigslist({
+          region,
+          category: "cta",
+          query: kw,
+          params: { min_price: String(MIN_PRICE), max_price: String(MAX_PRICE) },
+          maxPages: 1,
+          delayMs: 1200,
+          warmUp: false,
+        });
+        for (const r of results) {
+          if (seenIds.has(r.id)) continue;
+          seenIds.add(r.id);
+          const price = r.price || 0;
+          if (price < MIN_PRICE || price > MAX_PRICE) continue;
+          const detected = detectMakeModel(r.title);
+          const scamFlags = detectScamFlags({ title: r.title, price });
+          const listing: Listing = {
+            id: r.id,
+            title: r.title,
+            price,
+            url: r.url,
+            region,
+            date: r.date || "",
+            isTargetVehicle: !!detected?.model,
+            matchedMake: detected?.make || "",
+            matchedModel: detected?.model || "",
+            score: 0,
+            scamFlags,
+          };
+          listing.score = scoreListing(listing);
+          allListings.push(listing);
+        }
+      } catch { searchFailures++; }
+    }
+  }
+  return allListings;
+}
+
+async function execute() {
+  const [targeted, general] = await Promise.all([searchTargetedQueries(), searchGeneralEstate()]);
+
+  const deduped = new Map<string, Listing>();
+  for (const l of [...targeted, ...general]) {
+    const existing = deduped.get(l.id);
+    if (!existing || l.score > existing.score) {
+      deduped.set(l.id, l);
+    }
+  }
+  const all = Array.from(deduped.values());
+
+  const targetMatches = all.filter(l => l.isTargetVehicle && l.scamFlags.length === 0).sort((a, b) => b.score - a.score);
+  const flaggedTargets = all.filter(l => l.isTargetVehicle && l.scamFlags.length > 0).sort((a, b) => b.score - a.score);
+  const otherDeals = all.filter(l => !l.isTargetVehicle && l.score > 0).sort((a, b) => b.score - a.score);
+
+  let summary = "=== Targeted Vehicle Finder ===" + NL;
+  summary += "Scanned " + all.length + " listings across " + REGIONS.join(", ") + NL;
+  summary += "Target vehicles: " + TARGET_VEHICLES.map(v => v.make + " " + v.model).join(", ") + NL;
+  summary += "Price range: $" + MIN_PRICE + " - $" + MAX_PRICE + NL;
+  if (searchFailures > 0) summary += "Note: " + searchFailures + " search queries failed (network/rate-limit)" + NL;
+  summary += NL;
+
+  summary += "--- TARGET VEHICLE MATCHES (" + targetMatches.length + ") ---" + NL;
+  if (targetMatches.length === 0) {
+    summary += "  No clean target vehicle matches found this scan." + NL;
+  }
+  for (const l of targetMatches.slice(0, TOP_N)) {
+    summary += "  [" + l.matchedMake.toUpperCase() + " " + l.matchedModel.toUpperCase() + "] $" + l.price + " | " + l.title.slice(0, 80) + NL;
+    summary += "    " + l.url + " [" + l.region + "] (score: " + l.score + ")" + NL;
+  }
+
+  if (flaggedTargets.length > 0) {
+    summary += NL + "--- FLAGGED TARGET LISTINGS (" + flaggedTargets.length + ") ---" + NL;
+    for (const l of flaggedTargets.slice(0, 5)) {
+      summary += "  [FLAGGED] $" + l.price + " | " + l.title.slice(0, 70) + NL;
+      summary += "    Flags: " + l.scamFlags.join(", ") + NL;
+      summary += "    " + l.url + " [" + l.region + "]" + NL;
+    }
+  }
+
+  if (otherDeals.length > 0) {
+    summary += NL + "--- OTHER NOTABLE DEALS (" + otherDeals.length + ") ---" + NL;
+    for (const l of otherDeals.slice(0, 5)) {
+      summary += "  $" + l.price + " | " + l.title.slice(0, 80) + NL;
+      summary += "    " + l.url + " [" + l.region + "] (score: " + l.score + ")" + NL;
+    }
+  }
+
+  return { summary, metric: String(targetMatches.length) };
 }`,
       codeLang: "typescript",
     },
