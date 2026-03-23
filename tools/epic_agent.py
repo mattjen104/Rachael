@@ -140,7 +140,7 @@ try:
 
     _active_backend = "sendinput"
     _key_fn = _sendinput_key
-    _text_method = "unicode"
+    _text_method = "pyautogui"
 
     def set_keyboard_backend(name):
         """Switch between 'sendinput' and 'keybd_event' backends."""
