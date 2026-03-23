@@ -120,8 +120,27 @@ try:
             flags |= 0x0001
         user32.keybd_event(vk, scan, flags, 0)
 
+    KEYEVENTF_UNICODE = 0x0004
+
+    def _sendinput_unicode_char(ch):
+        """Send a single Unicode character via SendInput KEYEVENTF_UNICODE.
+        This bypasses keyboard layout mapping — Citrix forwards these as text events."""
+        code = ord(ch)
+        ki_down = KEYBDINPUT(wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE, time=0,
+                             dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
+        ki_up = KEYBDINPUT(wVk=0, wScan=code, dwFlags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, time=0,
+                           dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
+        inp_down = INPUT(type=INPUT_KEYBOARD)
+        inp_down._input.ki = ki_down
+        inp_up = INPUT(type=INPUT_KEYBOARD)
+        inp_up._input.ki = ki_up
+        user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
+        time.sleep(0.01)
+        user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
+
     _active_backend = "sendinput"
     _key_fn = _sendinput_key
+    _text_method = "unicode"
 
     def set_keyboard_backend(name):
         """Switch between 'sendinput' and 'keybd_event' backends."""
@@ -133,6 +152,12 @@ try:
             _active_backend = "sendinput"
             _key_fn = _sendinput_key
         print(f"  [input] Keyboard backend: {_active_backend}")
+
+    def set_text_method(name):
+        """Switch text input method: 'unicode', 'vk', or 'pyautogui'."""
+        global _text_method
+        _text_method = name
+        print(f"  [input] Text input method: {_text_method}")
 
     def sendinput_press(key):
         """Press and release a single key via the active backend."""
@@ -164,16 +189,25 @@ try:
             time.sleep(0.05)
 
     def sendinput_typewrite(text, interval=0.03):
-        """Type a string character by character via the active backend."""
-        for ch in text:
-            vk = VK_MAP.get(ch.lower())
-            if vk is not None:
-                _key_fn(vk, up=False)
-                time.sleep(0.015)
-                _key_fn(vk, up=True)
+        """Type a string using the active text input method.
+        Default is 'unicode' which sends raw Unicode chars — most reliable through Citrix."""
+        if _text_method == "unicode":
+            for ch in text:
+                _sendinput_unicode_char(ch)
                 time.sleep(interval)
-            else:
-                pyautogui.typewrite(ch, interval=interval)
+        elif _text_method == "vk":
+            for ch in text:
+                vk = VK_MAP.get(ch.lower())
+                if vk is not None:
+                    _key_fn(vk, up=False)
+                    time.sleep(0.015)
+                    _key_fn(vk, up=True)
+                    time.sleep(interval)
+                else:
+                    _sendinput_unicode_char(ch)
+                    time.sleep(interval)
+        else:
+            pyautogui.typewrite(text, interval=interval)
 
     HAS_SENDINPUT = True
     print(f"  [input] Low-level keyboard available (backend: {_active_backend})")
@@ -181,6 +215,8 @@ except Exception as e:
     HAS_SENDINPUT = False
     print(f"  [input] Low-level keyboard not available ({e}), using pyautogui only")
     def set_keyboard_backend(name):
+        pass
+    def set_text_method(name):
         pass
     def sendinput_press(key):
         pyautogui.press(key)
