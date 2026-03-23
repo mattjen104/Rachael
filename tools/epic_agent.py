@@ -2838,30 +2838,43 @@ def execute_search_crawl(cmd):
     def _clear_bar():
         """Adaptive clear: tries multiple methods with vision verification.
         Caches the first working method for _fast_clear().
-        Returns True if bar is confirmed empty."""
+        Returns True if bar is confirmed empty, False if all methods fail."""
         nonlocal proven_clear_approach
+
+        def _do_end_bksp():
+            pyautogui.press("end")
+            time.sleep(0.05)
+            for _ in range(50):
+                pyautogui.press("backspace")
+
+        def _do_home_shift_end_bksp():
+            pyautogui.press("home")
+            time.sleep(0.05)
+            pyautogui.keyDown("shift")
+            time.sleep(0.05)
+            pyautogui.press("end")
+            time.sleep(0.05)
+            pyautogui.keyUp("shift")
+            time.sleep(0.05)
+            pyautogui.press("backspace")
+
+        def _do_escape_reopen():
+            pyautogui.press("escape")
+            time.sleep(0.4)
+            _open_search_bar()
+            time.sleep(0.5)
+
+        def _do_50x_delete():
+            pyautogui.press("home")
+            time.sleep(0.05)
+            for _ in range(50):
+                pyautogui.press("delete")
+
         CLEAR_APPROACHES = [
-            ("end+backspace", lambda: (
-                pyautogui.press("end"),
-                time.sleep(0.05),
-                [pyautogui.press("backspace") for _ in range(50)],
-            )),
-            ("home+shift_end+bksp", lambda: (
-                pyautogui.press("home"),
-                time.sleep(0.05),
-                pyautogui.keyDown("shift"),
-                time.sleep(0.05),
-                pyautogui.press("end"),
-                time.sleep(0.05),
-                pyautogui.keyUp("shift"),
-                time.sleep(0.05),
-                pyautogui.press("backspace"),
-            )),
-            ("50x_delete", lambda: (
-                pyautogui.press("home"),
-                time.sleep(0.05),
-                [pyautogui.press("delete") for _ in range(50)],
-            )),
+            ("end+backspace", _do_end_bksp),
+            ("home+shift_end+bksp", _do_home_shift_end_bksp),
+            ("escape+reopen", _do_escape_reopen),
+            ("50x_delete", _do_50x_delete),
         ]
         for name, fn in CLEAR_APPROACHES:
             fn()
@@ -2870,8 +2883,11 @@ def execute_search_crawl(cmd):
             if state is None:
                 continue
             if not state.get("visible", False):
-                print(f"  [search-crawl]   {name}: bar closed/not visible after clear — need reopen")
-                return False
+                if name == "escape+reopen":
+                    print(f"  [search-crawl]   {name}: bar not visible after reopen — trying next method")
+                else:
+                    print(f"  [search-crawl]   {name}: bar closed — trying escape+reopen next")
+                continue
             bar_text = state.get("text", "").strip()
             if len(bar_text) == 0:
                 print(f"  [search-crawl]   Bar cleared via {name}")
@@ -3104,6 +3120,18 @@ def execute_search_crawl(cmd):
                 print(f"  [search-crawl]   Bar empty but trusted (streak={verified_streak}), accepting")
                 return state
 
+            foreign_chars = set(actual) - set(expected) - set(" ")
+            if len(foreign_chars) == 0 and len(actual) > 0:
+                print(f"  [search-crawl]   Bar shows '{actual}' — only contains chars from '{expected}', accepting")
+                verified_streak += 1
+                return state
+
+            results = state.get("items", [])
+            if len(results) > 0 and any(r.get("name", "").lower().startswith(expected) for r in results):
+                print(f"  [search-crawl]   Bar shows '{actual}' but results match '{expected}' — accepting")
+                verified_streak += 1
+                return state
+
             print(f"  [search-crawl]   Search bar shows '{actual}' but expected '{expected}' (attempt {attempt+1})")
             verified_streak = 0
 
@@ -3112,8 +3140,8 @@ def execute_search_crawl(cmd):
                 pyautogui.press("escape")
                 time.sleep(0.4)
                 search_bar_open = False
-            elif len(actual) > 0 and expected not in actual:
-                print(f"  [search-crawl]   Garbled text — focus wrong. Escape+reopen...")
+            elif len(actual) > 0:
+                print(f"  [search-crawl]   Wrong text (foreign chars: {foreign_chars}). Escape+reopen...")
                 pyautogui.press("escape")
                 time.sleep(0.4)
                 search_bar_open = False
@@ -3362,11 +3390,25 @@ def execute_launch(cmd):
     open_search()
     time.sleep(0.6)
 
-    pyautogui.press("end")
-    time.sleep(0.05)
-    for _ in range(50):
+    def _launch_clear_bar():
+        """Multi-strategy clear for launch flow."""
+        pyautogui.press("end")
+        time.sleep(0.05)
+        for _ in range(50):
+            pyautogui.press("backspace")
+        time.sleep(0.1)
+        pyautogui.press("home")
+        time.sleep(0.05)
+        pyautogui.keyDown("shift")
+        time.sleep(0.05)
+        pyautogui.press("end")
+        time.sleep(0.05)
+        pyautogui.keyUp("shift")
+        time.sleep(0.05)
         pyautogui.press("backspace")
-    time.sleep(0.15)
+        time.sleep(0.1)
+
+    _launch_clear_bar()
 
     pyautogui.typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
