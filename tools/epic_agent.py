@@ -2454,9 +2454,11 @@ def execute_search_crawl(cmd):
     """Discover all Epic activities by iterating through prefixes in the search bar.
     Phase 1: Calibrate text clearing - tries each method and uses vision to confirm
              which one actually clears the search bar in this Citrix session.
-    Phase 2: Smart prefix search - starts with single letters, expands to 2-4 chars
-             only where results are truncated. Skips prefixes already covered by
-             discovered activities. Saves progress after every batch."""
+    Phase 2: Smart prefix search - starts with 2-letter combos (aa-zz) since
+             Epic search requires minimum 2 chars. Expands to 3-4 char prefixes
+             only where results are truncated. Search is FUZZY so all returned
+             items are collected regardless of prefix match. Saves progress
+             after every batch."""
     env = cmd.get("env", "SUP")
     command_id = cmd.get("id", "unknown")
 
@@ -2768,7 +2770,7 @@ def execute_search_crawl(cmd):
     # Skip prefixes where all possible activities are already known.
     print(f"  [search-crawl] === PHASE 2: ACTIVITY DISCOVERY ===")
 
-    prefix_queue = list("abcdefghijklmnopqrstuvwxyz")
+    prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
     consecutive_errors = 0
     total_searched = 0
     search_bar_open = False
@@ -2787,10 +2789,10 @@ def execute_search_crawl(cmd):
         known_covering = sum(1 for name in all_activities if name.startswith(prefix.lower()))
         remaining = sum(1 for p in prefix_queue if p not in completed_prefixes)
 
-        if len(prefix) >= 2 and known_covering > 0 and known_covering < TRUNCATION_THRESHOLD:
+        if len(prefix) >= 3 and known_covering > 0 and known_covering < TRUNCATION_THRESHOLD:
             parent = prefix[:-1]
             if parent in completed_prefixes:
-                print(f"  [search-crawl] '{prefix}' skipped ({known_covering} already known, parent '{parent}' was not truncated)")
+                print(f"  [search-crawl] '{prefix}' skipped ({known_covering} known, parent '{parent}' non-truncated)")
                 completed_prefixes.add(prefix)
                 continue
 
@@ -2817,8 +2819,6 @@ def execute_search_crawl(cmd):
             truncated = state.get("truncated", False)
             consecutive_errors = 0
 
-            prefix_lower = prefix.lower()
-            prefix_matches = []
             new_count = 0
             for item in results:
                 name = item.get("name", "").strip()
@@ -2832,13 +2832,11 @@ def execute_search_crawl(cmd):
                         "discoveredBy": f"search:{prefix}",
                     }
                     new_count += 1
-                if name_key.startswith(prefix_lower):
-                    prefix_matches.append(name)
 
-            real_count = len(prefix_matches)
-            is_actually_truncated = truncated and real_count >= TRUNCATION_THRESHOLD
+            total_visible = len(results)
+            is_actually_truncated = truncated or total_visible >= TRUNCATION_THRESHOLD
 
-            print(f"  [search-crawl]   {len(results)} results ({real_count} prefix-match), {new_count} new"
+            print(f"  [search-crawl]   {total_visible} results (fuzzy), {new_count} new"
                   f"{' [TRUNCATED]' if is_actually_truncated else ''}")
 
             if is_actually_truncated and len(prefix) < MAX_PREFIX_LEN:

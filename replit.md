@@ -293,7 +293,9 @@ Database-driven scraping system replacing hardcoded adapters:
 - API endpoints: `/api/epic/agent/commands`, `/api/epic/agent/heartbeat`, `/api/epic/agent/results`, `/api/epic/agent/send`, `/api/epic/agent/status`, `/api/epic/agent/screenshot/:id`
 - CLI commands: `epic navigate <env> <target>`, `epic screenshot <env>`, `epic click <env> <element>`, `epic status`, `epic setup`
 - M-x commands: epic-status, epic-navigate, epic-screenshot, epic-click, epic-activities, epic-setup
-- TreeView: clicking an epicActivity node sends `epic navigate <env> <name>` (both mouse click and Enter key)
+- TreeView: double-click/Enter on epicActivity sends `epic launch <env> <name>` (search bar method); epicTreeNode uses `epic go` if navPath exists, else `epic launch`
+- **CRITICAL: Epic search bar requires minimum 2 characters** before showing results. Single-letter prefixes return nothing. search-crawl must start with 2-letter combos (aa-zz).
+- **Epic search is FUZZY** — typing "ch" may return "Chart Review" AND "Discharge" AND "Schedule". Not all results start with the typed prefix. search-crawl must collect ALL returned items, not just prefix-matching ones. Truncation detection should count total visible results, not just prefix-matching ones.
 
 ## Citrix Workspace Launcher
 
