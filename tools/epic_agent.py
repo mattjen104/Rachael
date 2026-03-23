@@ -2587,9 +2587,49 @@ def execute_search_crawl(cmd):
             pass
         return None
 
+    proven_search_method = None
+
+    SEARCH_OPENERS = [
+        ("ctrl_space", lambda: pyautogui.hotkey("ctrl", "space")),
+        ("alt_space", lambda: pyautogui.hotkey("alt", "space")),
+        ("epic_button_e", lambda: pyautogui.hotkey("alt", "e")),
+        ("f3", lambda: pyautogui.press("f3")),
+        ("ctrl_f", lambda: pyautogui.hotkey("ctrl", "f")),
+    ]
+
     def ensure_search_focused():
+        nonlocal proven_search_method
         activate_window(window)
         time.sleep(0.2)
+
+        if proven_search_method:
+            for name, fn in SEARCH_OPENERS:
+                if name == proven_search_method:
+                    fn()
+                    time.sleep(0.6)
+                    return
+            pyautogui.hotkey("ctrl", "space")
+            time.sleep(0.6)
+            return
+
+        print(f"  [search-crawl]   Discovering search bar shortcut...")
+        for name, fn in SEARCH_OPENERS:
+            print(f"  [search-crawl]     Trying: {name}")
+            fn()
+            time.sleep(0.8)
+
+            state = read_search_bar_text()
+            if state and state.get("visible", False):
+                proven_search_method = name
+                print(f"  [search-crawl]     === {name}: WORKS ===")
+                return
+            else:
+                print(f"  [search-crawl]     {name}: no search bar visible")
+                pyautogui.press("escape")
+                time.sleep(0.3)
+
+        print(f"  [search-crawl]   WARNING: No shortcut opened the search bar, falling back to ctrl+space")
+        proven_search_method = "ctrl_space"
         pyautogui.hotkey("ctrl", "space")
         time.sleep(0.6)
 
