@@ -2671,12 +2671,14 @@ def execute_search_crawl(cmd):
             return None
         prompt = (
             "Look at this Epic Hyperspace screen. "
-            "Is there a WIDE/EXPANDED search bar at the top of the screen? "
-            "When the search bar is activated (via Ctrl+Space), it expands/lengthens horizontally "
-            "to become much wider than its resting state. "
-            "A wide, expanded search bar means it is active and focused. "
-            "A narrow/short search bar or no search bar means it is NOT active. "
-            "If an expanded search bar is visible, read the EXACT text in it. "
+            "Is the search bar at the top ACTIVATED/FOCUSED? "
+            "An ACTIVATED search bar has TWO key visual indicators: "
+            "(1) It has a BLUE BORDER/OUTLINE around it, and "
+            "(2) It is horizontally MUCH WIDER/LONGER than its resting state — "
+            "it expands to take up most of the toolbar width. "
+            "It also shows placeholder text 'Search (Ctrl+Space)' when empty and focused. "
+            "If the search bar is narrow/short with no blue border, it is NOT activated. "
+            "If an activated search bar is visible, read the EXACT text typed in it. "
             "Return ONLY: {\"visible\": true/false, \"text\": \"exact contents or empty string\"}"
         )
         resp_text = ask_claude(b64, prompt)
