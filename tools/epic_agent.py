@@ -2816,7 +2816,34 @@ def execute_search_crawl(cmd):
     # Search is FUZZY so all returned items are collected regardless of prefix match.
     print(f"  [search-crawl] === PHASE 2: ACTIVITY DISCOVERY ===")
 
-    prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
+    VOWELS = set("aeiou")
+    COMMON_CONSONANT_PAIRS = {
+        "bl", "br", "ch", "cl", "cr", "dr", "fl", "fr", "gl", "gr",
+        "kn", "ph", "pl", "pr", "qu", "sc", "sh", "sk", "sl", "sm",
+        "sn", "sp", "sq", "st", "sw", "th", "tr", "tw", "wh", "wr",
+    }
+    RARE_STARTERS = {"bx", "cx", "dx", "fq", "fx", "gx", "hx", "jq", "jx", "jz",
+                     "kx", "kz", "mx", "mz", "px", "pz", "qb", "qc", "qd", "qe",
+                     "qf", "qg", "qh", "qi", "qj", "qk", "ql", "qm", "qn", "qo",
+                     "qp", "qq", "qr", "qs", "qt", "qv", "qw", "qx", "qy", "qz",
+                     "sx", "sz", "tx", "vb", "vc", "vd", "vf", "vg", "vh", "vj",
+                     "vk", "vm", "vn", "vp", "vq", "vr", "vs", "vt", "vw", "vx",
+                     "vy", "vz", "wc", "wd", "wf", "wg", "wj", "wk", "wm", "wn",
+                     "wp", "wq", "wv", "ww", "wx", "wy", "wz", "xb", "xc", "xd",
+                     "xf", "xg", "xh", "xj", "xk", "xl", "xm", "xn", "xp", "xq",
+                     "xr", "xs", "xv", "xw", "xx", "xy", "xz", "yb", "yc", "yd",
+                     "yf", "yg", "yh", "yj", "yk", "ym", "yn", "yp", "yq", "yr",
+                     "ys", "yt", "yv", "yw", "yx", "yy", "yz", "zb", "zc", "zd",
+                     "zf", "zg", "zh", "zj", "zk", "zl", "zm", "zn", "zp", "zq",
+                     "zr", "zs", "zt", "zv", "zw", "zx", "zy", "zz"}
+    prefix_queue = []
+    for a in "abcdefghijklmnopqrstuvwxyz":
+        for b in "abcdefghijklmnopqrstuvwxyz":
+            pair = a + b
+            if pair in RARE_STARTERS:
+                continue
+            prefix_queue.append(pair)
+    print(f"  [search-crawl] {len(prefix_queue)} plausible 2-letter prefixes (skipped {676 - len(prefix_queue)} rare combos)")
     consecutive_errors = 0
     total_searched = 0
     search_bar_open = False
