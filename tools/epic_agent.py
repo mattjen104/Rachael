@@ -656,10 +656,15 @@ def _read_search_bar(window):
     return None
 
 
+_cached_clear_method = None
+
+
 def adaptive_clear_search_bar(window, open_search_fn=None):
     """Module-level adaptive clear: tries multiple strategies to empty the search bar.
-    Verifies via vision after each attempt. Returns True if bar is confirmed empty.
+    Verifies via vision after each attempt. Caches the first working method.
+    Returns True if bar is confirmed empty.
     If open_search_fn is provided, uses it for escape+reopen strategy."""
+    global _cached_clear_method
 
     def _do_end_bksp():
         pyautogui.press("end")
@@ -693,12 +698,20 @@ def adaptive_clear_search_bar(window, open_search_fn=None):
         for _ in range(50):
             pyautogui.press("delete")
 
-    approaches = [
+    all_approaches = [
         ("end+backspace", _do_end_bksp),
         ("home+shift_end+bksp", _do_home_shift_end_bksp),
         ("escape+reopen", _do_escape_reopen),
         ("50x_delete", _do_50x_delete),
     ]
+
+    if _cached_clear_method:
+        cached = [(n, fn) for n, fn in all_approaches if n == _cached_clear_method]
+        rest = [(n, fn) for n, fn in all_approaches if n != _cached_clear_method]
+        approaches = cached + rest
+    else:
+        approaches = all_approaches
+
     for name, fn in approaches:
         fn()
         time.sleep(0.3)
@@ -714,6 +727,9 @@ def adaptive_clear_search_bar(window, open_search_fn=None):
         bar_text = state.get("text", "").strip()
         if len(bar_text) == 0:
             print(f"  [clear] Bar cleared via {name}")
+            if _cached_clear_method != name:
+                _cached_clear_method = name
+                print(f"  [clear] Cached clear method: {name}")
             return True
         print(f"  [clear] {name} didn't clear (still: '{bar_text}'), trying next...")
     print(f"  [clear] WARNING: All clear methods failed")
@@ -2950,6 +2966,35 @@ def execute_search_crawl(cmd):
                     if search_method_successes >= 3:
                         fn()
                         time.sleep(0.8)
+                        if search_method_successes % 5 == 0:
+                            bar_open, _ = _is_bar_open()
+                            if not bar_open:
+                                search_method_failures += 1
+                                print(f"  [search-crawl]   Trusted method {name} failed periodic check ({search_method_failures})")
+                                if search_method_failures >= 2:
+                                    print(f"  [search-crawl]   Re-discovering search method...")
+                                    search_method_successes = 0
+                                    search_method_failures = 0
+                                    proven_search_method = None
+                                    pyautogui.press("escape")
+                                    time.sleep(0.3)
+                                    break
+                                pyautogui.press("escape")
+                                time.sleep(0.3)
+                                fn()
+                                time.sleep(1.0)
+                                bar_open2, _ = _is_bar_open()
+                                if bar_open2:
+                                    search_method_failures = 0
+                                    search_method_successes += 1
+                                    return True
+                                print(f"  [search-crawl]   Retry failed, re-discovering...")
+                                search_method_successes = 0
+                                search_method_failures = 0
+                                proven_search_method = None
+                                pyautogui.press("escape")
+                                time.sleep(0.3)
+                                break
                         search_method_successes += 1
                         return True
 
@@ -3385,7 +3430,14 @@ def execute_launch(cmd):
     open_search()
     time.sleep(0.6)
 
-    adaptive_clear_search_bar(window, open_search_fn=open_search)
+    cleared = adaptive_clear_search_bar(window, open_search_fn=open_search)
+    if not cleared:
+        print(f"  [launch] Clear failed, attempting escape+reopen recovery")
+        pyautogui.press("escape")
+        time.sleep(0.5)
+        open_search()
+        time.sleep(0.8)
+        adaptive_clear_search_bar(window, open_search_fn=open_search)
 
     pyautogui.typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
