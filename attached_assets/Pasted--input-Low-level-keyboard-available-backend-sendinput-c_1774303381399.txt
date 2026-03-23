@@ -1,0 +1,119 @@
+  [input] Low-level keyboard available (backend: sendinput)
+  [config] Loading C:\Users\mjensen\Downloads\.env
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: https://i-cloud-sync-manager.replit.app
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+
+>> Command: search_crawl (id: epic-1774303176695-umycni)
+  [search-crawl] Starting activity discovery via search bar for SUP
+  [search-crawl] === PHASE 1: CALIBRATING SEARCH BAR + TEXT CLEAR ===
+  [search-crawl]   Step 1: Finding a working method to open the search bar...
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space
+  [search-crawl]     === sendinput_ctrl_space: WORKS (search bar visible) ===
+  [search-crawl]     Clicking inside search bar at (1105, 97)
+  [search-crawl]   Search bar opened successfully using: sendinput_ctrl_space
+  [search-crawl]   Step 2: Typing 'zz' to put known text in search bar...
+  [search-crawl]   Lost search bar after typing, trying to recover...
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space FAILED — search bar NOT visible
+  [search-crawl]   Clearing saved method, will re-discover...
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space
+  [search-crawl]     sendinput_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]     keybd_event_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: pyautogui_ctrl_space
+  [search-crawl]     === pyautogui_ctrl_space: WORKS (search bar visible) ===
+  [search-crawl]     Clicking inside search bar at (1105, 185)
+  [search-crawl]   After typing 'zz', search bar shows: ''
+  [search-crawl]   WARNING: Typed 'zz' but bar shows '' - search bar may not be focused
+  [search-crawl]   Step 3: Testing clear methods one by one...
+  [search-crawl]   --- Testing: escape_reopen ---
+  [search-crawl]     After escape_reopen: visible=True, text=''
+  [search-crawl]     === escape_reopen: WORKS ===
+  [search-crawl]   === PROVEN CLEAR METHOD: escape_reopen ===
+  [search-crawl] === PHASE 2: ACTIVITY DISCOVERY ===
+  [search-crawl] 538 plausible 2-letter prefixes (skipped 138 rare combos)
+  [search-crawl] 'aa' (537 left, 0 total, 0 known for this prefix)
+  [search-crawl]   Using saved search method: pyautogui_ctrl_space
+  [search-crawl]   Saved method pyautogui_ctrl_space FAILED — search bar NOT visible
+  [search-crawl]   Clearing saved method, will re-discover...
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space
+  [search-crawl]     sendinput_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]     === keybd_event_ctrl_space: WORKS (search bar visible) ===
+  [search-crawl]     Clicking inside search bar at (1105, 97)
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Search bar shows 'asl' but expected 'aa' (attempt 1)
+  [search-crawl]   Escaping and reopening search bar...
+  [search-crawl]   Using saved search method: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Saved method keybd_event_ctrl_space: confirmed working
+  [search-crawl]     Clicking inside search bar at (1105, 233)
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Search bar shows 'sal' but expected 'aa' (attempt 2)
+  [search-crawl]   Escaping and reopening search bar...
+  [search-crawl]   Using saved search method: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Saved method keybd_event_ctrl_space: confirmed working
+  [search-crawl]     Clicking inside search bar at (1105, 153)
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   2 results (fuzzy), 2 new
+  [search-crawl]   Saved (2 activities, 1 prefixes)
+  [search-crawl] 'ab' (536 left, 2 total, 0 known for this prefix)
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Search bar shows 'aaab' but expected 'ab' (attempt 1)
+  [search-crawl]   Escaping and reopening search bar...
+  [search-crawl]   Using saved search method: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Saved method keybd_event_ctrl_space: confirmed working
+  [search-crawl]     Clicking inside search bar at (1105, 209)
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Search bar shows 'abl' but expected 'ab' (attempt 2)
+  [search-crawl]   Escaping and reopening search bar...
+  [search-crawl]   Using saved search method: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Saved method keybd_event_ctrl_space: confirmed working
+  [search-crawl]     Clicking inside search bar at (1105, 233)
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Search bar shows 'abl' but expected 'ab' (attempt 3)
+  [search-crawl]   Could not get 'ab' into search bar after 3 attempts
+  [search-crawl]   Could not verify 'ab' in search bar
+  [search-crawl] 'ac' (535 left, 2 total, 0 known for this prefix)
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Search bar shows 'abaci' but expected 'ac' (attempt 1)
+  [search-crawl]   Escaping and reopening search bar...
+  [search-crawl]   Using saved search method: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]   Saved method keybd_event_ctrl_space FAILED — search bar NOT visible
+  [search-crawl]   Clearing saved method, will re-discover...
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space

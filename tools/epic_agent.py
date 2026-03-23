@@ -2798,34 +2798,15 @@ def execute_search_crawl(cmd):
         ("sendinput_f3", lambda: sendinput_press("f3")),
     ]
 
-    def _click_search_bar(state):
-        """Click inside the search bar using coordinates from vision response."""
-        cx = state.get("centerX")
-        cy = state.get("centerY")
-        if cx is not None and cy is not None:
-            img = screenshot_window(window)
-            if img:
-                img_w, img_h = img.size
-                abs_x = window.left + int(img_w * cx / 100)
-                abs_y = window.top + int(img_h * cy / 100)
-                print(f"  [search-crawl]     Clicking inside search bar at ({abs_x}, {abs_y})")
-                pyautogui.click(abs_x, abs_y)
-                time.sleep(0.3)
-                return True
-        print(f"  [search-crawl]     No search bar coordinates from vision, clicking estimated center")
-        pyautogui.click(window.left + window.width // 2, window.top + 30)
-        time.sleep(0.3)
-        return True
-
     def _try_search_opener(name, fn):
-        """Try a single search opener, return True if search bar appeared."""
+        """Try a single search opener, return True if search bar appeared.
+        NO click after — Ctrl+Space already focuses the text field."""
         print(f"  [search-crawl]     Trying: {name}")
         fn()
         time.sleep(1.0)
         state = read_search_bar_text()
         if state and state.get("visible", False):
             print(f"  [search-crawl]     === {name}: WORKS (search bar visible) ===")
-            _click_search_bar(state)
             return True
         visible = state.get("visible", False) if state else "vision_failed"
         print(f"  [search-crawl]     {name}: FAILED (visible={visible})")
@@ -2834,7 +2815,8 @@ def execute_search_crawl(cmd):
         return False
 
     def ensure_search_focused():
-        """Try to open the search bar and click inside it for focus. Returns True if confirmed open, False if all methods failed."""
+        """Open the search bar. NO click — the shortcut already focuses the text field.
+        Returns True if confirmed open, False if all methods failed."""
         nonlocal proven_search_method
         activate_window(window)
         time.sleep(0.3)
@@ -2850,7 +2832,6 @@ def execute_search_crawl(cmd):
                     state = read_search_bar_text()
                     if state and state.get("visible", False):
                         print(f"  [search-crawl]   Saved method {name}: confirmed working")
-                        _click_search_bar(state)
                         return True
                     print(f"  [search-crawl]   Saved method {name} FAILED — search bar NOT visible")
                     print(f"  [search-crawl]   Clearing saved method, will re-discover...")
@@ -2876,60 +2857,21 @@ def execute_search_crawl(cmd):
         return False
 
     def _open_search_bar():
-        """Use the proven search opener or default to sendinput ctrl+space, then click inside."""
+        """Use the proven search opener or default to sendinput ctrl+space. NO click."""
         if proven_search_method:
             for name, fn in SEARCH_OPENERS:
                 if name == proven_search_method:
                     fn()
                     time.sleep(0.5)
-                    pyautogui.click(window.left + window.width // 2, window.top + 30)
                     return
         sendinput_hotkey("ctrl", "space")
         time.sleep(0.5)
-        pyautogui.click(window.left + window.width // 2, window.top + 30)
 
-    CLEAR_METHODS = {
-        "escape_reopen": lambda: (
-            pyautogui.press("escape"),
-            time.sleep(0.4),
-            _open_search_bar(),
-            time.sleep(0.5),
-        ),
-        "ctrl_a_bksp": lambda: (
-            pyautogui.hotkey("ctrl", "a"),
-            time.sleep(0.1),
-            pyautogui.press("backspace"),
-            time.sleep(0.1),
-        ),
-        "triple_click_bksp": lambda: (
-            pyautogui.click(clicks=3, interval=0.05),
-            time.sleep(0.1),
-            pyautogui.press("backspace"),
-            time.sleep(0.1),
-        ),
-        "home_shift_end_bksp": lambda: (
-            pyautogui.press("home"),
-            time.sleep(0.05),
-            pyautogui.keyDown("shift"),
-            time.sleep(0.05),
-            pyautogui.press("end"),
-            time.sleep(0.05),
-            pyautogui.keyUp("shift"),
-            time.sleep(0.1),
-            pyautogui.press("backspace"),
-            time.sleep(0.1),
-        ),
-        "backspace_40": lambda: (
-            [pyautogui.press("backspace") for _ in range(40)],
-            time.sleep(0.1),
-        ),
-    }
-
-    # ── PHASE 1: CALIBRATE SEARCH BAR OPENING + TEXT CLEARING ──
-    # First discover which keyboard shortcut opens the search bar,
-    # then discover which method clears text from it.
-    if not proven_clear_method:
-        print(f"  [search-crawl] === PHASE 1: CALIBRATING SEARCH BAR + TEXT CLEAR ===")
+    # ── PHASE 1: CALIBRATE SEARCH BAR OPENING ──
+    # Discover which keyboard shortcut opens the search bar.
+    # Text clearing is handled by Ctrl+A before every typewrite (select-all + type replaces).
+    if not proven_search_method:
+        print(f"  [search-crawl] === PHASE 1: CALIBRATING SEARCH BAR ===")
 
         print(f"  [search-crawl]   Step 1: Finding a working method to open the search bar...")
         search_ok = ensure_search_focused()
@@ -2955,128 +2897,65 @@ def execute_search_crawl(cmd):
 
         print(f"  [search-crawl]   Search bar opened successfully using: {proven_search_method}")
 
-        print(f"  [search-crawl]   Step 2: Typing 'zz' to put known text in search bar...")
+        print(f"  [search-crawl]   Step 2: Verifying typing works (Ctrl+A then 'zz')...")
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.1)
         pyautogui.typewrite("zz", interval=0.05)
         time.sleep(0.8)
 
         state1 = read_search_bar_text()
-        if not state1 or not state1.get("visible", False):
-            print(f"  [search-crawl]   Lost search bar after typing, trying to recover...")
-            ensure_search_focused()
-            pyautogui.typewrite("zz", interval=0.05)
-            time.sleep(0.8)
-            state1 = read_search_bar_text()
-
         bar_after_type = state1.get("text", "").strip() if state1 else ""
         print(f"  [search-crawl]   After typing 'zz', search bar shows: '{bar_after_type}'")
 
         if "zz" not in bar_after_type.lower():
-            print(f"  [search-crawl]   WARNING: Typed 'zz' but bar shows '{bar_after_type}' - search bar may not be focused")
-
-        print(f"  [search-crawl]   Step 3: Testing clear methods one by one...")
-        for method_name, method_fn in CLEAR_METHODS.items():
-            print(f"  [search-crawl]   --- Testing: {method_name} ---")
-
-            if method_name == "escape_reopen":
-                method_fn()
-                time.sleep(0.3)
-            else:
-                method_fn()
-                time.sleep(0.3)
-
-            state = read_search_bar_text()
-            if state is None:
-                print(f"  [search-crawl]     Vision call failed, skipping this method")
-                if method_name == "escape_reopen":
-                    ensure_search_focused()
-                    pyautogui.typewrite("zz", interval=0.05)
-                    time.sleep(0.5)
-                continue
-
-            bar_text = state.get("text", "").strip()
-            is_visible = state.get("visible", False)
-            print(f"  [search-crawl]     After {method_name}: visible={is_visible}, text='{bar_text}'")
-
-            if method_name == "escape_reopen":
-                if is_visible and len(bar_text) == 0:
-                    print(f"  [search-crawl]     === {method_name}: WORKS ===")
-                    proven_clear_method = method_name
-                    break
-                else:
-                    print(f"  [search-crawl]     {method_name}: did not clear (visible={is_visible}, text='{bar_text}')")
-                    if not is_visible:
-                        ensure_search_focused()
-                    pyautogui.typewrite("zz", interval=0.05)
-                    time.sleep(0.5)
-                    continue
-            else:
-                if is_visible and len(bar_text) == 0:
-                    print(f"  [search-crawl]     === {method_name}: WORKS ===")
-                    proven_clear_method = method_name
-                    break
-                else:
-                    print(f"  [search-crawl]     {method_name}: did not clear (text='{bar_text}')")
-                    if not is_visible:
-                        ensure_search_focused()
-                    pyautogui.typewrite("zz", interval=0.05)
-                    time.sleep(0.5)
-                    continue
-
-        if not proven_clear_method:
-            proven_clear_method = "escape_reopen"
-            print(f"  [search-crawl]   No method confirmed, defaulting to escape_reopen")
+            print(f"  [search-crawl]   WARNING: Typed 'zz' but bar shows '{bar_after_type}' - will use select-all strategy")
         else:
-            print(f"  [search-crawl]   === PROVEN CLEAR METHOD: {proven_clear_method} ===")
+            print(f"  [search-crawl]   Typing confirmed working!")
+
+        print(f"  [search-crawl]   Step 3: Verifying Ctrl+A replacement clears old text...")
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.1)
+        pyautogui.typewrite("qq", interval=0.05)
+        time.sleep(0.8)
+
+        state2 = read_search_bar_text()
+        bar_after_replace = state2.get("text", "").strip() if state2 else ""
+        print(f"  [search-crawl]   After Ctrl+A + 'qq': bar shows '{bar_after_replace}'")
+
+        if "zz" in bar_after_replace.lower():
+            print(f"  [search-crawl]   WARNING: Ctrl+A did not replace old text — old 'zz' still present")
+            proven_clear_method = "escape_reopen"
+        else:
+            proven_clear_method = "ctrl_a_replace"
+            print(f"  [search-crawl]   === Ctrl+A replacement works! ===")
 
         save_progress(completed_prefixes)
     else:
-        print(f"  [search-crawl] Using previously proven clear method: {proven_clear_method}")
-
-    LEGACY_METHOD_MAP = {
-        "ctrl_a": "ctrl_a_bksp",
-        "ctrl_a_del": "ctrl_a_bksp",
-        "home_shift_end": "home_shift_end_bksp",
-        "home_shift_end_del": "home_shift_end_bksp",
-        "backspace": "backspace_40",
-        "backspace_30": "backspace_40",
-        "triple_click": "triple_click_bksp",
-        "triple_click_del": "triple_click_bksp",
-    }
-
-    if proven_clear_method in LEGACY_METHOD_MAP:
-        old_name = proven_clear_method
-        proven_clear_method = LEGACY_METHOD_MAP[old_name]
-        print(f"  [search-crawl] Migrated legacy clear method '{old_name}' -> '{proven_clear_method}'")
-    elif proven_clear_method and proven_clear_method not in CLEAR_METHODS:
-        print(f"  [search-crawl] Unknown clear method '{proven_clear_method}', recalibrating")
-        proven_clear_method = None
-
-    def clear_search_bar():
-        CLEAR_METHODS.get(proven_clear_method, CLEAR_METHODS["escape_reopen"])()
+        print(f"  [search-crawl] Using previously proven search method: {proven_search_method}")
+        if not proven_clear_method:
+            proven_clear_method = "ctrl_a_replace"
 
     search_bar_open = False
 
     verified_streak = 0
     VERIFY_THRESHOLD = 3
 
-    def type_and_read(prefix, max_attempts=3):
-        """Clear the bar, type prefix, read results.
-        Verifies search bar text matches for the first few prefixes until a
-        streak of VERIFY_THRESHOLD consecutive successes is reached. After that,
-        trusts the pattern and only re-verifies if an error resets the streak."""
+    def type_and_read(prefix, max_attempts=4):
+        """Select-all, type prefix, read results.
+        Self-healing: detects accumulated text, garbled input, and focus loss.
+        Uses Ctrl+A before every type to replace whatever is in the bar."""
         nonlocal search_bar_open, verified_streak
 
         for attempt in range(max_attempts):
             if not search_bar_open:
                 if not ensure_search_focused():
-                    print(f"  [search-crawl]   Cannot reopen search bar on attempt {attempt+1}")
+                    print(f"  [search-crawl]   Cannot open search bar on attempt {attempt+1}")
                     time.sleep(1.0)
                     continue
                 search_bar_open = True
 
-            clear_search_bar()
-            if proven_clear_method == "escape_reopen":
-                search_bar_open = True
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.15)
 
             pyautogui.typewrite(prefix, interval=0.05)
             time.sleep(1.0)
@@ -3089,7 +2968,7 @@ def execute_search_crawl(cmd):
                 continue
 
             if not state.get("searchBarVisible", True):
-                print(f"  [search-crawl]   Search bar not visible on attempt {attempt+1}, reopening...")
+                print(f"  [search-crawl]   Search bar closed on attempt {attempt+1}, reopening...")
                 search_bar_open = False
                 verified_streak = 0
                 continue
@@ -3100,18 +2979,33 @@ def execute_search_crawl(cmd):
             if verified_streak >= VERIFY_THRESHOLD:
                 return state
 
-            if actual == expected:
+            if actual == expected or (len(actual) >= len(expected) and actual.startswith(expected)):
                 verified_streak += 1
                 return state
 
             print(f"  [search-crawl]   Search bar shows '{actual}' but expected '{expected}' (attempt {attempt+1})")
             verified_streak = 0
 
-            if attempt < max_attempts - 1:
-                print(f"  [search-crawl]   Escaping and reopening search bar...")
+            if len(actual) > len(expected) and expected in actual:
+                print(f"  [search-crawl]   Text accumulated — Ctrl+A didn't select all. Trying escape+reopen...")
                 pyautogui.press("escape")
-                time.sleep(0.3)
+                time.sleep(0.4)
                 search_bar_open = False
+            elif len(actual) > 0 and expected not in actual:
+                print(f"  [search-crawl]   Garbled text — focus may be wrong. Trying escape+reopen...")
+                pyautogui.press("escape")
+                time.sleep(0.4)
+                search_bar_open = False
+            elif len(actual) == 0:
+                print(f"  [search-crawl]   Bar empty — typing not reaching search field. Trying escape+reopen...")
+                pyautogui.press("escape")
+                time.sleep(0.4)
+                search_bar_open = False
+            else:
+                if attempt < max_attempts - 1:
+                    pyautogui.press("escape")
+                    time.sleep(0.3)
+                    search_bar_open = False
 
         print(f"  [search-crawl]   Could not get '{prefix}' into search bar after {max_attempts} attempts")
         return None
@@ -3338,46 +3232,8 @@ def execute_launch(cmd):
     open_search()
     time.sleep(0.6)
 
-    pyautogui.click(window.left + window.width // 2, window.top + 30)
-    time.sleep(0.3)
-
-    if clear_method == "escape_reopen" or not clear_method:
-        pyautogui.press("escape")
-        time.sleep(0.4)
-        open_search()
-        time.sleep(0.8)
-        pyautogui.click(window.left + window.width // 2, window.top + 30)
-        time.sleep(0.3)
-    elif clear_method == "ctrl_a_bksp":
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.1)
-        pyautogui.press("backspace")
-        time.sleep(0.1)
-    elif clear_method == "triple_click_bksp":
-        pyautogui.click(clicks=3, interval=0.05)
-        time.sleep(0.1)
-        pyautogui.press("backspace")
-        time.sleep(0.1)
-    elif clear_method == "home_shift_end_bksp":
-        pyautogui.press("home")
-        time.sleep(0.05)
-        pyautogui.keyDown("shift")
-        time.sleep(0.05)
-        pyautogui.press("end")
-        time.sleep(0.05)
-        pyautogui.keyUp("shift")
-        time.sleep(0.1)
-        pyautogui.press("backspace")
-        time.sleep(0.1)
-    elif clear_method == "backspace_40":
-        for _ in range(40):
-            pyautogui.press("backspace")
-        time.sleep(0.1)
-    else:
-        pyautogui.press("escape")
-        time.sleep(0.4)
-        open_search()
-        time.sleep(0.8)
+    pyautogui.hotkey("ctrl", "a")
+    time.sleep(0.15)
 
     pyautogui.typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
