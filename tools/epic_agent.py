@@ -51,10 +51,13 @@ pyautogui.PAUSE = 0.05
 pyautogui.MINIMUM_DURATION = 0
 pyautogui.MINIMUM_SLEEP = 0
 
-# ── Low-level Windows keyboard via SendInput (ctypes) ──
-# pyautogui sometimes doesn't work through Citrix because it uses
-# a different input injection method. SendInput is what the actual
-# keyboard hardware driver uses, so Citrix treats it as real key presses.
+# ── Low-level Windows keyboard via multiple methods ──
+# Citrix can intercept/drop keystrokes from pyautogui. We provide three
+# injection methods and the calibration system picks whichever works:
+#   1) SendInput with virtual key codes (modern Windows API)
+#   2) keybd_event (legacy API, what pyautogui uses internally but with
+#      better timing control)
+#   3) pyautogui (fallback)
 try:
     import ctypes
     from ctypes import wintypes
@@ -62,7 +65,7 @@ try:
     user32 = ctypes.windll.user32
     INPUT_KEYBOARD = 1
     KEYEVENTF_KEYUP = 0x0002
-    KEYEVENTF_SCANCODE = 0x0008
+    KEYEVENTF_EXTENDEDKEY = 0x0001
 
     class KEYBDINPUT(ctypes.Structure):
         _fields_ = [
@@ -79,7 +82,7 @@ try:
         _fields_ = [("type", wintypes.DWORD), ("_input", _INPUT)]
 
     VK_MAP = {
-        "ctrl": 0x11, "shift": 0x10, "alt": 0x12,
+        "ctrl": 0x11, "control": 0x11, "shift": 0x10, "alt": 0x12, "menu": 0x12,
         "space": 0x20, "enter": 0x0D, "return": 0x0D,
         "escape": 0x1B, "esc": 0x1B,
         "backspace": 0x08, "delete": 0x2E,
@@ -95,28 +98,56 @@ try:
         "5": 0x35, "6": 0x36, "7": 0x37, "8": 0x38, "9": 0x39,
     }
 
-    def _send_key_event(vk, up=False):
+    EXTENDED_KEYS = {0x2E, 0x24, 0x23}
+
+    def _sendinput_key(vk, up=False):
+        """SendInput with virtual key code only (no scan code flag)."""
         scan = user32.MapVirtualKeyW(vk, 0)
-        flags = KEYEVENTF_SCANCODE | (KEYEVENTF_KEYUP if up else 0)
+        flags = KEYEVENTF_KEYUP if up else 0
+        if vk in EXTENDED_KEYS:
+            flags |= KEYEVENTF_EXTENDEDKEY
         ki = KEYBDINPUT(wVk=vk, wScan=scan, dwFlags=flags, time=0,
                         dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
         inp = INPUT(type=INPUT_KEYBOARD)
         inp._input.ki = ki
         user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
+    def _keybd_event_key(vk, up=False):
+        """Legacy keybd_event API — simpler, widely compatible."""
+        scan = user32.MapVirtualKeyW(vk, 0)
+        flags = 0x0002 if up else 0
+        if vk in EXTENDED_KEYS:
+            flags |= 0x0001
+        user32.keybd_event(vk, scan, flags, 0)
+
+    _active_backend = "sendinput"
+    _key_fn = _sendinput_key
+
+    def set_keyboard_backend(name):
+        """Switch between 'sendinput' and 'keybd_event' backends."""
+        global _active_backend, _key_fn
+        if name == "keybd_event":
+            _active_backend = "keybd_event"
+            _key_fn = _keybd_event_key
+        else:
+            _active_backend = "sendinput"
+            _key_fn = _sendinput_key
+        print(f"  [input] Keyboard backend: {_active_backend}")
+
     def sendinput_press(key):
-        """Press and release a single key via SendInput."""
+        """Press and release a single key via the active backend."""
         vk = VK_MAP.get(key.lower())
         if vk is None:
             pyautogui.press(key)
             return
-        _send_key_event(vk, up=False)
-        time.sleep(0.02)
-        _send_key_event(vk, up=True)
-        time.sleep(0.02)
+        _key_fn(vk, up=False)
+        time.sleep(0.03)
+        _key_fn(vk, up=True)
+        time.sleep(0.03)
 
     def sendinput_hotkey(*keys):
-        """Press a key combination via SendInput (e.g. sendinput_hotkey('ctrl', 'space'))."""
+        """Press a key combination (e.g. sendinput_hotkey('ctrl', 'space')).
+        Uses longer delays between modifier down and key down for Citrix reliability."""
         vks = []
         for k in keys:
             vk = VK_MAP.get(k.lower())
@@ -125,29 +156,32 @@ try:
                 return
             vks.append(vk)
         for vk in vks:
-            _send_key_event(vk, up=False)
-            time.sleep(0.02)
+            _key_fn(vk, up=False)
+            time.sleep(0.05)
+        time.sleep(0.05)
         for vk in reversed(vks):
-            _send_key_event(vk, up=True)
-            time.sleep(0.02)
+            _key_fn(vk, up=True)
+            time.sleep(0.05)
 
     def sendinput_typewrite(text, interval=0.03):
-        """Type a string character by character via SendInput."""
+        """Type a string character by character via the active backend."""
         for ch in text:
             vk = VK_MAP.get(ch.lower())
             if vk is not None:
-                _send_key_event(vk, up=False)
-                time.sleep(0.01)
-                _send_key_event(vk, up=True)
+                _key_fn(vk, up=False)
+                time.sleep(0.015)
+                _key_fn(vk, up=True)
                 time.sleep(interval)
             else:
                 pyautogui.typewrite(ch, interval=interval)
 
     HAS_SENDINPUT = True
-    print("  [input] SendInput (low-level keyboard) available")
+    print(f"  [input] Low-level keyboard available (backend: {_active_backend})")
 except Exception as e:
     HAS_SENDINPUT = False
-    print(f"  [input] SendInput not available ({e}), using pyautogui only")
+    print(f"  [input] Low-level keyboard not available ({e}), using pyautogui only")
+    def set_keyboard_backend(name):
+        pass
     def sendinput_press(key):
         pyautogui.press(key)
     def sendinput_hotkey(*keys):
@@ -2702,14 +2736,40 @@ def execute_search_crawl(cmd):
 
     proven_search_method = proven_search_method_saved
 
+    def _kbd_ctrl_space():
+        set_keyboard_backend("keybd_event")
+        sendinput_hotkey("ctrl", "space")
+        set_keyboard_backend("sendinput")
+
+    def _kbd_alt_space():
+        set_keyboard_backend("keybd_event")
+        sendinput_hotkey("alt", "space")
+        set_keyboard_backend("sendinput")
+
     SEARCH_OPENERS = [
         ("sendinput_ctrl_space", lambda: sendinput_hotkey("ctrl", "space")),
+        ("keybd_event_ctrl_space", _kbd_ctrl_space),
         ("pyautogui_ctrl_space", lambda: pyautogui.hotkey("ctrl", "space")),
         ("sendinput_alt_space", lambda: sendinput_hotkey("alt", "space")),
+        ("keybd_event_alt_space", _kbd_alt_space),
         ("pyautogui_alt_space", lambda: pyautogui.hotkey("alt", "space")),
         ("sendinput_ctrl_f", lambda: sendinput_hotkey("ctrl", "f")),
         ("sendinput_f3", lambda: sendinput_press("f3")),
     ]
+
+    def _try_search_opener(name, fn):
+        """Try a single search opener, return True if search bar appeared."""
+        print(f"  [search-crawl]     Trying: {name}")
+        fn()
+        time.sleep(0.8)
+        state = read_search_bar_text()
+        if state and state.get("visible", False):
+            print(f"  [search-crawl]     === {name}: WORKS ===")
+            return True
+        print(f"  [search-crawl]     {name}: no search bar visible")
+        sendinput_press("escape")
+        time.sleep(0.3)
+        return False
 
     def ensure_search_focused():
         nonlocal proven_search_method
@@ -2719,28 +2779,26 @@ def execute_search_crawl(cmd):
         if proven_search_method:
             for name, fn in SEARCH_OPENERS:
                 if name == proven_search_method:
+                    print(f"  [search-crawl]   Using saved search method: {name}")
                     fn()
                     time.sleep(0.6)
-                    return
-            sendinput_hotkey("ctrl", "space")
-            time.sleep(0.6)
-            return
+                    state = read_search_bar_text()
+                    if state and state.get("visible", False):
+                        return
+                    print(f"  [search-crawl]   Saved method {name} FAILED this time, re-discovering...")
+                    sendinput_press("escape")
+                    time.sleep(0.3)
+                    proven_search_method = None
+                    break
+            if proven_search_method:
+                print(f"  [search-crawl]   Saved method '{proven_search_method}' not found in openers, re-discovering...")
+                proven_search_method = None
 
         print(f"  [search-crawl]   Discovering search bar shortcut...")
         for name, fn in SEARCH_OPENERS:
-            print(f"  [search-crawl]     Trying: {name}")
-            fn()
-            time.sleep(0.8)
-
-            state = read_search_bar_text()
-            if state and state.get("visible", False):
+            if _try_search_opener(name, fn):
                 proven_search_method = name
-                print(f"  [search-crawl]     === {name}: WORKS ===")
                 return
-            else:
-                print(f"  [search-crawl]     {name}: no search bar visible")
-                sendinput_press("escape")
-                time.sleep(0.3)
 
         print(f"  [search-crawl]   WARNING: No shortcut opened the search bar, falling back to sendinput ctrl+space")
         proven_search_method = "sendinput_ctrl_space"
@@ -3158,10 +3216,22 @@ def execute_launch(cmd):
     except Exception:
         pass
 
+    def _launch_kbd_ctrl_space():
+        set_keyboard_backend("keybd_event")
+        sendinput_hotkey("ctrl", "space")
+        set_keyboard_backend("sendinput")
+
+    def _launch_kbd_alt_space():
+        set_keyboard_backend("keybd_event")
+        sendinput_hotkey("alt", "space")
+        set_keyboard_backend("sendinput")
+
     SEARCH_FNS = {
         "sendinput_ctrl_space": lambda: sendinput_hotkey("ctrl", "space"),
+        "keybd_event_ctrl_space": _launch_kbd_ctrl_space,
         "pyautogui_ctrl_space": lambda: pyautogui.hotkey("ctrl", "space"),
         "sendinput_alt_space": lambda: sendinput_hotkey("alt", "space"),
+        "keybd_event_alt_space": _launch_kbd_alt_space,
         "pyautogui_alt_space": lambda: pyautogui.hotkey("alt", "space"),
         "sendinput_ctrl_f": lambda: sendinput_hotkey("ctrl", "f"),
         "sendinput_f3": lambda: sendinput_press("f3"),
