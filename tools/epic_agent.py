@@ -2714,8 +2714,11 @@ def execute_search_crawl(cmd):
             "it expands to take up most of the toolbar width. "
             "It also shows placeholder text 'Search (Ctrl+Space)' when empty and focused. "
             "If the search bar is narrow/short with no blue border, it is NOT activated. "
-            "If an activated search bar is visible, read the EXACT text typed in it. "
-            "Return ONLY: {\"visible\": true/false, \"text\": \"exact contents or empty string\"}"
+            "If an activated search bar is visible: "
+            "  - Read the EXACT text typed in it "
+            "  - Estimate the CENTER coordinates of the text input area as x,y (as percentage of image width/height, 0-100) "
+            "Return ONLY: {\"visible\": true/false, \"text\": \"exact contents or empty string\", "
+            "\"centerX\": number 0-100, \"centerY\": number 0-100}"
         )
         resp_text = ask_claude(b64, prompt)
         if not resp_text:
@@ -2795,6 +2798,25 @@ def execute_search_crawl(cmd):
         ("sendinput_f3", lambda: sendinput_press("f3")),
     ]
 
+    def _click_search_bar(state):
+        """Click inside the search bar using coordinates from vision response."""
+        cx = state.get("centerX")
+        cy = state.get("centerY")
+        if cx is not None and cy is not None:
+            img = screenshot_window(window)
+            if img:
+                img_w, img_h = img.size
+                abs_x = window.left + int(img_w * cx / 100)
+                abs_y = window.top + int(img_h * cy / 100)
+                print(f"  [search-crawl]     Clicking inside search bar at ({abs_x}, {abs_y})")
+                pyautogui.click(abs_x, abs_y)
+                time.sleep(0.3)
+                return True
+        print(f"  [search-crawl]     No search bar coordinates from vision, clicking estimated center")
+        pyautogui.click(window.left + window.width // 2, window.top + 30)
+        time.sleep(0.3)
+        return True
+
     def _try_search_opener(name, fn):
         """Try a single search opener, return True if search bar appeared."""
         print(f"  [search-crawl]     Trying: {name}")
@@ -2803,6 +2825,7 @@ def execute_search_crawl(cmd):
         state = read_search_bar_text()
         if state and state.get("visible", False):
             print(f"  [search-crawl]     === {name}: WORKS (search bar visible) ===")
+            _click_search_bar(state)
             return True
         visible = state.get("visible", False) if state else "vision_failed"
         print(f"  [search-crawl]     {name}: FAILED (visible={visible})")
@@ -2811,7 +2834,7 @@ def execute_search_crawl(cmd):
         return False
 
     def ensure_search_focused():
-        """Try to open the search bar. Returns True if confirmed open, False if all methods failed."""
+        """Try to open the search bar and click inside it for focus. Returns True if confirmed open, False if all methods failed."""
         nonlocal proven_search_method
         activate_window(window)
         time.sleep(0.3)
@@ -2827,6 +2850,7 @@ def execute_search_crawl(cmd):
                     state = read_search_bar_text()
                     if state and state.get("visible", False):
                         print(f"  [search-crawl]   Saved method {name}: confirmed working")
+                        _click_search_bar(state)
                         return True
                     print(f"  [search-crawl]   Saved method {name} FAILED — search bar NOT visible")
                     print(f"  [search-crawl]   Clearing saved method, will re-discover...")
@@ -2852,20 +2876,24 @@ def execute_search_crawl(cmd):
         return False
 
     def _open_search_bar():
-        """Use the proven search opener or default to sendinput ctrl+space."""
+        """Use the proven search opener or default to sendinput ctrl+space, then click inside."""
         if proven_search_method:
             for name, fn in SEARCH_OPENERS:
                 if name == proven_search_method:
                     fn()
+                    time.sleep(0.5)
+                    pyautogui.click(window.left + window.width // 2, window.top + 30)
                     return
         sendinput_hotkey("ctrl", "space")
+        time.sleep(0.5)
+        pyautogui.click(window.left + window.width // 2, window.top + 30)
 
     CLEAR_METHODS = {
         "escape_reopen": lambda: (
             sendinput_press("escape"),
             time.sleep(0.4),
             _open_search_bar(),
-            time.sleep(0.8),
+            time.sleep(0.5),
         ),
         "triple_click_bksp": lambda: (
             pyautogui.click(clicks=3, interval=0.05),
@@ -3306,11 +3334,16 @@ def execute_launch(cmd):
     open_search()
     time.sleep(0.6)
 
+    pyautogui.click(window.left + window.width // 2, window.top + 30)
+    time.sleep(0.3)
+
     if clear_method == "escape_reopen" or not clear_method:
         sendinput_press("escape")
         time.sleep(0.4)
         open_search()
         time.sleep(0.8)
+        pyautogui.click(window.left + window.width // 2, window.top + 30)
+        time.sleep(0.3)
     elif clear_method == "triple_click_bksp":
         pyautogui.click(clicks=3, interval=0.05)
         time.sleep(0.1)

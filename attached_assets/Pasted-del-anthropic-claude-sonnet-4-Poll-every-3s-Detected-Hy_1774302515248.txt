@@ -1,0 +1,84 @@
+del:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+
+>> Command: search_crawl (id: epic-1774302398717-2dxvb0)
+  [search-crawl] Starting activity discovery via search bar for SUP
+  [search-crawl] === PHASE 1: CALIBRATING SEARCH BAR + TEXT CLEAR ===
+  [search-crawl]   Step 1: Finding a working method to open the search bar...
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space
+  [search-crawl]     === sendinput_ctrl_space: WORKS (search bar visible) ===
+  [search-crawl]   Search bar opened successfully using: sendinput_ctrl_space
+  [search-crawl]   Step 2: Typing 'zz' to put known text in search bar...
+  [search-crawl]   Lost search bar after typing, trying to recover...
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space: confirmed working
+  [search-crawl]   After typing 'zz', search bar shows: ''
+  [search-crawl]   WARNING: Typed 'zz' but bar shows '' - search bar may not be focused
+  [search-crawl]   Step 3: Testing clear methods one by one...
+  [search-crawl]   --- Testing: escape_reopen ---
+  [search-crawl]     After escape_reopen: visible=False, text=''
+  [search-crawl]     escape_reopen: did not clear (visible=False, text='')
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space FAILED — search bar NOT visible
+  [search-crawl]   Clearing saved method, will re-discover...
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space
+  [search-crawl]     sendinput_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: keybd_event_ctrl_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]     keybd_event_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: pyautogui_ctrl_space
+  [search-crawl]     pyautogui_ctrl_space: FAILED (visible=False)
+  [search-crawl]     Trying: sendinput_alt_space
+  [search-crawl]     sendinput_alt_space: FAILED (visible=False)
+  [search-crawl]     Trying: keybd_event_alt_space
+  [input] Keyboard backend: keybd_event
+  [input] Keyboard backend: sendinput
+  [search-crawl]     keybd_event_alt_space: FAILED (visible=False)
+  [search-crawl]     Trying: pyautogui_alt_space
+  [search-crawl]     pyautogui_alt_space: FAILED (visible=False)
+  [search-crawl]     Trying: sendinput_ctrl_f
+  [search-crawl]     sendinput_ctrl_f: FAILED (visible=False)
+  [search-crawl]     Trying: sendinput_f3
+  [search-crawl]     sendinput_f3: FAILED (visible=False)
+  [search-crawl]   FAILED: All 8 methods tried, none opened the search bar:
+  [search-crawl]     - sendinput_ctrl_space: failed
+  [search-crawl]     - keybd_event_ctrl_space: failed
+  [search-crawl]     - pyautogui_ctrl_space: failed
+  [search-crawl]     - sendinput_alt_space: failed
+  [search-crawl]     - keybd_event_alt_space: failed
+  [search-crawl]     - pyautogui_alt_space: failed
+  [search-crawl]     - sendinput_ctrl_f: failed
+  [search-crawl]     - sendinput_f3: failed
+  [search-crawl]   --- Testing: triple_click_bksp ---
+  [search-crawl]     After triple_click_bksp: visible=False, text=''
+  [search-crawl]     triple_click_bksp: did not clear (text='')
+  [search-crawl]   === DISCOVERING SEARCH BAR SHORTCUT (8 methods to try) ===
+  [search-crawl]     Trying: sendinput_ctrl_space
+  [search-crawl]     === sendinput_ctrl_space: WORKS (search bar visible) ===
+  [search-crawl]   --- Testing: home_shift_end_bksp ---
+  [search-crawl]     After home_shift_end_bksp: visible=False, text=''
+  [search-crawl]     home_shift_end_bksp: did not clear (text='')
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space: confirmed working
+  [search-crawl]   --- Testing: ctrl_a_bksp ---
+  [search-crawl]     After ctrl_a_bksp: visible=True, text=''
+  [search-crawl]     === ctrl_a_bksp: WORKS ===
+  [search-crawl]   === PROVEN CLEAR METHOD: ctrl_a_bksp ===
+  [search-crawl] === PHASE 2: ACTIVITY DISCOVERY ===
+  [search-crawl] 538 plausible 2-letter prefixes (skipped 138 rare combos)
+  [search-crawl] 'aa' (537 left, 0 total, 0 known for this prefix)
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
+  [search-crawl]   Saved method sendinput_ctrl_space: confirmed working
+  [search-crawl]   Search bar shows '' but expected 'aa' (attempt 1)
+  [search-crawl]   Escaping and reopening search bar...
+  [search-crawl]   Using saved search method: sendinput_ctrl_space
