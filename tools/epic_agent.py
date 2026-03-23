@@ -51,6 +51,110 @@ pyautogui.PAUSE = 0.05
 pyautogui.MINIMUM_DURATION = 0
 pyautogui.MINIMUM_SLEEP = 0
 
+# ── Low-level Windows keyboard via SendInput (ctypes) ──
+# pyautogui sometimes doesn't work through Citrix because it uses
+# a different input injection method. SendInput is what the actual
+# keyboard hardware driver uses, so Citrix treats it as real key presses.
+try:
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_KEYUP = 0x0002
+    KEYEVENTF_SCANCODE = 0x0008
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ]
+
+    class INPUT(ctypes.Structure):
+        class _INPUT(ctypes.Union):
+            _fields_ = [("ki", KEYBDINPUT)]
+        _fields_ = [("type", wintypes.DWORD), ("_input", _INPUT)]
+
+    VK_MAP = {
+        "ctrl": 0x11, "shift": 0x10, "alt": 0x12,
+        "space": 0x20, "enter": 0x0D, "return": 0x0D,
+        "escape": 0x1B, "esc": 0x1B,
+        "backspace": 0x08, "delete": 0x2E,
+        "tab": 0x09, "home": 0x24, "end": 0x23,
+        "f3": 0x72, "f4": 0x73, "f5": 0x74,
+        "a": 0x41, "b": 0x42, "c": 0x43, "d": 0x44, "e": 0x45,
+        "f": 0x46, "g": 0x47, "h": 0x48, "i": 0x49, "j": 0x4A,
+        "k": 0x4B, "l": 0x4C, "m": 0x4D, "n": 0x4E, "o": 0x4F,
+        "p": 0x50, "q": 0x51, "r": 0x52, "s": 0x53, "t": 0x54,
+        "u": 0x55, "v": 0x56, "w": 0x57, "x": 0x58, "y": 0x59,
+        "z": 0x5A,
+        "0": 0x30, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34,
+        "5": 0x35, "6": 0x36, "7": 0x37, "8": 0x38, "9": 0x39,
+    }
+
+    def _send_key_event(vk, up=False):
+        scan = user32.MapVirtualKeyW(vk, 0)
+        flags = KEYEVENTF_SCANCODE | (KEYEVENTF_KEYUP if up else 0)
+        ki = KEYBDINPUT(wVk=vk, wScan=scan, dwFlags=flags, time=0,
+                        dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
+        inp = INPUT(type=INPUT_KEYBOARD)
+        inp._input.ki = ki
+        user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+    def sendinput_press(key):
+        """Press and release a single key via SendInput."""
+        vk = VK_MAP.get(key.lower())
+        if vk is None:
+            pyautogui.press(key)
+            return
+        _send_key_event(vk, up=False)
+        time.sleep(0.02)
+        _send_key_event(vk, up=True)
+        time.sleep(0.02)
+
+    def sendinput_hotkey(*keys):
+        """Press a key combination via SendInput (e.g. sendinput_hotkey('ctrl', 'space'))."""
+        vks = []
+        for k in keys:
+            vk = VK_MAP.get(k.lower())
+            if vk is None:
+                pyautogui.hotkey(*keys)
+                return
+            vks.append(vk)
+        for vk in vks:
+            _send_key_event(vk, up=False)
+            time.sleep(0.02)
+        for vk in reversed(vks):
+            _send_key_event(vk, up=True)
+            time.sleep(0.02)
+
+    def sendinput_typewrite(text, interval=0.03):
+        """Type a string character by character via SendInput."""
+        for ch in text:
+            vk = VK_MAP.get(ch.lower())
+            if vk is not None:
+                _send_key_event(vk, up=False)
+                time.sleep(0.01)
+                _send_key_event(vk, up=True)
+                time.sleep(interval)
+            else:
+                pyautogui.typewrite(ch, interval=interval)
+
+    HAS_SENDINPUT = True
+    print("  [input] SendInput (low-level keyboard) available")
+except Exception as e:
+    HAS_SENDINPUT = False
+    print(f"  [input] SendInput not available ({e}), using pyautogui only")
+    def sendinput_press(key):
+        pyautogui.press(key)
+    def sendinput_hotkey(*keys):
+        pyautogui.hotkey(*keys)
+    def sendinput_typewrite(text, interval=0.03):
+        pyautogui.typewrite(text, interval=interval)
+
 def _load_env_file():
     """Load key=value pairs from .env file next to this script."""
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -578,24 +682,22 @@ Return ONLY the JSON object."""
                 pyautogui.click(abs_x, abs_y)
                 time.sleep(0.5)
             elif act_type == "type":
-                pyautogui.typewrite(action["text"], interval=0.05)
+                sendinput_typewrite(action["text"], interval=0.05)
                 time.sleep(0.3)
             elif act_type == "key":
                 key = action["key"].lower()
-                if key == "alt+space":
-                    pyautogui.hotkey("alt", "space")
-                elif "+" in key:
+                if "+" in key:
                     parts = key.split("+")
-                    pyautogui.hotkey(*parts)
+                    sendinput_hotkey(*parts)
                 else:
-                    pyautogui.press(key)
+                    sendinput_press(key)
                 time.sleep(0.3)
             elif act_type == "search":
-                pyautogui.hotkey("alt", "space")
+                sendinput_hotkey("alt", "space")
                 time.sleep(0.8)
-                pyautogui.typewrite(action["text"], interval=0.05)
+                sendinput_typewrite(action["text"], interval=0.05)
                 time.sleep(1.0)
-                pyautogui.press("enter")
+                sendinput_press("enter")
                 time.sleep(1.0)
             elif act_type == "wait":
                 time.sleep(action.get("seconds", 1))
@@ -984,8 +1086,8 @@ def execute_navigate_path(cmd):
 
         for i, keystroke in enumerate(nums):
             print(f"  [step {i+1}/{len(nums)}] Typing: {keystroke} ({steps[i]})")
-            pyautogui.typewrite(keystroke, interval=0.05)
-            pyautogui.press("enter")
+            sendinput_typewrite(keystroke, interval=0.05)
+            sendinput_press("enter")
             time.sleep(1.0)
     else:
         tree = fetch_cached_tree(env, client)
@@ -1198,15 +1300,15 @@ def execute_masterfile(cmd):
         activate_window(window)
         time.sleep(0.5)
 
-        pyautogui.typewrite(masterfile, interval=0.05)
+        sendinput_typewrite(masterfile, interval=0.05)
         time.sleep(0.3)
-        pyautogui.press("enter")
+        sendinput_press("enter")
         time.sleep(1.0)
 
         if item:
-            pyautogui.typewrite(item, interval=0.05)
+            sendinput_typewrite(item, interval=0.05)
             time.sleep(0.3)
-            pyautogui.press("enter")
+            sendinput_press("enter")
             time.sleep(1.0)
 
         final_img = screenshot_window(window)
@@ -1784,21 +1886,21 @@ def execute_menu_crawl(cmd):
                 return True
             elif state == "dialog":
                 print(f"  [recovery] Dialog detected - pressing Escape")
-                pyautogui.press("escape")
+                sendinput_press("escape")
                 time.sleep(0.5)
             elif state == "activity":
                 print(f"  [recovery] Activity opened - pressing Escape to close")
-                pyautogui.press("escape")
+                sendinput_press("escape")
                 time.sleep(0.5)
                 state2, _ = check_screen_state("after escape")
                 if state2 == "activity":
                     print(f"  [recovery] Still in activity - trying Alt+F4")
-                    pyautogui.hotkey("alt", "F4")
+                    sendinput_hotkey("alt", "f4")
                     time.sleep(0.5)
                     state3, _ = check_screen_state("after alt-f4")
                     if state3 == "dialog":
                         print(f"  [recovery] Close dialog - pressing N for No/Don't Save")
-                        pyautogui.press("n")
+                        sendinput_press("n")
                         time.sleep(0.5)
             elif state == "desktop":
                 print(f"  [recovery] At desktop - reopening Epic menu")
@@ -1807,16 +1909,16 @@ def execute_menu_crawl(cmd):
                 continue
             else:
                 print(f"  [recovery] Unknown state - pressing Escape")
-                pyautogui.press("escape")
+                sendinput_press("escape")
                 time.sleep(0.5)
 
         state_final, _ = check_screen_state("final check")
         if state_final == "menu":
             return True
         print(f"  [recovery] Reopening Epic menu as last resort")
-        pyautogui.press("escape")
+        sendinput_press("escape")
         time.sleep(0.3)
-        pyautogui.press("escape")
+        sendinput_press("escape")
         time.sleep(0.3)
         reopen_epic_menu()
         return True
@@ -1991,7 +2093,7 @@ def execute_menu_crawl(cmd):
                         sub_children, sub_count = crawl_submenu(si_path, current_depth + 1, max_depth, reopen_epic_fn)
                         si_node["children"] = sub_children
                         count += sub_count
-                        pyautogui.press("escape")
+                        sendinput_press("escape")
                         time.sleep(0.5)
                     else:
                         print(f"  [menu-crawl]{indent}     Unknown state after clicking '{si_name}': {state} - recovering")
@@ -2041,11 +2143,11 @@ def execute_menu_crawl(cmd):
                     time.sleep(0.5)
                 elif state == "activity":
                     print(f"  [menu] Activity visible instead of menu - pressing Escape first")
-                    pyautogui.press("escape")
+                    sendinput_press("escape")
                     time.sleep(0.5)
                 else:
                     print(f"  [menu] State after click: {state} (attempt {attempt+1}/3)")
-                    pyautogui.press("escape")
+                    sendinput_press("escape")
                     time.sleep(0.3)
             print(f"  [menu] WARNING: Could not confirm menu opened after 3 attempts")
             return False
@@ -2245,9 +2347,9 @@ def execute_menu_crawl(cmd):
                     state_before, _ = check_screen_state(f"before looking for {cat_name}")
                     if state_before != "menu":
                         print(f"  [menu-crawl]   Menu not open (state={state_before}), reopening...")
-                        pyautogui.press("escape")
+                        sendinput_press("escape")
                         time.sleep(0.3)
-                        pyautogui.press("escape")
+                        sendinput_press("escape")
                         time.sleep(0.3)
                         if not reopen_epic_menu():
                             print(f"  [menu-crawl]   Cannot reopen menu, skipping '{cat_name}'")
@@ -2308,9 +2410,9 @@ def execute_menu_crawl(cmd):
                                     sub_children, sub_count = crawl_submenu(cat_name, 2, depth + 1, reopen_epic_menu)
                                     node["children"] = sub_children
                                     crawled_count += sub_count
-                                    pyautogui.press("escape")
+                                    sendinput_press("escape")
                                     time.sleep(0.3)
-                                    pyautogui.press("escape")
+                                    sendinput_press("escape")
                                     time.sleep(0.3)
                                     menu_confirmed_open = reopen_epic_menu()
                                     consecutive_failures = 0
@@ -2336,9 +2438,9 @@ def execute_menu_crawl(cmd):
                     node["children"] = sub_children
                     crawled_count += sub_count
 
-                    pyautogui.press("escape")
+                    sendinput_press("escape")
                     time.sleep(0.3)
-                    pyautogui.press("escape")
+                    sendinput_press("escape")
                     time.sleep(0.3)
                     menu_confirmed_open = reopen_epic_menu()
                     consecutive_failures = 0
@@ -2393,7 +2495,7 @@ def execute_menu_crawl(cmd):
             else:
                 print(f"  [menu-crawl]   Progress save failed (non-fatal)")
 
-        pyautogui.press("escape")
+        sendinput_press("escape")
         time.sleep(0.3)
 
         print(f"  [menu-crawl] Step 3: Uploading final tree ({crawled_count} items)...")
@@ -2601,11 +2703,12 @@ def execute_search_crawl(cmd):
     proven_search_method = proven_search_method_saved
 
     SEARCH_OPENERS = [
-        ("ctrl_space", lambda: pyautogui.hotkey("ctrl", "space")),
-        ("alt_space", lambda: pyautogui.hotkey("alt", "space")),
-        ("epic_button_e", lambda: pyautogui.hotkey("alt", "e")),
-        ("f3", lambda: pyautogui.press("f3")),
-        ("ctrl_f", lambda: pyautogui.hotkey("ctrl", "f")),
+        ("sendinput_ctrl_space", lambda: sendinput_hotkey("ctrl", "space")),
+        ("pyautogui_ctrl_space", lambda: pyautogui.hotkey("ctrl", "space")),
+        ("sendinput_alt_space", lambda: sendinput_hotkey("alt", "space")),
+        ("pyautogui_alt_space", lambda: pyautogui.hotkey("alt", "space")),
+        ("sendinput_ctrl_f", lambda: sendinput_hotkey("ctrl", "f")),
+        ("sendinput_f3", lambda: sendinput_press("f3")),
     ]
 
     def ensure_search_focused():
@@ -2619,7 +2722,7 @@ def execute_search_crawl(cmd):
                     fn()
                     time.sleep(0.6)
                     return
-            pyautogui.hotkey("ctrl", "space")
+            sendinput_hotkey("ctrl", "space")
             time.sleep(0.6)
             return
 
@@ -2636,26 +2739,26 @@ def execute_search_crawl(cmd):
                 return
             else:
                 print(f"  [search-crawl]     {name}: no search bar visible")
-                pyautogui.press("escape")
+                sendinput_press("escape")
                 time.sleep(0.3)
 
-        print(f"  [search-crawl]   WARNING: No shortcut opened the search bar, falling back to ctrl+space")
-        proven_search_method = "ctrl_space"
-        pyautogui.hotkey("ctrl", "space")
+        print(f"  [search-crawl]   WARNING: No shortcut opened the search bar, falling back to sendinput ctrl+space")
+        proven_search_method = "sendinput_ctrl_space"
+        sendinput_hotkey("ctrl", "space")
         time.sleep(0.6)
 
     def _open_search_bar():
-        """Use the proven search opener or default to ctrl+space."""
+        """Use the proven search opener or default to sendinput ctrl+space."""
         if proven_search_method:
             for name, fn in SEARCH_OPENERS:
                 if name == proven_search_method:
                     fn()
                     return
-        pyautogui.hotkey("ctrl", "space")
+        sendinput_hotkey("ctrl", "space")
 
     CLEAR_METHODS = {
         "escape_reopen": lambda: (
-            pyautogui.press("escape"),
+            sendinput_press("escape"),
             time.sleep(0.4),
             _open_search_bar(),
             time.sleep(0.8),
@@ -2663,33 +2766,25 @@ def execute_search_crawl(cmd):
         "triple_click_bksp": lambda: (
             pyautogui.click(clicks=3, interval=0.05),
             time.sleep(0.1),
-            pyautogui.press("backspace"),
+            sendinput_press("backspace"),
             time.sleep(0.1),
         ),
         "home_shift_end_bksp": lambda: (
-            pyautogui.press("home"),
+            sendinput_press("home"),
             time.sleep(0.05),
-            pyautogui.keyDown("shift"),
-            time.sleep(0.05),
-            pyautogui.press("end"),
-            time.sleep(0.05),
-            pyautogui.keyUp("shift"),
+            sendinput_hotkey("shift", "end"),
             time.sleep(0.1),
-            pyautogui.press("backspace"),
+            sendinput_press("backspace"),
             time.sleep(0.1),
         ),
         "ctrl_a_bksp": lambda: (
-            pyautogui.keyDown("ctrl"),
-            time.sleep(0.05),
-            pyautogui.press("a"),
-            time.sleep(0.05),
-            pyautogui.keyUp("ctrl"),
+            sendinput_hotkey("ctrl", "a"),
             time.sleep(0.1),
-            pyautogui.press("backspace"),
+            sendinput_press("backspace"),
             time.sleep(0.1),
         ),
         "backspace_40": lambda: (
-            [pyautogui.press("backspace") for _ in range(40)],
+            [sendinput_press("backspace") for _ in range(40)],
             time.sleep(0.1),
         ),
     }
@@ -2717,14 +2812,14 @@ def execute_search_crawl(cmd):
         print(f"  [search-crawl]   Search bar confirmed visible (text: '{state0.get('text', '')}')")
 
         print(f"  [search-crawl]   Step 2: Typing 'zz' to put known text in search bar...")
-        pyautogui.typewrite("zz", interval=0.05)
+        sendinput_typewrite("zz", interval=0.05)
         time.sleep(0.8)
 
         state1 = read_search_bar_text()
         if not state1 or not state1.get("visible", False):
             print(f"  [search-crawl]   Lost search bar after typing, trying to recover...")
             ensure_search_focused()
-            pyautogui.typewrite("zz", interval=0.05)
+            sendinput_typewrite("zz", interval=0.05)
             time.sleep(0.8)
             state1 = read_search_bar_text()
 
@@ -2750,7 +2845,7 @@ def execute_search_crawl(cmd):
                 print(f"  [search-crawl]     Vision call failed, skipping this method")
                 if method_name == "escape_reopen":
                     ensure_search_focused()
-                    pyautogui.typewrite("zz", interval=0.05)
+                    sendinput_typewrite("zz", interval=0.05)
                     time.sleep(0.5)
                 continue
 
@@ -2767,7 +2862,7 @@ def execute_search_crawl(cmd):
                     print(f"  [search-crawl]     {method_name}: did not clear (visible={is_visible}, text='{bar_text}')")
                     if not is_visible:
                         ensure_search_focused()
-                    pyautogui.typewrite("zz", interval=0.05)
+                    sendinput_typewrite("zz", interval=0.05)
                     time.sleep(0.5)
                     continue
             else:
@@ -2779,7 +2874,7 @@ def execute_search_crawl(cmd):
                     print(f"  [search-crawl]     {method_name}: did not clear (text='{bar_text}')")
                     if not is_visible:
                         ensure_search_focused()
-                    pyautogui.typewrite("zz", interval=0.05)
+                    sendinput_typewrite("zz", interval=0.05)
                     time.sleep(0.5)
                     continue
 
@@ -2836,7 +2931,7 @@ def execute_search_crawl(cmd):
             if proven_clear_method == "escape_reopen":
                 search_bar_open = True
 
-            pyautogui.typewrite(prefix, interval=0.05)
+            sendinput_typewrite(prefix, interval=0.05)
             time.sleep(1.0)
 
             state = read_search_results()
@@ -2867,7 +2962,7 @@ def execute_search_crawl(cmd):
 
             if attempt < max_attempts - 1:
                 print(f"  [search-crawl]   Escaping and reopening search bar...")
-                pyautogui.press("escape")
+                sendinput_press("escape")
                 time.sleep(0.3)
                 search_bar_open = False
 
@@ -2998,13 +3093,13 @@ def execute_search_crawl(cmd):
             consecutive_errors += 1
             search_bar_open = False
             try:
-                pyautogui.press("escape")
+                sendinput_press("escape")
                 time.sleep(0.3)
             except Exception:
                 pass
 
     try:
-        pyautogui.press("escape")
+        sendinput_press("escape")
         time.sleep(0.2)
     except Exception:
         pass
@@ -3064,60 +3159,62 @@ def execute_launch(cmd):
         pass
 
     SEARCH_FNS = {
-        "ctrl_space": lambda: pyautogui.hotkey("ctrl", "space"),
-        "alt_space": lambda: pyautogui.hotkey("alt", "space"),
-        "epic_button_e": lambda: pyautogui.hotkey("alt", "e"),
-        "f3": lambda: pyautogui.press("f3"),
-        "ctrl_f": lambda: pyautogui.hotkey("ctrl", "f"),
+        "sendinput_ctrl_space": lambda: sendinput_hotkey("ctrl", "space"),
+        "pyautogui_ctrl_space": lambda: pyautogui.hotkey("ctrl", "space"),
+        "sendinput_alt_space": lambda: sendinput_hotkey("alt", "space"),
+        "pyautogui_alt_space": lambda: pyautogui.hotkey("alt", "space"),
+        "sendinput_ctrl_f": lambda: sendinput_hotkey("ctrl", "f"),
+        "sendinput_f3": lambda: sendinput_press("f3"),
+        "ctrl_space": lambda: sendinput_hotkey("ctrl", "space"),
+        "alt_space": lambda: sendinput_hotkey("alt", "space"),
+        "epic_button_e": lambda: sendinput_hotkey("alt", "e"),
+        "f3": lambda: sendinput_press("f3"),
+        "ctrl_f": lambda: sendinput_hotkey("ctrl", "f"),
     }
 
     activate_window(window)
     time.sleep(0.3)
 
-    open_search = SEARCH_FNS.get(search_method, SEARCH_FNS["ctrl_space"])
+    open_search = SEARCH_FNS.get(search_method, SEARCH_FNS["sendinput_ctrl_space"])
     open_search()
     time.sleep(0.6)
 
     if clear_method == "escape_reopen" or not clear_method:
-        pyautogui.press("escape")
+        sendinput_press("escape")
         time.sleep(0.4)
         open_search()
         time.sleep(0.8)
     elif clear_method == "triple_click_bksp":
         pyautogui.click(clicks=3, interval=0.05)
         time.sleep(0.1)
-        pyautogui.press("backspace")
+        sendinput_press("backspace")
         time.sleep(0.1)
     elif clear_method == "home_shift_end_bksp":
-        pyautogui.press("home")
+        sendinput_press("home")
         time.sleep(0.05)
-        pyautogui.keyDown("shift")
-        time.sleep(0.05)
-        pyautogui.press("end")
-        time.sleep(0.05)
-        pyautogui.keyUp("shift")
+        sendinput_hotkey("shift", "end")
         time.sleep(0.1)
-        pyautogui.press("backspace")
+        sendinput_press("backspace")
         time.sleep(0.1)
     elif clear_method == "ctrl_a_bksp":
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.05)
-        pyautogui.press("backspace")
+        sendinput_hotkey("ctrl", "a")
+        time.sleep(0.1)
+        sendinput_press("backspace")
         time.sleep(0.1)
     elif clear_method == "backspace_40":
         for _ in range(40):
-            pyautogui.press("backspace")
+            sendinput_press("backspace")
         time.sleep(0.1)
     else:
-        pyautogui.press("escape")
+        sendinput_press("escape")
         time.sleep(0.4)
         open_search()
         time.sleep(0.8)
 
-    pyautogui.typewrite(activity_name, interval=0.03)
+    sendinput_typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
 
-    pyautogui.press("enter")
+    sendinput_press("enter")
     time.sleep(1.5)
 
     final_img = screenshot_window(window)
@@ -3171,16 +3268,16 @@ def execute_patient(cmd):
         px, py = vision_to_screen(window, loc["x"], loc["y"])
         safe_click(px, py, pause_after=0.8, label="patient search")
 
-        pyautogui.typewrite(patient_name, interval=0.03)
+        sendinput_typewrite(patient_name, interval=0.03)
         time.sleep(0.5)
-        pyautogui.press("enter")
+        sendinput_press("enter")
         time.sleep(2.0)
     else:
         execute_launch({"env": env, "activity": "Patient Lookup", "id": command_id + "-sub"})
         time.sleep(2.0)
-        pyautogui.typewrite(patient_name, interval=0.03)
+        sendinput_typewrite(patient_name, interval=0.03)
         time.sleep(0.5)
-        pyautogui.press("enter")
+        sendinput_press("enter")
         time.sleep(2.0)
 
     final_img = screenshot_window(window)
@@ -3280,14 +3377,17 @@ def execute_batch(cmd):
             keys = step.get("keys", "")
             if keys:
                 print(f"  [batch]   Pressing: {keys}")
-                for k in keys.split("+"):
-                    pyautogui.press(k.strip())
-                    time.sleep(0.2)
+                parts = keys.split("+")
+                if len(parts) > 1:
+                    sendinput_hotkey(*[p.strip() for p in parts])
+                else:
+                    sendinput_press(parts[0].strip())
+                time.sleep(0.2)
         elif step_type == "type":
             text = step.get("text", "")
             if text:
                 print(f"  [batch]   Typing: {text}")
-                pyautogui.typewrite(text, interval=0.03)
+                sendinput_typewrite(text, interval=0.03)
                 time.sleep(0.3)
         else:
             print(f"  [batch]   Unknown step type: {step_type}")

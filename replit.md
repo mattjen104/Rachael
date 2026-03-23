@@ -296,6 +296,7 @@ Database-driven scraping system replacing hardcoded adapters:
 - TreeView: double-click/Enter on epicActivity sends `epic launch <env> <name>` (search bar method); epicTreeNode uses `epic go` if navPath exists, else `epic launch`
 - **CRITICAL: Epic search bar requires minimum 2 characters** before showing results. Single-letter prefixes return nothing. search-crawl must start with 2-letter combos (aa-zz).
 - **Epic search is FUZZY** — typing "ch" may return "Chart Review" AND "Discharge" AND "Schedule". Not all results start with the typed prefix. search-crawl must collect ALL returned items, not just prefix-matching ones. Truncation detection should count total visible results, not just prefix-matching ones.
+- **SendInput (ctypes) for all keyboard input** — All keyboard operations (typewrite, press, hotkey) now use Windows SendInput API via ctypes instead of pyautogui. This is the lowest-level input method and matches real hardware keystrokes, which Citrix forwards correctly. pyautogui is kept only for mouse clicks and as a fallback in SEARCH_OPENERS (`pyautogui_ctrl_space`, `pyautogui_alt_space`) that the calibration system can test if SendInput variants fail.
 
 ## Citrix Workspace Launcher
 
