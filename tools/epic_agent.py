@@ -2639,55 +2639,89 @@ def execute_search_crawl(cmd):
     # which one actually empties the search bar in this Citrix session.
     if not proven_clear_method:
         print(f"  [search-crawl] === PHASE 1: CALIBRATING TEXT CLEAR METHOD ===")
+
+        print(f"  [search-crawl]   Step 1: Opening search bar with Ctrl+Space...")
         ensure_search_focused()
 
-        pyautogui.typewrite("testclear", interval=0.03)
-        time.sleep(0.5)
-
-        check = read_search_bar_text()
-        if not check or not check.get("visible", False):
-            print(f"  [search-crawl]   Search bar not visible after typing test text, trying Ctrl+Space again")
-            ensure_search_focused()
-            pyautogui.typewrite("testclear", interval=0.03)
+        state0 = read_search_bar_text()
+        if not state0 or not state0.get("visible", False):
+            print(f"  [search-crawl]   Search bar NOT visible after Ctrl+Space, retrying...")
             time.sleep(0.5)
+            ensure_search_focused()
+            time.sleep(0.5)
+            state0 = read_search_bar_text()
+            if not state0 or not state0.get("visible", False):
+                print(f"  [search-crawl]   FATAL: Cannot open search bar. Aborting calibration.")
+                post_result(command_id, "error", error="Cannot open search bar with Ctrl+Space")
+                return
+        print(f"  [search-crawl]   Search bar confirmed visible (text: '{state0.get('text', '')}')")
 
+        print(f"  [search-crawl]   Step 2: Typing 'zz' to put known text in search bar...")
+        pyautogui.typewrite("zz", interval=0.05)
+        time.sleep(0.8)
+
+        state1 = read_search_bar_text()
+        if not state1 or not state1.get("visible", False):
+            print(f"  [search-crawl]   Lost search bar after typing, trying to recover...")
+            ensure_search_focused()
+            pyautogui.typewrite("zz", interval=0.05)
+            time.sleep(0.8)
+            state1 = read_search_bar_text()
+
+        bar_after_type = state1.get("text", "").strip() if state1 else ""
+        print(f"  [search-crawl]   After typing 'zz', search bar shows: '{bar_after_type}'")
+
+        if "zz" not in bar_after_type.lower():
+            print(f"  [search-crawl]   WARNING: Typed 'zz' but bar shows '{bar_after_type}' - search bar may not be focused")
+
+        print(f"  [search-crawl]   Step 3: Testing clear methods one by one...")
         for method_name, method_fn in CLEAR_METHODS.items():
-            print(f"  [search-crawl]   Testing clear method: {method_name}")
+            print(f"  [search-crawl]   --- Testing: {method_name} ---")
 
-            if method_name != "escape_reopen":
-                pyautogui.typewrite("testclear", interval=0.03)
+            if method_name == "escape_reopen":
+                method_fn()
                 time.sleep(0.3)
-
-            method_fn()
-            time.sleep(0.3)
+            else:
+                method_fn()
+                time.sleep(0.3)
 
             state = read_search_bar_text()
             if state is None:
-                print(f"  [search-crawl]     Vision failed, skipping")
+                print(f"  [search-crawl]     Vision call failed, skipping this method")
                 if method_name == "escape_reopen":
                     ensure_search_focused()
+                    pyautogui.typewrite("zz", interval=0.05)
+                    time.sleep(0.5)
                 continue
 
             bar_text = state.get("text", "").strip()
             is_visible = state.get("visible", False)
+            print(f"  [search-crawl]     After {method_name}: visible={is_visible}, text='{bar_text}'")
 
             if method_name == "escape_reopen":
                 if is_visible and len(bar_text) == 0:
-                    print(f"  [search-crawl]     escape_reopen: WORKS (bar visible, empty)")
+                    print(f"  [search-crawl]     === {method_name}: WORKS ===")
                     proven_clear_method = method_name
                     break
                 else:
-                    print(f"  [search-crawl]     escape_reopen: bar text='{bar_text}', visible={is_visible}")
+                    print(f"  [search-crawl]     {method_name}: did not clear (visible={is_visible}, text='{bar_text}')")
                     if not is_visible:
                         ensure_search_focused()
+                    pyautogui.typewrite("zz", interval=0.05)
+                    time.sleep(0.5)
                     continue
-
-            if len(bar_text) == 0:
-                print(f"  [search-crawl]     {method_name}: WORKS (bar is empty)")
-                proven_clear_method = method_name
-                break
             else:
-                print(f"  [search-crawl]     {method_name}: FAILED (bar still shows '{bar_text}')")
+                if is_visible and len(bar_text) == 0:
+                    print(f"  [search-crawl]     === {method_name}: WORKS ===")
+                    proven_clear_method = method_name
+                    break
+                else:
+                    print(f"  [search-crawl]     {method_name}: did not clear (text='{bar_text}')")
+                    if not is_visible:
+                        ensure_search_focused()
+                    pyautogui.typewrite("zz", interval=0.05)
+                    time.sleep(0.5)
+                    continue
 
         if not proven_clear_method:
             proven_clear_method = "escape_reopen"
@@ -2719,62 +2753,61 @@ def execute_search_crawl(cmd):
 
     search_bar_open = False
 
-    def type_and_read(prefix, verify=False):
-        """Clear the bar, type prefix, read results. If verify=True, also
-        confirm the search bar shows the correct text (costs an extra vision call
-        only on first use per session or after errors)."""
+    def type_and_read(prefix, max_attempts=3):
+        """Clear the bar, type prefix, read results with vision verification.
+        Always checks that the search bar is visible and shows the expected
+        prefix before collecting results. Retries with recovery on mismatch."""
         nonlocal search_bar_open
 
-        if not search_bar_open:
-            ensure_search_focused()
-            search_bar_open = True
+        for attempt in range(max_attempts):
+            if not search_bar_open:
+                ensure_search_focused()
+                search_bar_open = True
 
-        clear_search_bar()
-        if proven_clear_method == "escape_reopen":
-            search_bar_open = True
-
-        pyautogui.typewrite(prefix, interval=0.03)
-        time.sleep(0.8)
-
-        state = read_search_results()
-        if state is None:
-            return None
-
-        if not state.get("searchBarVisible", True):
-            search_bar_open = False
-            ensure_search_focused()
-            search_bar_open = True
             clear_search_bar()
             if proven_clear_method == "escape_reopen":
                 search_bar_open = True
-            pyautogui.typewrite(prefix, interval=0.03)
-            time.sleep(0.8)
+
+            pyautogui.typewrite(prefix, interval=0.05)
+            time.sleep(1.0)
+
             state = read_search_results()
+            if state is None:
+                print(f"  [search-crawl]   Vision failed on attempt {attempt+1}/{max_attempts}")
+                search_bar_open = False
+                continue
 
-        if verify and state:
+            if not state.get("searchBarVisible", True):
+                print(f"  [search-crawl]   Search bar not visible on attempt {attempt+1}, reopening...")
+                search_bar_open = False
+                continue
+
             actual = state.get("searchBarText", "").strip().lower()
-            if actual != prefix.lower():
-                print(f"  [search-crawl]   Verify mismatch: expected '{prefix}' got '{actual}', retrying")
-                clear_search_bar()
-                if proven_clear_method == "escape_reopen":
-                    search_bar_open = True
-                pyautogui.typewrite(prefix, interval=0.03)
-                time.sleep(0.8)
-                state = read_search_results()
+            expected = prefix.lower()
+            if actual == expected:
+                return state
 
-        return state
+            print(f"  [search-crawl]   Search bar shows '{actual}' but expected '{expected}' (attempt {attempt+1})")
+
+            if attempt < max_attempts - 1:
+                print(f"  [search-crawl]   Escaping and reopening search bar...")
+                pyautogui.press("escape")
+                time.sleep(0.3)
+                search_bar_open = False
+
+        print(f"  [search-crawl]   Could not get '{prefix}' into search bar after {max_attempts} attempts")
+        return None
 
     # ── PHASE 2: SMART PREFIX SEARCH ──
-    # Start with single letters (a-z). If a letter returns truncated results,
-    # expand to 2-letter prefixes (aa-az). Continue up to MAX_PREFIX_LEN.
-    # Skip prefixes where all possible activities are already known.
+    # Start with 2-letter combos (aa-zz) since Epic requires min 2 chars.
+    # If results are truncated, expand to 3-4 char prefixes.
+    # Search is FUZZY so all returned items are collected regardless of prefix match.
     print(f"  [search-crawl] === PHASE 2: ACTIVITY DISCOVERY ===")
 
     prefix_queue = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
     consecutive_errors = 0
     total_searched = 0
     search_bar_open = False
-    verify_next = True
 
     while prefix_queue:
         prefix = prefix_queue.pop(0)
@@ -2799,20 +2832,17 @@ def execute_search_crawl(cmd):
         print(f"  [search-crawl] '{prefix}' ({remaining} left, {len(all_activities)} total, {known_covering} known for this prefix)")
 
         try:
-            state = type_and_read(prefix, verify=verify_next)
-            verify_next = False
+            state = type_and_read(prefix)
 
             if state is None:
-                print(f"  [search-crawl]   Vision failed for '{prefix}'")
+                print(f"  [search-crawl]   Could not verify '{prefix}' in search bar")
                 consecutive_errors += 1
-                verify_next = True
                 continue
 
             if not state.get("searchBarVisible", True):
                 print(f"  [search-crawl]   Search bar not visible, marking error")
                 consecutive_errors += 1
                 search_bar_open = False
-                verify_next = True
                 continue
 
             results = state.get("items", [])
@@ -2864,7 +2894,6 @@ def execute_search_crawl(cmd):
             traceback.print_exc()
             consecutive_errors += 1
             search_bar_open = False
-            verify_next = True
             try:
                 pyautogui.press("escape")
                 time.sleep(0.3)
