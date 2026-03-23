@@ -629,6 +629,107 @@ def _bridge_request(method, path, label, timeout=10, max_retries=2, **kwargs):
     return None
 
 
+def _read_search_bar(window):
+    """Module-level helper: read search bar text via vision."""
+    img = screenshot_window(window)
+    b64 = img_to_base64(img)
+    if not b64:
+        return None
+    prompt = (
+        "Look at this Epic Hyperspace screen. "
+        "Is the search bar at the top ACTIVATED/FOCUSED? "
+        "An ACTIVATED search bar has TWO key visual indicators: "
+        "(1) It has a BLUE BORDER/OUTLINE around it, and "
+        "(2) It is horizontally MUCH WIDER/LONGER than its resting state. "
+        "If an activated search bar is visible, read the EXACT text typed in it. "
+        "Return ONLY: {\"visible\": true/false, \"text\": \"exact contents or empty string\"}"
+    )
+    resp_text = ask_claude(b64, prompt)
+    if not resp_text:
+        return None
+    try:
+        m = re.search(r'\{[\s\S]*?\}', resp_text)
+        if m:
+            return json.loads(m.group())
+    except Exception:
+        pass
+    return None
+
+
+def adaptive_clear_search_bar(window, open_search_fn=None):
+    """Module-level adaptive clear: tries multiple strategies to empty the search bar.
+    Verifies via vision after each attempt. Returns True if bar is confirmed empty.
+    If open_search_fn is provided, uses it for escape+reopen strategy."""
+
+    def _do_end_bksp():
+        pyautogui.press("end")
+        time.sleep(0.05)
+        for _ in range(50):
+            pyautogui.press("backspace")
+
+    def _do_home_shift_end_bksp():
+        pyautogui.press("home")
+        time.sleep(0.05)
+        pyautogui.keyDown("shift")
+        time.sleep(0.05)
+        pyautogui.press("end")
+        time.sleep(0.05)
+        pyautogui.keyUp("shift")
+        time.sleep(0.05)
+        pyautogui.press("backspace")
+
+    def _do_escape_reopen():
+        pyautogui.press("escape")
+        time.sleep(0.4)
+        if open_search_fn:
+            open_search_fn()
+        else:
+            sendinput_hotkey("ctrl", "space")
+        time.sleep(0.5)
+
+    def _do_50x_delete():
+        pyautogui.press("home")
+        time.sleep(0.05)
+        for _ in range(50):
+            pyautogui.press("delete")
+
+    approaches = [
+        ("end+backspace", _do_end_bksp),
+        ("home+shift_end+bksp", _do_home_shift_end_bksp),
+        ("escape+reopen", _do_escape_reopen),
+        ("50x_delete", _do_50x_delete),
+    ]
+    for name, fn in approaches:
+        fn()
+        time.sleep(0.3)
+        state = _read_search_bar(window)
+        if state is None:
+            continue
+        if not state.get("visible", False):
+            if name == "escape+reopen":
+                print(f"  [clear] {name}: bar not visible after reopen — trying next")
+            else:
+                print(f"  [clear] {name}: bar closed — trying next")
+            continue
+        bar_text = state.get("text", "").strip()
+        if len(bar_text) == 0:
+            print(f"  [clear] Bar cleared via {name}")
+            return True
+        print(f"  [clear] {name} didn't clear (still: '{bar_text}'), trying next...")
+    print(f"  [clear] WARNING: All clear methods failed")
+    return False
+
+
+def fast_clear_search_bar():
+    """Quick clear using End+Backspace (no vision verification).
+    Used in hot loops to avoid API calls."""
+    pyautogui.press("end")
+    time.sleep(0.05)
+    for _ in range(50):
+        pyautogui.press("backspace")
+    time.sleep(0.1)
+
+
 def poll_commands():
     resp = _bridge_request(
         "get", "/api/epic/agent/commands", "poll", timeout=10,
@@ -2806,98 +2907,13 @@ def execute_search_crawl(cmd):
         state = read_search_bar_text()
         return (state is not None and state.get("visible", False)), state
 
-    proven_clear_approach = None
-
     def _fast_clear():
-        """Quick clear using proven method (no vision verification).
-        Used in the hot loop to avoid extra API calls."""
-        if proven_clear_approach == "home+shift_end+bksp":
-            pyautogui.press("home")
-            time.sleep(0.05)
-            pyautogui.keyDown("shift")
-            time.sleep(0.05)
-            pyautogui.press("end")
-            time.sleep(0.05)
-            pyautogui.keyUp("shift")
-            time.sleep(0.05)
-            pyautogui.press("backspace")
-            time.sleep(0.1)
-        elif proven_clear_approach == "50x_delete":
-            pyautogui.press("home")
-            time.sleep(0.05)
-            for _ in range(50):
-                pyautogui.press("delete")
-            time.sleep(0.1)
-        else:
-            pyautogui.press("end")
-            time.sleep(0.05)
-            for _ in range(50):
-                pyautogui.press("backspace")
-            time.sleep(0.1)
+        """Quick clear using End+Backspace (no vision verification)."""
+        fast_clear_search_bar()
 
     def _clear_bar():
-        """Adaptive clear: tries multiple methods with vision verification.
-        Caches the first working method for _fast_clear().
-        Returns True if bar is confirmed empty, False if all methods fail."""
-        nonlocal proven_clear_approach
-
-        def _do_end_bksp():
-            pyautogui.press("end")
-            time.sleep(0.05)
-            for _ in range(50):
-                pyautogui.press("backspace")
-
-        def _do_home_shift_end_bksp():
-            pyautogui.press("home")
-            time.sleep(0.05)
-            pyautogui.keyDown("shift")
-            time.sleep(0.05)
-            pyautogui.press("end")
-            time.sleep(0.05)
-            pyautogui.keyUp("shift")
-            time.sleep(0.05)
-            pyautogui.press("backspace")
-
-        def _do_escape_reopen():
-            pyautogui.press("escape")
-            time.sleep(0.4)
-            _open_search_bar()
-            time.sleep(0.5)
-
-        def _do_50x_delete():
-            pyautogui.press("home")
-            time.sleep(0.05)
-            for _ in range(50):
-                pyautogui.press("delete")
-
-        CLEAR_APPROACHES = [
-            ("end+backspace", _do_end_bksp),
-            ("home+shift_end+bksp", _do_home_shift_end_bksp),
-            ("escape+reopen", _do_escape_reopen),
-            ("50x_delete", _do_50x_delete),
-        ]
-        for name, fn in CLEAR_APPROACHES:
-            fn()
-            time.sleep(0.3)
-            state = read_search_bar_text()
-            if state is None:
-                continue
-            if not state.get("visible", False):
-                if name == "escape+reopen":
-                    print(f"  [search-crawl]   {name}: bar not visible after reopen — trying next method")
-                else:
-                    print(f"  [search-crawl]   {name}: bar closed — trying escape+reopen next")
-                continue
-            bar_text = state.get("text", "").strip()
-            if len(bar_text) == 0:
-                print(f"  [search-crawl]   Bar cleared via {name}")
-                if not proven_clear_approach:
-                    proven_clear_approach = name
-                    print(f"  [search-crawl]   Locked clear method: {name}")
-                return True
-            print(f"  [search-crawl]   {name} didn't clear (still: '{bar_text}'), trying next...")
-        print(f"  [search-crawl]   WARNING: All clear methods failed")
-        return False
+        """Adaptive clear with vision verification. Delegates to shared module-level function."""
+        return adaptive_clear_search_bar(window, open_search_fn=_open_search_bar)
 
     def _try_search_opener(name, fn):
         """Try a single search opener, return True if search bar appeared."""
@@ -2933,30 +2949,9 @@ def execute_search_crawl(cmd):
                     found_in_list = True
                     if search_method_successes >= 3:
                         fn()
-                        time.sleep(1.0)
-                        bar_open, _ = _is_bar_open()
-                        if bar_open:
-                            search_method_successes += 1
-                            return True
-                        search_method_failures += 1
-                        print(f"  [search-crawl]   Trusted method {name} failed ({search_method_failures} consecutive)")
-                        if search_method_failures < 2:
-                            pyautogui.press("escape")
-                            time.sleep(0.3)
-                            fn()
-                            time.sleep(1.0)
-                            bar_open2, _ = _is_bar_open()
-                            if bar_open2:
-                                search_method_failures = 0
-                                search_method_successes += 1
-                                return True
-                            print(f"  [search-crawl]   Retry also failed, will re-discover")
-                        search_method_successes = 0
-                        search_method_failures = 0
-                        pyautogui.press("escape")
-                        time.sleep(0.3)
-                        proven_search_method = None
-                        break
+                        time.sleep(0.8)
+                        search_method_successes += 1
+                        return True
 
                     print(f"  [search-crawl]   Using saved search method: {name}")
                     fn()
@@ -3390,25 +3385,7 @@ def execute_launch(cmd):
     open_search()
     time.sleep(0.6)
 
-    def _launch_clear_bar():
-        """Multi-strategy clear for launch flow."""
-        pyautogui.press("end")
-        time.sleep(0.05)
-        for _ in range(50):
-            pyautogui.press("backspace")
-        time.sleep(0.1)
-        pyautogui.press("home")
-        time.sleep(0.05)
-        pyautogui.keyDown("shift")
-        time.sleep(0.05)
-        pyautogui.press("end")
-        time.sleep(0.05)
-        pyautogui.keyUp("shift")
-        time.sleep(0.05)
-        pyautogui.press("backspace")
-        time.sleep(0.1)
-
-    _launch_clear_bar()
+    adaptive_clear_search_bar(window, open_search_fn=open_search)
 
     pyautogui.typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
