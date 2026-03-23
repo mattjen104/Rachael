@@ -2656,17 +2656,17 @@ def execute_search_crawl(cmd):
     CLEAR_METHODS = {
         "escape_reopen": lambda: (
             pyautogui.press("escape"),
-            time.sleep(0.3),
+            time.sleep(0.4),
             _open_search_bar(),
-            time.sleep(0.6),
+            time.sleep(0.8),
         ),
-        "triple_click_del": lambda: (
+        "triple_click_bksp": lambda: (
             pyautogui.click(clicks=3, interval=0.05),
             time.sleep(0.1),
-            pyautogui.press("delete"),
+            pyautogui.press("backspace"),
             time.sleep(0.1),
         ),
-        "home_shift_end_del": lambda: (
+        "home_shift_end_bksp": lambda: (
             pyautogui.press("home"),
             time.sleep(0.05),
             pyautogui.keyDown("shift"),
@@ -2675,21 +2675,21 @@ def execute_search_crawl(cmd):
             time.sleep(0.05),
             pyautogui.keyUp("shift"),
             time.sleep(0.1),
-            pyautogui.press("delete"),
+            pyautogui.press("backspace"),
             time.sleep(0.1),
         ),
-        "ctrl_a_del": lambda: (
+        "ctrl_a_bksp": lambda: (
             pyautogui.keyDown("ctrl"),
             time.sleep(0.05),
             pyautogui.press("a"),
             time.sleep(0.05),
             pyautogui.keyUp("ctrl"),
             time.sleep(0.1),
-            pyautogui.press("delete"),
+            pyautogui.press("backspace"),
             time.sleep(0.1),
         ),
-        "backspace_30": lambda: (
-            [pyautogui.press("backspace") for _ in range(30)],
+        "backspace_40": lambda: (
+            [pyautogui.press("backspace") for _ in range(40)],
             time.sleep(0.1),
         ),
     }
@@ -2794,10 +2794,14 @@ def execute_search_crawl(cmd):
         print(f"  [search-crawl] Using previously proven clear method: {proven_clear_method}")
 
     LEGACY_METHOD_MAP = {
-        "ctrl_a": "ctrl_a_del",
-        "home_shift_end": "home_shift_end_del",
-        "backspace": "backspace_30",
-        "triple_click": "triple_click_del",
+        "ctrl_a": "ctrl_a_bksp",
+        "ctrl_a_del": "ctrl_a_bksp",
+        "home_shift_end": "home_shift_end_bksp",
+        "home_shift_end_del": "home_shift_end_bksp",
+        "backspace": "backspace_40",
+        "backspace_30": "backspace_40",
+        "triple_click": "triple_click_bksp",
+        "triple_click_del": "triple_click_bksp",
     }
 
     if proven_clear_method in LEGACY_METHOD_MAP:
@@ -3074,17 +3078,17 @@ def execute_launch(cmd):
     open_search()
     time.sleep(0.6)
 
-    if clear_method == "escape_reopen":
+    if clear_method == "escape_reopen" or not clear_method:
         pyautogui.press("escape")
-        time.sleep(0.3)
+        time.sleep(0.4)
         open_search()
-        time.sleep(0.6)
-    elif clear_method == "triple_click_del":
+        time.sleep(0.8)
+    elif clear_method == "triple_click_bksp":
         pyautogui.click(clicks=3, interval=0.05)
         time.sleep(0.1)
-        pyautogui.press("delete")
+        pyautogui.press("backspace")
         time.sleep(0.1)
-    elif clear_method == "home_shift_end_del":
+    elif clear_method == "home_shift_end_bksp":
         pyautogui.press("home")
         time.sleep(0.05)
         pyautogui.keyDown("shift")
@@ -3093,17 +3097,22 @@ def execute_launch(cmd):
         time.sleep(0.05)
         pyautogui.keyUp("shift")
         time.sleep(0.1)
-        pyautogui.press("delete")
+        pyautogui.press("backspace")
         time.sleep(0.1)
-    elif clear_method == "backspace_30":
-        for _ in range(30):
+    elif clear_method == "ctrl_a_bksp":
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.05)
+        pyautogui.press("backspace")
+        time.sleep(0.1)
+    elif clear_method == "backspace_40":
+        for _ in range(40):
             pyautogui.press("backspace")
         time.sleep(0.1)
     else:
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.05)
-        pyautogui.press("delete")
-        time.sleep(0.1)
+        pyautogui.press("escape")
+        time.sleep(0.4)
+        open_search()
+        time.sleep(0.8)
 
     pyautogui.typewrite(activity_name, interval=0.03)
     time.sleep(1.0)
