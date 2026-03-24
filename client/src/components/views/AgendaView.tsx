@@ -181,7 +181,7 @@ export default function AgendaView({ onNavigate }: AgendaViewProps) {
                 onNavigate?.("results", r.id);
               }}
             >
-              <span className="w-12 shrink-0 text-muted-foreground">{r.programName.slice(0, 12)}</span>
+              <span className="w-28 shrink-0 truncate text-muted-foreground">{r.programName.slice(0, 12)}</span>
               <span className="truncate flex-1">{r.summary}</span>
               {r.metric && <span className="text-muted-foreground shrink-0">={r.metric}</span>}
             </div>
