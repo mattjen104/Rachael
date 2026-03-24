@@ -1937,7 +1937,7 @@ async function execute() {
   let snowInstanceUrl = "";
   try {
     const cfgR = await fetch(BASE + "/api/config/snow_instance", { headers: hdrs });
-    if (cfgR.ok) { const cfgData = await cfgR.json(); snowInstanceUrl = (cfgData.value || "").replace(/\\/+$/, ""); }
+    if (cfgR.ok) { const cfgData = await cfgR.json(); snowInstanceUrl = (cfgData.value || "").replace(/[/]+$/, ""); }
   } catch {}
   if (!snowInstanceUrl) snowInstanceUrl = "https://uchealth.service-now.com";
 
