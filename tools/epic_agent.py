@@ -1413,10 +1413,8 @@ def execute_navigate_path(cmd):
                     return
 
     time.sleep(0.5)
-    final_img = screenshot_window(window)
-    final_b64 = img_to_base64(final_img)
     nav_mode = "cached" if (client != "text" and has_coords and use_cache) else "vision"
-    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+    post_result(command_id, "complete", data={
         "path": path,
         "client": client,
         "stepsCompleted": len(steps),
