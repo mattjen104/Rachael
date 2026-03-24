@@ -266,11 +266,53 @@ pyautogui.FAILSAFE = True
 _hotkeys_registered = False
 _hotkey_thread = None
 
+_orgcloud_popup_hwnd = None
+
+def _find_chrome_exe():
+    """Find Chrome executable on Windows."""
+    candidates = [
+        os.path.join(os.environ.get("PROGRAMFILES", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
+    ]
+    for p in candidates:
+        if p and os.path.exists(p):
+            return p
+    return None
+
 def _open_orgcloud_mode(mode):
-    """Open OrgCloud in browser with the given mode (capture, command, search, agenda)."""
+    """Open OrgCloud as a Chrome app-mode window (no address bar, clean popup)."""
+    import subprocess
+    global _orgcloud_popup_hwnd
     url = f"{ORGCLOUD_URL}?mode={mode}"
     print(f"  [hotkey] Opening {mode} mode: {url}")
-    threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
+
+    chrome = _find_chrome_exe()
+    if chrome:
+        def launch():
+            global _orgcloud_popup_hwnd
+            try:
+                if _orgcloud_popup_hwnd:
+                    user32 = ctypes.windll.user32
+                    if user32.IsWindow(_orgcloud_popup_hwnd):
+                        user32.ShowWindow(_orgcloud_popup_hwnd, 9)
+                        user32.SetForegroundWindow(_orgcloud_popup_hwnd)
+                        return
+                    _orgcloud_popup_hwnd = None
+
+                subprocess.Popen([
+                    chrome,
+                    f"--app={url}",
+                    "--window-size=420,700",
+                    "--window-position=960,160",
+                ])
+            except Exception as e:
+                print(f"  [hotkey] Chrome app-mode failed: {e}, falling back to browser")
+                webbrowser.open(url)
+        threading.Thread(target=launch, daemon=True).start()
+    else:
+        print("  [hotkey] Chrome not found, opening in default browser")
+        threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
 
 def _hotkey_listener():
     """Win32 RegisterHotKey message loop — runs in a daemon thread.
