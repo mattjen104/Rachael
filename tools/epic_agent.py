@@ -264,6 +264,7 @@ pyautogui.PAUSE = 0.2
 pyautogui.FAILSAFE = True
 
 _hotkeys_registered = False
+_hotkey_thread = None
 
 def _open_orgcloud_mode(mode):
     """Open OrgCloud in browser with the given mode (capture, command, search, agenda)."""
@@ -271,27 +272,77 @@ def _open_orgcloud_mode(mode):
     print(f"  [hotkey] Opening {mode} mode: {url}")
     threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
 
+def _hotkey_listener():
+    """Win32 RegisterHotKey message loop — runs in a daemon thread.
+    Uses user32.RegisterHotKey which works without admin privileges."""
+    try:
+        user32 = ctypes.windll.user32
+
+        MOD_ALT = 0x0001
+        MOD_NOREPEAT = 0x4000
+        mods = MOD_ALT | MOD_NOREPEAT
+
+        HOTKEY_CAPTURE = 1
+        HOTKEY_COMMAND = 2
+        HOTKEY_SEARCH  = 3
+        HOTKEY_AGENDA  = 4
+
+        VK_C = 0x43
+        VK_X = 0x58
+        VK_S = 0x53
+        VK_A = 0x41
+
+        hotkey_map = {
+            HOTKEY_CAPTURE: ("capture", VK_C, "Alt+C"),
+            HOTKEY_COMMAND: ("command", VK_X, "Alt+X"),
+            HOTKEY_SEARCH:  ("search",  VK_S, "Alt+S"),
+            HOTKEY_AGENDA:  ("agenda",  VK_A, "Alt+A"),
+        }
+
+        registered = []
+        for hk_id, (mode, vk, label) in hotkey_map.items():
+            ok = user32.RegisterHotKey(None, hk_id, mods, vk)
+            if ok:
+                registered.append(label)
+            else:
+                print(f"  [hotkey] WARNING: {label} could not be registered (may be in use by another app)")
+
+        if registered:
+            print(f"  [hotkey] Global hotkeys registered: {', '.join(registered)}")
+            print("    Alt+C = Capture  |  Alt+X = Command (M-x)")
+            print("    Alt+S = Search   |  Alt+A = Agenda")
+        else:
+            print("  [hotkey] No hotkeys could be registered")
+            return
+
+        WM_HOTKEY = 0x0312
+        msg = ctypes.wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+            if msg.message == WM_HOTKEY:
+                hk_id = msg.wParam
+                if hk_id in hotkey_map:
+                    mode_name = hotkey_map[hk_id][0]
+                    _open_orgcloud_mode(mode_name)
+
+        for hk_id in hotkey_map:
+            user32.UnregisterHotKey(None, hk_id)
+
+    except Exception as e:
+        print(f"  [hotkey] Hotkey listener error: {e}")
+
 def register_global_hotkeys():
-    """Register Alt+C/X/S/A as system-wide global hotkeys using the keyboard library."""
-    global _hotkeys_registered
+    """Register Alt+C/X/S/A as system-wide global hotkeys using Win32 RegisterHotKey."""
+    global _hotkeys_registered, _hotkey_thread
     if _hotkeys_registered:
         return
     try:
-        import keyboard
-        keyboard.add_hotkey("alt+c", lambda: _open_orgcloud_mode("capture"), suppress=True)
-        keyboard.add_hotkey("alt+x", lambda: _open_orgcloud_mode("command"), suppress=True)
-        keyboard.add_hotkey("alt+s", lambda: _open_orgcloud_mode("search"), suppress=True)
-        keyboard.add_hotkey("alt+a", lambda: _open_orgcloud_mode("agenda"), suppress=True)
+        import ctypes.wintypes
+        _hotkey_thread = threading.Thread(target=_hotkey_listener, daemon=True)
+        _hotkey_thread.start()
         _hotkeys_registered = True
-        print("  [hotkey] Global hotkeys registered:")
-        print("    Alt+C = Capture  |  Alt+X = Command (M-x)")
-        print("    Alt+S = Search   |  Alt+A = Agenda")
-    except ImportError:
-        print("  [hotkey] 'keyboard' package not installed — global hotkeys disabled")
-        print("    Install with: pip install keyboard")
+        time.sleep(0.3)
     except Exception as e:
-        print(f"  [hotkey] Failed to register global hotkeys: {e}")
-        print("    Try running as administrator (keyboard requires elevated privileges)")
+        print(f"  [hotkey] Platform does not support Win32 hotkeys: {e}")
 
 
 def safe_click(x, y, pause_before=0.15, pause_after=0.3, label=""):
