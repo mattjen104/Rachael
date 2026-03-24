@@ -226,6 +226,8 @@ export default function Minibuffer({
       { id: "epic-view", label: "epic-view", hint: "Live accessibility tree view (Vimium)", action: () => { setMode("shell"); setQuery("epic view SUP"); setShellOutput(""); executeShellCommand("epic view SUP"); } },
       { id: "epic-do", label: "epic-do", hint: "Interact by hint key (Vimium)", action: () => { setMode("shell"); setQuery("epic do SUP "); setShellOutput(""); } },
       { id: "epic-menu", label: "epic-menu", hint: "Browse stored navigation tree", action: () => { setMode("shell"); setQuery("epic menu SUP"); setShellOutput(""); executeShellCommand("epic menu SUP"); } },
+      { id: "epic-screen", label: "epic-screen", hint: "Navigate + live field view + cache", action: () => { setMode("shell"); setQuery("epic screen "); setShellOutput(""); } },
+      { id: "epic-fields", label: "epic-fields", hint: "Show cached field layouts", action: () => { setMode("shell"); setQuery("epic fields"); setShellOutput(""); executeShellCommand("epic fields"); } },
       { id: "epic-search", label: "epic-search", hint: "Search Epic activities", action: () => { setMode("shell"); setQuery("epic search SUP "); setShellOutput(""); } },
       { id: "epic-status", label: "epic-status", hint: "Desktop agent status", action: () => { setMode("shell"); setQuery("epic status"); setShellOutput(""); executeShellCommand("epic status"); } },
       { id: "epic-screenshot", label: "epic-screenshot", hint: "Capture Hyperspace screen", action: () => { setMode("shell"); setQuery("epic screenshot "); setShellOutput(""); } },

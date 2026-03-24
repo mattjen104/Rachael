@@ -3335,8 +3335,68 @@ ${fullHtml}`;
     return ok(lines.join(nl));
   });
 
-  registerCommand("epic", "Epic Hyperspace activity tools", "epic [search|activities|navigate|screenshot|click|status|setup|scan|clear] <env> [target]", async (args) => {
+  registerCommand("epic", "Epic Hyperspace activity tools", "epic [view|do|screen|fields|menu|search|go|activities|navigate|screenshot|click|status|setup] <env> [target]", async (args) => {
     const nl = String.fromCharCode(10);
+    const EPIC_ENVS = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
+
+    function renderElementLines(elements: any[]): string[] {
+      const lines: string[] = [];
+      const groups = new Map<string, any[]>();
+      for (const el of elements) {
+        const group = el.parent || "Window";
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group)!.push(el);
+      }
+      for (const [group, items] of groups) {
+        lines.push(`--- ${group} ---`);
+        for (const el of items) {
+          const hintLabel = el.hint ? `[${el.hint}]` : "    ";
+          const ct = (el.controlType || "").padEnd(12);
+          const name = el.name || "";
+          const enabled = el.enabled === false ? " (disabled)" : "";
+          let suffix = "";
+          if (el.value) suffix = ` = "${el.value}"`;
+          if (el.checked === true) suffix = " [x]";
+          if (el.checked === false) suffix = " [ ]";
+          if (el.static) {
+            lines.push(`     ${ct} ${name}${suffix}`);
+          } else {
+            lines.push(`  ${hintLabel.padEnd(5)} ${ct} ${name}${enabled}${suffix}`);
+          }
+        }
+        lines.push("");
+      }
+      return lines;
+    }
+
+    function slugify(name: string): string {
+      return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    }
+
+    function formatAge(ms: number): string {
+      const sec = Math.floor(ms / 1000);
+      if (sec < 60) return `${sec}s ago`;
+      const min = Math.floor(sec / 60);
+      if (min < 60) return `${min}m ago`;
+      const hr = Math.floor(min / 60);
+      if (hr < 24) return `${hr}h ago`;
+      return `${Math.floor(hr / 24)}d ago`;
+    }
+
+    async function cacheFieldLayout(env: string, activity: string, elements: any[], windowTitle: string): Promise<void> {
+      if (!activity) return;
+      const slug = slugify(activity);
+      const key = `epic_fields_${env.toLowerCase()}_${slug}`;
+      const cache = {
+        activity,
+        elements,
+        window: windowTitle,
+        timestamp: Date.now(),
+        fieldCount: elements.filter((e: any) => !e.static).length,
+      };
+      await storage.setAgentConfig(key, JSON.stringify(cache), "epic");
+    }
+
     if (args[0] === "activities") {
       const env = (args[1] || "SUP").toUpperCase();
       const key = `epic_activities_${env.toLowerCase()}`;
@@ -3709,10 +3769,9 @@ ${fullHtml}`;
     }
 
     if (args[0] === "view") {
-      const envSet = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
       const firstArg = (args[1] || "").toUpperCase();
-      const env = envSet.has(firstArg) ? firstArg : "SUP";
-      const restArgs = envSet.has(firstArg) ? args.slice(2) : args.slice(1);
+      const env = EPIC_ENVS.has(firstArg) ? firstArg : "SUP";
+      const restArgs = EPIC_ENVS.has(firstArg) ? args.slice(2) : args.slice(1);
       const showAll = restArgs.includes("--all");
       let focus = "";
       const focusIdx = restArgs.indexOf("--focus");
@@ -3753,56 +3812,278 @@ ${fullHtml}`;
           return ok(`=== EPIC VIEW: ${env} ===${nl}Window: ${window}${focusLabel ? `${nl}Focus: ${focusLabel}` : ""}${nl}${nl}No interactive elements found.`);
         }
 
-        const groups = new Map<string, any[]>();
-        for (const el of elements) {
-          const group = el.parent || "Window";
-          if (!groups.has(group)) groups.set(group, []);
-          groups.get(group)!.push(el);
+        const activityName = d.activity || "";
+        if (activityName) {
+          await cacheFieldLayout(env, activityName, elements, window);
         }
 
         const lines: string[] = [];
         lines.push(`=== EPIC VIEW: ${env} ===`);
         lines.push(`Window: ${window}`);
+        if (activityName) lines.push(`Activity: ${activityName}`);
         if (focusLabel) lines.push(`Focus: ${focusLabel}`);
         lines.push(`Elements: ${d.interactiveCount || 0} interactive` + (showAll ? `, ${elements.length} total` : ""));
         lines.push("");
-
-        for (const [group, items] of groups) {
-          lines.push(`--- ${group} ---`);
-          for (const el of items) {
-            const hint = el.hint ? `[${el.hint}]` : "    ";
-            const ct = el.controlType || "";
-            const name = el.name || "";
-            const enabled = el.enabled === false ? " (disabled)" : "";
-            let suffix = "";
-            if (el.value) suffix = ` = "${el.value}"`;
-            if (el.checked === true) suffix = " [x]";
-            if (el.checked === false) suffix = " [ ]";
-            if (el.static) {
-              lines.push(`     ${ct.padEnd(12)} ${name}${suffix}`);
-            } else {
-              lines.push(`  ${hint.padEnd(5)} ${ct.padEnd(12)} ${name}${enabled}${suffix}`);
-            }
-          }
-          lines.push("");
-        }
-
+        lines.push(...renderElementLines(elements));
         lines.push(`Interact: epic do ${env} <hint> [value]`);
         lines.push(`Refresh:  epic view ${env}`);
+        if (activityName) lines.push(`Cached:   epic fields ${env} ${activityName.toLowerCase()}`);
         return ok(lines.join(nl));
       } catch (e: any) {
         return fail(`[epic] ${e.message}`);
       }
     }
 
-    if (args[0] === "do") {
-      const envSet = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
+    if (args[0] === "screen") {
       const firstArg = (args[1] || "").toUpperCase();
-      const hasEnv = envSet.has(firstArg);
+      const hasEnv = EPIC_ENVS.has(firstArg);
+      const env = hasEnv ? firstArg : "SUP";
+      const target = (hasEnv ? args.slice(2) : args.slice(1)).join(" ");
+      if (!target) return fail(`[epic] Usage: epic screen [env] <activity>${nl}Example: epic screen chart`);
+
+      function fMatchScreen(text: string, q: string): boolean {
+        const lower = text.toLowerCase();
+        const words = q.toLowerCase().split(/\s+/);
+        return words.every(w => lower.includes(w));
+      }
+
+      function findInTreeScreen(node: any, query: string, client: string): { path: string; client: string; name: string } | null {
+        for (const child of (node.children || [])) {
+          if (fMatchScreen(child.name || "", query)) {
+            return { path: child.path || child.name, client, name: child.name };
+          }
+          const found = findInTreeScreen(child, query, client);
+          if (found) return found;
+        }
+        return null;
+      }
+
+      let resolved: { path: string; client: string; name: string } | null = null;
+
+      const aliasCfg = await storage.getAgentConfig("epic_aliases");
+      let epicAliases: Record<string, string> = {};
+      if (aliasCfg?.value) {
+        try { epicAliases = JSON.parse(aliasCfg.value); } catch {}
+      }
+      const resolvedAlias = epicAliases[target.toLowerCase()];
+      const effectiveTarget = resolvedAlias || target;
+
+      if (effectiveTarget.includes(">")) {
+        const isTextPath = /^\d+\s/.test(effectiveTarget.split(">")[0].trim());
+        resolved = { path: effectiveTarget, client: isTextPath ? "text" : "hyperspace", name: resolvedAlias ? `${target} -> ${effectiveTarget}` : effectiveTarget };
+      } else {
+        for (const client of ["hyperspace", "text"]) {
+          const key = `epic_tree_${env.toLowerCase()}_${client}`;
+          const cfg = await storage.getAgentConfig(key);
+          if (cfg?.value) {
+            try {
+              const tree = JSON.parse(cfg.value);
+              const found = findInTreeScreen(tree, effectiveTarget, client);
+              if (found) { resolved = found; break; }
+            } catch {}
+          }
+        }
+        if (!resolved) {
+          const actKey = `epic_activities_${env.toLowerCase()}`;
+          const actCfg = await storage.getAgentConfig(actKey);
+          if (actCfg?.value) {
+            try {
+              const acts = JSON.parse(actCfg.value);
+              const match = acts.find((a: any) => fMatchScreen(a.name || "", effectiveTarget));
+              if (match) resolved = { path: match.name, client: "hyperspace", name: match.name };
+            } catch {}
+          }
+        }
+      }
+
+      if (!resolved) return fail(`[epic] No activity matching "${target}" in ${env} tree.${nl}Run: epic search ${target}`);
+
+      try {
+        const navResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "navigate_path", env, path: resolved.path, client: resolved.client }),
+        });
+        const navData = await navResp.json() as any;
+        if (!navData.ok) return fail("[epic] Failed to send navigation command");
+        const navCmdId = navData.commandId;
+
+        let navCompleted = false;
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${navCmdId}`);
+          const pollData = await poll.json() as any;
+          if (pollData.status === "error") return fail(`[epic] Navigation failed: ${pollData.error || "unknown error"}`);
+          if (pollData.status && pollData.status !== "pending") { navCompleted = true; break; }
+        }
+
+        if (!navCompleted) return fail("[epic] Navigation timed out (10s). Is the desktop agent running?");
+
+        await new Promise(r => setTimeout(r, 1500));
+
+        const viewResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "view", env, _activity_label: resolved.name }),
+        });
+        const viewData = await viewResp.json() as any;
+        if (!viewData.ok) return fail("[epic] Failed to send view command");
+        const viewCmdId = viewData.commandId;
+
+        let viewResult: any = null;
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${viewCmdId}`);
+          const pollData = await poll.json() as any;
+          if (pollData.status && pollData.status !== "pending") {
+            viewResult = pollData;
+            break;
+          }
+        }
+
+        if (!viewResult) return fail("[epic] View timed out (10s). Is the desktop agent running?");
+        if (viewResult.status === "error") return fail(`[epic] ${viewResult.error || "View failed"}`);
+
+        const d = viewResult.data || {};
+        const elements = d.elements || [];
+        const windowTitle = d.window || "Unknown";
+        const activityLabel = d.activity || resolved.name;
+
+        if (activityLabel) {
+          await cacheFieldLayout(env, activityLabel, elements, windowTitle);
+        }
+
+        const lines: string[] = [];
+        lines.push(`=== EPIC SCREEN: ${env} ===`);
+        lines.push(`Activity: ${activityLabel}`);
+        lines.push(`Window: ${windowTitle}`);
+        lines.push(`Elements: ${elements.filter((e: any) => !e.static).length} interactive`);
+        lines.push(`Cached: yes`);
+        lines.push("");
+
+        if (elements.length) {
+          lines.push(...renderElementLines(elements));
+        } else {
+          lines.push("No interactive elements found.");
+          lines.push("");
+        }
+
+        lines.push(`Interact: epic do ${env} <hint> [value]`);
+        lines.push(`Cached:   epic fields ${env} ${activityLabel.toLowerCase()}`);
+        lines.push(`Refresh:  epic screen ${env} ${target}`);
+        return ok(lines.join(nl));
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
+    }
+
+    if (args[0] === "fields") {
+      const firstArg = (args[1] || "").toUpperCase();
+      const hasEnv = EPIC_ENVS.has(firstArg);
+      const env = hasEnv ? firstArg : "SUP";
+      const activity = (hasEnv ? args.slice(2) : args.slice(1)).join(" ");
+
+      const allConfigs = await storage.getAgentConfigs();
+      const prefix = `epic_fields_${env.toLowerCase()}_`;
+      const fieldConfigs = allConfigs.filter(c => c.key.startsWith(prefix));
+
+      if (!activity) {
+        if (!fieldConfigs.length) return ok(`No cached field layouts for ${env}.${nl}Run: epic screen ${env} <activity>`);
+
+        const lines: string[] = [];
+        lines.push(`=== EPIC FIELDS: ${env} === (${fieldConfigs.length} cached)`);
+        lines.push("");
+
+        for (const cfg of fieldConfigs) {
+          try {
+            const cache = JSON.parse(cfg.value);
+            const age = Date.now() - (cache.timestamp || 0);
+            const stale = age > 300000 ? " (stale)" : "";
+            lines.push(`  ${(cache.activity || cfg.key.replace(prefix, "")).padEnd(30)} ${String(cache.fieldCount || 0).padStart(3)} fields  ${formatAge(age)}${stale}`);
+          } catch {
+            lines.push(`  ${cfg.key.replace(prefix, "").padEnd(30)} (invalid cache)`);
+          }
+        }
+        lines.push("");
+        lines.push(`View: epic fields ${env} <activity>`);
+        lines.push(`Refresh: epic screen ${env} <activity>`);
+        return ok(lines.join(nl));
+      }
+
+      const slug = slugify(activity);
+      let matchedCfg = fieldConfigs.find(c => c.key === `${prefix}${slug}`);
+      if (!matchedCfg) {
+        matchedCfg = fieldConfigs.find(c => {
+          try {
+            const cache = JSON.parse(c.value);
+            return (cache.activity || "").toLowerCase().includes(activity.toLowerCase());
+          } catch { return false; }
+        });
+      }
+
+      if (!matchedCfg) {
+        return fail(`[epic] No cached fields for "${activity}" in ${env}.${nl}Run: epic screen ${env} ${activity}`);
+      }
+
+      try {
+        const cache = JSON.parse(matchedCfg.value);
+        const elements = cache.elements || [];
+        const age = Date.now() - (cache.timestamp || 0);
+        const staleMsg = age > 300000 ? `${nl}(stale - last updated ${formatAge(age)}, run: epic screen ${env} ${activity})` : "";
+
+        const lines: string[] = [];
+        lines.push(`=== EPIC FIELDS: ${env} / ${cache.activity || activity} ===`);
+        lines.push(`Window: ${cache.window || "Unknown"}`);
+        lines.push(`Fields: ${cache.fieldCount || 0} interactive`);
+        lines.push(`Updated: ${formatAge(age)}${age > 300000 ? " (stale)" : ""}`);
+        lines.push("");
+
+        if (elements.length) {
+          lines.push(...renderElementLines(elements));
+        } else {
+          lines.push("No elements cached.");
+          lines.push("");
+        }
+
+        lines.push(`Interact: epic do ${env} <hint> [value]`);
+        lines.push(`Refresh:  epic screen ${env} ${activity}${staleMsg}`);
+        return ok(lines.join(nl));
+      } catch {
+        return fail(`[epic] Corrupted cache for "${activity}". Run: epic screen ${env} ${activity}`);
+      }
+    }
+
+    if (args[0] === "do") {
+      const firstArg = (args[1] || "").toUpperCase();
+      const hasEnv = EPIC_ENVS.has(firstArg);
       const env = hasEnv ? firstArg : "SUP";
       const hint = (hasEnv ? args[2] || "" : args[1] || "").toLowerCase();
       const value = (hasEnv ? args.slice(3) : args.slice(2)).join(" ");
-      if (!hint) return fail(`[epic] Usage: epic do [env] <hint> [value]${nl}Run 'epic view' first to see available hints.`);
+      if (!hint) {
+        let hintHelp = "";
+        const allConfigs = await storage.getAgentConfigs();
+        const fieldConfigs = allConfigs.filter(c => c.key.startsWith(`epic_fields_${env.toLowerCase()}_`));
+        if (fieldConfigs.length) {
+          const latest = fieldConfigs.sort((a, b) => {
+            try {
+              const ta = JSON.parse(a.value).timestamp || 0;
+              const tb = JSON.parse(b.value).timestamp || 0;
+              return tb - ta;
+            } catch { return 0; }
+          })[0];
+          try {
+            const cache = JSON.parse(latest.value);
+            const hints = (cache.elements || []).filter((e: any) => e.hint).slice(0, 15);
+            if (hints.length) {
+              hintHelp = `${nl}${nl}Last activity: ${cache.activity || "unknown"}${nl}Available hints:`;
+              for (const h of hints) {
+                hintHelp += `${nl}  [${h.hint}] ${h.controlType || ""} ${h.name || ""}`;
+              }
+            }
+          } catch {}
+        }
+        return fail(`[epic] Usage: epic do [env] <hint> [value]${nl}Run 'epic view' first to see available hints.${hintHelp}`);
+      }
 
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
@@ -3831,41 +4112,21 @@ ${fullHtml}`;
         const d = result.data || {};
         const elements = d.elements || [];
         const window = d.window || "Unknown";
+        const activityName = d.activity || "";
+
+        if (activityName && elements.length) {
+          await cacheFieldLayout(env, activityName, elements, window);
+        }
 
         const lines: string[] = [];
         lines.push(`=== EPIC DO: ${env} [${hint}]${value ? ` = "${value}"` : ""} ===`);
         lines.push(`Window: ${window}`);
+        if (activityName) lines.push(`Activity: ${activityName}`);
         lines.push(`Action: complete`);
         lines.push("");
 
         if (elements.length) {
-          const groups = new Map<string, any[]>();
-          for (const el of elements) {
-            const group = el.parent || "Window";
-            if (!groups.has(group)) groups.set(group, []);
-            groups.get(group)!.push(el);
-          }
-
-          lines.push("--- Updated View ---");
-          for (const [group, items] of groups) {
-            lines.push(`--- ${group} ---`);
-            for (const el of items) {
-              const hintLabel = el.hint ? `[${el.hint}]` : "    ";
-              const ct = el.controlType || "";
-              const name = el.name || "";
-              const enabled = el.enabled === false ? " (disabled)" : "";
-              let suffix = "";
-              if (el.value) suffix = ` = "${el.value}"`;
-              if (el.checked === true) suffix = " [x]";
-              if (el.checked === false) suffix = " [ ]";
-              if (el.static) {
-                lines.push(`     ${ct.padEnd(12)} ${name}${suffix}`);
-              } else {
-                lines.push(`  ${hintLabel.padEnd(5)} ${ct.padEnd(12)} ${name}${enabled}${suffix}`);
-              }
-            }
-            lines.push("");
-          }
+          lines.push(...renderElementLines(elements));
         }
 
         lines.push(`Next: epic do ${env} <hint> [value]`);
@@ -3876,9 +4137,8 @@ ${fullHtml}`;
     }
 
     if (args[0] === "menu") {
-      const envSet = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
       const firstArg = (args[1] || "").toUpperCase();
-      const hasEnv = envSet.has(firstArg);
+      const hasEnv = EPIC_ENVS.has(firstArg);
       const envArg = hasEnv ? firstArg : "SUP";
       const restArgs = hasEnv ? args.slice(2) : args.slice(1);
       const goFlag = restArgs.includes("--go");
@@ -4446,6 +4706,9 @@ ${fullHtml}`;
       "  epic view [env] --focus X - Scope to panel/group X",
       "  epic do [env] <hint>      - Click/select element by hint",
       "  epic do [env] <hint> <val>- Type value into field by hint",
+      "  epic screen [env] <name>  - Go to activity + view + cache",
+      "  epic fields [env]         - List cached field layouts",
+      "  epic fields [env] <name>  - Show cached fields instantly",
       "  epic menu [env]           - Browse stored nav tree",
       "  epic menu [env] 3 2       - Drill into tree by numbers",
       "  epic menu [env] 3 --go    - Navigate to tree item",

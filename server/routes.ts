@@ -660,7 +660,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, any> = { id, type, env: env || "SUP" };
@@ -676,6 +676,7 @@ export async function registerRoutes(
     if (value) cmd.value = value;
     if (showAll) cmd.showAll = showAll;
     if (focus) cmd.focus = focus;
+    if (_activity_label) cmd._activity_label = _activity_label;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });
