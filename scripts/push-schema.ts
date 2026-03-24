@@ -194,6 +194,12 @@ const extraTables = [
 const alterations = [
   `ALTER TABLE site_profiles ADD COLUMN IF NOT EXISTS default_permission TEXT NOT NULL DEFAULT 'autonomous'`,
   `ALTER TABLE navigation_paths ADD COLUMN IF NOT EXISTS permission_level TEXT NOT NULL DEFAULT 'autonomous'`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS image_url TEXT`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS repeat TEXT`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS parent_id INTEGER`,
+  `ALTER TABLE notes ADD COLUMN IF NOT EXISTS image_url TEXT`,
+  `ALTER TABLE captures ADD COLUMN IF NOT EXISTS image_url TEXT`,
+  `ALTER TABLE captures ADD COLUMN IF NOT EXISTS template TEXT`,
 ];
 
 const indexes = [
