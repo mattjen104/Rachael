@@ -6,7 +6,7 @@ Polls OrgCloud for navigation commands and drives Hyperspace using
 screenshots + Claude vision (via OpenRouter).
 
 Requirements:
-    pip install pyautogui pillow requests pygetwindow
+    pip install pyautogui pillow requests pygetwindow keyboard
 
 Usage:
     python epic_agent.py
@@ -26,6 +26,8 @@ import io
 import re
 import traceback
 import random
+import webbrowser
+import threading
 
 try:
     import ctypes
@@ -260,6 +262,36 @@ POLL_INTERVAL = 3
 
 pyautogui.PAUSE = 0.2
 pyautogui.FAILSAFE = True
+
+_hotkeys_registered = False
+
+def _open_orgcloud_mode(mode):
+    """Open OrgCloud in browser with the given mode (capture, command, search, agenda)."""
+    url = f"{ORGCLOUD_URL}?mode={mode}"
+    print(f"  [hotkey] Opening {mode} mode: {url}")
+    threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
+
+def register_global_hotkeys():
+    """Register Alt+C/X/S/A as system-wide global hotkeys using the keyboard library."""
+    global _hotkeys_registered
+    if _hotkeys_registered:
+        return
+    try:
+        import keyboard
+        keyboard.add_hotkey("alt+c", lambda: _open_orgcloud_mode("capture"), suppress=True)
+        keyboard.add_hotkey("alt+x", lambda: _open_orgcloud_mode("command"), suppress=True)
+        keyboard.add_hotkey("alt+s", lambda: _open_orgcloud_mode("search"), suppress=True)
+        keyboard.add_hotkey("alt+a", lambda: _open_orgcloud_mode("agenda"), suppress=True)
+        _hotkeys_registered = True
+        print("  [hotkey] Global hotkeys registered:")
+        print("    Alt+C = Capture  |  Alt+X = Command (M-x)")
+        print("    Alt+S = Search   |  Alt+A = Agenda")
+    except ImportError:
+        print("  [hotkey] 'keyboard' package not installed — global hotkeys disabled")
+        print("    Install with: pip install keyboard")
+    except Exception as e:
+        print(f"  [hotkey] Failed to register global hotkeys: {e}")
+        print("    Try running as administrator (keyboard requires elevated privileges)")
 
 
 def safe_click(x, y, pause_before=0.15, pause_after=0.3, label=""):
@@ -4377,6 +4409,8 @@ def main():
         print("WARNING: OPENROUTER_API_KEY not set — vision/AI commands disabled")
         print("  Deterministic commands (navigate_path, tree-scan, masterfile) will still work")
         print()
+
+    register_global_hotkeys()
 
     windows = list_windows()
     if windows:
