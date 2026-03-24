@@ -291,21 +291,50 @@ def _open_orgcloud_mode(mode):
     if chrome:
         def launch():
             global _orgcloud_popup_hwnd
-            try:
-                if _orgcloud_popup_hwnd:
-                    user32 = ctypes.windll.user32
-                    if user32.IsWindow(_orgcloud_popup_hwnd):
-                        user32.ShowWindow(_orgcloud_popup_hwnd, 9)
-                        user32.SetForegroundWindow(_orgcloud_popup_hwnd)
-                        return
-                    _orgcloud_popup_hwnd = None
+            user32 = ctypes.windll.user32
 
+            if _orgcloud_popup_hwnd and user32.IsWindow(_orgcloud_popup_hwnd):
+                user32.ShowWindow(_orgcloud_popup_hwnd, 9)
+                user32.SetForegroundWindow(_orgcloud_popup_hwnd)
+                return
+
+            _orgcloud_popup_hwnd = None
+            profile_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "OrgCloudPopup")
+
+            try:
                 subprocess.Popen([
                     chrome,
                     f"--app={url}",
-                    "--window-size=420,700",
-                    "--window-position=960,160",
+                    f"--user-data-dir={profile_dir}",
+                    "--window-size=420,650",
+                    "--window-position=1480,100",
+                    "--no-first-run",
+                    "--no-default-browser-check",
                 ])
+                time.sleep(1.5)
+                title_match = "i-cloud-sync-manager"
+
+                def enum_cb(hwnd, _):
+                    global _orgcloud_popup_hwnd
+                    if user32.IsWindowVisible(hwnd):
+                        length = user32.GetWindowTextLengthW(hwnd)
+                        if length > 0:
+                            buf = ctypes.create_unicode_buffer(length + 1)
+                            user32.GetWindowTextW(hwnd, buf, length + 1)
+                            if title_match in buf.value.lower():
+                                _orgcloud_popup_hwnd = hwnd
+                                RECT = ctypes.wintypes.RECT
+                                rc = RECT()
+                                user32.GetWindowRect(hwnd, ctypes.byref(rc))
+                                cur_w = rc.right - rc.left
+                                cur_h = rc.bottom - rc.top
+                                if cur_w > 500 or cur_h > 750:
+                                    user32.MoveWindow(hwnd, 1480, 100, 420, 650, True)
+                    return True
+
+                WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+                user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+
             except Exception as e:
                 print(f"  [hotkey] Chrome app-mode failed: {e}, falling back to browser")
                 webbrowser.open(url)
