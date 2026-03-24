@@ -3395,6 +3395,7 @@ ${fullHtml}`;
         fieldCount: elements.filter((e: any) => !e.static).length,
       };
       await storage.setAgentConfig(key, JSON.stringify(cache), "epic");
+      await storage.setAgentConfig(`epic_current_activity_${env.toLowerCase()}`, activity, "epic");
     }
 
     if (args[0] === "activities") {
@@ -3808,13 +3809,13 @@ ${fullHtml}`;
         const window = d.window || "Unknown";
         const focusLabel = d.focus || "";
 
-        if (!elements.length) {
-          return ok(`=== EPIC VIEW: ${env} ===${nl}Window: ${window}${focusLabel ? `${nl}Focus: ${focusLabel}` : ""}${nl}${nl}No interactive elements found.`);
-        }
-
         const activityName = d.activity || "";
         if (activityName) {
           await cacheFieldLayout(env, activityName, elements, window);
+        }
+
+        if (!elements.length) {
+          return ok(`=== EPIC VIEW: ${env} ===${nl}Window: ${window}${activityName ? `${nl}Activity: ${activityName}` : ""}${focusLabel ? `${nl}Focus: ${focusLabel}` : ""}${nl}${nl}No interactive elements found.`);
         }
 
         const lines: string[] = [];
@@ -4061,26 +4062,23 @@ ${fullHtml}`;
       const value = (hasEnv ? args.slice(3) : args.slice(2)).join(" ");
       if (!hint) {
         let hintHelp = "";
-        const allConfigs = await storage.getAgentConfigs();
-        const fieldConfigs = allConfigs.filter(c => c.key.startsWith(`epic_fields_${env.toLowerCase()}_`));
-        if (fieldConfigs.length) {
-          const latest = fieldConfigs.sort((a, b) => {
+        const currentActCfg = await storage.getAgentConfig(`epic_current_activity_${env.toLowerCase()}`);
+        const currentActivity = currentActCfg?.value || "";
+        if (currentActivity) {
+          const cacheKey = `epic_fields_${env.toLowerCase()}_${slugify(currentActivity)}`;
+          const cacheCfg = await storage.getAgentConfig(cacheKey);
+          if (cacheCfg?.value) {
             try {
-              const ta = JSON.parse(a.value).timestamp || 0;
-              const tb = JSON.parse(b.value).timestamp || 0;
-              return tb - ta;
-            } catch { return 0; }
-          })[0];
-          try {
-            const cache = JSON.parse(latest.value);
-            const hints = (cache.elements || []).filter((e: any) => e.hint).slice(0, 15);
-            if (hints.length) {
-              hintHelp = `${nl}${nl}Last activity: ${cache.activity || "unknown"}${nl}Available hints:`;
-              for (const h of hints) {
-                hintHelp += `${nl}  [${h.hint}] ${h.controlType || ""} ${h.name || ""}`;
+              const cache = JSON.parse(cacheCfg.value);
+              const hints = (cache.elements || []).filter((e: any) => e.hint).slice(0, 15);
+              if (hints.length) {
+                hintHelp = `${nl}${nl}Current activity: ${cache.activity || currentActivity}${nl}Available hints:`;
+                for (const h of hints) {
+                  hintHelp += `${nl}  [${h.hint}] ${h.controlType || ""} ${h.name || ""}`;
+                }
               }
-            }
-          } catch {}
+            } catch {}
+          }
         }
         return fail(`[epic] Usage: epic do [env] <hint> [value]${nl}Run 'epic view' first to see available hints.${hintHelp}`);
       }
@@ -4114,7 +4112,7 @@ ${fullHtml}`;
         const window = d.window || "Unknown";
         const activityName = d.activity || "";
 
-        if (activityName && elements.length) {
+        if (activityName) {
           await cacheFieldLayout(env, activityName, elements, window);
         }
 
