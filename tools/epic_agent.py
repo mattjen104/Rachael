@@ -3977,13 +3977,11 @@ def _walk_uia_tree(element, depth, max_depth, show_all, parent_name=""):
             }
             results.append(entry)
 
-        if is_container or (not is_interactive and depth < max_depth):
-            sub_parent = name if name else container_label
-            sub = _walk_uia_tree(child, depth + 1, max_depth, show_all, sub_parent)
-            results.extend(sub)
-        elif is_interactive and ctrl_type in ("Menu", "MenuBar", "TreeItem", "TabControl") and depth < max_depth:
-            sub = _walk_uia_tree(child, depth + 1, max_depth, show_all, name or container_label)
-            results.extend(sub)
+        if depth < max_depth:
+            if is_container or not is_interactive or ctrl_type in ("Menu", "MenuBar", "TreeItem", "TabControl", "ToolBar", "Tab", "TabItem"):
+                sub_parent = name if name else container_label
+                sub = _walk_uia_tree(child, depth + 1, max_depth, show_all, sub_parent)
+                results.extend(sub)
 
     return results
 
@@ -4018,7 +4016,7 @@ def execute_view(cmd):
     command_id = cmd.get("id", "unknown")
     show_all = cmd.get("showAll", False)
     focus_target = cmd.get("focus", "")
-    max_depth = 5
+    max_depth = 10
 
     print(f"  [view] Reading accessibility tree for {env}")
 
