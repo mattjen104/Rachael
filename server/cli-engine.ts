@@ -317,14 +317,11 @@ export function setTeamsCache(c: typeof teamsCache) { teamsCache = c; }
 export function getSnowCache() { return snowCache; }
 export function setSnowCache(c: typeof snowCache) { snowCache = c; }
 
-function buildSnowRecordUrl(baseUrl: string, tableName: string, num: string, useSow: boolean = true): string {
-  if (useSow) {
-    return `${baseUrl}/now/sow/record/${tableName}?sysparm_query=number%3D${num}`;
-  }
+function buildSnowRecordUrl(baseUrl: string, tableName: string, num: string): string {
   return `${baseUrl}/nav_to.do?uri=${tableName}.do?sysparm_query=number=${num}`;
 }
 
-function parseSnowListFromText(text: string, recordType: "incident" | "change" | "request", baseUrl: string, source: "personal" | "team" = "personal", useSowUrls: boolean = true): CachedSnowRecord[] {
+function parseSnowListFromText(text: string, recordType: "incident" | "change" | "request", baseUrl: string, source: "personal" | "team" = "personal"): CachedSnowRecord[] {
   const records: CachedSnowRecord[] = [];
   const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 0);
   const numberPattern = recordType === "incident" ? /\b(INC\d{7,})\b/gi
@@ -349,7 +346,7 @@ function parseSnowListFromText(text: string, recordType: "incident" | "change" |
         || contextLines.match(/(?:Service Desk|IT Support|Network|Infrastructure|Application|Desktop|Help Desk|Operations|Security|Development)[A-Za-z\s]*/i);
       const dateMatch = contextLines.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
       const tableName = recordType === "incident" ? "incident" : recordType === "change" ? "change_request" : "sc_req_item";
-      const recordUrl = buildSnowRecordUrl(baseUrl, tableName, num, useSowUrls);
+      const recordUrl = buildSnowRecordUrl(baseUrl, tableName, num);
       records.push({
         number: num,
         shortDescription: extractSnowDescription(contextLines, num),
@@ -2704,7 +2701,7 @@ ${fullHtml}`;
         const text = scrapeResult.content?.text || "";
         const extractedText = Object.values(scrapeResult.extractedData).join("\n");
         const allText = `${text}\n${extractedText}`;
-        return parseSnowListFromText(allText, recordType, baseUrl, source, false);
+        return parseSnowListFromText(allText, recordType, baseUrl, source);
       } catch (e: any) {
         emitEvent("cli", `[snow] Nav path scrape failed: ${e.message}`, "warn", { metadata: { command: "snow" } });
         return [];
