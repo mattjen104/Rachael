@@ -317,6 +317,10 @@ export function setTeamsCache(c: typeof teamsCache) { teamsCache = c; }
 export function getSnowCache() { return snowCache; }
 export function setSnowCache(c: typeof snowCache) { snowCache = c; }
 
+function buildSnowRecordUrl(baseUrl: string, tableName: string, num: string): string {
+  return `${baseUrl}/now/sow/record/${tableName}?sysparm_query=number%3D${num}`;
+}
+
 function parseSnowListFromText(text: string, recordType: "incident" | "change" | "request", baseUrl: string, source: "personal" | "team" = "personal"): CachedSnowRecord[] {
   const records: CachedSnowRecord[] = [];
   const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 0);
@@ -342,7 +346,7 @@ function parseSnowListFromText(text: string, recordType: "incident" | "change" |
         || contextLines.match(/(?:Service Desk|IT Support|Network|Infrastructure|Application|Desktop|Help Desk|Operations|Security|Development)[A-Za-z\s]*/i);
       const dateMatch = contextLines.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
       const tableName = recordType === "incident" ? "incident" : recordType === "change" ? "change_request" : "sc_req_item";
-      const recordUrl = `${baseUrl}/nav_to.do?uri=${tableName}.do?sysparm_query=number=${num}`;
+      const recordUrl = buildSnowRecordUrl(baseUrl, tableName, num);
       records.push({
         number: num,
         shortDescription: extractSnowDescription(contextLines, num),
@@ -2775,7 +2779,7 @@ ${fullHtml}`;
       let tableName = "incident";
       if (/^CHG/i.test(recordNumber)) tableName = "change_request";
       else if (/^REQ|^RITM/i.test(recordNumber)) tableName = "sc_req_item";
-      const detailUrl = `${baseUrl}/nav_to.do?uri=${tableName}.do?sysparm_query=number=${recordNumber}`;
+      const detailUrl = buildSnowRecordUrl(baseUrl, tableName, recordNumber);
 
       const detailNavPath = navPathMap["view-record-detail"];
       emitEvent("cli", `Opening ServiceNow record: ${recordNumber}`, "info", { metadata: { command: "snow detail" } });
