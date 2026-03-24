@@ -267,6 +267,10 @@ _hotkeys_registered = False
 _hotkey_thread = None
 
 _orgcloud_popup_hwnd = None
+_popup_visible = False
+_POPUP_W = 420
+_POPUP_H = 650
+_POPUP_TITLE_MATCH = "orgcloud"
 
 def _find_chrome_exe():
     """Find Chrome executable on Windows."""
@@ -280,68 +284,107 @@ def _find_chrome_exe():
             return p
     return None
 
-def _open_orgcloud_mode(mode):
-    """Open OrgCloud as a Chrome app-mode window (no address bar, clean popup)."""
-    import subprocess
+def _find_orgcloud_window():
+    """Find an existing OrgCloud popup window by title."""
     global _orgcloud_popup_hwnd
+    user32 = ctypes.windll.user32
+    found = [None]
+
+    def enum_cb(hwnd, _):
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length > 0:
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value.lower()
+            if _POPUP_TITLE_MATCH in title or "i-cloud-sync-manager" in title:
+                found[0] = hwnd
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+    user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+    if found[0]:
+        _orgcloud_popup_hwnd = found[0]
+    return found[0]
+
+def _get_screen_width():
+    """Get primary monitor width."""
+    try:
+        return ctypes.windll.user32.GetSystemMetrics(0)
+    except Exception:
+        return 1920
+
+def _open_orgcloud_mode(mode):
+    """Toggle OrgCloud popup: show/hide if exists, create if not. Opens in main Chrome profile."""
+    import subprocess
+    global _orgcloud_popup_hwnd, _popup_visible
     url = f"{ORGCLOUD_URL}?mode={mode}"
-    print(f"  [hotkey] Opening {mode} mode: {url}")
 
-    chrome = _find_chrome_exe()
-    if chrome:
-        def launch():
-            global _orgcloud_popup_hwnd
-            user32 = ctypes.windll.user32
+    def do_toggle():
+        global _orgcloud_popup_hwnd, _popup_visible
+        user32 = ctypes.windll.user32
+        SW_HIDE = 0
+        SW_RESTORE = 9
 
-            if _orgcloud_popup_hwnd and user32.IsWindow(_orgcloud_popup_hwnd):
-                user32.ShowWindow(_orgcloud_popup_hwnd, 9)
+        if _orgcloud_popup_hwnd and user32.IsWindow(_orgcloud_popup_hwnd):
+            if _popup_visible:
+                user32.ShowWindow(_orgcloud_popup_hwnd, SW_HIDE)
+                _popup_visible = False
+                print(f"  [hotkey] Hidden OrgCloud popup")
+                return
+            else:
+                user32.ShowWindow(_orgcloud_popup_hwnd, SW_RESTORE)
                 user32.SetForegroundWindow(_orgcloud_popup_hwnd)
+                _popup_visible = True
+                print(f"  [hotkey] Shown OrgCloud popup")
                 return
 
-            _orgcloud_popup_hwnd = None
-            profile_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "OrgCloudPopup")
+        hwnd = _find_orgcloud_window()
+        if hwnd:
+            _orgcloud_popup_hwnd = hwnd
+            if _popup_visible:
+                user32.ShowWindow(hwnd, SW_HIDE)
+                _popup_visible = False
+                print(f"  [hotkey] Hidden OrgCloud popup (found existing)")
+            else:
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                user32.SetForegroundWindow(hwnd)
+                _popup_visible = True
+                print(f"  [hotkey] Shown OrgCloud popup (found existing)")
+            return
 
-            try:
-                subprocess.Popen([
-                    chrome,
-                    f"--app={url}",
-                    f"--user-data-dir={profile_dir}",
-                    "--window-size=420,650",
-                    "--window-position=1480,100",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                ])
-                time.sleep(1.5)
-                title_match = "i-cloud-sync-manager"
+        print(f"  [hotkey] Opening {mode} mode: {url}")
+        chrome = _find_chrome_exe()
+        if not chrome:
+            print("  [hotkey] Chrome not found, opening in default browser")
+            webbrowser.open(url)
+            return
 
-                def enum_cb(hwnd, _):
-                    global _orgcloud_popup_hwnd
-                    if user32.IsWindowVisible(hwnd):
-                        length = user32.GetWindowTextLengthW(hwnd)
-                        if length > 0:
-                            buf = ctypes.create_unicode_buffer(length + 1)
-                            user32.GetWindowTextW(hwnd, buf, length + 1)
-                            if title_match in buf.value.lower():
-                                _orgcloud_popup_hwnd = hwnd
-                                RECT = ctypes.wintypes.RECT
-                                rc = RECT()
-                                user32.GetWindowRect(hwnd, ctypes.byref(rc))
-                                cur_w = rc.right - rc.left
-                                cur_h = rc.bottom - rc.top
-                                if cur_w > 500 or cur_h > 750:
-                                    user32.MoveWindow(hwnd, 1480, 100, 420, 650, True)
-                    return True
+        screen_w = _get_screen_width()
+        pos_x = screen_w - _POPUP_W - 20
 
-                WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
-                user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+        try:
+            subprocess.Popen([
+                chrome,
+                f"--app={url}",
+                f"--window-size={_POPUP_W},{_POPUP_H}",
+                f"--window-position={pos_x},100",
+            ])
+            time.sleep(2)
 
-            except Exception as e:
-                print(f"  [hotkey] Chrome app-mode failed: {e}, falling back to browser")
-                webbrowser.open(url)
-        threading.Thread(target=launch, daemon=True).start()
-    else:
-        print("  [hotkey] Chrome not found, opening in default browser")
-        threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
+            hwnd = _find_orgcloud_window()
+            if hwnd:
+                _orgcloud_popup_hwnd = hwnd
+                user32.MoveWindow(hwnd, pos_x, 100, _POPUP_W, _POPUP_H, True)
+                _popup_visible = True
+                print(f"  [hotkey] OrgCloud popup opened ({_POPUP_W}x{_POPUP_H})")
+            else:
+                _popup_visible = True
+
+        except Exception as e:
+            print(f"  [hotkey] Chrome app-mode failed: {e}")
+            webbrowser.open(url)
+
+    threading.Thread(target=do_toggle, daemon=True).start()
 
 def _hotkey_listener():
     """Win32 RegisterHotKey message loop — runs in a daemon thread.
