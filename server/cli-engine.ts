@@ -342,6 +342,7 @@ function parseSnowListFromText(text: string, recordType: "incident" | "change" |
         || contextLines.match(/(?:Service Desk|IT Support|Network|Infrastructure|Application|Desktop|Help Desk|Operations|Security|Development)[A-Za-z\s]*/i);
       const dateMatch = contextLines.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
       const tableName = recordType === "incident" ? "incident" : recordType === "change" ? "change_request" : "sc_req_item";
+      const recordUrl = `${baseUrl}/now/sow/record/${tableName}?sysparm_query=number=${num}`;
       records.push({
         number: num,
         shortDescription: extractSnowDescription(contextLines, num),
@@ -353,7 +354,7 @@ function parseSnowListFromText(text: string, recordType: "incident" | "change" |
         type: recordType,
         source,
         slaBreached: /breach|overdue|exceeded|sla/i.test(contextLines),
-        url: `${baseUrl}/nav_to.do?uri=${tableName}.do?sysparm_query=number=${num}`,
+        url: recordUrl,
       });
     }
   }
@@ -2657,6 +2658,33 @@ ${fullHtml}`;
       navPathMap[np.name] = np;
     }
 
+    async function scrapeSowHomepage(profile: typeof updatedProfile, paths: typeof navPathMap, bUrl: string): Promise<string> {
+      const sowPath = paths["scrape-sow-home"];
+      if (sowPath) {
+        emitEvent("cli", "Executing SOW homepage nav path (SPA wait + scroll)...", "info", { metadata: { command: "snow" } });
+        try {
+          const scrapeResult = await executeNavigationPath(profile, sowPath);
+          const text = scrapeResult.content?.text || "";
+          const extractedText = Object.values(scrapeResult.extractedData).filter(v => v).join(String.fromCharCode(10));
+          const allText = text + String.fromCharCode(10) + extractedText;
+          if (allText.length > 200) {
+            emitEvent("cli", `SOW nav path extracted: ${allText.length} chars`, "info", { metadata: { command: "snow" } });
+            return allText;
+          }
+          emitEvent("cli", `SOW nav path yielded sparse content (${allText.length} chars), trying smartFetch fallback...`, "warn", { metadata: { command: "snow" } });
+        } catch (e: any) {
+          emitEvent("cli", `SOW nav path failed: ${e.message}, trying smartFetch fallback...`, "warn", { metadata: { command: "snow" } });
+        }
+      }
+
+      const { smartFetch } = await import("./bridge-queue");
+      const sowUrl = `${bUrl}/now/sow/home`;
+      const result = await smartFetch(sowUrl, "dom", "cli-snow-sow-fallback", {
+        maxText: 80000,
+      }, 30000);
+      return result.text || "";
+    }
+
     async function scrapeSnowNavPath(pathName: string, recordType: "incident" | "change" | "request", source: "personal" | "team" = "personal"): Promise<CachedSnowRecord[]> {
       const navPath = navPathMap[pathName];
       if (!navPath) {
@@ -2747,7 +2775,7 @@ ${fullHtml}`;
       let tableName = "incident";
       if (/^CHG/i.test(recordNumber)) tableName = "change_request";
       else if (/^REQ|^RITM/i.test(recordNumber)) tableName = "sc_req_item";
-      const detailUrl = `${baseUrl}/nav_to.do?uri=${tableName}.do?sysparm_query=number=${recordNumber}`;
+      const detailUrl = `${baseUrl}/now/sow/record/${tableName}?sysparm_query=number=${recordNumber}`;
 
       const detailNavPath = navPathMap["view-record-detail"];
       emitEvent("cli", `Opening ServiceNow record: ${recordNumber}`, "info", { metadata: { command: "snow detail" } });
@@ -2835,12 +2863,7 @@ ${fullHtml}`;
     if (sub === "home") {
       emitEvent("cli", "Scraping SOW homepage dashboard...", "info", { metadata: { command: "snow home" } });
       try {
-        const { smartFetch } = await import("./bridge-queue");
-        const sowUrl = `${baseUrl}/now/sow/home`;
-        const result = await smartFetch(sowUrl, "dom", "cli-snow-sow-home", {
-          maxText: 80000,
-        }, 30000);
-        const sowText = result.text || "";
+        const sowText = await scrapeSowHomepage(updatedProfile, navPathMap, baseUrl);
         if (sowText.length < 100) {
           return fail(`[snow home] SOW homepage returned only ${sowText.length} chars. Dashboard may not have loaded. Check bridge-status.`);
         }
@@ -2852,7 +2875,7 @@ ${fullHtml}`;
         await persistSnowResults(allRecords, "sow-home");
         const lines = [
           `=== SOW HOMEPAGE SCRAPE ===`, "",
-          `  URL: ${sowUrl}`,
+          `  URL: ${baseUrl}/now/sow/home`,
           `  Page text: ${sowText.length} chars`,
           `  Incidents: ${sowIncidents.length}`,
           `  Changes:   ${sowChanges.length}`,
@@ -2884,31 +2907,23 @@ ${fullHtml}`;
       let queueItems: CachedSnowRecord[] = [];
       let source = "classic";
 
-      const sowNavPath = navPathMap["scrape-sow-home"];
-      if (sowNavPath) {
-        emitEvent("cli", "Trying SOW homepage dashboard scrape...", "info", { metadata: { command: "snow refresh" } });
-        try {
-          const { smartFetch } = await import("./bridge-queue");
-          const sowUrl = `${baseUrl}/now/sow/home`;
-          const result = await smartFetch(sowUrl, "dom", "cli-snow-sow-home", {
-            maxText: 80000,
-          }, 30000);
-          const sowText = result.text || "";
-          const sowTextLen = sowText.length;
-          emitEvent("cli", `SOW homepage extracted: ${sowTextLen} chars`, "info", { metadata: { command: "snow refresh" } });
+      emitEvent("cli", "Trying SOW homepage dashboard scrape...", "info", { metadata: { command: "snow refresh" } });
+      try {
+        const sowText = await scrapeSowHomepage(updatedProfile, navPathMap, baseUrl);
+        const sowTextLen = sowText.length;
+        emitEvent("cli", `SOW homepage extracted: ${sowTextLen} chars`, "info", { metadata: { command: "snow refresh" } });
 
-          if (sowTextLen > 200) {
-            incidents = parseSnowListFromText(sowText, "incident", baseUrl, "personal");
-            changes = parseSnowListFromText(sowText, "change", baseUrl, "personal");
-            requests = parseSnowListFromText(sowText, "request", baseUrl, "personal");
-            source = "sow-home";
-            emitEvent("cli", `SOW parse: ${incidents.length} incidents, ${changes.length} changes, ${requests.length} requests`, "info", { metadata: { command: "snow refresh" } });
-          } else {
-            emitEvent("cli", "SOW homepage returned sparse content, falling back to classic nav paths", "warn", { metadata: { command: "snow refresh" } });
-          }
-        } catch (e: any) {
-          emitEvent("cli", `SOW homepage scrape failed: ${e.message}, falling back to classic nav paths`, "warn", { metadata: { command: "snow refresh" } });
+        if (sowTextLen > 200) {
+          incidents = parseSnowListFromText(sowText, "incident", baseUrl, "personal");
+          changes = parseSnowListFromText(sowText, "change", baseUrl, "personal");
+          requests = parseSnowListFromText(sowText, "request", baseUrl, "personal");
+          source = "sow-home";
+          emitEvent("cli", `SOW parse: ${incidents.length} incidents, ${changes.length} changes, ${requests.length} requests`, "info", { metadata: { command: "snow refresh" } });
+        } else {
+          emitEvent("cli", "SOW homepage returned sparse content, falling back to classic nav paths", "warn", { metadata: { command: "snow refresh" } });
         }
+      } catch (e: any) {
+        emitEvent("cli", `SOW homepage scrape failed: ${e.message}, falling back to classic nav paths`, "warn", { metadata: { command: "snow refresh" } });
       }
 
       if (incidents.length === 0 && changes.length === 0 && requests.length === 0) {
