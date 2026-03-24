@@ -3791,7 +3791,7 @@ ${fullHtml}`;
         const cmdId = sendData.commandId;
 
         let result: any = null;
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 60; i++) {
           await new Promise(r => setTimeout(r, 500));
           const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
           const pollData = await poll.json() as any;
@@ -3801,7 +3801,7 @@ ${fullHtml}`;
           }
         }
 
-        if (!result) return fail("[epic] View timed out (10s). Is the desktop agent running?");
+        if (!result) return fail("[epic] View timed out (30s). Is the desktop agent running?");
         if (result.status === "error") return fail(`[epic] ${result.error || "View failed"}`);
 
         const d = result.data || {};
@@ -3910,7 +3910,7 @@ ${fullHtml}`;
         const navCmdId = navData.commandId;
 
         let navCompleted = false;
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 60; i++) {
           await new Promise(r => setTimeout(r, 500));
           const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${navCmdId}`);
           const pollData = await poll.json() as any;
@@ -3918,7 +3918,7 @@ ${fullHtml}`;
           if (pollData.status && pollData.status !== "pending") { navCompleted = true; break; }
         }
 
-        if (!navCompleted) return fail("[epic] Navigation timed out (10s). Is the desktop agent running?");
+        if (!navCompleted) return fail("[epic] Navigation timed out (30s). Is the desktop agent running?");
 
         await new Promise(r => setTimeout(r, 1500));
 
@@ -3932,7 +3932,7 @@ ${fullHtml}`;
         const viewCmdId = viewData.commandId;
 
         let viewResult: any = null;
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 60; i++) {
           await new Promise(r => setTimeout(r, 500));
           const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${viewCmdId}`);
           const pollData = await poll.json() as any;
@@ -3942,7 +3942,7 @@ ${fullHtml}`;
           }
         }
 
-        if (!viewResult) return fail("[epic] View timed out (10s). Is the desktop agent running?");
+        if (!viewResult) return fail("[epic] View timed out (30s). Is the desktop agent running?");
         if (viewResult.status === "error") return fail(`[epic] ${viewResult.error || "View failed"}`);
 
         const d = viewResult.data || {};
@@ -4094,7 +4094,7 @@ ${fullHtml}`;
         const cmdId = sendData.commandId;
 
         let result: any = null;
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 60; i++) {
           await new Promise(r => setTimeout(r, 500));
           const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
           const pollData = await poll.json() as any;
@@ -4104,7 +4104,7 @@ ${fullHtml}`;
           }
         }
 
-        if (!result) return fail("[epic] Action timed out (10s). Is the desktop agent running?");
+        if (!result) return fail("[epic] Action timed out (30s). Is the desktop agent running?");
         if (result.status === "error") return fail(`[epic] ${result.error || "Action failed"}`);
 
         const d = result.data || {};
