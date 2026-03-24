@@ -1,13 +1,14 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useAgenda, useToggleTask } from "@/hooks/use-org-data";
 import { getStoredApiKey } from "@/lib/queryClient";
-import type { Task, AgentResult } from "@shared/schema";
+import type { Task, Note, AgentResult } from "@shared/schema";
 
 interface AgendaViewProps {
   onNavigate?: (view: string, id?: number) => void;
+  onEditItem?: (item: { type: "task"; data: Task } | { type: "note"; data: Note }) => void;
 }
 
-export default function AgendaView({ onNavigate }: AgendaViewProps) {
+export default function AgendaView({ onNavigate, onEditItem }: AgendaViewProps) {
   const { data: agenda, isLoading } = useAgenda();
   const toggleTask = useToggleTask();
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -74,6 +75,14 @@ export default function AgendaView({ onNavigate }: AgendaViewProps) {
           });
         }
         break;
+      case "e": {
+        e.preventDefault();
+        const editItem = allItems[selectedIdx];
+        if (editItem?.type === "task" && onEditItem) {
+          onEditItem({ type: "task", data: editItem.item });
+        }
+        break;
+      }
       case "Enter":
         e.preventDefault();
         const item = allItems[selectedIdx];
@@ -84,7 +93,7 @@ export default function AgendaView({ onNavigate }: AgendaViewProps) {
         }
         break;
     }
-  }, [allItems, selectedIdx, toggleTask, onNavigate, expandedSections]);
+  }, [allItems, selectedIdx, toggleTask, onNavigate, expandedSections, onEditItem]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OrgCloud Bridge",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "Personal browser bridge for OrgCloud — scrapes any site you're logged into",
   "permissions": [
     "activeTab",
@@ -10,7 +10,6 @@
     "offscreen",
     "scripting",
     "storage",
-    "sidePanel",
     "alarms",
     "downloads",
     "downloads.open",
@@ -23,15 +22,30 @@
   "action": {
     "default_title": "OrgCloud Bridge"
   },
-  "side_panel": {
-    "default_path": "sidepanel.html"
-  },
   "commands": {
-    "_execute_action": {
+    "open-command": {
+      "suggested_key": {
+        "default": "Alt+X"
+      },
+      "description": "Open command palette (M-x)"
+    },
+    "open-capture": {
       "suggested_key": {
         "default": "Alt+C"
       },
-      "description": "Open OrgCloud Space capture"
+      "description": "Open capture mode"
+    },
+    "open-search": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "Open search mode"
+    },
+    "open-agenda": {
+      "suggested_key": {
+        "default": "Alt+A"
+      },
+      "description": "Open agenda view"
     }
   },
   "options_ui": {

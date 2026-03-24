@@ -1,5 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import path from "path";
+import fs from "fs";
+import crypto from "crypto";
 import { storage } from "./storage";
 import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema, insertMealPlanSchema, insertShoppingListSchema, insertPantryItemSchema, insertKiddoFoodLogSchema, insertNightlyRecommendationSchema } from "@shared/schema";
 import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
@@ -17,6 +20,7 @@ import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
 import { insertRecipeSchema } from "@shared/schema";
 import { claimJobsTracked, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken, recordHeartbeat, isExtensionConnected, smartFetch } from "./bridge-queue";
 import { startRecordingSession, addAudioChunk, stopRecordingSession, getActiveRecordingSessions, transcribeUploadedAudio } from "./transcription-service";
+import { CAPTURE_TEMPLATES } from "@shared/capture-templates";
 import multer from "multer";
 
 interface AppNotification {
@@ -48,6 +52,21 @@ function addNotification(label: string, output: string, source: string, command:
     notifications.splice(0, notifications.length - MAX_NOTIFICATIONS);
   }
   return n;
+}
+
+function computeNextDate(currentDate: string, repeat: string): string {
+  const d = new Date(currentDate + "T12:00:00");
+  const match = repeat.match(/^\+(\d+)([dwm])$/);
+  if (match) {
+    const amount = parseInt(match[1], 10);
+    const unit = match[2];
+    if (unit === "d") d.setDate(d.getDate() + amount);
+    else if (unit === "w") d.setDate(d.getDate() + amount * 7);
+    else if (unit === "m") d.setMonth(d.getMonth() + amount);
+  } else {
+    d.setDate(d.getDate() + 1);
+  }
+  return d.toISOString().split("T")[0];
 }
 
 export async function registerRoutes(
@@ -226,6 +245,23 @@ export async function registerRoutes(
     if (!task) return res.status(404).json({ message: "Task not found" });
     const newStatus = task.status === "TODO" ? "DONE" : "TODO";
     const updated = await storage.updateTask(id, { status: newStatus });
+
+    if (newStatus === "DONE" && task.repeat) {
+      const nextDate = computeNextDate(task.scheduledDate || new Date().toISOString().split("T")[0], task.repeat);
+      await storage.createTask({
+        title: task.title,
+        status: "TODO",
+        body: task.body,
+        scheduledDate: nextDate,
+        deadlineDate: null,
+        priority: task.priority,
+        tags: task.tags,
+        parentId: task.parentId,
+        imageUrl: task.imageUrl,
+        repeat: task.repeat,
+      });
+    }
+
     res.json(updated);
   });
 
@@ -295,12 +331,21 @@ export async function registerRoutes(
   });
 
   app.post("/api/captures/smart", async (req, res) => {
-    const { content } = req.body;
+    const { content, imageUrl, template } = req.body;
     if (!content || typeof content !== "string") {
       return res.status(400).json({ message: "content required" });
     }
 
     const parsed = parseCaptureEntry(content);
+
+    const templateDef = template ? CAPTURE_TEMPLATES.find(t => t.key === template) : null;
+    if (templateDef) {
+      for (const tag of templateDef.autoTags) {
+        if (!parsed.tags.includes(tag)) {
+          parsed.tags.push(tag);
+        }
+      }
+    }
 
     if (parsed.type === "task") {
       const task = await storage.createTask({
@@ -309,14 +354,18 @@ export async function registerRoutes(
         scheduledDate: parsed.scheduledDate || null,
         deadlineDate: parsed.deadlineDate || null,
         tags: parsed.tags,
-        body: "",
+        body: parsed.body || "",
+        priority: parsed.priority || null,
+        imageUrl: imageUrl || null,
+        repeat: parsed.repeat || null,
       });
       return res.status(201).json({ type: "task", item: task, parsed });
     } else {
       const note = await storage.createNote({
         title: parsed.title,
-        body: "",
-        tags: [],
+        body: parsed.body || "",
+        tags: parsed.tags,
+        imageUrl: imageUrl || null,
       });
       return res.status(201).json({ type: "note", item: note, parsed });
     }
@@ -331,6 +380,84 @@ export async function registerRoutes(
       metadata = await fetchUrlMetadata(detection.url);
     }
     res.json({ detection, metadata });
+  });
+
+  app.get("/api/capture-templates", (_req, res) => {
+    res.json(CAPTURE_TEMPLATES);
+  });
+
+  const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+  app.post("/api/uploads/image", imageUpload.single("image"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ message: "No image file provided" });
+    const ext = path.extname(req.file.originalname || ".png") || ".png";
+    const filename = `${crypto.randomUUID()}${ext}`;
+    const uploadsDir = path.join(process.cwd(), "uploads");
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    fs.writeFileSync(path.join(uploadsDir, filename), req.file.buffer);
+    res.json({ url: `/api/uploads/${filename}` });
+  });
+
+  app.get("/api/uploads/:filename", (req, res) => {
+    const filename = req.params.filename.replace(/[^a-zA-Z0-9._-]/g, "");
+    const filePath = path.join(process.cwd(), "uploads", filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File not found" });
+    res.sendFile(filePath);
+  });
+
+  app.post("/api/captures/:id/refile", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const capture = await storage.getCapture(id);
+    if (!capture) return res.status(404).json({ message: "Capture not found" });
+
+    const { type, title, body, tags, scheduledDate, deadlineDate, priority, parentId } = req.body;
+
+    if (type === "task") {
+      const task = await storage.createTask({
+        title: title || capture.content,
+        status: "TODO",
+        body: body || "",
+        scheduledDate: scheduledDate || null,
+        deadlineDate: deadlineDate || null,
+        priority: priority || null,
+        tags: tags || [],
+        parentId: parentId || null,
+        imageUrl: capture.imageUrl || null,
+      });
+      await storage.markCaptureProcessed(id);
+      return res.status(201).json({ type: "task", item: task });
+    } else {
+      const note = await storage.createNote({
+        title: title || capture.content,
+        body: body || "",
+        tags: tags || [],
+        imageUrl: capture.imageUrl || null,
+      });
+      await storage.markCaptureProcessed(id);
+      return res.status(201).json({ type: "note", item: note });
+    }
+  });
+
+  app.get("/api/backlinks/:type/:id", async (req, res) => {
+    const { type, id } = req.params;
+    const pattern = `[[${id}:${type}]]`;
+    const results: Array<{ type: string; id: number; title: string }> = [];
+
+    const allTasks = await storage.getTasks();
+    for (const t of allTasks) {
+      if (t.body && t.body.includes(pattern)) {
+        results.push({ type: "task", id: t.id, title: t.title });
+      }
+    }
+
+    const allNotes = await storage.getNotes();
+    for (const n of allNotes) {
+      if (n.body && n.body.includes(pattern)) {
+        results.push({ type: "note", id: n.id, title: n.title });
+      }
+    }
+
+    res.json(results);
   });
 
   app.get("/api/results", async (req, res) => {

@@ -3,6 +3,7 @@ import { useSearch, useSmartCapture, useToggleRuntime, useCreateReaderPage, useP
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ViewMode } from "@/components/layout/Sidebar";
 import { useTvMode } from "@/hooks/use-tv-mode";
+import { CAPTURE_TEMPLATES, type CaptureTemplate } from "@shared/capture-templates";
 
 interface ScraperResultData {
   success: boolean;
@@ -25,6 +26,8 @@ interface MinibufferCommand {
 interface MinibufferProps {
   initialMode?: "command" | "search" | "capture" | "add-url" | "shell";
   initialShellCmd?: string | null;
+  initialTemplate?: string;
+  initialCaptureContext?: { url: string; title: string; selection: string } | null;
   onClose: () => void;
   onSwitchView: (view: ViewMode) => void;
   onNavigate: (view: string, id?: number) => void;
@@ -32,18 +35,51 @@ interface MinibufferProps {
   onCommandExecuted: (label: string) => void;
 }
 
+function getInitialCaptureState(initialMode: string, initialTemplate?: string): { mode: "command" | "search" | "capture" | "capture-template" | "add-url" | "scrape-url" | "scraper-result" | "shell"; query: string; template: CaptureTemplate | null } {
+  if (initialMode !== "capture") return { mode: initialMode as "command" | "search" | "add-url" | "shell", query: "", template: null };
+  if (initialTemplate) {
+    const tmpl = CAPTURE_TEMPLATES.find(t => t.key === initialTemplate);
+    if (tmpl) {
+      const today = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      let prefix = tmpl.prefix;
+      if (tmpl.key === "j") prefix = `[${today}] `;
+      if (tmpl.key === "m") prefix = `[${today}] Meeting: `;
+      return { mode: "capture", query: prefix, template: tmpl };
+    }
+  }
+  return { mode: "capture-template", query: "", template: null };
+}
+
 export default function Minibuffer({
   initialMode = "command",
   initialShellCmd = null,
+  initialTemplate,
+  initialCaptureContext = null,
   onClose,
   onSwitchView,
   onNavigate,
   onCycleTheme,
   onCommandExecuted,
 }: MinibufferProps) {
-  const [query, setQuery] = useState("");
+  const captureInit = getInitialCaptureState(initialMode, initialTemplate);
+  const formatContext = (ctx: { url: string; title: string; selection: string } | null, templateKey?: string): string => {
+    if (!ctx) return "";
+    const parts: string[] = [];
+    if (templateKey === "b") {
+      if (ctx.url) parts.push(ctx.url);
+      if (ctx.title) parts.push(ctx.title);
+      return parts.join(" ");
+    }
+    if (ctx.selection) parts.push(ctx.selection);
+    if (ctx.title && ctx.title !== ctx.selection) parts.push(ctx.title);
+    if (ctx.url) parts.push(ctx.url);
+    return parts.join("\n");
+  };
+  const contextSuffix = (initialMode === "capture" && initialCaptureContext) ? formatContext(initialCaptureContext, captureInit.template?.key) : "";
+  const [query, setQuery] = useState(captureInit.query + contextSuffix);
+  const captureContextRef = useRef(initialCaptureContext);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [mode, setMode] = useState<"command" | "search" | "capture" | "add-url" | "scrape-url" | "scraper-result" | "shell">(initialMode);
+  const [mode, setMode] = useState(captureInit.mode);
   const [scraperResult, setScraperResult] = useState<ScraperResultData | null>(null);
   const [pendingNavPathId, setPendingNavPathId] = useState<number | null>(null);
   const [pendingNavPathLabel, setPendingNavPathLabel] = useState("");
@@ -51,7 +87,11 @@ export default function Minibuffer({
   const [shellRunning, setShellRunning] = useState(false);
   const [shellHistory, setShellHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
+  const [selectedTemplate, setSelectedTemplate] = useState<CaptureTemplate | null>(captureInit.template);
+  const [captureImageUrl, setCaptureImageUrl] = useState<string | null>(null);
+  const [captureImageUploading, setCaptureImageUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const { isTvMode, setTvMode } = useTvMode();
 
@@ -67,7 +107,11 @@ export default function Minibuffer({
   const { data: allNavPaths = [] } = useNavigationPaths();
 
   useEffect(() => {
-    inputRef.current?.focus();
+    if (mode === "capture") {
+      textareaRef.current?.focus();
+    } else {
+      inputRef.current?.focus();
+    }
   }, [mode]);
 
   useEffect(() => {
@@ -196,8 +240,8 @@ export default function Minibuffer({
       { id: "toggle-control", label: "toggle-control-mode", hint: "Tab", action: () => exec("Control toggled", async () => { await apiRequest("POST", "/api/control/toggle"); queryClient.invalidateQueries({ queryKey: ["/api/control"] }); }) },
       { id: "view-permissions", label: "edit-permissions", action: () => { onNavigate("cockpit"); window.dispatchEvent(new CustomEvent("cockpit-tab", { detail: "permissions" })); onCommandExecuted("Permissions"); onClose(); } },
       { id: "view-audit-log", label: "view-audit-log", action: () => { onNavigate("cockpit"); window.dispatchEvent(new CustomEvent("cockpit-tab", { detail: "audit" })); onCommandExecuted("Audit Log"); onClose(); } },
-      { id: "capture", label: "capture", hint: "c", action: () => { setMode("capture"); setQuery(""); setSelectedIdx(0); } },
-      { id: "quick-capture", label: "quick-capture", hint: "q", action: () => { setMode("capture"); setQuery(""); setSelectedIdx(0); } },
+      { id: "capture", label: "capture", hint: "c", action: () => { setMode("capture-template"); setQuery(""); setSelectedIdx(0); setSelectedTemplate(null); setCaptureImageUrl(null); } },
+      { id: "quick-capture", label: "quick-capture", hint: "q", action: () => { setMode("capture-template"); setQuery(""); setSelectedIdx(0); setSelectedTemplate(null); setCaptureImageUrl(null); } },
       { id: "search", label: "search-all", hint: "/", action: () => { setMode("search"); setQuery(""); setSelectedIdx(0); } },
       { id: "add-url", label: "read-url", hint: "u", action: () => { setMode("add-url"); setQuery(""); setSelectedIdx(0); } },
       { id: "scrape-url", label: "scrape-url", hint: "Scrape any URL", action: () => { setMode("scrape-url"); setQuery(""); setSelectedIdx(0); } },
@@ -426,7 +470,18 @@ export default function Minibuffer({
       onCommandExecuted(`Found: ${r.title}`);
       onClose();
     } else if (mode === "capture" && query.trim()) {
-      smartCapture.mutate(query.trim());
+      if (selectedTemplate?.key === "s" && !captureImageUrl) {
+        return;
+      }
+      const captureData: Record<string, string> = { content: query.trim() };
+      if (captureImageUrl) captureData.imageUrl = captureImageUrl;
+      if (selectedTemplate) captureData.template = selectedTemplate.key;
+      apiRequest("POST", "/api/captures/smart", captureData).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/notes"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/tasks/agenda"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
+      });
       onCommandExecuted(`Captured: ${query.trim().slice(0, 30)}`);
       onClose();
     } else if (mode === "add-url" && query.trim()) {
@@ -449,15 +504,66 @@ export default function Minibuffer({
     doSubmit();
   }, [doSubmit]);
 
+  const handleClipboardPaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (mode !== "capture") return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) return;
+        setCaptureImageUploading(true);
+        const formData = new FormData();
+        formData.append("image", file);
+        try {
+          const headers: Record<string, string> = {};
+          const storedKey = localStorage.getItem("orgcloud_api_key");
+          if (storedKey) headers["Authorization"] = `Bearer ${storedKey}`;
+          const res = await fetch("/api/uploads/image", { method: "POST", body: formData, headers, credentials: "include" });
+          const data = await res.json();
+          setCaptureImageUrl(data.url);
+        } catch (err) {
+          console.error("Image upload failed:", err);
+        } finally {
+          setCaptureImageUploading(false);
+        }
+        return;
+      }
+    }
+  }, [mode]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (mode === "capture-template") {
+      const key = e.key.toLowerCase();
+      const tmpl = CAPTURE_TEMPLATES.find(t => t.key === key);
+      if (tmpl) {
+        e.preventDefault();
+        setSelectedTemplate(tmpl);
+        setMode("capture");
+        const today = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+        let prefix = tmpl.prefix;
+        if (tmpl.key === "j") prefix = `[${today}] `;
+        if (tmpl.key === "m") prefix = `[${today}] Meeting: `;
+        setQuery(prefix + formatContext(captureContextRef.current, tmpl.key));
+        setCaptureImageUrl(null);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      return;
+    }
+
     const maxIdx = mode === "command" ? filteredCommands.length - 1 :
       mode === "search" ? searchResults.length - 1 : 0;
 
     switch (e.key) {
       case "Escape":
         e.preventDefault();
-        if (mode !== "command") { setMode("command"); setQuery(""); }
-        else onClose();
+        onClose();
         break;
       case "ArrowDown":
       case "Tab":
@@ -488,6 +594,14 @@ export default function Minibuffer({
         }
         break;
       case "Enter":
+        if (mode === "capture" && !e.shiftKey) {
+          e.preventDefault();
+          doSubmit();
+          return;
+        }
+        if (mode === "capture" && e.shiftKey) {
+          return;
+        }
         e.preventDefault();
         doSubmit();
         break;
@@ -496,7 +610,8 @@ export default function Minibuffer({
 
   const modeLabel = mode === "command" ? "M-x" :
     mode === "search" ? "Search" :
-    mode === "capture" ? "Capture (t task / note)" :
+    mode === "capture-template" ? "Capture — pick template" :
+    mode === "capture" ? `Capture [${selectedTemplate?.label || "note"}]` :
     mode === "scraper-result" ? "Scraper Result" :
     mode === "shell" ? ":" :
     mode === "scrape-url" ? (pendingNavPathId ? `URL for ${pendingNavPathLabel}` : "Scrape URL") :
@@ -515,16 +630,31 @@ export default function Minibuffer({
           isTvMode ? "px-4 py-3" : "px-2 py-1"
         }`}>
           <span className={`text-muted-foreground shrink-0 ${isTvMode ? "mr-3" : "mr-2"}`}>{modeLabel}:</span>
-          <input
-            ref={inputRef}
-            data-testid="minibuffer-input"
-            className={`flex-1 bg-transparent outline-none text-primary ${isTvMode ? "text-[22px]" : ""}`}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            autoComplete="off"
-            placeholder={mode === "shell" ? "Type command (help for list)..." : mode === "capture" ? "t buy milk tomorrow..." : mode === "add-url" || mode === "scrape-url" ? "https://..." : "Type to filter..."}
-          />
+          {mode === "capture" ? (
+            <textarea
+              ref={textareaRef}
+              data-testid="minibuffer-input"
+              className={`flex-1 bg-transparent outline-none text-primary resize-none ${isTvMode ? "text-[22px]" : ""}`}
+              rows={3}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handleClipboardPaste}
+              autoComplete="off"
+              placeholder="t buy milk tomorrow... #tag !A (Shift+Enter for newline)"
+            />
+          ) : (
+            <input
+              ref={inputRef}
+              data-testid="minibuffer-input"
+              className={`flex-1 bg-transparent outline-none text-primary ${isTvMode ? "text-[22px]" : ""} ${mode === "capture-template" ? "hidden" : ""}`}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoComplete="off"
+              placeholder={mode === "shell" ? "Type command (help for list)..." : mode === "capture-template" ? "Press a key to select template..." : mode === "add-url" || mode === "scrape-url" ? "https://..." : "Type to filter..."}
+            />
+          )}
         </form>
         <div ref={listRef} className={`overflow-y-auto ${isTvMode ? "max-h-[500px]" : "max-h-64"}`}>
           {mode === "command" && filteredCommands.map((cmd, idx) => (
@@ -568,9 +698,43 @@ export default function Minibuffer({
           {mode === "search" && query && searchResults.length === 0 && (
             <div className="px-2 py-2 text-muted-foreground">No results for "{query}"</div>
           )}
-          {mode === "capture" && query && (
-            <div className="px-2 py-2 text-muted-foreground">
-              Press Enter to capture. Prefix with "t " for a task.
+          {mode === "capture-template" && (
+            <div className="px-1 py-1" tabIndex={0} ref={(el) => el?.focus()} onKeyDown={handleKeyDown}>
+              {CAPTURE_TEMPLATES.map(tmpl => (
+                <div
+                  key={tmpl.key}
+                  data-testid={`template-${tmpl.key}`}
+                  className="px-2 py-1 cursor-pointer flex justify-between items-center hover:bg-primary/20"
+                  onClick={() => {
+                    setSelectedTemplate(tmpl);
+                    setMode("capture");
+                    const today = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+                    let prefix = tmpl.prefix;
+                    if (tmpl.key === "j") prefix = `[${today}] `;
+                    if (tmpl.key === "m") prefix = `[${today}] Meeting: `;
+                    setQuery(prefix + formatContext(captureContextRef.current, tmpl.key));
+                    setCaptureImageUrl(null);
+                  }}
+                >
+                  <span><span className="text-primary font-bold">[{tmpl.key}]</span> {tmpl.label}</span>
+                  <span className="text-muted-foreground text-[10px]">{tmpl.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {mode === "capture" && (
+            <div className="px-2 py-1 text-muted-foreground space-y-1">
+              {captureImageUploading && <div className="text-primary animate-pulse">[uploading image...]</div>}
+              {captureImageUrl && <div className="text-primary">[image attached] <img src={captureImageUrl} alt="preview" className="inline-block max-h-8 rounded" /></div>}
+              {selectedTemplate?.key === "s" && !captureImageUrl && !captureImageUploading && (
+                <div className="text-yellow-500">Paste an image (Ctrl+V) to attach a screenshot. Required before capture.</div>
+              )}
+              {selectedTemplate?.key === "b" && (
+                <div>Enter URL to bookmark (e.g. https://example.com). Tags auto-applied: #bookmark</div>
+              )}
+              {selectedTemplate?.key !== "s" && selectedTemplate?.key !== "b" && (
+                <div>Enter to capture. Shift+Enter for multiline. Ctrl+V to paste image. #tag !A/!B/!C for priority.</div>
+              )}
             </div>
           )}
           {mode === "add-url" && query && (

@@ -1,7 +1,6 @@
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-
 let pendingContext = null;
 let lastClickDebug = null;
+let popupWindowId = null;
 
 async function getPageContext(tabId) {
   try {
@@ -24,17 +23,85 @@ async function getPageContext(tabId) {
   }
 }
 
+async function openPopupWindow(mode, template) {
+  const { orgcloudUrl } = await new Promise(resolve =>
+    chrome.storage.sync.get(["orgcloudUrl"], resolve)
+  );
+  if (!orgcloudUrl) return;
+
+  let url = `${orgcloudUrl}?mode=${mode}`;
+  if (template) url += `&template=${template}`;
+
+  if (popupWindowId !== null) {
+    try {
+      const win = await chrome.windows.get(popupWindowId);
+      if (win) {
+        await chrome.windows.update(popupWindowId, { focused: true });
+        const tabs = await chrome.tabs.query({ windowId: popupWindowId });
+        if (tabs.length > 0) {
+          await chrome.tabs.update(tabs[0].id, { url });
+        }
+        return;
+      }
+    } catch (e) {
+      popupWindowId = null;
+    }
+  }
+
+  const win = await chrome.windows.create({
+    url,
+    type: "popup",
+    focused: true,
+    width: 420,
+    height: 600,
+  });
+  popupWindowId = win.id;
+}
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === popupWindowId) {
+    popupWindowId = null;
+  }
+});
+
 chrome.action.onClicked.addListener(async (tab) => {
   const context = await getPageContext(tab.id);
   pendingContext = context || { url: "", title: "", selection: "" };
-  await chrome.sidePanel.open({ tabId: tab.id });
-  try {
-    await chrome.runtime.sendMessage({
-      action: "trigger-capture",
-      context: pendingContext,
-    });
+  await openPopupWindow("capture");
+});
+
+chrome.commands.onCommand.addListener(async (command) => {
+  const modeMap = {
+    "open-command": "command",
+    "open-capture": "capture",
+    "open-search": "search",
+    "open-agenda": "agenda",
+  };
+  const mode = modeMap[command];
+  if (mode) {
+    if (mode === "capture") {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) {
+        const context = await getPageContext(tab.id);
+        pendingContext = context || { url: "", title: "", selection: "" };
+      }
+    }
+    await openPopupWindow(mode);
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "close-popup") {
+    if (popupWindowId !== null) {
+      chrome.windows.remove(popupWindowId).catch(() => {});
+      popupWindowId = null;
+    }
+    sendResponse({ ok: true });
+  }
+  if (message.action === "get-pending-context") {
+    sendResponse({ context: pendingContext });
     pendingContext = null;
-  } catch (e) {}
+  }
 });
 
 

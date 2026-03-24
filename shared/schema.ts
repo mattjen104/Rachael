@@ -80,6 +80,8 @@ export const tasks = pgTable("tasks", {
   priority: text("priority"),
   tags: text("tags").array().notNull().default([]),
   parentId: integer("parent_id"),
+  imageUrl: text("image_url"),
+  repeat: text("repeat"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -92,6 +94,8 @@ export const insertTaskSchema = z.object({
   priority: z.string().nullable().optional(),
   tags: z.array(z.string()).default([]),
   parentId: z.number().nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
+  repeat: z.string().nullable().optional(),
 });
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type Task = typeof tasks.$inferSelect;
@@ -101,6 +105,7 @@ export const notes = pgTable("notes", {
   title: text("title").notNull(),
   body: text("body").notNull().default(""),
   tags: text("tags").array().notNull().default([]),
+  imageUrl: text("image_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -108,6 +113,7 @@ export const insertNoteSchema = z.object({
   title: z.string(),
   body: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  imageUrl: z.string().nullable().optional(),
 });
 export type InsertNote = z.infer<typeof insertNoteSchema>;
 export type Note = typeof notes.$inferSelect;
@@ -123,6 +129,8 @@ export const captures = pgTable("captures", {
   urlDescription: text("url_description"),
   urlImage: text("url_image"),
   urlDomain: text("url_domain"),
+  imageUrl: text("image_url"),
+  template: text("template"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -135,6 +143,8 @@ export const insertCaptureSchema = z.object({
   urlDescription: z.string().nullable().optional(),
   urlImage: z.string().nullable().optional(),
   urlDomain: z.string().nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
+  template: z.string().nullable().optional(),
 });
 export type InsertCapture = z.infer<typeof insertCaptureSchema>;
 export type Capture = typeof captures.$inferSelect;

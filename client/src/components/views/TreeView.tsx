@@ -1,10 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useTreeData, useToggleTask, useBridgeStatus, useMailInbox, useTeamsChats, useSnowRecords } from "@/hooks/use-org-data";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import type { Task, Note } from "@shared/schema";
 
 interface TreeViewProps {
   onNavigate?: (view: string, id?: number) => void;
   onRunCommand?: (cmd: string) => void;
+  onEditItem?: (item: { type: "task"; data: Task } | { type: "note"; data: Note }) => void;
 }
 
 type TreeNode = {
@@ -105,7 +107,7 @@ type TreeNode = {
   stepCount: number;
 };
 
-export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
+export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeViewProps) {
   const { data, isLoading } = useTreeData();
   const toggleTask = useToggleTask();
   const { data: bridgeStatus } = useBridgeStatus();
@@ -121,6 +123,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
   const [launchingApp, setLaunchingApp] = useState<string | null>(null);
   const [epicRecording, setEpicRecording] = useState<{ active: boolean; env: string; stepCount: number }>({ active: false, env: "SUP", stepCount: 0 });
   const [recReview, setRecReview] = useState<{ show: boolean; steps: Array<{ step: number; description: string; screen: string; timeDelta: number; excluded?: boolean }>; name: string } | null>(null);
+  const [refilePanel, setRefilePanel] = useState<{ captureId: number; content: string; type: "task" | "note"; title: string; tags: string; priority: string; scheduledDate: string; deadlineDate: string; parentId: string } | null>(null);
 
   useEffect(() => {
     const checkRecStatus = async () => {
@@ -420,9 +423,32 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
       }
     }
 
-    nodes.push({ type: "section", label: "NOTES", key: "notes", count: regularNotes.length });
+    const journalNotes = regularNotes.filter((n: any) => (n.tags || []).some((t: string) => t.toLowerCase() === "journal"));
+    const nonJournalNotes = regularNotes.filter((n: any) => !(n.tags || []).some((t: string) => t.toLowerCase() === "journal"));
+
+    if (journalNotes.length > 0) {
+      nodes.push({ type: "section", label: "JOURNAL", key: "journal", count: journalNotes.length });
+      if (expanded.has("journal")) {
+        const byDate = new Map<string, typeof journalNotes>();
+        for (const n of journalNotes) {
+          const date = n.createdAt ? new Date(n.createdAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "Undated";
+          if (!byDate.has(date)) byDate.set(date, []);
+          byDate.get(date)!.push(n);
+        }
+        for (const [date, entries] of Array.from(byDate.entries())) {
+          nodes.push({ type: "section", label: `  ${date}`, key: `journal-${date}`, count: entries.length });
+          if (expanded.has(`journal-${date}`)) {
+            for (const n of entries) {
+              nodes.push({ type: "note", id: n.id, title: n.title });
+            }
+          }
+        }
+      }
+    }
+
+    nodes.push({ type: "section", label: "NOTES", key: "notes", count: nonJournalNotes.length });
     if (expanded.has("notes")) {
-      for (const n of regularNotes) {
+      for (const n of nonJournalNotes) {
         nodes.push({ type: "note", id: n.id, title: n.title });
       }
     }
@@ -614,6 +640,26 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
         }
         break;
       }
+      case "e": {
+        e.preventDefault();
+        const eNode = nodes[selectedIdx];
+        if (eNode?.type === "task" && data && onEditItem) {
+          const taskData = data.tasks.find(t => t.id === eNode.id);
+          if (taskData) onEditItem({ type: "task", data: taskData });
+        } else if (eNode?.type === "note" && data && onEditItem) {
+          const noteData = data.notes.find(n => n.id === eNode.id);
+          if (noteData) onEditItem({ type: "note", data: noteData });
+        }
+        break;
+      }
+      case "r": {
+        e.preventDefault();
+        const rNode = nodes[selectedIdx];
+        if (rNode?.type === "capture") {
+          setRefilePanel({ captureId: rNode.id, content: rNode.content, type: "task", title: rNode.content, tags: "", priority: "", scheduledDate: "", deadlineDate: "", parentId: "" });
+        }
+        break;
+      }
       case "Tab":
         e.preventDefault();
         const cur = nodes[selectedIdx];
@@ -668,7 +714,7 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
     <div ref={containerRef} className="flex flex-col h-full overflow-y-auto font-mono text-xs" data-testid="tree-view">
       <div className="px-2 py-1 text-muted-foreground border-b border-border sticky top-0 bg-background z-10 flex justify-between">
         <span>TREE -- All Data</span>
-        <span className="text-[10px]">2x/Enter:open  c:capture  j/k:nav</span>
+        <span className="text-[10px]">Enter:open  e:edit  r:refile  j/k:nav</span>
       </div>
       {nodes.map((node, idx) => {
         const sel = idx === selectedIdx;
@@ -833,6 +879,113 @@ export default function TreeView({ onNavigate, onRunCommand }: TreeViewProps) {
           </div>
         );
       })}
+      {refilePanel && (
+        <div className="border-t border-border bg-background p-2" data-testid="refile-panel">
+          <div className="text-xs font-bold mb-1 text-primary">REFILE CAPTURE</div>
+          <div className="text-[10px] text-muted-foreground mb-1 truncate">{refilePanel.content}</div>
+          <div className="flex gap-2 mb-1">
+            <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <input type="radio" name="refile-type" value="task" checked={refilePanel.type === "task"} onChange={() => setRefilePanel(prev => prev ? { ...prev, type: "task" } : prev)} />
+              Task
+            </label>
+            <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <input type="radio" name="refile-type" value="note" checked={refilePanel.type === "note"} onChange={() => setRefilePanel(prev => prev ? { ...prev, type: "note" } : prev)} />
+              Note
+            </label>
+          </div>
+          <input
+            type="text"
+            data-testid="refile-title"
+            className="w-full bg-transparent border border-border px-1 py-0.5 text-xs font-mono mb-1"
+            placeholder="Title..."
+            value={refilePanel.title}
+            onChange={(e) => setRefilePanel(prev => prev ? { ...prev, title: e.target.value } : prev)}
+            autoFocus
+          />
+          <div className="flex gap-1 mb-1">
+            <input
+              type="text"
+              data-testid="refile-tags"
+              className="flex-1 bg-transparent border border-border px-1 py-0.5 text-[10px] font-mono"
+              placeholder="Tags (comma sep)..."
+              value={refilePanel.tags}
+              onChange={(e) => setRefilePanel(prev => prev ? { ...prev, tags: e.target.value } : prev)}
+            />
+            {refilePanel.type === "task" && (
+              <select
+                data-testid="refile-priority"
+                className="bg-background border border-border px-1 py-0.5 text-[10px]"
+                value={refilePanel.priority}
+                onChange={(e) => setRefilePanel(prev => prev ? { ...prev, priority: e.target.value } : prev)}
+              >
+                <option value="">Pri</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+              </select>
+            )}
+          </div>
+          {refilePanel.type === "task" && (
+            <div className="flex gap-1 mb-1">
+              <input
+                type="date"
+                data-testid="refile-scheduled"
+                className="flex-1 bg-transparent border border-border px-1 py-0.5 text-[10px]"
+                value={refilePanel.scheduledDate}
+                onChange={(e) => setRefilePanel(prev => prev ? { ...prev, scheduledDate: e.target.value } : prev)}
+              />
+              <input
+                type="date"
+                data-testid="refile-deadline"
+                className="flex-1 bg-transparent border border-border px-1 py-0.5 text-[10px]"
+                value={refilePanel.deadlineDate}
+                onChange={(e) => setRefilePanel(prev => prev ? { ...prev, deadlineDate: e.target.value } : prev)}
+              />
+            </div>
+          )}
+          {refilePanel.type === "task" && data?.tasks && (
+            <select
+              data-testid="refile-parent"
+              className="w-full bg-background border border-border px-1 py-0.5 text-[10px] mb-1"
+              value={refilePanel.parentId}
+              onChange={(e) => setRefilePanel(prev => prev ? { ...prev, parentId: e.target.value } : prev)}
+            >
+              <option value="">No parent</option>
+              {data.tasks.map(t => (
+                <option key={t.id} value={String(t.id)}>{t.title}</option>
+              ))}
+            </select>
+          )}
+          <div className="flex gap-1">
+            <button
+              data-testid="refile-submit"
+              className="px-2 py-0.5 text-xs border border-primary text-primary hover:bg-primary/20"
+              onClick={() => {
+                const parsedTags = refilePanel.tags.split(",").map(t => t.trim()).filter(Boolean);
+                apiRequest("POST", `/api/captures/${refilePanel.captureId}/refile`, {
+                  type: refilePanel.type,
+                  title: refilePanel.title,
+                  tags: parsedTags,
+                  priority: refilePanel.priority || undefined,
+                  scheduledDate: refilePanel.scheduledDate || undefined,
+                  deadlineDate: refilePanel.deadlineDate || undefined,
+                  parentId: refilePanel.parentId ? parseInt(refilePanel.parentId, 10) : undefined,
+                }).then(() => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
+                  queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+                  queryClient.invalidateQueries({ queryKey: ["/api/tasks/agenda"] });
+                  setRefilePanel(null);
+                }).catch(() => {});
+              }}
+            >[refile]</button>
+            <button
+              data-testid="refile-cancel"
+              className="px-2 py-0.5 text-xs border border-border text-muted-foreground hover:bg-muted"
+              onClick={() => setRefilePanel(null)}
+            >[cancel]</button>
+          </div>
+        </div>
+      )}
       {recReview && recReview.show && (
         <div className="border-t border-border bg-background p-2" data-testid="epic-rec-review">
           <div className="text-xs font-bold mb-1 text-primary">RECORDING REVIEW ({recReview.steps.filter(s => !s.excluded).length} steps)</div>

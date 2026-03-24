@@ -12,18 +12,51 @@ import CockpitView from "@/components/views/CockpitView";
 import SnowView from "@/components/views/SnowView";
 import VoiceView from "@/components/views/VoiceView";
 import Minibuffer from "@/components/editor/Minibuffer";
+import InlineEditor from "@/components/editor/InlineEditor";
 import NotificationToast from "@/components/layout/NotificationToast";
 import { useSmartCapture } from "@/hooks/use-org-data";
 import { useCrtTheme } from "@/lib/crt-theme";
 import { useTvMode } from "@/hooks/use-tv-mode";
+import type { Task, Note } from "@shared/schema";
+
+interface ChromeWindow extends Window {
+  chrome?: {
+    runtime?: {
+      sendMessage?: (msg: Record<string, string>, cb?: () => void) => void;
+    };
+  };
+}
+
+function getUrlParams(): { minibufferMode?: "command" | "search" | "capture" | "add-url" | "shell"; view?: ViewMode; openMinibuffer: boolean; template?: string } {
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get("mode");
+  const template = params.get("template") || undefined;
+  if (mode === "command") return { minibufferMode: "command", openMinibuffer: true };
+  if (mode === "capture") return { minibufferMode: "capture", openMinibuffer: true, template };
+  if (mode === "search") return { minibufferMode: "search", openMinibuffer: true };
+  if (mode === "agenda") return { view: "agenda", openMinibuffer: false };
+  return { openMinibuffer: false };
+}
+
+function sendClosePopup() {
+  try {
+    const w = window as ChromeWindow;
+    if (w.chrome?.runtime?.sendMessage) {
+      w.chrome.runtime.sendMessage({ action: "close-popup" });
+    }
+  } catch (_) {}
+}
 
 export default function Workspace() {
-  const [viewMode, setViewMode] = useState<ViewMode>("agenda");
-  const [minibufferOpen, setMinibufferOpen] = useState(false);
-  const [minibufferInitialMode, setMinibufferInitialMode] = useState<"command" | "search" | "capture" | "add-url" | "shell">("command");
+  const urlParams = getUrlParams();
+  const [viewMode, setViewMode] = useState<ViewMode>(urlParams.view || "agenda");
+  const [minibufferOpen, setMinibufferOpen] = useState(urlParams.openMinibuffer);
+  const [minibufferInitialMode, setMinibufferInitialMode] = useState<"command" | "search" | "capture" | "add-url" | "shell">(urlParams.minibufferMode || "command");
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<number | undefined>(undefined);
   const [pendingShellCmd, setPendingShellCmd] = useState<string | null>(null);
+  const [editorItem, setEditorItem] = useState<{ type: "task"; data: Task } | { type: "note"; data: Note } | null>(null);
+  const [captureContext, setCaptureContext] = useState<{ url: string; title: string; selection: string } | null>(null);
 
   const { cycleTheme } = useCrtTheme();
   const { isTvMode } = useTvMode();
@@ -51,9 +84,33 @@ export default function Workspace() {
     setMinibufferOpen(true);
   }, []);
 
+  const handleEditItem = useCallback((item: { type: "task"; data: Task } | { type: "note"; data: Note }) => {
+    setEditorItem(item);
+  }, []);
+
+  const handleMinibufferClose = useCallback(() => {
+    setMinibufferOpen(false);
+    setPendingShellCmd(null);
+    sendClosePopup();
+  }, []);
+
   useEffect(() => {
     if (window.parent !== window) {
       window.parent.postMessage({ action: "orgcloud-ready" }, "*");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!urlParams.openMinibuffer) return;
+    const w = window as ChromeWindow;
+    if (w.chrome?.runtime?.sendMessage) {
+      try {
+        w.chrome.runtime.sendMessage({ action: "get-pending-context" }, (response: { context?: { url: string; title: string; selection: string } } | undefined) => {
+          if (response?.context) {
+            setCaptureContext(response.context);
+          }
+        });
+      } catch (_) {}
     }
   }, []);
 
@@ -71,10 +128,10 @@ export default function Workspace() {
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
-      const tag = (document.activeElement as HTMLElement)?.tagName;
-      const isEditable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
-        (document.activeElement as HTMLElement)?.isContentEditable;
-      if (isEditable || minibufferOpen) return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      const isEditable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el?.isContentEditable ?? false);
+      if (isEditable || minibufferOpen || editorItem) return;
 
       const text = e.clipboardData?.getData("text/plain")?.trim();
       if (!text) return;
@@ -85,13 +142,24 @@ export default function Workspace() {
     };
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
-  }, [smartCapture, minibufferOpen]);
+  }, [smartCapture, minibufferOpen, editorItem]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (editorItem) return;
+        if (minibufferOpen) return;
+        if (viewMode === "cockpit") return;
+        sendClosePopup();
+        setViewMode("agenda");
+        return;
+      }
+
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (minibufferOpen) return;
+      if (minibufferOpen || editorItem) return;
 
       if (e.key === " " || (e.altKey && e.key === "x") || (e.ctrlKey && e.key === "k")) {
         e.preventDefault();
@@ -121,13 +189,6 @@ export default function Workspace() {
         return;
       }
 
-      if (e.key === "Escape") {
-        if (viewMode === "cockpit") return;
-        e.preventDefault();
-        setViewMode("agenda");
-        return;
-      }
-
       if (e.key >= "1" && e.key <= "9" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (viewMode === "cockpit") return;
         e.preventDefault();
@@ -138,15 +199,15 @@ export default function Workspace() {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [minibufferOpen, viewMode]);
+  }, [minibufferOpen, viewMode, editorItem]);
 
   return (
     <div className={`flex flex-col h-screen w-full mx-auto bg-background text-foreground overflow-hidden ${isTvMode ? "max-w-full px-4" : "max-w-[500px]"}`} data-testid="workspace">
       <Sidebar current={viewMode} onSwitch={setViewMode} />
 
       <div className="flex-1 overflow-hidden">
-        {viewMode === "agenda" && <AgendaView onNavigate={handleNavigate} />}
-        {viewMode === "tree" && <TreeView onNavigate={handleNavigate} onRunCommand={handleRunCommand} />}
+        {viewMode === "agenda" && <AgendaView onNavigate={handleNavigate} onEditItem={handleEditItem} />}
+        {viewMode === "tree" && <TreeView onNavigate={handleNavigate} onRunCommand={handleRunCommand} onEditItem={handleEditItem} />}
         {viewMode === "programs" && <ProgramsView onNavigate={handleNavigate} />}
         {viewMode === "results" && <ResultsView selectedResultId={selectedItemId} />}
         {viewMode === "reader" && <ReaderView selectedPageId={selectedItemId} />}
@@ -168,11 +229,20 @@ export default function Workspace() {
         <Minibuffer
           initialMode={minibufferInitialMode}
           initialShellCmd={pendingShellCmd}
-          onClose={() => { setMinibufferOpen(false); setPendingShellCmd(null); }}
+          initialTemplate={urlParams.template}
+          initialCaptureContext={captureContext}
+          onClose={handleMinibufferClose}
           onSwitchView={setViewMode}
           onNavigate={handleNavigate}
           onCycleTheme={cycleTheme}
           onCommandExecuted={handleCommandExecuted}
+        />
+      )}
+
+      {editorItem && (
+        <InlineEditor
+          item={editorItem}
+          onClose={() => setEditorItem(null)}
         />
       )}
     </div>
