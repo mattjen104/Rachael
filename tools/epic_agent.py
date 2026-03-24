@@ -3884,9 +3884,18 @@ def _generate_hint_keys(count):
     return keys[:count]
 
 
+_walk_deadline = 0.0
+_walk_node_count = 0
+_WALK_MAX_NODES = 1000
+_WALK_TIME_LIMIT = 20.0
+
+
 def _walk_uia_tree(element, depth, max_depth, show_all, parent_name=""):
     """Walk the UI Automation tree and collect elements with metadata."""
+    global _walk_node_count
     if depth > max_depth:
+        return []
+    if _walk_node_count >= _WALK_MAX_NODES or time.time() > _walk_deadline:
         return []
     results = []
     try:
@@ -3895,6 +3904,10 @@ def _walk_uia_tree(element, depth, max_depth, show_all, parent_name=""):
         return []
 
     for child in children:
+        _walk_node_count += 1
+        if _walk_node_count >= _WALK_MAX_NODES or time.time() > _walk_deadline:
+            break
+
         try:
             info = child.element_info
             ctrl_type = info.control_type or ""
@@ -3977,11 +3990,15 @@ def _walk_uia_tree(element, depth, max_depth, show_all, parent_name=""):
             }
             results.append(entry)
 
-        if depth < max_depth:
-            if is_container or not is_interactive or ctrl_type in ("Menu", "MenuBar", "TreeItem", "TabControl", "ToolBar", "Tab", "TabItem"):
-                sub_parent = name if name else container_label
-                sub = _walk_uia_tree(child, depth + 1, max_depth, show_all, sub_parent)
-                results.extend(sub)
+        should_recurse = depth < max_depth and (
+            is_container
+            or not is_interactive
+            or ctrl_type in ("Menu", "MenuBar", "TreeItem", "TabControl", "ToolBar", "Tab", "TabItem")
+        )
+        if should_recurse:
+            sub_parent = name if name else container_label
+            sub = _walk_uia_tree(child, depth + 1, max_depth, show_all, sub_parent)
+            results.extend(sub)
 
     return results
 
@@ -4016,7 +4033,7 @@ def execute_view(cmd):
     command_id = cmd.get("id", "unknown")
     show_all = cmd.get("showAll", False)
     focus_target = cmd.get("focus", "")
-    max_depth = 10
+    max_depth = 8
 
     print(f"  [view] Reading accessibility tree for {env}")
 
@@ -4077,7 +4094,13 @@ def execute_view(cmd):
         else:
             print(f"  [view] Focus target '{focus_target}' not found, showing full window")
 
+    global _walk_deadline, _walk_node_count
+    _walk_deadline = time.time() + _WALK_TIME_LIMIT
+    _walk_node_count = 0
     elements = _walk_uia_tree(root_element, 0, max_depth, show_all, "")
+    walked_nodes = _walk_node_count
+    timed_out = time.time() > _walk_deadline
+    print(f"  [view] Tree walk: {walked_nodes} nodes visited, {len(elements)} elements found" + (" (time limit reached)" if timed_out else ""))
     if not elements:
         post_result(command_id, "complete", data={
             "window": window_title,
