@@ -1931,52 +1931,73 @@ async function execute() {
     if (r.ok) navPaths = await r.json();
   } catch {}
 
-  const snowPaths = navPaths.filter((p: any) => NAV_PATH_NAMES.includes(p.name));
-  if (snowPaths.length === 0) {
-    return { summary: "SNOW Shift Brief: No ServiceNow navigation paths found (expected: " + NAV_PATH_NAMES.join(", ") + "). Cannot generate brief.", metric: "0" };
-  }
-
   const snowData: Record<string, string> = {};
   let liveFetchCount = 0;
 
-  for (const pathName of NAV_PATH_NAMES) {
-    const navPath = snowPaths.find((p: any) => p.name === pathName);
-    if (!navPath) {
-      snowData[pathName] = "Navigation path '" + pathName + "' not found";
-      continue;
+  let snowInstanceUrl = "";
+  try {
+    const cfgR = await fetch(BASE + "/api/config/snow_instance", { headers: hdrs });
+    if (cfgR.ok) { const cfgData = await cfgR.json(); snowInstanceUrl = (cfgData.value || "").replace(/\\/+$/, ""); }
+  } catch {}
+  if (!snowInstanceUrl) snowInstanceUrl = "https://uchealth.service-now.com";
+
+  let sowSuccess = false;
+  try {
+    const sowUrl = snowInstanceUrl + "/now/sow/home";
+    const sowResult = await bridgeFetch(sowUrl, { type: "dom", timeout: 30000 });
+    const sowText = sowResult.text || (typeof sowResult.body === "string" ? sowResult.body : "");
+    if (sowText.length > 200) {
+      snowData["sow-home"] = String(sowText).slice(0, 8000);
+      liveFetchCount++;
+      sowSuccess = true;
+    }
+  } catch {}
+
+  if (!sowSuccess) {
+    const snowPaths = navPaths.filter((p: any) => NAV_PATH_NAMES.includes(p.name));
+    if (snowPaths.length === 0) {
+      return { summary: "SNOW Shift Brief: No ServiceNow data sources available (SOW homepage failed, no classic nav paths). Cannot generate brief.", metric: "0" };
     }
 
-    const steps = navPath.steps || [];
-    const navigateStep = steps.find((s: any) => s.action === "navigate");
-    const targetUrl = navigateStep?.target || "";
-    const extractionRules = navPath.extractionRules || {};
-
-    if (!targetUrl) {
-      snowData[pathName] = "No target URL defined for " + pathName;
-      continue;
-    }
-
-    try {
-      const result = await bridgeFetch(targetUrl, {
-        type: "dom",
-        selectors: extractionRules,
-        timeout: 30000,
-      });
-
-      if (result.error) {
-        snowData[pathName] = "[bridge error] " + result.error;
+    for (const pathName of NAV_PATH_NAMES) {
+      const navPath = snowPaths.find((p: any) => p.name === pathName);
+      if (!navPath) {
+        snowData[pathName] = "Navigation path '" + pathName + "' not found";
         continue;
       }
 
-      const extracted = result.extracted || result.text || (typeof result.body === "string" ? result.body : JSON.stringify(result.body || {}));
-      if (extracted && String(extracted).length > 10) {
-        snowData[pathName] = String(extracted).slice(0, 3000);
-        liveFetchCount++;
-      } else {
-        snowData[pathName] = "Empty response from " + pathName + " (bridge returned no content)";
+      const steps = navPath.steps || [];
+      const navigateStep = steps.find((s: any) => s.action === "navigate");
+      const targetUrl = navigateStep?.target || "";
+      const extractionRules = navPath.extractionRules || {};
+
+      if (!targetUrl) {
+        snowData[pathName] = "No target URL defined for " + pathName;
+        continue;
       }
-    } catch (e: any) {
-      snowData[pathName] = "[fetch error] " + (e.message || "unknown").slice(0, 200);
+
+      try {
+        const result = await bridgeFetch(targetUrl, {
+          type: "dom",
+          selectors: extractionRules,
+          timeout: 30000,
+        });
+
+        if (result.error) {
+          snowData[pathName] = "[bridge error] " + result.error;
+          continue;
+        }
+
+        const extracted = result.extracted || result.text || (typeof result.body === "string" ? result.body : JSON.stringify(result.body || {}));
+        if (extracted && String(extracted).length > 10) {
+          snowData[pathName] = String(extracted).slice(0, 3000);
+          liveFetchCount++;
+        } else {
+          snowData[pathName] = "Empty response from " + pathName + " (bridge returned no content)";
+        }
+      } catch (e: any) {
+        snowData[pathName] = "[fetch error] " + (e.message || "unknown").slice(0, 200);
+      }
     }
   }
 
@@ -1997,11 +2018,15 @@ async function execute() {
     .join(NL)
     .slice(0, 1500);
 
+  const sowHomeData = snowData["sow-home"] || "";
+  const dataSection = sowHomeData
+    ? "SERVICENOW DASHBOARD (scraped from SOW homepage):" + NL + sowHomeData.slice(0, 6000)
+    : "MY OPEN INCIDENTS (from list-my-incidents):" + NL + (snowData["list-my-incidents"] || "No data").slice(0, 3000) + NL + NL +
+      "MY CHANGE REQUESTS (from list-my-changes):" + NL + (snowData["list-my-changes"] || "No data").slice(0, 2000) + NL + NL +
+      "MY REQUEST ITEMS (from list-my-requests):" + NL + (snowData["list-my-requests"] || "No data").slice(0, 2000) + NL + NL +
+      "GROUP QUEUE (from list-group-queue):" + NL + (snowData["list-group-queue"] || "No data").slice(0, 2000);
   const prompt = "You are a ServiceNow shift briefing writer for an IT operations engineer. Synthesize the following SNOW data into a concise shift brief." + NL + NL +
-    "MY OPEN INCIDENTS (from list-my-incidents):" + NL + (snowData["list-my-incidents"] || "No data").slice(0, 3000) + NL + NL +
-    "MY CHANGE REQUESTS (from list-my-changes):" + NL + (snowData["list-my-changes"] || "No data").slice(0, 2000) + NL + NL +
-    "MY REQUEST ITEMS (from list-my-requests):" + NL + (snowData["list-my-requests"] || "No data").slice(0, 2000) + NL + NL +
-    "GROUP QUEUE (from list-group-queue):" + NL + (snowData["list-group-queue"] || "No data").slice(0, 2000) + NL + NL +
+    dataSection + NL + NL +
     "OVERNIGHT ACTIVITY (items updated since " + overnightCutoff + "):" + NL + (overnightActivity || "No overnight activity detected") + NL + NL +
     "Write in Markdown with EXACTLY these section headers:" + NL +
     "## SLA Risk" + NL + "Items approaching SLA breach, sorted by urgency. Include ticket numbers, short descriptions, and time remaining if apparent. If none at risk, state that clearly." + NL + NL +
@@ -2017,7 +2042,8 @@ async function execute() {
   const htmlFilename = "snow-" + dateStamp + ".html";
   const { htmlUrl, notifyStatus } = await saveBriefingAndNotify(briefingText, htmlFilename, "SNOW Shift Brief - " + dateStamp, "SNOW Shift Brief", dateStamp, "snow-shift-brief", "SNOW,briefcase", BASE, hdrs);
 
-  return { summary: "=== SNOW SHIFT BRIEF ===" + NL + "Generated: " + now.toISOString() + NL + "HTML: " + htmlUrl + NL + "Notify: " + notifyStatus + NL + "Live fetches: " + liveFetchCount + "/" + NAV_PATH_NAMES.length + " nav paths" + NL + NL + briefingText, metric: String(liveFetchCount) };
+  const sourceLabel = sowSuccess ? "SOW homepage" : "classic nav paths (" + liveFetchCount + "/" + NAV_PATH_NAMES.length + ")";
+  return { summary: "=== SNOW SHIFT BRIEF ===" + NL + "Generated: " + now.toISOString() + NL + "HTML: " + htmlUrl + NL + "Notify: " + notifyStatus + NL + "Source: " + sourceLabel + NL + NL + briefingText, metric: String(liveFetchCount) };
 }`,
       codeLang: "typescript",
     },
@@ -2546,7 +2572,7 @@ async function seedSiteProfiles(): Promise<void> {
     },
     {
       name: "servicenow",
-      description: "ServiceNow — incident, change, and request management via DOM scraping",
+      description: "ServiceNow — incident, change, and request management via DOM scraping (SOW + Classic UI)",
       baseUrl: "",
       urlPatterns: [".*\\.service-now\\.com"],
       extractionSelectors: {
@@ -2799,6 +2825,23 @@ async function seedSiteProfiles(): Promise<void> {
         state: 'td[class*="state"]',
         assignedTo: 'td[class*="assigned_to"]',
         assignmentGroup: 'td[class*="assignment_group"]',
+      },
+    },
+    {
+      name: "scrape-sow-home",
+      description: "Scrape the ServiceNow Service Operations Workspace (SOW) homepage dashboard to extract all visible tickets (incidents, changes, requests)",
+      siteProfileId: profileMap.get("servicenow")!,
+      steps: [
+        { action: "navigate" as const, target: "{baseUrl}/now/sow/home", description: "Open SOW homepage dashboard" },
+        { action: "wait" as const, waitMs: 6000, description: "Wait for SPA dashboard widgets to render" },
+        { action: "scroll" as const, target: "", description: "Scroll page to trigger lazy-loaded widgets" },
+        { action: "wait" as const, waitMs: 3000, description: "Wait for additional widgets to load" },
+        { action: "scroll" as const, target: "", description: "Scroll again to load remaining content" },
+        { action: "wait" as const, waitMs: 2000, description: "Final wait for all content" },
+        { action: "extract" as const, description: "Extract all ticket data from dashboard" },
+      ],
+      extractionRules: {
+        body: "body",
       },
     },
     {

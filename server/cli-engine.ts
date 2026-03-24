@@ -2625,16 +2625,18 @@ ${fullHtml}`;
     return ok(lines.length > 0 ? lines.join("\n") : "Nothing on the agenda today.");
   });
 
-  registerCommand("snow", "ServiceNow command center", "snow [incidents|changes|requests|detail <number>|queue|refresh]", async (args) => {
+  registerCommand("snow", "ServiceNow command center", "snow [home|incidents|changes|requests|detail <number>|queue|refresh]", async (args) => {
     const { isExtensionConnected } = await import("./bridge-queue");
     if (!isExtensionConnected()) {
       return fail("[snow] Chrome extension bridge not connected. ServiceNow requires your real browser session.\nRun: bridge-status");
     }
 
-    const instanceConfig = await storage.getAgentConfig("snow_instance");
-    const instanceUrl = instanceConfig?.value || "";
+    let instanceConfig = await storage.getAgentConfig("snow_instance");
+    let instanceUrl = instanceConfig?.value || "";
     if (!instanceUrl) {
-      return fail("[snow] No ServiceNow instance configured.\nUsage: config set snow_instance https://yourinstance.service-now.com");
+      instanceUrl = "https://uchealth.service-now.com";
+      await storage.setAgentConfig("snow_instance", instanceUrl, "snow");
+      emitEvent("cli", `Auto-configured snow_instance: ${instanceUrl}`, "info", { metadata: { command: "snow" } });
     }
     const baseUrl = instanceUrl.replace(/\/+$/, "");
 
@@ -2830,21 +2832,106 @@ ${fullHtml}`;
       return ok(lines.join(nl));
     }
 
+    if (sub === "home") {
+      emitEvent("cli", "Scraping SOW homepage dashboard...", "info", { metadata: { command: "snow home" } });
+      try {
+        const { smartFetch } = await import("./bridge-queue");
+        const sowUrl = `${baseUrl}/now/sow/home`;
+        const result = await smartFetch(sowUrl, "dom", "cli-snow-sow-home", {
+          maxText: 80000,
+        }, 30000);
+        const sowText = result.text || "";
+        if (sowText.length < 100) {
+          return fail(`[snow home] SOW homepage returned only ${sowText.length} chars. Dashboard may not have loaded. Check bridge-status.`);
+        }
+        const sowIncidents = parseSnowListFromText(sowText, "incident", baseUrl, "personal");
+        const sowChanges = parseSnowListFromText(sowText, "change", baseUrl, "personal");
+        const sowRequests = parseSnowListFromText(sowText, "request", baseUrl, "personal");
+        const allRecords = [...sowIncidents, ...sowChanges, ...sowRequests];
+        snowCache = { records: allRecords, fetchedAt: Date.now() };
+        await persistSnowResults(allRecords, "sow-home");
+        const lines = [
+          `=== SOW HOMEPAGE SCRAPE ===`, "",
+          `  URL: ${sowUrl}`,
+          `  Page text: ${sowText.length} chars`,
+          `  Incidents: ${sowIncidents.length}`,
+          `  Changes:   ${sowChanges.length}`,
+          `  Requests:  ${sowRequests.length}`,
+          `  Total:     ${allRecords.length}`,
+          "",
+        ];
+        if (allRecords.length === 0) {
+          lines.push("No tickets parsed. Dashboard text preview (first 2000 chars):", "");
+          lines.push(sowText.slice(0, 2000));
+        } else {
+          for (const r of allRecords.slice(0, 20)) {
+            const sla = r.slaBreached ? " !!SLA" : "";
+            lines.push(`  ${r.number.padEnd(15)} ${r.state.padEnd(12)} ${r.shortDescription.slice(0, 50)}${sla}`);
+          }
+        }
+        return ok(lines.join(nl));
+      } catch (e: any) {
+        return fail(`[snow home] ${e.message}`);
+      }
+    }
+
     if (sub === "refresh") {
       emitEvent("cli", "Refreshing all ServiceNow data...", "info", { metadata: { command: "snow refresh" } });
-      const [incidents, changes, requests, queueItems] = await Promise.all([
-        scrapeSnowNavPath("list-my-incidents", "incident", "personal"),
-        scrapeSnowNavPath("list-my-changes", "change", "personal"),
-        scrapeSnowNavPath("list-my-requests", "request", "personal"),
-        scrapeSnowNavPath("list-group-queue", "incident", "team"),
-      ]);
+
+      let incidents: CachedSnowRecord[] = [];
+      let changes: CachedSnowRecord[] = [];
+      let requests: CachedSnowRecord[] = [];
+      let queueItems: CachedSnowRecord[] = [];
+      let source = "classic";
+
+      const sowNavPath = navPathMap["scrape-sow-home"];
+      if (sowNavPath) {
+        emitEvent("cli", "Trying SOW homepage dashboard scrape...", "info", { metadata: { command: "snow refresh" } });
+        try {
+          const { smartFetch } = await import("./bridge-queue");
+          const sowUrl = `${baseUrl}/now/sow/home`;
+          const result = await smartFetch(sowUrl, "dom", "cli-snow-sow-home", {
+            maxText: 80000,
+          }, 30000);
+          const sowText = result.text || "";
+          const sowTextLen = sowText.length;
+          emitEvent("cli", `SOW homepage extracted: ${sowTextLen} chars`, "info", { metadata: { command: "snow refresh" } });
+
+          if (sowTextLen > 200) {
+            incidents = parseSnowListFromText(sowText, "incident", baseUrl, "personal");
+            changes = parseSnowListFromText(sowText, "change", baseUrl, "personal");
+            requests = parseSnowListFromText(sowText, "request", baseUrl, "personal");
+            source = "sow-home";
+            emitEvent("cli", `SOW parse: ${incidents.length} incidents, ${changes.length} changes, ${requests.length} requests`, "info", { metadata: { command: "snow refresh" } });
+          } else {
+            emitEvent("cli", "SOW homepage returned sparse content, falling back to classic nav paths", "warn", { metadata: { command: "snow refresh" } });
+          }
+        } catch (e: any) {
+          emitEvent("cli", `SOW homepage scrape failed: ${e.message}, falling back to classic nav paths`, "warn", { metadata: { command: "snow refresh" } });
+        }
+      }
+
+      if (incidents.length === 0 && changes.length === 0 && requests.length === 0) {
+        source = "classic";
+        [incidents, changes, requests, queueItems] = await Promise.all([
+          scrapeSnowNavPath("list-my-incidents", "incident", "personal"),
+          scrapeSnowNavPath("list-my-changes", "change", "personal"),
+          scrapeSnowNavPath("list-my-requests", "request", "personal"),
+          scrapeSnowNavPath("list-group-queue", "incident", "team"),
+        ]);
+      } else {
+        try {
+          queueItems = await scrapeSnowNavPath("list-group-queue", "incident", "team");
+        } catch {}
+      }
+
       const personalRecords = [...incidents, ...changes, ...requests];
       const teamDeduped = queueItems.filter(qr => !personalRecords.some(pr => pr.number === qr.number));
       const allRecords = [...personalRecords, ...teamDeduped];
       snowCache = { records: allRecords, fetchedAt: Date.now() };
       await persistSnowResults(allRecords, "refresh");
       const lines = [
-        `=== SNOW REFRESH COMPLETE ===`, "",
+        `=== SNOW REFRESH COMPLETE (${source}) ===`, "",
         `  My Incidents: ${incidents.length}`,
         `  My Changes:   ${changes.length}`,
         `  My Requests:  ${requests.length}`,
@@ -2856,7 +2943,7 @@ ${fullHtml}`;
       return ok(lines.join(nl));
     }
 
-    return fail(`[snow] unknown subcommand "${sub}"${nl}Usage: snow [incidents|changes|requests|detail <number>|queue|refresh]`);
+    return fail(`[snow] unknown subcommand "${sub}"${nl}Usage: snow [home|incidents|changes|requests|detail <number>|queue|refresh]`);
   });
 
   registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--save] | citrix clean | citrix portal [add|list|remove|scan]", async (args) => {
