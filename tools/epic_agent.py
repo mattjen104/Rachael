@@ -3856,6 +3856,20 @@ _vimium_element_maps = {}
 _last_activity_label = {}
 
 
+def _detect_current_activity(window_title, env_upper):
+    """Detect the current activity from the Epic window title."""
+    if not window_title:
+        return ""
+    skip_words = {"EPIC", "HYPERSPACE", "HYPERDRIVE", env_upper, "SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"}
+    parts = window_title.split(" - ")
+    for part in reversed(parts):
+        candidate = part.strip()
+        if candidate and len(candidate) > 1 and candidate.upper() not in skip_words:
+            if not any(k in candidate.upper() for k in ["EPIC", "HYPERSPACE", "HYPERDRIVE"]):
+                return candidate
+    return ""
+
+
 def _generate_hint_keys(count):
     """Generate Vimium-style hint keys: a-z, then aa-az, ba-bz, etc."""
     keys = []
@@ -4100,7 +4114,7 @@ def execute_view(cmd):
 
     _vimium_element_maps[env_upper] = hint_map
 
-    activity_label = cmd.get("_activity_label", "") or _last_activity_label.get(env_upper, "")
+    activity_label = cmd.get("_activity_label", "") or _detect_current_activity(window_title, env_upper)
     if activity_label:
         _last_activity_label[env_upper] = activity_label
 
