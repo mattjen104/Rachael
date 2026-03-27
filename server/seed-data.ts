@@ -1528,6 +1528,37 @@ async function execute() {
 
   const recipeName = rec.recipeRecommendation?.name || "unknown";
   const kiddoItem = rec.kiddoLunchSuggestion?.item || "unknown";
+
+  let digestLines = ["=== Nightly Meal Plan (" + today + ") ===", ""];
+  if (rec.recipeRecommendation) {
+    const r = rec.recipeRecommendation;
+    digestLines.push("DINNER: " + (r.name || "unknown"));
+    if (r.appliance) digestLines.push("  Appliance: " + r.appliance);
+    if (r.ingredients && r.ingredients.length) digestLines.push("  Ingredients: " + r.ingredients.join(", "));
+    if (r.instructions) digestLines.push("  Instructions: " + r.instructions);
+    digestLines.push("");
+  }
+  if (rec.kiddoLunchSuggestion) {
+    const k = rec.kiddoLunchSuggestion;
+    digestLines.push("KIDDO LUNCH: " + (k.item || "unknown"));
+    if (k.bridgeRationale) digestLines.push("  Why: " + k.bridgeRationale);
+    if (k.similarTo) digestLines.push("  Similar to: " + k.similarTo);
+  }
+  const digestText = digestLines.join(String.fromCharCode(10));
+
+  try {
+    const ntfyBody = digestText.slice(0, 3900);
+    await fetch("https://ntfy.sh/orgcloud-standup", {
+      method: "POST",
+      headers: {
+        "Title": "Meal Plan " + today,
+        "Tags": "fork_and_knife,cooking",
+        "Email": "Matthew.e.jensen@gmail.com",
+      },
+      body: ntfyBody,
+    });
+  } catch (ntfyErr) {}
+
   return { summary: "Nightly Meal Rec (" + today + "): Recipe: " + recipeName + " | Kiddo: " + kiddoItem, metric: "1" };
 }`,
       codeLang: "typescript",
