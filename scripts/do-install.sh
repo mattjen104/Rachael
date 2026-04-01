@@ -179,6 +179,10 @@ else
 :80 {
     reverse_proxy localhost:5000
 }
+:443 {
+    tls internal
+    reverse_proxy localhost:5000
+}
 CADDYEOF
 fi
 
