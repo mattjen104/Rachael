@@ -172,6 +172,45 @@ const tables = [
   )`,
 ];
 
+const evolutionTables = [
+  `CREATE TABLE IF NOT EXISTS evolution_versions (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    version INTEGER NOT NULL,
+    changes JSONB DEFAULT '{}',
+    gate_results JSONB DEFAULT '{}',
+    metrics_snapshot JSONB,
+    applied_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    rolled_back_at TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS golden_suite (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    input TEXT NOT NULL,
+    expected_output TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'correction',
+    program_name TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS evolution_observations (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    program_name TEXT,
+    observation_type TEXT NOT NULL DEFAULT 'general',
+    content TEXT NOT NULL,
+    consolidated BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS judge_cost_tracking (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    judge_type TEXT NOT NULL,
+    model TEXT NOT NULL,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    estimated_cost TEXT NOT NULL DEFAULT '0',
+    date TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+];
+
 const extraTables = [
   `CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -200,6 +239,7 @@ const alterations = [
   `ALTER TABLE notes ADD COLUMN IF NOT EXISTS image_url TEXT`,
   `ALTER TABLE captures ADD COLUMN IF NOT EXISTS image_url TEXT`,
   `ALTER TABLE captures ADD COLUMN IF NOT EXISTS template TEXT`,
+  `ALTER TABLE programs ADD COLUMN IF NOT EXISTS compute_target TEXT NOT NULL DEFAULT 'local'`,
 ];
 
 const indexes = [
@@ -211,6 +251,9 @@ const indexes = [
 
 async function pushSchema() {
   for (const ddl of tables) {
+    await db.execute(sql.raw(ddl));
+  }
+  for (const ddl of evolutionTables) {
     await db.execute(sql.raw(ddl));
   }
   for (const ddl of extraTables) {

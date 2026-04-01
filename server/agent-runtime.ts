@@ -12,6 +12,7 @@ import { sanitizeResultRow } from "./output-sanitizer";
 import { emitEvent } from "./event-bus";
 import { isAgentPaused, shouldYield, recordAction, getControlMode, enqueueCommand, completeCommand, pauseExecution, onResume, removePausedExecution, getPausedExecutions, type PausedExecution } from "./control-bus";
 import { executePhantomTask, detectComputeTarget, isPhantomConfigured, getPhantomHealth, checkPhantomHealth } from "./phantom-client";
+import { isLocalComputeAvailable, executeLocalComputeTask } from "./local-compute";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import type { Program } from "@shared/schema";
@@ -89,8 +90,15 @@ function shortModelName(model: string): string {
   return last.replace(/:free$/, "").replace(/-instruct$/, "");
 }
 
-function resolveComputeTarget(prog: Program): "local" | "phantom" {
+function resolveComputeTarget(prog: Program): "local" | "phantom" | "local-compute" {
   const target = prog.computeTarget || "local";
+  if (isLocalComputeAvailable()) {
+    if (target === "phantom" || target === "auto") {
+      const detected = detectComputeTarget(prog.instructions);
+      return detected === "phantom" ? "local-compute" : "local";
+    }
+    return "local";
+  }
   if (target === "auto") {
     return detectComputeTarget(prog.instructions);
   }
@@ -700,6 +708,44 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       output = `[Iteration ${ps.iteration}] No LLM API keys configured.`;
     } else {
       const resolvedComputeTarget = resolveComputeTarget(prog);
+
+      if (resolvedComputeTarget === "local-compute") {
+        if (shouldYield()) {
+          ps.status = "idle";
+          pauseExecution({ type: "program", programName, stepIndex: ps.iteration, context: { phase: "pre-local-compute" } });
+          emitEvent("agent-runtime", `Program "${programName}" paused: human took control (will resume)`, "info", { program: programName });
+          recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
+          if (cmd) completeCommand(cmd.id, "error");
+          return;
+        }
+
+        emitEvent("agent-runtime", `Routing "${programName}" to local compute (self-hosted)`, "action", { program: programName });
+        recordAction(getControlMode(), `local-compute: ${programName}`, programName, undefined, "started");
+
+        const localPrompt = [
+          soul,
+          memory.persistentContext ? `\n\nMemory context:\n${memory.persistentContext}` : "",
+          `\n\nProgram: ${programName}\nIteration: ${ps.iteration}\n\nInstructions:\n${prog.instructions}`,
+        ].join("");
+
+        const localResult = await executeLocalComputeTask({
+          prompt: localPrompt,
+          programName,
+          iteration: ps.iteration,
+          capabilities: (prog.config?.PHANTOM_CAPABILITIES as string || "bash,filesystem,network").split(",").map(s => s.trim()),
+        });
+
+        if (localResult.status === "success") {
+          emitEvent("agent-runtime", `Local compute completed "${programName}" (${localResult.executionTime}ms)`, "info", { program: programName });
+          output = localResult.content;
+          modelUsed = "local-compute";
+          tokensUsed = 0;
+        } else {
+          emitEvent("agent-runtime", `Local compute ${localResult.status} for "${programName}": ${localResult.error}, falling back to LLM`, "info", { program: programName });
+          recordAction(getControlMode(), `local-compute-fallback: ${programName}`, programName, undefined, `local-${localResult.status}`);
+        }
+      }
+
       const usePhantom = resolvedComputeTarget === "phantom" && isPhantomConfigured();
 
       if (usePhantom) {

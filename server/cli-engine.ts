@@ -1081,6 +1081,21 @@ function registerBuiltinCommands(): void {
     return ok(args.join(" "));
   });
 
+  registerCommand("sh", "Execute a shell command (self-hosted only)", "sh <command>", async (args) => {
+    const { isLocalComputeAvailable, executeLocalShell } = await import("./local-compute");
+    if (!isLocalComputeAvailable()) {
+      return fail("[error] sh: requires RACHAEL_SELF_HOSTED=true (only available on self-hosted instances)");
+    }
+    if (args.length === 0) return fail("[error] sh: no command provided");
+    const command = args.join(" ");
+    const result = await executeLocalShell(command, { timeout: 30000 });
+    const parts: string[] = [];
+    if (result.stdout) parts.push(result.stdout.trimEnd());
+    if (result.stderr) parts.push(`[stderr] ${result.stderr.trimEnd()}`);
+    if (result.exitCode !== 0) parts.push(`[exit ${result.exitCode}]`);
+    return parts.length > 0 ? ok(parts.join(String.fromCharCode(10))) : ok("(no output)");
+  });
+
   registerCommand("cat", "Read a result or stdin", "cat [result <id>] [note <id>]", async (args, stdin) => {
     if (stdin && args.length === 0) return ok(stdin);
     const sub = args[0];
