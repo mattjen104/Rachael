@@ -13,6 +13,7 @@ export const programs = pgTable("programs", {
   config: jsonb("config").$type<Record<string, string>>().default({}),
   enabled: boolean("enabled").notNull().default(true),
   costTier: text("cost_tier").notNull().default("cheap"),
+  computeTarget: text("compute_target").notNull().default("local"),
   tags: text("tags").array().notNull().default([]),
   lastRun: timestamp("last_run"),
   nextRun: timestamp("next_run"),
@@ -30,6 +31,7 @@ export const insertProgramSchema = z.object({
   config: z.record(z.string(), z.string()).default({}),
   enabled: z.boolean().default(true),
   costTier: z.string().default("cheap"),
+  computeTarget: z.enum(["local", "phantom", "auto"]).default("local"),
   tags: z.array(z.string()).default([]),
 });
 export type InsertProgram = z.infer<typeof insertProgramSchema>;

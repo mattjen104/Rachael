@@ -10,6 +10,7 @@ import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
 import { getRuntimeState, toggleRuntime, manualTrigger, getRuntimeBudgetStatus } from "./agent-runtime";
 import { getModelRoster, getModelQuality, loadRosterFromConfig } from "./model-router";
+import { getPhantomHealth, checkPhantomHealth, isPhantomConfigured, startPhantomHealthMonitor } from "./phantom-client";
 import { getBridgeStatus, launchBrowser, closeBrowser, startLoginSession, getPageContent, openPage, getPageText } from "./browser-bridge";
 import { openOutlook, openTeams, getOutlookEmails, readOutlookEmail, getTeamsChats, readTeamsChat } from "./app-adapters";
 import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlValidator } from "./universal-scraper";
@@ -132,6 +133,36 @@ export async function registerRoutes(
       res.status(500).json({ message: e.message });
     }
   });
+
+  app.get("/api/phantom/health", async (_req, res) => {
+    const health = getPhantomHealth();
+    res.json({
+      configured: isPhantomConfigured(),
+      ...health,
+    });
+  });
+
+  app.post("/api/phantom/health/check", async (_req, res) => {
+    const health = await checkPhantomHealth();
+    res.json({
+      configured: isPhantomConfigured(),
+      ...health,
+    });
+  });
+
+  app.get("/api/phantom/status", async (_req, res) => {
+    const health = getPhantomHealth();
+    res.json({
+      configured: isPhantomConfigured(),
+      available: health.available,
+      lastChecked: health.lastChecked,
+      latencyMs: health.latencyMs,
+      version: health.version,
+      error: health.error,
+    });
+  });
+
+  startPhantomHealthMonitor();
 
   app.get("/api/skills", async (_req, res) => {
     const allSkills = await storage.getSkills();

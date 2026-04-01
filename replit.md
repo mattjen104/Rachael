@@ -29,6 +29,17 @@ All data lives in Postgres tables:
 - `radar_seen_items` — Cross-run deduplication store for research radar (content hashes, 7-day window)
 - `radar_engagement` — User engagement tracking for research radar briefing items (url, source, title)
 
+## Phantom Compute Bridge
+
+- **Phantom Client** (`server/phantom-client.ts`) — Routes compute-heavy tasks to a remote Phantom instance on DigitalOcean
+- Programs have a `computeTarget` field: `"local"` (default, direct LLM), `"phantom"` (route to DO instance), or `"auto"` (auto-detect from instructions)
+- Auto-detection scans instructions for keywords like "install", "docker", "bash", "build", "deploy"
+- Graceful fallback: if Phantom is unreachable, tasks fall back to direct LLM calls with a warning
+- Health monitoring: periodic health checks against DO instance, status exposed via `/api/phantom/health` and `/api/phantom/status`
+- Cost tracking: Phantom-reported costs are tracked alongside LLM token costs
+- Control Bus integration: Phantom-bound tasks go through the same pause/resume and permission checks
+- Environment vars: `PHANTOM_URL` (webhook base URL), `PHANTOM_API_KEY` (auth token)
+
 ## Control Bus & Permissions
 
 - **Control Bus** (`server/control-bus.ts`) — Tracks who is driving (human vs agent), manages turn-taking with pause/resume semantics

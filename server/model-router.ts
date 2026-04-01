@@ -358,6 +358,11 @@ export function trackTokenUsage(model: string, tokens: number, programName?: str
   dailyUsage.push({ model, tokens, timestamp: Date.now(), programName, estimatedCost });
 }
 
+export function trackExternalCost(model: string, cost: number, tokens: number, programName?: string): void {
+  resetIfNewDay();
+  dailyUsage.push({ model, tokens, timestamp: Date.now(), programName, estimatedCost: cost });
+}
+
 export interface DailyTokenReport {
   total: number;
   totalCost: number;

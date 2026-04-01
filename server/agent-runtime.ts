@@ -3,7 +3,7 @@ import { executeLLM, buildProgramPrompt, hasLLMKeys, type LLMResponse, type LLMC
 import { runHardenedSkill } from "./skill-runner";
 import {
   detectTaskType, pickCascadeModels, pickComparisonModels, pickCheapThenPremium,
-  trackTokenUsage, trackModelQuality, parseCostTier,
+  trackTokenUsage, trackExternalCost, trackModelQuality, parseCostTier,
   getDailyBudget, isBudgetExhausted, getBudgetStatus, getDailyTokenUsage, loadRosterFromConfig,
   persistQualityScores, loadQualityScores, removeFromRoster, refreshRosterPricing,
   type TaskType, type CostTier, type BudgetStatus,
@@ -11,6 +11,7 @@ import {
 import { sanitizeResultRow } from "./output-sanitizer";
 import { emitEvent } from "./event-bus";
 import { isAgentPaused, shouldYield, recordAction, getControlMode, enqueueCommand, completeCommand, pauseExecution, onResume, removePausedExecution, getPausedExecutions, type PausedExecution } from "./control-bus";
+import { executePhantomTask, detectComputeTarget, isPhantomConfigured, getPhantomHealth, checkPhantomHealth } from "./phantom-client";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import type { Program } from "@shared/schema";
@@ -86,6 +87,21 @@ async function createGateValidatedProposal(
 function shortModelName(model: string): string {
   const last = model.split("/").pop() || model;
   return last.replace(/:free$/, "").replace(/-instruct$/, "");
+}
+
+function resolveComputeTarget(prog: Program): "local" | "phantom" {
+  const target = prog.computeTarget || "local";
+  if (target === "auto") {
+    return detectComputeTarget(prog.instructions);
+  }
+  if (target === "phantom") return "phantom";
+  return "local";
+}
+
+function trackPhantomCost(cost: number, tokens: number, programName?: string): void {
+  trackExternalCost("phantom", cost, tokens, programName);
+  const usage = getDailyTokenUsage();
+  emitEvent("phantom", `Phantom cost: $${cost.toFixed(4)} for "${programName || "unknown"}" (daily total: $${usage.totalCost.toFixed(4)})`, "info", { program: programName });
 }
 
 function resolveProviderPrefix(modelId: string): string {
@@ -552,11 +568,12 @@ __run().then((r) => {
 }
 
 interface ProgramResumeContext {
-  phase: "post-llm";
+  phase: "post-llm" | "post-phantom";
   llmContent: string;
   llmModel: string;
   llmTokens: number;
   iteration: number;
+  phantomCost?: number;
 }
 
 async function executeProgram(programName: string, resumeCtx?: ProgramResumeContext): Promise<void> {
@@ -620,8 +637,12 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       output = resumeCtx.llmContent;
       modelUsed = resumeCtx.llmModel;
       tokensUsed = resumeCtx.llmTokens;
-      trackTokenUsage(modelUsed, tokensUsed, programName);
-      emitEvent("agent-runtime", `Resumed with saved LLM result for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
+      if (resumeCtx.phase === "post-phantom") {
+        emitEvent("agent-runtime", `Resumed with saved Phantom result for "${programName}" (cost already tracked)`, "info", { program: programName });
+      } else {
+        trackTokenUsage(modelUsed, tokensUsed, programName);
+        emitEvent("agent-runtime", `Resumed with saved LLM result for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
+      }
     } else if (prog.code) {
       try {
         const result = await executeInlineCode(prog.code, prog.config as Record<string, string> || {});
@@ -675,73 +696,155 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       }
     } else if (prog.config?.LLM_REQUIRED === "false" || prog.config?.llmRequired === "false") {
       output = `[Iteration ${ps.iteration}] Program "${programName}" requires code but has none. Skipping LLM (LLM_REQUIRED=false).`;
-    } else if (!hasLLMKeys()) {
+    } else if (!hasLLMKeys() && !isPhantomConfigured()) {
       output = `[Iteration ${ps.iteration}] No LLM API keys configured.`;
     } else {
-      const allSkills = await storage.getSkills();
-      const skillBodies = allSkills
-        .filter(s => prog.instructions.toLowerCase().includes(s.name.toLowerCase()))
-        .map(s => `### Skill: ${s.name}\n${s.content}`);
+      const resolvedComputeTarget = resolveComputeTarget(prog);
+      const usePhantom = resolvedComputeTarget === "phantom" && isPhantomConfigured();
 
-      const recallResults = pendingRecallResults.get(programName);
-      if (recallResults) {
-        pendingRecallResults.delete(programName);
-      }
+      if (usePhantom) {
+        let phantomReachable = getPhantomHealth().available;
+        if (!phantomReachable) {
+          const freshHealth = await checkPhantomHealth();
+          phantomReachable = freshHealth.available;
+          if (!phantomReachable) {
+            emitEvent("phantom", `Phantom unavailable for "${programName}", falling back to LLM`, "info", { program: programName });
+          }
+        }
 
-      const messages = buildProgramPrompt(
-        soul,
-        skillBodies,
-        prog.instructions,
-        ps.iteration,
-        "",
-        { userProfile: "", persistentContext: memory.persistentContext, sessionLog: "", recallResults: recallResults || undefined }
-      );
+        if (phantomReachable) {
+          if (shouldYield()) {
+            ps.status = "idle";
+            pauseExecution({ type: "program", programName, stepIndex: ps.iteration, context: { phase: "pre-phantom" } });
+            emitEvent("agent-runtime", `Program "${programName}" paused: human took control (will resume)`, "info", { program: programName });
+            recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
+            if (cmd) completeCommand(cmd.id, "error");
+            return;
+          }
 
-      const taskType = detectTaskType(prog.instructions, prog.config?.TASK_TYPE as string);
-      const costTier = parseCostTier(prog.costTier);
-      const modelOverride = prog.config?.MODEL as string || undefined;
+          emitEvent("agent-runtime", `Routing "${programName}" to Phantom compute bridge`, "action", { program: programName });
+          recordAction(getControlMode(), `phantom-route: ${programName}`, programName, undefined, "started");
 
-      if (shouldYield()) {
-        ps.status = "idle";
-        pauseExecution({ type: "program", programName, stepIndex: ps.iteration, context: { phase: "pre-llm" } });
-        emitEvent("agent-runtime", `Program "${programName}" paused: human took control (will resume)`, "info", { program: programName });
-        recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
-        if (cmd) completeCommand(cmd.id, "error");
-        return;
-      }
+          const phantomPrompt = [
+            soul,
+            memory.persistentContext ? `\n\nMemory context:\n${memory.persistentContext}` : "",
+            `\n\nProgram: ${programName}\nIteration: ${ps.iteration}\n\nInstructions:\n${prog.instructions}`,
+          ].join("");
 
-      const cfgMap = prog.config as Record<string, string>;
-      const useTwoStage = cfgMap?.TWO_STAGE === "true" || cfgMap?.twoStage === "true";
-      emitEvent("agent-runtime", `Calling LLM for "${programName}" (${taskType}${useTwoStage ? ", two-stage" : ""})`, "action", { program: programName });
-      const llmResult = modelOverride
-        ? await executeLLM(messages, modelOverride, llmConfig, {})
-        : useTwoStage
-          ? await executeLLMTwoStage(messages, taskType, costTier, llmConfig)
-          : await executeLLMWithCascade(messages, taskType, costTier, undefined, llmConfig);
-
-      if (shouldYield()) {
-        ps.status = "idle";
-        pauseExecution({
-          type: "program", programName, stepIndex: ps.iteration,
-          context: {
-            phase: "post-llm",
-            llmContent: llmResult.content,
-            llmModel: llmResult.model,
-            llmTokens: llmResult.tokensUsed || 0,
+          const phantomResult = await executePhantomTask({
+            prompt: phantomPrompt,
+            programName,
             iteration: ps.iteration,
-          },
-        });
-        emitEvent("agent-runtime", `Program "${programName}" paused after LLM: human took control (will resume with saved result)`, "info", { program: programName });
-        recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
-        if (cmd) completeCommand(cmd.id, "error");
-        return;
+            capabilities: (prog.config?.PHANTOM_CAPABILITIES as string || "bash,docker,filesystem,network").split(",").map(s => s.trim()),
+          });
+
+          if (phantomResult.status === "success") {
+            const phantomModel = phantomResult.model || "phantom";
+            const phantomTokens = phantomResult.tokensUsed || 0;
+            if (phantomResult.cost !== undefined) {
+              trackPhantomCost(phantomResult.cost, phantomTokens, programName);
+            } else if (phantomTokens > 0) {
+              trackTokenUsage(phantomModel, phantomTokens, programName);
+            }
+            emitEvent("agent-runtime", `Phantom completed "${programName}" (${phantomResult.executionTime}ms${phantomResult.cost ? `, $${phantomResult.cost.toFixed(4)}` : ""})`, "info", { program: programName });
+
+            if (shouldYield()) {
+              ps.status = "idle";
+              pauseExecution({
+                type: "program", programName, stepIndex: ps.iteration,
+                context: {
+                  phase: "post-phantom",
+                  llmContent: phantomResult.content,
+                  llmModel: phantomModel,
+                  llmTokens: phantomTokens,
+                  iteration: ps.iteration,
+                  phantomCost: phantomResult.cost,
+                },
+              });
+              emitEvent("agent-runtime", `Program "${programName}" paused after Phantom: human took control (will resume with saved result)`, "info", { program: programName });
+              recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
+              if (cmd) completeCommand(cmd.id, "error");
+              return;
+            }
+
+            output = phantomResult.content;
+            modelUsed = phantomModel;
+            tokensUsed = phantomTokens;
+          } else {
+            emitEvent("phantom", `Phantom ${phantomResult.status} for "${programName}": ${phantomResult.error}, falling back to LLM`, "info", { program: programName });
+            recordAction(getControlMode(), `phantom-fallback: ${programName}`, programName, undefined, `phantom-${phantomResult.status}`);
+          }
+        }
       }
 
-      output = llmResult.content;
-      modelUsed = llmResult.model;
-      tokensUsed = llmResult.tokensUsed || 0;
-      trackTokenUsage(modelUsed, tokensUsed, programName);
-      emitEvent("agent-runtime", `LLM response received for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
+      if (!output && hasLLMKeys()) {
+        const allSkills = await storage.getSkills();
+        const skillBodies = allSkills
+          .filter(s => prog.instructions.toLowerCase().includes(s.name.toLowerCase()))
+          .map(s => `### Skill: ${s.name}\n${s.content}`);
+
+        const recallResults = pendingRecallResults.get(programName);
+        if (recallResults) {
+          pendingRecallResults.delete(programName);
+        }
+
+        const messages = buildProgramPrompt(
+          soul,
+          skillBodies,
+          prog.instructions,
+          ps.iteration,
+          "",
+          { userProfile: "", persistentContext: memory.persistentContext, sessionLog: "", recallResults: recallResults || undefined }
+        );
+
+        const taskType = detectTaskType(prog.instructions, prog.config?.TASK_TYPE as string);
+        const costTier = parseCostTier(prog.costTier);
+        const modelOverride = prog.config?.MODEL as string || undefined;
+
+        if (shouldYield()) {
+          ps.status = "idle";
+          pauseExecution({ type: "program", programName, stepIndex: ps.iteration, context: { phase: "pre-llm" } });
+          emitEvent("agent-runtime", `Program "${programName}" paused: human took control (will resume)`, "info", { program: programName });
+          recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
+          if (cmd) completeCommand(cmd.id, "error");
+          return;
+        }
+
+        const cfgMap = prog.config as Record<string, string>;
+        const useTwoStage = cfgMap?.TWO_STAGE === "true" || cfgMap?.twoStage === "true";
+        emitEvent("agent-runtime", `Calling LLM for "${programName}" (${taskType}${useTwoStage ? ", two-stage" : ""})`, "action", { program: programName });
+        const llmResult = modelOverride
+          ? await executeLLM(messages, modelOverride, llmConfig, {})
+          : useTwoStage
+            ? await executeLLMTwoStage(messages, taskType, costTier, llmConfig)
+            : await executeLLMWithCascade(messages, taskType, costTier, undefined, llmConfig);
+
+        if (shouldYield()) {
+          ps.status = "idle";
+          pauseExecution({
+            type: "program", programName, stepIndex: ps.iteration,
+            context: {
+              phase: "post-llm",
+              llmContent: llmResult.content,
+              llmModel: llmResult.model,
+              llmTokens: llmResult.tokensUsed || 0,
+              iteration: ps.iteration,
+            },
+          });
+          emitEvent("agent-runtime", `Program "${programName}" paused after LLM: human took control (will resume with saved result)`, "info", { program: programName });
+          recordAction(getControlMode(), `program-paused: ${programName}`, programName, undefined, "paused");
+          if (cmd) completeCommand(cmd.id, "error");
+          return;
+        }
+
+        output = llmResult.content;
+        modelUsed = llmResult.model;
+        tokensUsed = llmResult.tokensUsed || 0;
+        trackTokenUsage(modelUsed, tokensUsed, programName);
+        emitEvent("agent-runtime", `LLM response received for "${programName}" (${tokensUsed} tokens, ${shortModelName(modelUsed)})`, "info", { program: programName });
+      } else if (!output) {
+        output = `[Iteration ${ps.iteration}] No LLM API keys configured and Phantom unavailable.`;
+      }
 
       const outputType = (prog.config?.OUTPUT_TYPE as string || "").toLowerCase();
       if (outputType === "proposal") {
@@ -1179,11 +1282,21 @@ export function getRuntimeState(): {
   active: boolean;
   lastTick: Date | null;
   programs: Array<ProgramState>;
+  phantom: { configured: boolean; available: boolean; lastChecked: Date; latencyMs?: number; version?: string; error?: string };
 } {
+  const phantomHealth = getPhantomHealth();
   return {
     active: runtime.active,
     lastTick: runtime.lastTick,
     programs: Array.from(runtime.programs.values()),
+    phantom: {
+      configured: isPhantomConfigured(),
+      available: phantomHealth.available,
+      lastChecked: phantomHealth.lastChecked,
+      latencyMs: phantomHealth.latencyMs,
+      version: phantomHealth.version,
+      error: phantomHealth.error,
+    },
   };
 }
 
@@ -1353,9 +1466,9 @@ export function initRuntime(): void {
       removePausedExecution(paused.id);
       emitEvent("agent-runtime", `Resuming paused program: ${name} (phase: ${ctx?.phase || "fresh"})`, "info", { program: name });
 
-      if (ctx?.phase === "post-llm" && ctx.llmContent) {
+      if ((ctx?.phase === "post-llm" || ctx?.phase === "post-phantom") && ctx.llmContent) {
         const resumeCtx: ProgramResumeContext = {
-          phase: "post-llm",
+          phase: ctx.phase as "post-llm" | "post-phantom",
           llmContent: ctx.llmContent as string,
           llmModel: ctx.llmModel as string,
           llmTokens: ctx.llmTokens as number,
