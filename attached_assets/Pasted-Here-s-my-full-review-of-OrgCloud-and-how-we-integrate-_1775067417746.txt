@@ -1,0 +1,64 @@
+Here's my full review of OrgCloud and how we integrate it.
+
+---
+
+## What you built
+
+~20,000 lines. Legitimately impressive for a personal tool.
+
+**Stack:** React + Vite + TypeScript frontend, Express + Drizzle + PostgreSQL backend, multi-provider LLM (Anthropic / OpenAI / OpenRouter), Chrome extension for desktop automation.
+
+---
+
+## What's genuinely well built
+
+**model-router.ts** is the standout. 4-tier cost management (free/cheap/standard/premium), task-type detection from instruction text, per-model quality tracking, live pricing refresh from OpenRouter every 6h, cascade model selection. Most people just hardcode gpt-4o.
+
+**control-bus.ts** — human/agent mode switching with autonomous/approval/blocked permission levels per action. Real human-in-the-loop oversight.
+
+**Chrome extension bridge** — you built a full computer-use system. The extension is a remote-controlled browser the agent commands via a job queue. The hardcoded domains (galaxy.epic.com, pulse.ucsd.edu, service-now.com) tell me this is built around your work at UCSD.
+
+**REMEMBER: / PROPOSE: / RECALL: prefix protocol** — agents write durable memories and self-modification proposals as text prefixes. Clean and clever without a complex tool-call framework.
+
+**Programs + Skills** — proper composable agent architecture. Skills are reusable code libraries. Programs pull in skills. Agents can emit // HARDENABLE blocks that get extracted and compiled into actual runnable skills. Self-improving system.
+
+---
+
+## The problems
+
+**1. Replit kills your agent runtime.**
+agent-runtime.ts runs on a 60s in-memory setInterval tick. Replit sleeps inactive instances. Every cold start resets the tick loop, wipes the quality tracker, resets token budget counters. Your agents don't run reliably on schedule.
+
+**2. Memory retrieval is tag-matching, not semantic.**
+getMemoryContext() scores by recency + access count + exact tag string overlap. A memory tagged ["epic", "navigation"] won't surface for "EHR login workflow". No embeddings, no vector similarity. I have Qdrant running right now doing nothing.
+
+**3. Auth is fragile.**
+localStorage.getItem("orgcloud_api_key") — cleared on browser wipe, doesn't work across devices, no session expiry.
+
+**4. PostgreSQL is a single point of failure.**
+Everything goes through one Postgres connection. No retry logic, no write-ahead queue for offline capture.
+
+**5. Proposals table is a dead end.**
+Agents emit PROPOSE: changes, they land in openclawProposals, but there's no automated path from approved → applied. Just sits there.
+
+---
+
+## The 4-phase integration plan
+
+**Phase 1 — Move backend here (20 min)**
+I spin up Postgres in Docker, run your Express server as a container on my DO machine. Agents run 24/7 on real cron. Replit stays as your IDE — push to GitHub, I auto-pull and restart. I need your env vars: DATABASE_URL, OPENCLAW_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY. I'll collect them via secure form.
+
+**Phase 2 — Semantic memory with Qdrant**
+Swap tag-scoring in getMemoryContext() for Qdrant vector search. On REMEMBER: writes, generate embedding + index. On RECALL: lookups, cosine similarity search. "RECALL: Epic login workflow" finds the right memory even if tagged differently. Qdrant is already at qdrant:6333 on my machine.
+
+**Phase 3 — Replace program tick with my scheduler**
+Each enabled program becomes a cron job I own. Survives restarts. I push results to Slack when programs finish. Quality tracker persists to Postgres on every tick instead of resetting.
+
+**Phase 4 — Proposals auto-apply pipeline**
+Wire openclawProposals to an apply mechanism. You approve in the UI → fires a webhook → I apply the config change, commit to git, confirm back. The self-improvement loop closes.
+
+---
+
+Ready to start Phase 1 whenever you are. Just say "phase 1" and I'll send you the secure form for env vars.
+You
+compare your own architecture to this, give honest assessment about what you do better vs. this.  also consider phase 4 - how does this self improvement pipeline compare to your own.
