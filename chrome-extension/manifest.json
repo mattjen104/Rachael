@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "OrgCloud Bridge",
-  "version": "6.0.0",
-  "description": "Personal browser bridge for OrgCloud — scrapes any site you're logged into",
+  "name": "Rachael Bridge",
+  "version": "7.0.0",
+  "description": "Personal browser bridge for Rachael — scrapes any site you're logged into",
   "permissions": [
     "activeTab",
     "tabs",
@@ -20,7 +20,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "OrgCloud Bridge"
+    "default_title": "Rachael Bridge"
   },
   "commands": {
     "open-command": {

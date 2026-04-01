@@ -2253,7 +2253,7 @@ ${fullHtml}`;
           ntfyLines.push(message.slice(0, 4000));
         }
         const headers: Record<string, string> = {
-          "Title": "OrgCloud Morning Briefing",
+          "Title": "Rachael Morning Briefing",
           "Priority": "default",
           "Tags": "briefcase,radio",
         };
@@ -2304,7 +2304,7 @@ ${fullHtml}`;
         const resp = await fetch(webhook, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: message.slice(0, 16000), title: "OrgCloud Morning Standup", timestamp: new Date().toISOString() }),
+          body: JSON.stringify({ text: message.slice(0, 16000), title: "Rachael Morning Standup", timestamp: new Date().toISOString() }),
         });
         if (resp.ok) {
           results.push(`Sent to webhook`);
@@ -3556,7 +3556,7 @@ ${fullHtml}`;
         "  - Find your Hyperspace window",
         "  - Screenshot menus and buttons",
         "  - Use Claude vision to identify activities",
-        "  - Post results to OrgCloud TreeView",
+        "  - Post results to Rachael TreeView",
         "",
         "Environments: SUP, POC, TST",
       ].join(nl));
@@ -3636,7 +3636,7 @@ ${fullHtml}`;
         "  4. python epic_agent.py",
         "",
         "The agent runs in background and:",
-        "  - Polls OrgCloud for commands every 3s",
+        "  - Polls Rachael for commands every 3s",
         "  - Takes screenshots on demand",
         "  - Navigates Hyperspace via Claude vision",
         "  - Clicks buttons/menus by name",

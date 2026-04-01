@@ -52,7 +52,7 @@ export default function TvShortcutOverlay() {
     >
       <div className="max-w-[800px] w-full mx-8 font-mono text-foreground">
         <h1 className="text-[48px] font-bold mb-2 phosphor-glow-bright text-center">
-          OrgCloud TV Mode
+          Rachael TV Mode
         </h1>
         <p className="text-[24px] text-muted-foreground mb-8 text-center">
           Connect a Bluetooth keyboard and use these shortcuts

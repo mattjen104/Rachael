@@ -1,6 +1,6 @@
-# OrgCloud Command Center
+# Rachael
 
-A database-first, keyboard-driven command center optimized for Chrome sidebar use (~400px wide). Features autonomous agent programs, vim motions (j/k/g/G), Tab fold/unfold, and an Emacs-inspired command palette (M-x/Space). CRT phosphor aesthetic.
+Autonomous agent runtime with 30+ CLI programs, self-evolution engine, and CRT phosphor aesthetic. Doom Emacs-inspired web UI (IBM Plex Mono) with Chrome extension as primary interface. Deployable to DigitalOcean via `scripts/do-install.sh`.
 
 ## Architecture
 

@@ -91,7 +91,7 @@ export default function AuthGate({ children }: AuthGateProps) {
           padding: "24px",
           border: "1px solid var(--border)",
         }}>
-          <div style={{ fontSize: "14px", opacity: 0.7 }}>orgcloud</div>
+          <div style={{ fontSize: "14px", opacity: 0.7 }}>rachael</div>
           <div style={{ fontSize: "12px", opacity: 0.5 }}>Enter API key to continue</div>
           <input
             data-testid="input-api-key"

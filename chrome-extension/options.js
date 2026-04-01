@@ -34,7 +34,7 @@ saveBtn.addEventListener("click", async () => {
     if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
     const healthData = await healthRes.json();
     if (!healthData.ok || healthData.service !== "orgcloud-bridge") {
-      throw new Error("Not an OrgCloud server");
+      throw new Error("Not a Rachael server");
     }
   } catch (e) {
     status.textContent = `Cannot reach server: ${e.message}`;
