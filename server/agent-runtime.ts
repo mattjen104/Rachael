@@ -14,6 +14,9 @@ import { isAgentPaused, shouldYield, recordAction, getControlMode, enqueueComman
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import type { Program } from "@shared/schema";
+import { initQdrant } from "./qdrant-client";
+import { storeMemoryWithQdrant, searchMemoriesHybrid, getMemoryContextHybrid, runConsolidation } from "./memory-consolidation";
+import { runEvolutionPipeline, checkAutoRollback, validateProposal, addToGoldenSuite, consolidateObservations } from "./evolution-engine";
 
 export type ProgramStatus = "idle" | "queued" | "running" | "completed" | "error";
 
@@ -46,6 +49,39 @@ const programRuns = new Map<string, Array<{ model: string; tokens: number; times
 const proposalCounts = new Map<string, number>();
 const MAX_PROPOSALS_PER_ITERATION = 50;
 const pendingRecallResults = new Map<string, string>();
+
+async function createGateValidatedProposal(
+  proposal: {
+    section: string;
+    targetName: string;
+    reason: string;
+    currentContent: string;
+    proposedContent: string;
+    source: string;
+    proposalType: string;
+  },
+  llmConfig: LLMConfig
+): Promise<{ created: boolean; rejected: boolean; rejectionReasons?: string[] }> {
+  const validation = await validateProposal(proposal.section, proposal.proposedContent, llmConfig);
+  const latestActive = await storage.getLatestEvolutionVersion();
+  const evolutionVersion = latestActive?.status === "active" ? latestActive.version : null;
+
+  if (validation.valid) {
+    await storage.createProposal({
+      ...proposal,
+      evolutionVersion,
+    });
+    return { created: true, rejected: false };
+  }
+
+  await storage.createProposal({
+    ...proposal,
+    reason: `REJECTED by evolution gates: ${validation.rejectionReasons.join("; ")}`,
+    warnings: `Gate rejections: ${validation.rejectionReasons.join("; ")}`,
+    evolutionVersion,
+  });
+  return { created: true, rejected: true, rejectionReasons: validation.rejectionReasons };
+}
 
 function shortModelName(model: string): string {
   const last = model.split("/").pop() || model;
@@ -555,7 +591,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
 
     const llmConfig = await getLLMConfig();
     const soul = await getSoulPrompt();
-    const memory = await getMemoryContext(programName);
+    const memory = await getMemoryContextHybrid(programName, MEMORY_TOKEN_BUDGET);
 
     const recentObservations = await storage.getMemoriesForProgram(programName, {
       limit: 3,
@@ -596,7 +632,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         if (result.proposals && Array.isArray(result.proposals)) {
           for (const p of result.proposals.slice(0, MAX_PROPOSALS_PER_ITERATION)) {
             try {
-              await storage.createProposal({
+              const gateResult = await createGateValidatedProposal({
                 section: p.section || "RESEARCH",
                 targetName: programName,
                 reason: p.reason || p.diff || output.slice(0, 200),
@@ -604,7 +640,10 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
                 proposedContent: p.diff || p.reason,
                 source: "agent",
                 proposalType: "change",
-              });
+              }, llmConfig);
+              if (gateResult.rejected) {
+                emitEvent("evolution", `Inline proposal from "${programName}" rejected by gates: ${gateResult.rejectionReasons?.[0]?.slice(0, 100)}`, "info", { program: programName });
+              }
               const count = proposalCounts.get(programName) || 0;
               proposalCounts.set(programName, count + 1);
             } catch (e) {
@@ -616,7 +655,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         const inlineOutputType = (prog.config?.OUTPUT_TYPE as string || "").toLowerCase();
         if (inlineOutputType === "proposal" && output.trim()) {
           try {
-            await storage.createProposal({
+            await createGateValidatedProposal({
               section: "PROGRAMS",
               targetName: programName,
               reason: `Produced by "${programName}" (iteration ${ps.iteration}, inline-code)`,
@@ -624,7 +663,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
               proposedContent: output.trim().slice(0, 50000),
               source: "agent",
               proposalType: "change",
-            });
+            }, llmConfig);
           } catch (e) {
             console.error("[agent-runtime] Failed to create inline OUTPUT_TYPE=proposal:", e);
           }
@@ -707,7 +746,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       const outputType = (prog.config?.OUTPUT_TYPE as string || "").toLowerCase();
       if (outputType === "proposal") {
         try {
-          await storage.createProposal({
+          await createGateValidatedProposal({
             section: "PROGRAMS",
             targetName: programName,
             reason: `Proposed by "${programName}" (iteration ${ps.iteration}, ${modelUsed})`,
@@ -715,7 +754,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
             proposedContent: output.trim(),
             source: "agent",
             proposalType: "change",
-          });
+          }, llmConfig);
         } catch (e) {
           console.error("[agent-runtime] Failed to create auto-proposal:", e);
         }
@@ -727,15 +766,19 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
           const count = proposalCounts.get(programName) || 0;
           if (count < MAX_PROPOSALS_PER_ITERATION) {
             try {
-              await storage.createProposal({
+              const proposedContent = proposeMatch[1].trim();
+              const gateResult = await createGateValidatedProposal({
                 section: "PROGRAMS",
                 targetName: programName,
                 reason: `Auto-proposed by "${programName}" at iteration ${ps.iteration}`,
                 currentContent: prog.instructions,
-                proposedContent: proposeMatch[1].trim(),
+                proposedContent,
                 source: "agent",
                 proposalType: "change",
-              });
+              }, llmConfig);
+              if (gateResult.rejected) {
+                emitEvent("evolution", `Proposal from "${programName}" rejected by gates: ${gateResult.rejectionReasons?.[0]?.slice(0, 100)}`, "info", { program: programName });
+              }
               proposalCounts.set(programName, count + 1);
             } catch (e) {
               console.error("[agent-runtime] Failed to create proposal:", e);
@@ -749,14 +792,18 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         if (rememberMatch) {
           const content = rememberMatch[1].trim();
           try {
-            const mem = await storage.createMemory({
-              programName: programName,
-              content,
-              memoryType: "fact",
-              tags: extractTags(content),
-              relevanceScore: 100,
-            });
-            emitEvent("memory", `Memory created from REMEMBER: "${content.slice(0, 80)}"`, "info", { program: programName, metadata: { memoryId: mem.id } });
+            const subjectMatch = content.match(/^(?:\[([^\]]+)\]\s*)?(.+)/s);
+            const subject = subjectMatch?.[1] || null;
+            const memContent = subjectMatch?.[2] || content;
+            const mem = await storeMemoryWithQdrant(
+              memContent,
+              "semantic",
+              programName,
+              extractTags(memContent),
+              100,
+              subject
+            );
+            emitEvent("memory", `Memory created from REMEMBER: "${memContent.slice(0, 80)}"`, "info", { program: programName, metadata: { memoryId: mem.id } });
           } catch (e) {
             console.error("[agent-runtime] Failed to create memory:", e);
           }
@@ -768,7 +815,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         if (recallMatch) {
           const topic = recallMatch[1].trim();
           try {
-            const recalled = await storage.searchMemories(topic, 5, programName);
+            const recalled = await searchMemoriesHybrid(topic, 5, programName);
             if (recalled.length > 0) {
               const recallBlock = recalled.map(m => `[${m.memoryType}] ${m.content}`).join("\n");
               emitEvent("memory", `Recalled ${recalled.length} memories for topic: "${topic.slice(0, 50)}"`, "info", { program: programName });
@@ -840,6 +887,19 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
           relevanceScore: 90,
         });
         emitEvent("memory", `Novel finding filed for "${programName}": ${distilled.slice(0, 100)}`, "info", { program: programName });
+
+        const hadRecentError = recentOutcomes.some(m =>
+          m.tags?.includes("error") && m.tags?.includes(programName)
+        );
+        if (hadRecentError) {
+          try {
+            const inputSummary = `${programName} (iteration ${ps.iteration})`;
+            await addToGoldenSuite(inputSummary, summaryLine.slice(0, 500), programName);
+            emitEvent("evolution", `Golden suite: promoted correction for "${programName}"`, "info", { program: programName });
+          } catch (e) {
+            console.error("[agent-runtime] Failed to promote to golden suite:", e);
+          }
+        }
       } else if (isError) {
         const errorDistilled = `[${new Date().toISOString().slice(0, 10)}] ${programName} ERROR: ${summaryLine.slice(0, 150)}`;
         await storage.createMemory({
@@ -859,7 +919,39 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       console.error("[agent-runtime] Failed evaluate phase:", e);
     }
 
-    await extractRecipeDirectives(output, programName);
+    await extractRecipeDirectives(output, programName, llmConfig);
+
+    try {
+      const sessionData = `Program: ${programName}\nIteration: ${ps.iteration}\nModel: ${modelUsed}\nOutput:\n${output.slice(0, 8000)}`;
+      const consolidationResult = await runConsolidation(sessionData, programName, llmConfig);
+      if (consolidationResult.episodes + consolidationResult.facts + consolidationResult.procedures > 0) {
+        emitEvent("memory", `Consolidation for "${programName}": ${consolidationResult.episodes}ep, ${consolidationResult.facts}facts, ${consolidationResult.procedures}proc`, "info", { program: programName });
+      }
+    } catch (e) {
+      console.error("[agent-runtime] Memory consolidation failed:", e);
+    }
+
+    try {
+      const evolutionResult = await runEvolutionPipeline(output, programName, llmConfig);
+      if (evolutionResult) {
+        if (evolutionResult.applied) {
+          emitEvent("evolution", `Evolution v${evolutionResult.version} applied for "${programName}" (${evolutionResult.observations.length} observations, ${evolutionResult.deltas.length} deltas)`, "info", { program: programName });
+        } else if (evolutionResult.rejectionReason) {
+          emitEvent("evolution", `Evolution rejected for "${programName}": ${evolutionResult.rejectionReason.slice(0, 150)}`, "info", { program: programName });
+        }
+      }
+    } catch (e) {
+      console.error("[agent-runtime] Evolution pipeline failed:", e);
+    }
+
+    try {
+      const rolledBack = await checkAutoRollback(llmConfig);
+      if (rolledBack) {
+        emitEvent("evolution", `Auto-rollback triggered for "${programName}" — success rate below threshold`, "info", { program: programName });
+      }
+    } catch (e) {
+      console.error("[agent-runtime] Auto-rollback check failed:", e);
+    }
 
     const nextRun = parseSchedule(prog.schedule, ps.lastRun, prog.cronExpression);
     ps.nextRun = nextRun;
@@ -987,6 +1079,34 @@ async function tick(): Promise<void> {
     await tickCitrixKeepalive();
   } catch (err) {
     // silent
+  }
+
+  try {
+    await tickObservationConsolidation();
+  } catch (err) {
+    console.error("[agent-runtime] Observation consolidation tick error:", err);
+  }
+}
+
+let lastObservationConsolidation = 0;
+const OBSERVATION_CONSOLIDATION_INTERVAL_MS = 30 * 60 * 1000;
+
+async function tickObservationConsolidation(): Promise<void> {
+  const now = Date.now();
+  if (now - lastObservationConsolidation < OBSERVATION_CONSOLIDATION_INTERVAL_MS) return;
+  lastObservationConsolidation = now;
+
+  try {
+    const unconsolidated = await storage.getUnconsolidatedObservations(1);
+    if (unconsolidated.length === 0) return;
+
+    const llmConfig = await getLLMConfig();
+    const consolidated = await consolidateObservations(llmConfig);
+    if (consolidated > 0) {
+      emitEvent("evolution", `Periodic consolidation: ${consolidated} observations consolidated`, "info", {});
+    }
+  } catch (e) {
+    console.error("[agent-runtime] Periodic observation consolidation failed:", e);
   }
 }
 
@@ -1220,6 +1340,12 @@ export function initRuntime(): void {
 
   migratePersistentContextToMemories().catch(e => console.error("[agent-runtime] migration error:", e));
 
+  initQdrant().then(ok => {
+    console.log(`[agent-runtime] Qdrant: ${ok ? "connected" : "unavailable (using Postgres fallback)"}`);
+  }).catch(() => {
+    console.log("[agent-runtime] Qdrant: unavailable (using Postgres fallback)");
+  });
+
   onResume((paused: PausedExecution) => {
     if (paused.type === "program" && paused.programName) {
       const name = paused.programName;
@@ -1243,7 +1369,7 @@ export function initRuntime(): void {
   });
 }
 
-async function extractRecipeDirectives(output: string, programName: string): Promise<void> {
+async function extractRecipeDirectives(output: string, programName: string, llmConfig: LLMConfig): Promise<void> {
   const recipePattern = /^RECIPE:\s+(\S+)\s+"([^"]+)"(?:\s+--schedule\s+(\S+))?(?:\s+--desc\s+(.+))?$/gm;
   let match: RegExpExecArray | null;
 
@@ -1254,7 +1380,7 @@ async function extractRecipeDirectives(output: string, programName: string): Pro
       const existing = await storage.getRecipeByName(name);
       if (existing) continue;
 
-      await storage.createProposal({
+      await createGateValidatedProposal({
         section: "RECIPES",
         targetName: name,
         reason: `Auto-proposed by program "${programName}"\nCommand: ${command}${schedule ? `\nSchedule: ${schedule}` : ""}${description ? `\nDescription: ${description}` : ""}`,
@@ -1262,7 +1388,7 @@ async function extractRecipeDirectives(output: string, programName: string): Pro
         proposedContent: JSON.stringify({ name, command, schedule: schedule || null, description: description || `Auto-generated from ${programName}` }),
         source: "agent",
         proposalType: "change",
-      });
+      }, llmConfig);
 
       emitEvent("agent-runtime", `Recipe proposed by ${programName}: "${name}" = ${command}`, "take-over-point", { program: programName, metadata: { recipe: name, command } });
     } catch (e) {

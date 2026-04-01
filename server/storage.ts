@@ -22,6 +22,10 @@ import {
   type KiddoFoodLog, type InsertKiddoFoodLog, kiddoFoodLog,
   type NightlyRecommendation, type InsertNightlyRecommendation, nightlyRecommendations,
   type AgentMemory, type InsertAgentMemory, agentMemories,
+  type EvolutionVersion, type InsertEvolutionVersion, evolutionVersions,
+  type GoldenSuiteEntry, type InsertGoldenSuite, goldenSuite,
+  type EvolutionObservation, type InsertEvolutionObservation, evolutionObservations,
+  type JudgeCost, type InsertJudgeCost, judgeCostTracking,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
@@ -169,6 +173,29 @@ export interface IStorage {
   searchMemories(query: string, limit?: number, programName?: string): Promise<AgentMemory[]>;
   getAllMemories(limit?: number): Promise<AgentMemory[]>;
   consolidateOldMemories(beforeDate: Date, decayAmount?: number): Promise<number>;
+  updateMemoryQdrantId(id: number, qdrantId: string): Promise<void>;
+  searchMemoriesBySubject(subject: string, programName: string | null): Promise<AgentMemory[]>;
+  expireMemory(id: number, validUntil: Date): Promise<void>;
+  getMemoriesByIds(ids: number[]): Promise<AgentMemory[]>;
+
+  getEvolutionVersions(limit?: number): Promise<EvolutionVersion[]>;
+  getEvolutionVersion(id: number): Promise<EvolutionVersion | undefined>;
+  getLatestEvolutionVersion(): Promise<EvolutionVersion | undefined>;
+  createEvolutionVersion(v: InsertEvolutionVersion): Promise<EvolutionVersion>;
+  updateEvolutionVersionStatus(id: number, status: string): Promise<EvolutionVersion | undefined>;
+
+  getGoldenSuite(): Promise<GoldenSuiteEntry[]>;
+  createGoldenSuiteEntry(e: InsertGoldenSuite): Promise<GoldenSuiteEntry>;
+  deleteGoldenSuiteEntry(id: number): Promise<void>;
+
+  getEvolutionObservations(limit?: number): Promise<EvolutionObservation[]>;
+  getUnconsolidatedObservations(limit?: number): Promise<EvolutionObservation[]>;
+  createEvolutionObservation(o: InsertEvolutionObservation): Promise<EvolutionObservation>;
+  markObservationConsolidated(id: number): Promise<void>;
+
+  getJudgeCostsForDate(date: string): Promise<JudgeCost[]>;
+  createJudgeCost(c: InsertJudgeCost): Promise<JudgeCost>;
+  getJudgeCostSummary(): Promise<JudgeCost[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -773,6 +800,115 @@ export class DatabaseStorage implements IStorage {
       .where(and(lte(agentMemories.lastAccessed, beforeDate), gte(agentMemories.relevanceScore, 1)))
       .returning();
     return result.length;
+  }
+
+  async updateMemoryQdrantId(id: number, qdrantId: string): Promise<void> {
+    await db.update(agentMemories).set({ qdrantId }).where(eq(agentMemories.id, id));
+  }
+
+  async searchMemoriesBySubject(subject: string, programName: string | null): Promise<AgentMemory[]> {
+    const conditions = [eq(agentMemories.subject, subject)];
+    if (programName) {
+      conditions.push(or(eq(agentMemories.programName, programName), sql`${agentMemories.programName} IS NULL`)!);
+    }
+    conditions.push(or(sql`${agentMemories.validUntil} IS NULL`, gte(agentMemories.validUntil, new Date()))!);
+    return db.select().from(agentMemories)
+      .where(and(...conditions))
+      .orderBy(desc(agentMemories.createdAt));
+  }
+
+  async expireMemory(id: number, validUntil: Date): Promise<void> {
+    await db.update(agentMemories).set({ validUntil }).where(eq(agentMemories.id, id));
+  }
+
+  async getMemoriesByIds(ids: number[]): Promise<AgentMemory[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(agentMemories)
+      .where(sql`${agentMemories.id} = ANY(${ids})`);
+  }
+
+  async getEvolutionVersions(limit = 20): Promise<EvolutionVersion[]> {
+    return db.select().from(evolutionVersions)
+      .orderBy(desc(evolutionVersions.version))
+      .limit(limit);
+  }
+
+  async getEvolutionVersion(id: number): Promise<EvolutionVersion | undefined> {
+    const [v] = await db.select().from(evolutionVersions).where(eq(evolutionVersions.id, id));
+    return v;
+  }
+
+  async getLatestEvolutionVersion(): Promise<EvolutionVersion | undefined> {
+    const [v] = await db.select().from(evolutionVersions)
+      .where(eq(evolutionVersions.status, "active"))
+      .orderBy(desc(evolutionVersions.version))
+      .limit(1);
+    return v;
+  }
+
+  async createEvolutionVersion(v: InsertEvolutionVersion): Promise<EvolutionVersion> {
+    const [created] = await db.insert(evolutionVersions).values(v).returning();
+    return created;
+  }
+
+  async updateEvolutionVersionStatus(id: number, status: string): Promise<EvolutionVersion | undefined> {
+    const setData: Record<string, unknown> = { status };
+    if (status === "rolled_back") {
+      setData.rolledBackAt = new Date();
+    }
+    const [updated] = await db.update(evolutionVersions).set(setData).where(eq(evolutionVersions.id, id)).returning();
+    return updated;
+  }
+
+  async getGoldenSuite(): Promise<GoldenSuiteEntry[]> {
+    return db.select().from(goldenSuite).orderBy(desc(goldenSuite.createdAt));
+  }
+
+  async createGoldenSuiteEntry(e: InsertGoldenSuite): Promise<GoldenSuiteEntry> {
+    const [created] = await db.insert(goldenSuite).values(e).returning();
+    return created;
+  }
+
+  async deleteGoldenSuiteEntry(id: number): Promise<void> {
+    await db.delete(goldenSuite).where(eq(goldenSuite.id, id));
+  }
+
+  async getEvolutionObservations(limit = 50): Promise<EvolutionObservation[]> {
+    return db.select().from(evolutionObservations)
+      .orderBy(desc(evolutionObservations.createdAt))
+      .limit(limit);
+  }
+
+  async getUnconsolidatedObservations(limit = 50): Promise<EvolutionObservation[]> {
+    return db.select().from(evolutionObservations)
+      .where(eq(evolutionObservations.consolidated, false))
+      .orderBy(asc(evolutionObservations.createdAt))
+      .limit(limit);
+  }
+
+  async createEvolutionObservation(o: InsertEvolutionObservation): Promise<EvolutionObservation> {
+    const [created] = await db.insert(evolutionObservations).values(o).returning();
+    return created;
+  }
+
+  async markObservationConsolidated(id: number): Promise<void> {
+    await db.update(evolutionObservations).set({ consolidated: true }).where(eq(evolutionObservations.id, id));
+  }
+
+  async getJudgeCostsForDate(date: string): Promise<JudgeCost[]> {
+    return db.select().from(judgeCostTracking)
+      .where(eq(judgeCostTracking.date, date));
+  }
+
+  async createJudgeCost(c: InsertJudgeCost): Promise<JudgeCost> {
+    const [created] = await db.insert(judgeCostTracking).values(c).returning();
+    return created;
+  }
+
+  async getJudgeCostSummary(): Promise<JudgeCost[]> {
+    return db.select().from(judgeCostTracking)
+      .orderBy(desc(judgeCostTracking.createdAt))
+      .limit(100);
   }
 }
 

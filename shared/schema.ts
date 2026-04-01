@@ -206,6 +206,7 @@ export const openclawProposals = pgTable("openclaw_proposals", {
   source: text("source").notNull().default("agent"),
   warnings: text("warnings"),
   proposalType: text("proposal_type").notNull().default("change"),
+  evolutionVersion: integer("evolution_version"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at"),
 });
@@ -219,6 +220,7 @@ export const insertOpenclawProposalSchema = z.object({
   source: z.string().default("agent"),
   warnings: z.string().nullable().optional(),
   proposalType: z.string().default("change"),
+  evolutionVersion: z.number().nullable().optional(),
 });
 export type InsertOpenclawProposal = z.infer<typeof insertOpenclawProposalSchema>;
 export type OpenclawProposal = typeof openclawProposals.$inferSelect;
@@ -573,14 +575,104 @@ export const agentMemories = pgTable("agent_memories", {
   accessCount: integer("access_count").notNull().default(0),
   lastAccessed: timestamp("last_accessed").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  subject: text("subject"),
+  validUntil: timestamp("valid_until"),
+  qdrantId: text("qdrant_id"),
 });
 
 export const insertAgentMemorySchema = z.object({
   programName: z.string().nullable().optional(),
   content: z.string(),
-  memoryType: z.enum(["fact", "outcome", "observation"]).default("fact"),
+  memoryType: z.enum(["fact", "outcome", "observation", "episodic", "semantic", "procedural"]).default("fact"),
   tags: z.array(z.string()).default([]),
   relevanceScore: z.number().default(100),
+  subject: z.string().nullable().optional(),
+  validUntil: z.date().nullable().optional(),
+  qdrantId: z.string().nullable().optional(),
 });
 export type InsertAgentMemory = z.infer<typeof insertAgentMemorySchema>;
 export type AgentMemory = typeof agentMemories.$inferSelect;
+
+export const evolutionVersions = pgTable("evolution_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  version: integer("version").notNull(),
+  changes: jsonb("changes").$type<Record<string, { before: string; after: string }>>().default({}),
+  gateResults: jsonb("gate_results").$type<Record<string, { passed: boolean; reason: string }>>().default({}),
+  metricsSnapshot: jsonb("metrics_snapshot").$type<{ successRate: number; correctionRate: number; evolutionCount: number; rollbackCount: number }>(),
+  appliedAt: timestamp("applied_at").notNull().defaultNow(),
+  rolledBackAt: timestamp("rolled_back_at"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertEvolutionVersionSchema = z.object({
+  version: z.number(),
+  changes: z.record(z.string(), z.object({ before: z.string(), after: z.string() })).default({}),
+  gateResults: z.record(z.string(), z.object({ passed: z.boolean(), reason: z.string() })).default({}),
+  metricsSnapshot: z.object({
+    successRate: z.number(),
+    correctionRate: z.number(),
+    totalRuns: z.number(),
+    successfulRuns: z.number(),
+    corrections: z.number(),
+  }).nullable().optional(),
+  status: z.string().default("active"),
+});
+export type InsertEvolutionVersion = z.infer<typeof insertEvolutionVersionSchema>;
+export type EvolutionVersion = typeof evolutionVersions.$inferSelect;
+
+export const goldenSuite = pgTable("golden_suite", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  input: text("input").notNull(),
+  expectedOutput: text("expected_output").notNull(),
+  source: text("source").notNull().default("correction"),
+  programName: text("program_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertGoldenSuiteSchema = z.object({
+  input: z.string(),
+  expectedOutput: z.string(),
+  source: z.string().default("correction"),
+  programName: z.string().nullable().optional(),
+});
+export type InsertGoldenSuite = z.infer<typeof insertGoldenSuiteSchema>;
+export type GoldenSuiteEntry = typeof goldenSuite.$inferSelect;
+
+export const evolutionObservations = pgTable("evolution_observations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  programName: text("program_name"),
+  observationType: text("observation_type").notNull().default("general"),
+  content: text("content").notNull(),
+  consolidated: boolean("consolidated").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertEvolutionObservationSchema = z.object({
+  programName: z.string().nullable().optional(),
+  observationType: z.string().default("general"),
+  content: z.string(),
+  consolidated: z.boolean().default(false),
+});
+export type InsertEvolutionObservation = z.infer<typeof insertEvolutionObservationSchema>;
+export type EvolutionObservation = typeof evolutionObservations.$inferSelect;
+
+export const judgeCostTracking = pgTable("judge_cost_tracking", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  judgeType: text("judge_type").notNull(),
+  model: text("model").notNull(),
+  tokensUsed: integer("tokens_used").notNull().default(0),
+  estimatedCost: text("estimated_cost").notNull().default("0"),
+  date: text("date").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertJudgeCostSchema = z.object({
+  judgeType: z.string(),
+  model: z.string(),
+  tokensUsed: z.number().default(0),
+  estimatedCost: z.string().default("0"),
+  date: z.string(),
+});
+export type InsertJudgeCost = z.infer<typeof insertJudgeCostSchema>;
+export type JudgeCost = typeof judgeCostTracking.$inferSelect;

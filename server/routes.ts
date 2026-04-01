@@ -2418,5 +2418,114 @@ export async function registerRoutes(
     res.json(updated);
   });
 
+  app.get("/api/evolution/state", async (_req, res) => {
+    try {
+      const { getEvolutionState } = await import("./evolution-engine");
+      const state = await getEvolutionState();
+      res.json(state);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/evolution/versions", async (req, res) => {
+    const limit = parseInt(req.query.limit as string || "20", 10);
+    const versions = await storage.getEvolutionVersions(limit);
+    res.json(versions);
+  });
+
+  app.get("/api/evolution/versions/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const version = await storage.getEvolutionVersion(id);
+    if (!version) return res.status(404).json({ message: "Version not found" });
+    res.json(version);
+  });
+
+  app.post("/api/evolution/versions/:id/rollback", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { rollbackVersion } = await import("./evolution-engine");
+      const success = await rollbackVersion(id);
+      if (!success) return res.status(404).json({ message: "Version not found or no changes to rollback" });
+      res.json({ rolledBack: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/evolution/golden-suite", async (_req, res) => {
+    const suite = await storage.getGoldenSuite();
+    res.json(suite);
+  });
+
+  app.post("/api/evolution/golden-suite", async (req, res) => {
+    const { input, expectedOutput, programName } = req.body;
+    if (!input || !expectedOutput) return res.status(400).json({ message: "input and expectedOutput required" });
+    try {
+      const { addToGoldenSuite } = await import("./evolution-engine");
+      await addToGoldenSuite(input, expectedOutput, programName);
+      res.status(201).json({ added: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/evolution/golden-suite/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deleteGoldenSuiteEntry(id);
+    res.status(204).send();
+  });
+
+  app.get("/api/evolution/observations", async (req, res) => {
+    const limit = parseInt(req.query.limit as string || "50", 10);
+    const observations = await storage.getEvolutionObservations(limit);
+    res.json(observations);
+  });
+
+  app.post("/api/evolution/consolidate", async (_req, res) => {
+    try {
+      const { consolidateObservations } = await import("./evolution-engine");
+      const llmConfig = { defaultModel: "anthropic/claude-3.5-sonnet", aliases: {}, routing: {} };
+      const count = await consolidateObservations(llmConfig);
+      res.json({ consolidated: count });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/evolution/judge-costs", async (_req, res) => {
+    try {
+      const { getJudgeCostSummary } = await import("./llm-judges");
+      const summary = await getJudgeCostSummary();
+      res.json(summary);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/memory/migrate-to-qdrant", async (_req, res) => {
+    try {
+      const { migratePostgresMemoriesToQdrant } = await import("./memory-consolidation");
+      const result = await migratePostgresMemoriesToQdrant();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/memory/search", async (req, res) => {
+    const query = req.query.q as string;
+    const limit = parseInt(req.query.limit as string || "20", 10);
+    const programName = req.query.program as string | undefined;
+    if (!query) return res.status(400).json({ message: "q parameter required" });
+    try {
+      const { searchMemoriesHybrid } = await import("./memory-consolidation");
+      const results = await searchMemoriesHybrid(query, limit, programName);
+      res.json(results);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   return httpServer;
 }

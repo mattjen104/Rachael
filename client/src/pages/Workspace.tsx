@@ -11,6 +11,7 @@ import TranscriptsView from "@/components/views/TranscriptsView";
 import CockpitView from "@/components/views/CockpitView";
 import SnowView from "@/components/views/SnowView";
 import VoiceView from "@/components/views/VoiceView";
+import EvolutionPanel from "@/components/views/EvolutionPanel";
 import Minibuffer from "@/components/editor/Minibuffer";
 import InlineEditor from "@/components/editor/InlineEditor";
 import NotificationToast from "@/components/layout/NotificationToast";
@@ -189,11 +190,12 @@ export default function Workspace() {
         return;
       }
 
-      if (e.key >= "1" && e.key <= "9" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (((e.key >= "1" && e.key <= "9") || e.key === "0") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (viewMode === "cockpit") return;
         e.preventDefault();
-        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader", "transcripts", "cockpit", "snow", "voice"];
-        setViewMode(views[parseInt(e.key) - 1]);
+        const views: ViewMode[] = ["agenda", "tree", "programs", "results", "reader", "transcripts", "cockpit", "snow", "voice", "evolution"];
+        const idx = e.key === "0" ? 9 : parseInt(e.key) - 1;
+        if (idx < views.length) setViewMode(views[idx]);
         return;
       }
     };
@@ -215,6 +217,7 @@ export default function Workspace() {
         {viewMode === "cockpit" && <CockpitView />}
         {viewMode === "snow" && <SnowView />}
         {viewMode === "voice" && <VoiceView />}
+        {viewMode === "evolution" && <EvolutionPanel />}
       </div>
 
       <NotificationToast />

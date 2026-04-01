@@ -36,7 +36,7 @@ All data lives in Postgres tables:
 - **Takeover Points** — When agent hits an "approval" action, it emits a takeover point visible in Cockpit stream; human can confirm, reject, or take over
 - **Audit Log** — All actions (human and agent) logged with actor, action, permission level, result, timestamp
 
-## Nine-View Architecture
+## Ten-View Architecture
 
 Narrow tab bar at top, full-height views below:
 
@@ -112,11 +112,66 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - Human can approve via `proposals approve <id>` — recipe is auto-created from the proposal data
 - Also available: `propose-recipe <name> "<command>"` CLI command for manual proposals
 
+## Phantom Memory & Evolution Engine
+
+### Memory Backend (server/qdrant-client.ts, server/memory-consolidation.ts)
+- **Qdrant hybrid search**: Dense cosine (Ollama embeddings) + BM25 sparse (FNV-1a hash-based TF) via Reciprocal Rank Fusion
+- **Three memory types**: episodic (events/observations), semantic (facts with subject+contradiction detection), procedural (strategies/procedures)
+- **Graceful fallback**: All operations work via Postgres when Qdrant is unreachable
+- **Contradiction detection**: New semantic facts with same subject automatically expire old ones (valid_until timestamp)
+- **Token-budget-aware context**: Prioritizes facts > episodes > procedures when building memory context
+- **Migration endpoint**: `POST /api/memory/migrate-to-qdrant` migrates existing Postgres memories to Qdrant
+- **Hybrid search API**: `GET /api/memory/search?q=<query>&limit=N&program=<name>`
+
+### Memory Consolidation (server/memory-consolidation.ts)
+- After each program run, LLM consolidation judge extracts episodes, semantic facts, and procedures from session data
+- Falls back to heuristic extraction (correction patterns, preference patterns, procedure detection) when judges unavailable or cost-capped
+
+### Self-Evolution Engine (server/evolution-engine.ts)
+- **6-step pipeline**: observe → critique → deltas → 5-gate validation → apply → rollback
+- Observations extracted by LLM judge (regex fallback), critiqued, then translated to config deltas
+- Config files: `server/evolution-config/` — constitution.md (immutable), persona.md, user-profile.md, domain-knowledge.md, strategies/ (task-patterns, tool-preferences, error-recovery)
+- **5 validation gates**: constitution (triple-Sonnet, minority veto), regression (golden suite check), size (line limits), drift (Jaccard similarity), safety (dangerous pattern + triple-Sonnet)
+- **Auto-rollback**: If 7-day success rate drops below threshold after evolution, previous version auto-restored
+- **Golden suite**: Successful corrections promoted to test cases; capped at configurable max size
+- **PROPOSE: enhancement**: Agent proposals routed through gates before storage; rejected proposals stored with explanations
+- **Version history**: Full change/gate/metrics tracking in `evolution_versions` table
+
+### LLM Judges (server/llm-judges.ts)
+- Triple-Sonnet with minority veto (constitution + safety gates) — fail-closed on errors
+- Cascaded Haiku→Sonnet (regression gate) — Haiku first, Sonnet override if rejected
+- Observation extraction, quality assessment, consolidation judges
+- Daily cost cap (JUDGE_DAILY_COST_CAP env var), all costs tracked in `judge_cost_tracking` table
+
+### Evolution UI (10:EVO)
+- Version history with gate results, metrics snapshots, rollback controls
+- Metrics dashboard: success rate, correction rate, run count, golden suite size
+- Judge cost tracking with breakdown by type
+- Observation viewer with consolidation trigger
+- Qdrant migration button
+
+### Database Tables
+- `agent_memories` — Extended with `subject`, `valid_until`, `qdrant_id` columns
+- `evolution_versions` — Version tracking with changes, gate results, metrics snapshots
+- `golden_suite` — Regression test cases from successful corrections
+- `evolution_observations` — Extracted observations with consolidation tracking
+- `judge_cost_tracking` — Daily LLM judge cost tracking by type
+
+### Environment Variables
+- `QDRANT_URL` — Qdrant instance URL (default: http://localhost:6333)
+- `OLLAMA_URL` — Ollama embedding server URL (default: http://localhost:11434)
+- `EMBEDDING_MODEL` — Ollama model for embeddings (default: nomic-embed-text)
+- `QDRANT_TIMEOUT_MS` — Qdrant request timeout (default: 5000)
+- `JUDGE_DAILY_COST_CAP` — Daily cost cap for LLM judges (default: 5.0)
+- `MAX_GOLDEN_SUITE_SIZE` — Max golden suite entries (default: 100)
+- `DRIFT_THRESHOLD` — Jaccard similarity threshold for drift gate (default: 0.4)
+- `SUCCESS_RATE_ROLLBACK_THRESHOLD` — Auto-rollback trigger (default: 0.6)
+
 ## Memory Commands (server/cli-engine.ts)
 
 - `memory show` — View all persistent memory
 - `memory store <text>` — Append timestamped entry to persistent context
-- `memory search <query>` — Search persistent context + agent results
+- `memory search <query>` — Search persistent context + agent results (now uses hybrid search)
 - `memory recent [N]` — Last N memory entries
 - `memory forget <pattern>` — Remove matching entries
 
