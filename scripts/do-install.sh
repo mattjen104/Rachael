@@ -5,12 +5,12 @@ set -euo pipefail
 # Rachael — DigitalOcean Installer
 # =============================================================================
 # Run as root on a fresh Ubuntu 22.04+ droplet:
-#   curl -sL https://raw.githubusercontent.com/mattjen104/orgcloud-space/main/scripts/do-install.sh | bash
+#   curl -sL https://raw.githubusercontent.com/mattjen104/Rachael/main/scripts/do-install.sh | bash
 # Or clone first and run:
-#   git clone https://github.com/mattjen104/orgcloud-space.git && cd orgcloud-space && bash scripts/do-install.sh
+#   git clone https://github.com/mattjen104/Rachael.git && cd Rachael && bash scripts/do-install.sh
 # =============================================================================
 
-REPO_URL="https://github.com/mattjen104/orgcloud-space.git"
+REPO_URL="https://github.com/mattjen104/Rachael.git"
 APP_DIR="/opt/rachael"
 APP_USER="rachael"
 NODE_VERSION="20"
