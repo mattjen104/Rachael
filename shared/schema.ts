@@ -31,7 +31,7 @@ export const insertProgramSchema = z.object({
   config: z.record(z.string(), z.string()).default({}),
   enabled: z.boolean().default(true),
   costTier: z.string().default("cheap"),
-  computeTarget: z.enum(["local", "phantom", "auto"]).default("local"),
+  computeTarget: z.enum(["local"]).default("local"),
   tags: z.array(z.string()).default([]),
 });
 export type InsertProgram = z.infer<typeof insertProgramSchema>;

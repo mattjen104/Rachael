@@ -77,17 +77,6 @@ export default function ProgramsView({ onNavigate }: ProgramsViewProps) {
       <div className="px-2 py-1 text-muted-foreground border-b border-border sticky top-0 bg-background z-10 flex justify-between items-center">
         <span>PROGRAMS ({programs.length})</span>
         <div className="flex items-center gap-2">
-          {runtime?.phantom?.configured && (
-            <span
-              data-testid="phantom-status-badge"
-              className={`text-[10px] px-1 rounded ${
-                runtime.phantom.available ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"
-              }`}
-              title={runtime.phantom.error || (runtime.phantom.available ? `Phantom OK${runtime.phantom.latencyMs ? ` (${runtime.phantom.latencyMs}ms)` : ""}` : "Phantom unavailable")}
-            >
-              ⚡ {runtime.phantom.available ? "PHM" : "PHM ✗"}
-            </span>
-          )}
           <span
             data-testid="runtime-toggle"
             className={`cursor-pointer ${runtime?.active ? "text-green-500" : "text-red-500"}`}

@@ -33,7 +33,7 @@ saveBtn.addEventListener("click", async () => {
     const healthRes = await fetch(`${url}/api/bridge/ext/health`, { method: "GET" });
     if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
     const healthData = await healthRes.json();
-    if (!healthData.ok || healthData.service !== "orgcloud-bridge") {
+    if (!healthData.ok || healthData.service !== "rachael-bridge") {
       throw new Error("Not a Rachael server");
     }
   } catch (e) {

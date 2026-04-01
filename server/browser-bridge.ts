@@ -11,7 +11,7 @@ function safeEvaluate<T>(page: Page, fn: (...args: any[]) => T, ...args: any[]):
   return page.evaluate(wrapper);
 }
 
-const USER_DATA_DIR = path.join(os.homedir(), ".orgcloud", "browser-data");
+const USER_DATA_DIR = path.join(os.homedir(), ".rachael", "browser-data");
 const STORAGE_STATE_PATH = path.join(USER_DATA_DIR, "storage-state.json");
 
 let browser: Browser | null = null;

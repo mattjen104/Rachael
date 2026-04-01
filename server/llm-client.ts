@@ -181,8 +181,8 @@ export async function executeLLM(
         {
           "HTTP-Referer": process.env.REPLIT_DOMAINS
             ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-            : "https://orgcloud.replit.app",
-          "X-Title": "OrgCloud Space",
+            : "https://rachael.replit.app",
+          "X-Title": "Rachael",
         },
         controller.signal
       );

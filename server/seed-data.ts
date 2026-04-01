@@ -195,7 +195,7 @@ async function execute() {
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
 const FILTER_MODEL = "anthropic/claude-sonnet-4";
 const SYNTH_MODEL = "anthropic/claude-sonnet-4";
-const UA = "OrgCloud/2.0 (research-radar; +https://orgcloud.dev)";
+const UA = "Rachael/2.0 (research-radar)";
 const SERVER_BASE = "http://localhost:" + (__bridgePort || "5000");
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
@@ -823,7 +823,7 @@ async function fetchTrending(lang: string): Promise<{name: string; url: string; 
   const repos: {name: string; url: string; lang: string}[] = [];
   try {
     const r = await fetch("https://github.com/trending/" + encodeURIComponent(lang) + "?since=" + SINCE, {
-      headers: { "User-Agent": "OrgCloud/1.0", "Accept": "text/html" }
+      headers: { "User-Agent": "Rachael/1.0", "Accept": "text/html" }
     });
     const html = await r.text();
     const re = new RegExp("href=\\"/([^/]+/[^/\\"]+)\\"[^>]*>[\\\\s\\\\S]*?</a>", "g");
@@ -1130,7 +1130,7 @@ const SERIES = (props.SERIES_IDS || "DGS10,DGS2,FEDFUNDS").split(",").map(s => s
 async function fetchSeries(id: string): Promise<{id: string; value: string; date: string}> {
   try {
     const r = await fetch("https://fred.stlouisfed.org/series/" + id, {
-      headers: { "User-Agent": "OrgCloud/1.0" }
+      headers: { "User-Agent": "Rachael/1.0" }
     });
     const html = await r.text();
     const valM = html.match(new RegExp("class=\\"[^\\"]*obs-value[^\\"]*\\"[^>]*>([^<]+)"));
@@ -1168,7 +1168,7 @@ async function scrapeRegion(region: string): Promise<FreeItem[]> {
   const items: FreeItem[] = [];
   try {
     const url = "https://" + region + ".craigslist.org/search/zip?format=rss&sort=date";
-    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const r = await smartFetch(url, { headers: { "User-Agent": "Rachael/1.0" } });
     const xml = await r.text();
     if (xml.includes("blocked") && xml.length < 500) return items;
     const entries = xml.split("<item ");
@@ -1217,11 +1217,11 @@ async function fetchFilings(ticker: string): Promise<Array<{ticker: string; type
   const filings: Array<{ticker: string; type: string; date: string; url: string}> = [];
   try {
     const r = await fetch("https://efts.sec.gov/LATEST/search-index?q=%22" + ticker + "%22&dateRange=custom&startdt=" + new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0] + "&enddt=" + new Date().toISOString().split("T")[0] + "&forms=" + FILING_TYPES.join(","), {
-      headers: { "User-Agent": "OrgCloud research@orgcloud.dev", "Accept": "application/json" }
+      headers: { "User-Agent": "Rachael research-agent", "Accept": "application/json" }
     });
     if (!r.ok) {
       const r2 = await fetch("https://efts.sec.gov/LATEST/search-index?q=%22" + ticker + "%22&forms=" + FILING_TYPES.join(","), {
-        headers: { "User-Agent": "OrgCloud research@orgcloud.dev", "Accept": "application/json" }
+        headers: { "User-Agent": "Rachael research-agent", "Accept": "application/json" }
       });
       if (!r2.ok) return filings;
       const d2 = await r2.json();
@@ -1270,7 +1270,7 @@ async function search(region: string, query: string): Promise<Vehicle[]> {
   const vehicles: Vehicle[] = [];
   try {
     const url = "https://" + region + ".craigslist.org/search/cta?format=rss&query=" + encodeURIComponent(query) + "&max_price=" + MAX_PRICE + "&sort=date";
-    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const r = await smartFetch(url, { headers: { "User-Agent": "Rachael/1.0" } });
     const xml = await r.text();
     if (xml.includes("blocked") && xml.length < 500) return vehicles;
     const items = xml.split("<item ");
@@ -1324,7 +1324,7 @@ async function scrapeHUD(): Promise<ForeclosureListing[]> {
   const listings: ForeclosureListing[] = [];
   try {
     const url = "https://www.hudhomestore.gov/Listing/PropertySearchResult?sState=" + STATE + "&sZipCode=" + ZIP_CODES[0] + "&iMiles=25&sPropType=SFR&iPageSize=20&sLanguage=ENGLISH";
-    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0", "Accept": "text/html" } });
+    const r = await smartFetch(url, { headers: { "User-Agent": "Rachael/1.0", "Accept": "text/html" } });
     const html = await r.text();
     const rows = html.split("PropertyDetail");
     for (let i = 1; i < rows.length && listings.length < 15; i++) {
@@ -1347,7 +1347,7 @@ async function scrapeHomePath(): Promise<ForeclosureListing[]> {
   const listings: ForeclosureListing[] = [];
   try {
     const url = "https://www.homepath.fanniemae.com/cg-bin/fhmse/se_search?state=" + STATE + "&zip=" + ZIP_CODES[0] + "&radius=25&format=json";
-    const r = await smartFetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const r = await smartFetch(url, { headers: { "User-Agent": "Rachael/1.0" } });
     if (r.ok) {
       const text = await r.text();
       const addresses = text.match(/"address"\\s*:\\s*"([^"]+)"/g) || [];
@@ -1398,7 +1398,7 @@ async function searchArchive(term: string): Promise<ArchiveResult[]> {
   try {
     const q = encodeURIComponent(term);
     const url = "https://archive.org/advancedsearch.php?q=" + q + "&fl[]=identifier&fl[]=title&fl[]=year&fl[]=mediatype&rows=25&output=json&sort[]=downloads+desc";
-    const r = await fetch(url, { headers: { "User-Agent": "OrgCloud/1.0" } });
+    const r = await fetch(url, { headers: { "User-Agent": "Rachael/1.0" } });
     const data = await r.json();
     const docs = data?.response?.docs || [];
     const spelling = term.toLowerCase().includes("berenstein") ? "berenstein" : "berenstain";
@@ -1420,7 +1420,7 @@ async function searchWikipedia(): Promise<string[]> {
   const mentions: string[] = [];
   try {
     const r = await fetch("https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=berenstain+OR+berenstein+bears+spelling&srnamespace=0&srlimit=10&format=json", {
-      headers: { "User-Agent": "OrgCloud/1.0" }
+      headers: { "User-Agent": "Rachael/1.0" }
     });
     const data = await r.json();
     for (const item of data?.query?.search || []) {
@@ -1548,7 +1548,7 @@ async function execute() {
 
   try {
     const ntfyBody = digestText.slice(0, 3900);
-    await fetch("https://ntfy.sh/orgcloud-standup", {
+    await fetch("https://ntfy.sh/" + (process.env.NTFY_CHANNEL || "rachael-standup"), {
       method: "POST",
       headers: {
         "Title": "Meal Plan " + today,
@@ -1903,7 +1903,7 @@ async function execute() {
   const htmlFilename = "digest-" + dateStamp + ".html";
 
   const { saveBriefingAndNotify } = await import(__projectRoot + "/server/briefing-utils");
-  const { htmlUrl, notifyStatus } = await saveBriefingAndNotify(briefingText, htmlFilename, "OrgCloud Daily Brief - " + dateStamp, "Daily Intelligence Brief", dateStamp, "overnight-digest", "briefcase,radio", BASE, hdrs);
+  const { htmlUrl, notifyStatus } = await saveBriefingAndNotify(briefingText, htmlFilename, "Rachael Daily Brief - " + dateStamp, "Daily Intelligence Brief", dateStamp, "overnight-digest", "briefcase,radio", BASE, hdrs);
 
   const summaryLines: string[] = [];
   summaryLines.push("=== DAILY INTELLIGENCE BRIEF ===");
@@ -2512,10 +2512,10 @@ async function execute() {
 
   const skillSeedInputs = [
     {
-      name: "orgcloud-sync",
-      description: "Sync config with OrgCloud and propose self-modifications",
+      name: "rachael-sync",
+      description: "Sync config and propose self-modifications",
       type: "skill",
-      content: "Handles uploading, downloading, and proposing changes between the local OpenClaw instance and the OrgCloud control plane.",
+      content: "Handles uploading, downloading, and proposing changes for the local Rachael instance.",
     },
     {
       name: "composable-programs",
@@ -2549,7 +2549,7 @@ async function execute() {
         { name: "Personal finance & deals", keywords: ["finance", "budget", "deal", "sale", "discount", "investment", "savings", "frugal", "craigslist", "estate-sale", "foreclosure", "fed-rate", "interest-rate"], priority: 3 },
         { name: "Meal planning & nutrition", keywords: ["meal", "recipe", "nutrition", "cooking", "food", "diet", "grocery", "pantry", "kiddo", "toddler-food"], priority: 3 },
       ]), category: "goals" },
-      { key: "notify_channel", value: process.env.NTFY_CHANNEL || "orgcloud-standup", category: "notifications" },
+      { key: "notify_channel", value: process.env.NTFY_CHANNEL || "rachael-standup", category: "notifications" },
       { key: "notify_email", value: process.env.NOTIFY_EMAIL || "", category: "notifications" },
     ];
 

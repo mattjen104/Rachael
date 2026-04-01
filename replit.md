@@ -29,16 +29,21 @@ All data lives in Postgres tables:
 - `radar_seen_items` — Cross-run deduplication store for research radar (content hashes, 7-day window)
 - `radar_engagement` — User engagement tracking for research radar briefing items (url, source, title)
 
-## Phantom Compute Bridge
+## Secure Credential Collection
 
-- **Phantom Client** (`server/phantom-client.ts`) — Routes compute-heavy tasks to a remote Phantom instance on DigitalOcean
-- Programs have a `computeTarget` field: `"local"` (default, direct LLM), `"phantom"` (route to DO instance), or `"auto"` (auto-detect from instructions)
-- Auto-detection scans instructions for keywords like "install", "docker", "bash", "build", "deploy"
-- Graceful fallback: if Phantom is unreachable, tasks fall back to direct LLM calls with a warning
-- Health monitoring: periodic health checks against DO instance, status exposed via `/api/phantom/health` and `/api/phantom/status`
-- Cost tracking: Phantom-reported costs are tracked alongside LLM token costs
-- Control Bus integration: Phantom-bound tasks go through the same pause/resume and permission checks
-- Environment vars: `PHANTOM_URL` (webhook base URL), `PHANTOM_API_KEY` (auth token)
+- **Secrets Module** (`server/secrets.ts`) — AES-256-GCM encrypted secret storage with magic-link collection forms
+- `collect-secrets` CLI command creates a time-limited (10 min) magic-link URL for credential collection
+- Magic-link forms are public (no auth required); submitted secrets are encrypted at rest
+- Secrets stored via `agent_configs` table with `category: "secrets"` prefix
+- API: `POST /api/secrets/request` (create request), `GET /api/secrets/form/:id` (public form), `POST /api/secrets/submit` (public submit), `GET /api/secrets/:name` (auth required)
+- Response body logging suppressed for all `/api/secrets` routes
+
+## Local Compute
+
+- **Local Compute** (`server/local-compute.ts`) — Shell execution for self-hosted instances
+- Enabled by `RACHAEL_SELF_HOSTED=true` environment variable
+- Programs can use `LOCAL_CAPABILITIES` config for capability declarations
+- `sh` CLI command for direct shell access on self-hosted instances
 
 ## Control Bus & Permissions
 
@@ -123,7 +128,7 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - Human can approve via `proposals approve <id>` — recipe is auto-created from the proposal data
 - Also available: `propose-recipe <name> "<command>"` CLI command for manual proposals
 
-## Phantom Memory & Evolution Engine
+## Memory & Evolution Engine
 
 ### Memory Backend (server/qdrant-client.ts, server/memory-consolidation.ts)
 - **Qdrant hybrid search**: Dense cosine (Ollama embeddings) + BM25 sparse (FNV-1a hash-based TF) via Reciprocal Rank Fusion
@@ -240,7 +245,7 @@ Data flows into the KB as markdown notes stored in the `notes` table:
 - **Recipe scheduler**: `tickRecipes()` runs inside the main tick loop, checks recipes with cron schedules and executes them automatically
 - **Default model**: `openrouter/anthropic/claude-sonnet-4` everywhere (NO free models for real work)
 - **Research Radar** (research-radar, program id=3): Self-improving closed-loop research system. Dual-source Reddit strategy: Channel A fetches user's authenticated front page via bridge (`/best.json`), Channel B scrapes configurable niche subs. Cross-run dedup via content hashing (7-day window, `radar_seen_items` table). Engagement tracking records user clicks on briefing links (`radar_engagement` table), feeding topics/sources back into the filter prompt. Source quality scoring tracks signal-to-noise per source with exponential smoothing, persisted to program config across runs. Dynamic config: niche subs, interest areas, thresholds, enabled sources, Lemmy communities, ArXiv category stored in program `config` JSON (not hardcoded). Score threshold filters low-scoring niche Reddit items. Structured proposals (`add-source`, `drop-source`, `add-interest`, `adjust-threshold`) auto-generated and applied on approval. Radar Health footer in briefings. Two-stage Claude Sonnet pipeline. Code stored in DB; update via `scripts/fix-radar-code.ts`. API endpoints: `/api/radar/seen`, `/api/radar/engagement` (all require auth). Inline scripts use `__apiKey` for authenticated API calls.
-- **overnight-digest** (program id=18): Goal-oriented daily intelligence brief. Fetches `user_goals` from config, parses research-radar structured data, keyword-matches items to goals. LLM prompt produces 6-section brief (Goal Progress, Deep Reads, Developing Threads, Agent Activity, Action Items, System Health). Generates CRT-themed wiki-style HTML to `.briefings/digest-YYYY-MM-DD.html` (served at `/briefings/:filename`). Auto-sends via ntfy (channel=`orgcloud-standup`, email forwarding) with truncated summary + Click link to full brief. DeepSeek→Claude cascade. Cron `0 13 * * *` (6am PT).
+- **overnight-digest** (program id=18): Goal-oriented daily intelligence brief. Fetches `user_goals` from config, parses research-radar structured data, keyword-matches items to goals. LLM prompt produces 6-section brief (Goal Progress, Deep Reads, Developing Threads, Agent Activity, Action Items, System Health). Generates CRT-themed wiki-style HTML to `.briefings/digest-YYYY-MM-DD.html` (served at `/briefings/:filename`). Auto-sends via ntfy (channel=`rachael-standup`, email forwarding) with truncated summary + Click link to full brief. DeepSeek→Claude cascade. Cron `0 13 * * *` (6am PT).
 - **User goals**: Stored in `agent_config` key `user_goals` as JSON array `[{name, keywords[], priority}]`. 5 goals seeded. CLI: `goals list`, `goals add <name>`, `goals remove <name>`. Used by overnight-digest for goal-matched research.
 - **Morning briefing** (standup CLI): HTML email with navigable index + NPR-style voice synthesis (Microsoft Edge neural TTS via `msedge-tts`). Cron `0 13 * * *` (6am PT). Voice script generated by LLM, synthesized to MP3, attached to ntfy notification.
 - **Auto-start**: Runtime defaults to `active: true`, control mode defaults to `agent` — no manual activation needed after server restart
@@ -310,7 +315,7 @@ Database-driven scraping system replacing hardcoded adapters:
 ## TV Mode (Google TV Integration)
 
 - Activate via `?tv=1` query parameter or `toggle-tv-mode` command in palette
-- Persisted in localStorage (`orgcloud-tv-mode`), auto-activates on subsequent loads
+- Persisted in localStorage (`rachael-tv-mode`), auto-activates on subsequent loads
 - Scales base font to 26px, increases all padding/spacing/targets for 10-foot viewing
 - Removes 500px max-width constraint, fills full 1920px TV screen
 - Sidebar shows full view names (Agenda, Tree, etc.) instead of 3-letter abbreviations
@@ -342,7 +347,7 @@ Database-driven scraping system replacing hardcoded adapters:
 - **Desktop Python script** that explores Hyperspace menus via screenshots + Claude vision (OpenRouter)
 - Uses `pyautogui` + `pygetwindow` to find/screenshot Hyperspace windows, `Pillow` for image processing
 - Sends screenshots to Claude via OpenRouter to identify menu items, buttons, tabs, activities
-- Posts discovered activities to OrgCloud API: `POST /api/epic/activities` (auth: Bearer bridge token)
+- Posts discovered activities to Rachael API: `POST /api/epic/activities` (auth: Bearer bridge token)
 - Activities stored in `agent_config` as `epic_activities_sup`, `epic_activities_poc`, `epic_activities_tst`
 - TreeView displays activities under EPIC (Activities) section, grouped by environment then category
 - CLI commands: `epic activities <env>`, `epic clear <env>`, `epic scan` (setup instructions)
@@ -350,7 +355,7 @@ Database-driven scraping system replacing hardcoded adapters:
 
 ## Epic Desktop Agent (tools/epic_agent.py)
 
-- **Background Python agent** that polls OrgCloud for commands and drives Hyperspace via Claude vision
+- **Background Python agent** that polls Rachael for commands and drives Hyperspace via Claude vision
 - Requires env vars: `OPENROUTER_API_KEY`, `BRIDGE_TOKEN` (no hardcoded defaults)
 - Commands: navigate (go to activity), screenshot (capture screen), click (click element by name), scan (full menu scan)
 - Agent heartbeat/polling every 3s; status endpoint shows connected/disconnected with 60s staleness timeout

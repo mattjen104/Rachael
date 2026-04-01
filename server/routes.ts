@@ -10,7 +10,6 @@ import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
 import { getRuntimeState, toggleRuntime, manualTrigger, getRuntimeBudgetStatus } from "./agent-runtime";
 import { getModelRoster, getModelQuality, loadRosterFromConfig } from "./model-router";
-import { getPhantomHealth, checkPhantomHealth, isPhantomConfigured, startPhantomHealthMonitor } from "./phantom-client";
 import { getBridgeStatus, launchBrowser, closeBrowser, startLoginSession, getPageContent, openPage, getPageText } from "./browser-bridge";
 import { openOutlook, openTeams, getOutlookEmails, readOutlookEmail, getTeamsChats, readTeamsChat } from "./app-adapters";
 import { executeNavigationPath, bestEffortExtract, matchProfileToUrl, type UrlValidator } from "./universal-scraper";
@@ -21,6 +20,7 @@ import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
 import { insertRecipeSchema } from "@shared/schema";
 import { claimJobsTracked, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken, recordHeartbeat, isExtensionConnected, smartFetch } from "./bridge-queue";
 import { startRecordingSession, addAudioChunk, stopRecordingSession, getActiveRecordingSessions, transcribeUploadedAudio } from "./transcription-service";
+import { createSecretRequest, getSecretRequest, validateAndSubmitSecrets, getSecret, listSecretNames, renderSecretForm, type SecretField } from "./secrets";
 import { CAPTURE_TEMPLATES } from "@shared/capture-templates";
 import multer from "multer";
 
@@ -133,36 +133,6 @@ export async function registerRoutes(
       res.status(500).json({ message: e.message });
     }
   });
-
-  app.get("/api/phantom/health", async (_req, res) => {
-    const health = getPhantomHealth();
-    res.json({
-      configured: isPhantomConfigured(),
-      ...health,
-    });
-  });
-
-  app.post("/api/phantom/health/check", async (_req, res) => {
-    const health = await checkPhantomHealth();
-    res.json({
-      configured: isPhantomConfigured(),
-      ...health,
-    });
-  });
-
-  app.get("/api/phantom/status", async (_req, res) => {
-    const health = getPhantomHealth();
-    res.json({
-      configured: isPhantomConfigured(),
-      available: health.available,
-      lastChecked: health.lastChecked,
-      latencyMs: health.latencyMs,
-      version: health.version,
-      error: health.error,
-    });
-  });
-
-  startPhantomHealthMonitor();
 
   app.get("/api/skills", async (_req, res) => {
     const allSkills = await storage.getSkills();
@@ -2028,7 +1998,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/bridge/ext/health", (_req, res) => {
-    res.json({ ok: true, service: "orgcloud-bridge" });
+    res.json({ ok: true, service: "rachael-bridge" });
   });
 
   app.get("/api/bridge/ext/queue", bridgeAuth, (_req, res) => {
@@ -2556,6 +2526,46 @@ export async function registerRoutes(
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
+  });
+
+  app.get("/api/secrets/form/:requestId", async (req, res) => {
+    const { requestId } = req.params;
+    const token = req.query.token as string;
+    if (!requestId || !token) return res.status(400).send("Missing requestId or token");
+    const request = await getSecretRequest(requestId);
+    if (!request) return res.status(404).send("Request not found");
+    if (request.status !== "pending") return res.status(410).send("This form has already been used or expired.");
+    if (new Date() > new Date(request.expiresAt)) return res.status(410).send("This form has expired.");
+    res.setHeader("Content-Type", "text/html");
+    res.send(renderSecretForm(request, requestId, token));
+  });
+
+  app.post("/api/secrets/submit", async (req, res) => {
+    const { requestId, token, secrets: secretValues } = req.body;
+    if (!requestId || !token || !secretValues) return res.status(400).json({ success: false, error: "Missing fields" });
+    const result = await validateAndSubmitSecrets(requestId, token, secretValues);
+    res.json(result);
+  });
+
+  app.get("/api/secrets/:name", async (req, res) => {
+    const value = await getSecret(req.params.name);
+    if (value === null) return res.status(404).json({ message: "Secret not found" });
+    res.json({ name: req.params.name, value });
+  });
+
+  app.get("/api/secrets", async (_req, res) => {
+    const names = await listSecretNames();
+    res.json(names);
+  });
+
+  app.post("/api/secrets/request", async (req, res) => {
+    const { fields, purpose } = req.body;
+    if (!fields || !Array.isArray(fields) || !purpose) return res.status(400).json({ message: "fields (array) and purpose (string) required" });
+    const { requestId, magicToken } = await createSecretRequest(fields as SecretField[], purpose);
+    const protocol = req.headers["x-forwarded-proto"] || "http";
+    const host = req.headers["host"] || "localhost:5000";
+    const formUrl = `${protocol}://${host}/api/secrets/form/${requestId}?token=${encodeURIComponent(magicToken)}`;
+    res.json({ requestId, formUrl });
   });
 
   return httpServer;

@@ -276,7 +276,7 @@ export async function searchBySubject(collection: string, subject: string): Prom
 }
 
 export function getCollectionName(type: MemoryCollectionType): string {
-  return `orgcloud_memory_${type}`;
+  return `rachael_memory_${type}`;
 }
 
 export async function initQdrant(): Promise<boolean> {

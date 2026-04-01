@@ -1096,6 +1096,43 @@ function registerBuiltinCommands(): void {
     return parts.length > 0 ? ok(parts.join(String.fromCharCode(10))) : ok("(no output)");
   });
 
+  registerCommand("collect-secrets", "Request credentials via secure magic-link form", "collect-secrets <purpose> --field <name:label:type> [--field ...]", async (args) => {
+    const secretsMod = await import("./secrets");
+    const purpose = args.filter(a => a !== "--field" && !a.includes(":")).join(" ");
+    if (!purpose) return fail("[error] collect-secrets: purpose text required");
+    const fields: Array<{ name: string; label: string; type: "password" | "text"; required: boolean }> = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--field" && args[i + 1]) {
+        const parts = args[i + 1].split(":");
+        if (parts.length < 2) return fail("[error] collect-secrets: --field format is name:label[:type]. type is password|text (default: password)");
+        fields.push({
+          name: parts[0],
+          label: parts[1],
+          type: (parts[2] === "text" ? "text" : "password") as "password" | "text",
+          required: true,
+        });
+        i++;
+      }
+    }
+    if (fields.length === 0) return fail("[error] collect-secrets: at least one --field required");
+    const { requestId, magicToken } = await secretsMod.createSecretRequest(fields, purpose);
+    const base = process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : process.env.RACHAEL_DOMAIN
+        ? `https://${process.env.RACHAEL_DOMAIN}`
+        : "http://localhost:5000";
+    const formUrl = `${base}/api/secrets/form/${requestId}?token=${encodeURIComponent(magicToken)}`;
+    const lines = [
+      "Secret collection request created.",
+      `Request ID: ${requestId}`,
+      `Expires: 10 minutes`,
+      "",
+      "Share this link with the user:",
+      formUrl,
+    ];
+    return ok(lines.join(String.fromCharCode(10)));
+  });
+
   registerCommand("cat", "Read a result or stdin", "cat [result <id>] [note <id>]", async (args, stdin) => {
     if (stdin && args.length === 0) return ok(stdin);
     const sub = args[0];
@@ -2174,7 +2211,7 @@ ${fullHtml}`;
     const email = emailConfig?.value;
 
     if (!channel && !webhook) {
-      return fail("[error] notify: no notification target configured.\nSet up ntfy.sh:  config set notify_channel orgcloud-briefing\nOr a webhook:    config set notify_webhook https://your-webhook-url\nFor email:       config set notify_email you@example.com\n\nFor ntfy.sh: install the ntfy app on your phone, subscribe to the same channel name.");
+      return fail("[error] notify: no notification target configured." + String.fromCharCode(10) + "Set up ntfy.sh:  config set notify_channel rachael-briefing" + String.fromCharCode(10) + "Or a webhook:    config set notify_webhook https://your-webhook-url" + String.fromCharCode(10) + "For email:       config set notify_email you@example.com" + String.fromCharCode(10) + String.fromCharCode(10) + "For ntfy.sh: install the ntfy app on your phone, subscribe to the same channel name.");
     }
 
     const results: string[] = [];
