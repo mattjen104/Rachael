@@ -3,7 +3,11 @@ import math
 import time
 from typing import Any, Optional
 
-from nc_widgets import BRAILLE_BLOCKS, braille_bar, braille_sparkline_str, MEDIA_CAPS
+from nc_widgets import (
+    BRAILLE_BLOCKS, braille_bar, braille_sparkline_str,
+    braille_heatmap_row, quadrant_bar, activity_density_grid,
+    MEDIA_CAPS,
+)
 
 STATUS_CHARS = {
     "running": "\u27F3", "queued": "\u2026", "error": "\u2717",
@@ -11,6 +15,10 @@ STATUS_CHARS = {
 }
 VIEWS = ["agenda", "tree", "programs", "results", "reader",
          "cockpit", "snow", "evolution", "transcripts", "voice"]
+SNOW_TABS = ["my-queue", "team", "aging"]
+EVO_TABS = ["overview", "versions", "golden", "observations", "costs"]
+TREE_SECTIONS = ["RUNTIME", "BUDGET", "PROGRAMS", "TASKS", "NOTES",
+                 "SKILLS", "INBOX", "READER", "JOURNAL"]
 
 
 def wrap_text(text: str, width: int) -> list:
@@ -23,6 +31,20 @@ def wrap_text(text: str, width: int) -> list:
             raw_line = raw_line[width:]
         lines.append(raw_line)
     return lines
+
+
+class TreeState:
+    def __init__(self):
+        self.collapsed: set = set()
+
+    def toggle(self, section: str):
+        if section in self.collapsed:
+            self.collapsed.discard(section)
+        else:
+            self.collapsed.add(section)
+
+    def is_collapsed(self, section: str) -> bool:
+        return section in self.collapsed
 
 
 def build_agenda_items(data_cache: dict) -> list:
@@ -46,7 +68,7 @@ def build_agenda_items(data_cache: dict) -> list:
     return items
 
 
-def build_tree_items(data_cache: dict) -> list:
+def build_tree_items(data_cache: dict, tree_state: TreeState) -> list:
     items = []
     runtime = data_cache.get("runtime", {})
     budget = data_cache.get("budget", {})
@@ -56,44 +78,130 @@ def build_tree_items(data_cache: dict) -> list:
     skills_list = data_cache.get("skills", [])
     captures = data_cache.get("captures", [])
     reader = data_cache.get("reader", [])
+    journal = data_cache.get("journal", [])
 
-    items.append({"_section": "RUNTIME"})
-    items.append({"_tree": "status", "_label": "Active: " + str(runtime.get("active", False))})
+    sections = [
+        ("RUNTIME", _tree_runtime_children, [runtime]),
+        ("BUDGET", _tree_budget_children, [budget]),
+        ("PROGRAMS (" + str(len(programs)) + ")", _tree_list_children, [programs]),
+        ("TASKS (" + str(len(tasks_list)) + ")", _tree_list_children, [tasks_list]),
+        ("NOTES (" + str(len(notes)) + ")", _tree_list_children, [notes]),
+        ("SKILLS (" + str(len(skills_list)) + ")", _tree_list_children, [skills_list]),
+        ("INBOX (" + str(len(captures)) + ")", _tree_list_children, [captures]),
+        ("READER (" + str(len(reader)) + ")", _tree_list_children, [reader]),
+        ("JOURNAL (" + str(len(journal)) + ")", _tree_list_children, [journal]),
+    ]
+
+    for sec_label, child_fn, args in sections:
+        sec_key = sec_label.split(" ")[0]
+        collapsed = tree_state.is_collapsed(sec_key)
+        caret = "\u25B8" if collapsed else "\u25BE"
+        items.append({"_section": caret + " " + sec_label, "_sec_key": sec_key, "_collapsible": True})
+        if not collapsed:
+            children = child_fn(*args)
+            items.extend(children)
+
+    return items
+
+
+def _tree_runtime_children(runtime: dict) -> list:
+    children = []
+    children.append({"_tree": "status", "_label": "Active: " + str(runtime.get("active", False)),
+                     "_depth": 1})
     rp = runtime.get("programs", [])
     running_count = sum(1 for p in rp if p.get("status") == "running")
-    items.append({"_tree": "status", "_label": "Running: " + str(running_count) + "/" + str(len(rp))})
+    children.append({"_tree": "status", "_label": "Running: " + str(running_count) + "/" + str(len(rp)),
+                     "_depth": 1})
+    for p in rp:
+        status = p.get("status", "?")
+        sc = STATUS_CHARS.get(status, "\u25CB")
+        children.append({"_tree": "program", "_label": "  " + sc + " " + p.get("name", "?") +
+                         " [" + status + "]", "_depth": 2})
+    return children
 
-    items.append({"_section": "BUDGET"})
+
+def _tree_budget_children(budget: dict) -> list:
+    children = []
     spent = budget.get("spent", 0)
     cap = budget.get("dailyCap", 0)
     remaining = max(0, cap - spent)
     pct = min(1.0, spent / cap) if cap > 0 else 0
     bar = braille_bar(pct, 1.0, 8)
-    items.append({"_tree": "budget", "_label": bar + " $" + str(round(spent, 4)) + "/$" + str(round(cap, 2))})
-    items.append({"_tree": "budget", "_label": "Remaining: $" + str(round(remaining, 4))})
+    children.append({"_tree": "budget", "_label": bar + " $" + str(round(spent, 4)) + "/$" + str(round(cap, 2)),
+                     "_depth": 1, "_progbar_val": pct})
+    children.append({"_tree": "budget", "_label": "Remaining: $" + str(round(remaining, 4)),
+                     "_depth": 1})
+    qbar = quadrant_bar(pct, 1.0, 10)
+    children.append({"_tree": "budget", "_label": "Burn: " + qbar, "_depth": 1})
+    return children
 
-    items.append({"_section": "PROGRAMS (" + str(len(programs)) + ")"})
-    for p in programs:
-        items.append(p)
-    items.append({"_section": "TASKS (" + str(len(tasks_list)) + ")"})
-    for t in tasks_list:
-        items.append(t)
-    items.append({"_section": "NOTES (" + str(len(notes)) + ")"})
-    for n_item in notes:
-        items.append(n_item)
-    items.append({"_section": "SKILLS (" + str(len(skills_list)) + ")"})
-    for s in skills_list:
-        items.append(s)
-    items.append({"_section": "INBOX (" + str(len(captures)) + ")"})
-    for c in captures:
-        items.append(c)
-    items.append({"_section": "READER (" + str(len(reader)) + ")"})
-    for r in reader:
-        items.append(r)
+
+def _tree_list_children(item_list: list) -> list:
+    children = []
+    for item in item_list:
+        if isinstance(item, dict):
+            item["_depth"] = 1
+        children.append(item)
+    return children
+
+
+def build_snow_items(data_cache: dict, snow_tab: str, api) -> list:
+    items = []
+    tab_labels = {"my-queue": "MY QUEUE", "team": "TEAM WORKLOAD", "aging": "AGING / SLA RISK"}
+    tab_line = ""
+    for t in SNOW_TABS:
+        if t == snow_tab:
+            tab_line += " [" + tab_labels[t] + "]"
+        else:
+            tab_line += "  " + tab_labels[t]
+    items.append({"_section": tab_line})
+
+    proposals = data_cache.get("proposals", [])
+
+    if snow_tab == "my-queue":
+        pending = [p for p in proposals if p.get("status", "").lower() in ("pending", "open", "new")]
+        items.append({"_section": "PENDING (" + str(len(pending)) + ")"})
+        items.extend(pending)
+        in_progress = [p for p in proposals if p.get("status", "").lower() in ("in_progress", "active")]
+        if in_progress:
+            items.append({"_section": "IN PROGRESS (" + str(len(in_progress)) + ")"})
+            items.extend(in_progress)
+    elif snow_tab == "team":
+        by_assignee: dict = {}
+        for p in proposals:
+            assignee = p.get("assignee", p.get("owner", "unassigned"))
+            by_assignee.setdefault(assignee, []).append(p)
+        for assignee, group in sorted(by_assignee.items()):
+            load_bar = braille_bar(len(group), max(10, len(proposals)), 5)
+            items.append({"_section": assignee.upper() + " " + load_bar + " (" + str(len(group)) + ")"})
+            items.extend(group)
+    elif snow_tab == "aging":
+        now = time.time() * 1000
+        aged = []
+        for p in proposals:
+            created = p.get("createdAt", 0)
+            if isinstance(created, str):
+                try:
+                    created = datetime.datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp() * 1000
+                except ValueError:
+                    created = 0
+            age_hours = (now - created) / 3600000 if created else 0
+            p_copy = dict(p)
+            p_copy["_age_hours"] = age_hours
+            aged.append(p_copy)
+        aged.sort(key=lambda x: x.get("_age_hours", 0), reverse=True)
+        sla_risk = [a for a in aged if a.get("_age_hours", 0) > 24]
+        normal = [a for a in aged if a.get("_age_hours", 0) <= 24]
+        if sla_risk:
+            items.append({"_section": "SLA RISK >24h (" + str(len(sla_risk)) + ")"})
+            items.extend(sla_risk)
+        items.append({"_section": "NORMAL (" + str(len(normal)) + ")"})
+        items.extend(normal)
+
     return items
 
 
-def build_evolution_items(api, evo_tab: str) -> list:
+def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
     items = []
     try:
         state = api.evolution_state()
@@ -106,14 +214,35 @@ def build_evolution_items(api, evo_tab: str) -> list:
         m = state.get("metrics", {})
         sr = m.get("successRate", 0)
         sr_bar = braille_bar(sr, 1.0, 6)
-        items.append({"_tree": "metric", "_label": "Success: " + sr_bar + " " + str(round(sr * 100, 1)) + "%"})
-        items.append({"_tree": "metric", "_label": "Total Runs (7d): " + str(m.get("totalRuns", 0))})
-        items.append({"_tree": "metric", "_label": "Successful: " + str(m.get("successfulRuns", 0))})
         cr = m.get("correctionRate", 0)
         cr_bar = braille_bar(cr, 1.0, 6)
-        items.append({"_tree": "metric", "_label": "Corrections: " + cr_bar + " " + str(round(cr * 100, 1)) + "%"})
+        total_runs = m.get("totalRuns", 0)
+        successful = m.get("successfulRuns", 0)
+        tokens_used = m.get("tokensUsed", 0)
+
+        items.append({"_tree": "metric", "_label": "Success: " + sr_bar + " " + str(round(sr * 100, 1)) + "%",
+                      "_metric_key": "success", "_metric_val": sr})
+        items.append({"_tree": "metric", "_label": "Total Runs (7d): " + str(total_runs)})
+        items.append({"_tree": "metric", "_label": "Successful: " + str(successful)})
+        items.append({"_tree": "metric", "_label": "Corrections: " + cr_bar + " " + str(round(cr * 100, 1)) + "%",
+                      "_metric_key": "corrections", "_metric_val": cr})
         items.append({"_tree": "metric", "_label": "Golden Suite: " + str(state.get("goldenSuiteSize", 0)) + " cases"})
         items.append({"_tree": "metric", "_label": "Pending Obs: " + str(state.get("unconsolidatedObservations", 0))})
+        if tokens_used:
+            tok_bar = braille_bar(tokens_used, max(tokens_used, 100000), 8)
+            items.append({"_tree": "metric", "_label": "Tokens: " + tok_bar + " " + str(tokens_used),
+                          "_metric_key": "tokens", "_metric_val": tokens_used})
+
+        versions = state.get("recentVersions", [])
+        if versions:
+            sr_history = [v.get("metricsSnapshot", {}).get("successRate", 0) for v in versions]
+            items.append({"_tree": "metric", "_label": "Success Trend: " + braille_sparkline_str(sr_history)})
+            cr_history = [v.get("metricsSnapshot", {}).get("correctionRate", 0) for v in versions]
+            items.append({"_tree": "metric", "_label": "Correction Trend: " + braille_sparkline_str(cr_history)})
+            burn_history = [v.get("metricsSnapshot", {}).get("totalRuns", 0) for v in versions]
+            items.append({"_tree": "density", "_label": "Activity: " + braille_heatmap_row(
+                [float(x) for x in burn_history], max(1, max(burn_history) if burn_history else 1), 15)})
+
     elif evo_tab == "versions":
         versions = state.get("recentVersions", [])
         items.append({"_section": "VERSIONS (" + str(len(versions)) + ")"})
@@ -137,19 +266,28 @@ def build_evolution_items(api, evo_tab: str) -> list:
         try:
             costs = api.evolution_judge_costs()
             items.append({"_section": "JUDGE COSTS"})
-            items.append({"_tree": "cost", "_label": "Today: $" + str(round(costs.get("today", 0), 4))})
-            items.append({"_tree": "cost", "_label": "Cap: $" + str(round(costs.get("cap", 0), 2))})
-            items.append({"_tree": "cost", "_label": "Remaining: $" + str(round(costs.get("remaining", 0), 4))})
+            today_cost = costs.get("today", 0)
+            cap_cost = costs.get("cap", 0)
+            remaining = costs.get("remaining", 0)
+            items.append({"_tree": "cost", "_label": "Today: $" + str(round(today_cost, 4)) +
+                          "  " + braille_bar(today_cost, max(cap_cost, 0.01), 6)})
+            items.append({"_tree": "cost", "_label": "Cap: $" + str(round(cap_cost, 2))})
+            items.append({"_tree": "cost", "_label": "Remaining: $" + str(round(remaining, 4))})
             breakdown = costs.get("breakdown", {})
-            for judge, cost in breakdown.items():
-                items.append({"_tree": "cost", "_label": "  " + judge + ": $" + str(round(cost, 4))})
+            if breakdown:
+                max_cost = max(breakdown.values()) if breakdown.values() else 1
+                for judge, cost in breakdown.items():
+                    bar = braille_bar(cost, max(max_cost, 0.001), 5)
+                    items.append({"_tree": "cost", "_label": "  " + judge + ": " + bar + " $" + str(round(cost, 4))})
         except Exception:
             items.append({"_tree": "error", "_label": "Failed to load judge costs"})
     return items
 
 
 def current_items(view: str, data_cache: dict, api, evo_tab: str,
-                  reader_reading_id, cockpit_events) -> list:
+                  reader_reading_id, cockpit_events,
+                  tree_state: Optional[TreeState] = None,
+                  snow_tab: str = "my-queue") -> list:
     if view == "programs":
         return data_cache.get("programs", [])
     elif view == "results":
@@ -163,22 +301,25 @@ def current_items(view: str, data_cache: dict, api, evo_tab: str,
     elif view == "cockpit":
         return list(cockpit_events)
     elif view == "tree":
-        return build_tree_items(data_cache)
+        ts = tree_state or TreeState()
+        return build_tree_items(data_cache, ts)
     elif view == "evolution":
-        return build_evolution_items(api, evo_tab)
+        return build_evolution_items(api, evo_tab, data_cache)
     elif view == "snow":
-        return data_cache.get("proposals", [])
+        return build_snow_items(data_cache, snow_tab, api)
     elif view == "transcripts":
         return data_cache.get("transcripts", [])
     elif view == "voice":
         media = []
         for cap_name, available in MEDIA_CAPS.items():
-            media.append({"_tree": "info", "_label": cap_name + ": " + ("YES" if available else "NO")})
+            status_icon = "\u2713" if available else "\u2717"
+            media.append({"_tree": "info", "_label": status_icon + " " + cap_name +
+                          ": " + ("supported" if available else "not detected")})
         return [
-            {"_tree": "info", "_label": "Voice commands available via CLI"},
+            {"_section": "VOICE COMMANDS"},
             {"_tree": "info", "_label": "Use X to open CLI prompt"},
             {"_tree": "info", "_label": "Commands: briefing, status, capture <text>"},
-            {"_section": "TERMINAL MEDIA SUPPORT"},
+            {"_section": "TERMINAL MEDIA CAPABILITIES"},
         ] + media
     return []
 
@@ -191,7 +332,9 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
         dashes = max(0, max_width - len(label) - 4)
         return "\u2500\u2500 " + label + " " + "\u2500" * dashes
     if "_tree" in item:
-        return "  " + item.get("_label", "")
+        depth = item.get("_depth", 0)
+        indent = "  " * (depth + 1)
+        return indent + item.get("_label", "")
 
     if view == "programs" or (view == "tree" and item.get("name") and item.get("instructions")):
         enabled = item.get("enabled", False)
@@ -227,12 +370,16 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
         prog = (item.get("programName", "") or "")[:12]
         summary = item.get("summary", "") or ""
         metric = item.get("metric")
+        tokens = item.get("tokensUsed", 0)
         line = sc + " " + prog.ljust(13) + summary
         if metric and isinstance(metric, (int, float)):
             bar = braille_bar(metric, max_val=1.0, width=5)
             line += " " + bar + " " + str(round(metric, 2))
         elif metric:
             line += " =" + str(metric)
+        if tokens and isinstance(tokens, (int, float)):
+            tok_bar = quadrant_bar(tokens, 4000, 3)
+            line += " " + tok_bar
         return line[:max_width]
 
     elif view == "reader":
@@ -283,7 +430,10 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
             v = "v" + str(item.get("version", 0))
             st = item.get("status", "")
             applied = str(item.get("appliedAt", ""))[:10]
-            return (v + " [" + st + "] " + applied)[:max_width]
+            ms = item.get("metricsSnapshot", {})
+            sr = ms.get("successRate", 0) if ms else 0
+            sr_mini = braille_bar(sr, 1.0, 3) if sr else ""
+            return (v + " [" + st + "] " + sr_mini + " " + applied)[:max_width]
         if item.get("input"):
             return ("\u25CF " + str(item.get("input", ""))[:max_width - 2])[:max_width]
         if item.get("observationType"):
@@ -295,7 +445,14 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
     elif view == "snow":
         title = item.get("title", item.get("description", "?"))
         status = item.get("status", "")
-        return (status[:8].ljust(9) + str(title))[:max_width]
+        age_h = item.get("_age_hours")
+        age_str = ""
+        if age_h is not None:
+            if age_h > 48:
+                age_str = " \u26A0" + str(int(age_h)) + "h"
+            elif age_h > 24:
+                age_str = " " + str(int(age_h)) + "h"
+        return (status[:8].ljust(9) + str(title) + age_str)[:max_width]
 
     elif view == "transcripts":
         platform = item.get("platform", "?")
@@ -352,6 +509,10 @@ def format_detail(item: dict, max_width: int, view: str, data_cache: dict) -> li
         if tokens and isinstance(tokens, (int, float)):
             tok_bar = braille_bar(tokens, max_val=4000, width=8)
             lines.append("tokens: " + tok_bar + " " + str(tokens))
+        cost = item.get("cost", 0)
+        if cost and isinstance(cost, (int, float)):
+            cost_bar = quadrant_bar(cost, 0.1, 6)
+            lines.append("cost:   " + cost_bar + " $" + str(round(cost, 6)))
         created = item.get("createdAt", "")
         if created:
             lines.append("time: " + str(created))
@@ -362,7 +523,10 @@ def format_detail(item: dict, max_width: int, view: str, data_cache: dict) -> li
         lines.append("URL: " + str(item.get("url", "")))
         has_media = any(MEDIA_CAPS.values())
         if has_media:
-            lines.append("[Media rendering: " + ", ".join(k for k, v in MEDIA_CAPS.items() if v) + "]")
+            supported = [k for k, v in MEDIA_CAPS.items() if v]
+            lines.append("[Media: " + ", ".join(supported) + "]")
+        else:
+            lines.append("[No media rendering available]")
         text = item.get("extractedText", "")
         lines.extend(wrap_text(str(text)[:400], max_width))
 
@@ -388,9 +552,12 @@ def format_detail(item: dict, max_width: int, view: str, data_cache: dict) -> li
         if ms:
             sr = ms.get("successRate", 0)
             cr = ms.get("correctionRate", 0)
-            lines.append("Success: " + braille_bar(sr, 1.0, 6) + " " + str(round(sr * 100, 1)) + "%")
-            lines.append("Correction: " + braille_bar(cr, 1.0, 6) + " " + str(round(cr * 100, 1)) + "%")
+            lines.append("Success:    " + braille_bar(sr, 1.0, 8) + " " + str(round(sr * 100, 1)) + "%")
+            lines.append("Correction: " + braille_bar(cr, 1.0, 8) + " " + str(round(cr * 100, 1)) + "%")
             lines.append("Runs: " + str(ms.get("totalRuns", 0)))
+            tokens = ms.get("tokensUsed", 0)
+            if tokens:
+                lines.append("Tokens:     " + braille_bar(tokens, 100000, 8) + " " + str(tokens))
         gr = item.get("gateResults", {})
         if gr and isinstance(gr, dict):
             for gate, result in gr.items():
@@ -404,13 +571,16 @@ def format_detail(item: dict, max_width: int, view: str, data_cache: dict) -> li
             for field, diff in changes.items():
                 if isinstance(diff, dict):
                     lines.append(field + ": " + str(diff.get("before", ""))[:30] +
-                                 " -> " + str(diff.get("after", ""))[:30])
+                                 " \u2192 " + str(diff.get("after", ""))[:30])
 
     elif view == "snow":
         desc = item.get("description", "")
         if desc:
             lines.extend(wrap_text(str(desc)[:400], max_width))
-        lines.append("[a:accept  x:reject]")
+        age_h = item.get("_age_hours")
+        if age_h is not None:
+            lines.append("Age: " + str(int(age_h)) + "h")
+        lines.append("[a:accept  x:reject  Tab:switch-tab]")
 
     elif view == "transcripts":
         raw = item.get("rawText", "")

@@ -269,6 +269,15 @@ class RachaelAPI:
     def reject_proposal(self, pid: int) -> dict:
         return self._call(self._post("/api/proposals/" + str(pid) + "/reject")) or {}
 
+    def journal(self, limit: int = 50) -> list:
+        return self._call(self._get("/api/journal", params={"limit": str(limit)})) or []
+
+    def journal_entry(self, jid: int) -> dict:
+        return self._call(self._get("/api/journal/" + str(jid))) or {}
+
+    def create_journal_entry(self, data: dict) -> dict:
+        return self._call(self._post("/api/journal", body=data)) or {}
+
     def transcripts(self) -> list:
         return self._call(self._get("/api/transcripts")) or []
 

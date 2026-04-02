@@ -13,10 +13,11 @@ from themes import ThemeEngine, THEMES, THEME_NAMES
 from nc_widgets import (
     NC_AVAILABLE, NcPlane, Notcurses, NcInput, WidgetManager,
     check_capabilities, detect_media_capabilities, braille_sparkline_str,
-    NCALPHA_BLEND, BRAILLE_BLOCKS,
+    NCALPHA_BLEND, BRAILLE_BLOCKS, MEDIA_CAPS,
 )
 from tui_views import (
-    VIEWS, STATUS_CHARS, current_items, format_item, format_detail,
+    VIEWS, SNOW_TABS, EVO_TABS, STATUS_CHARS, TreeState,
+    current_items, format_item, format_detail,
     build_evolution_items, wrap_text,
 )
 
@@ -40,7 +41,8 @@ MENU_SECTIONS = [
               ("SNOW", "7"), ("Evolution", "8"), ("Transcripts", "9"),
               ("Voice", "0")]),
     ("Actions", [("Capture", "c"), ("CLI", "X"), ("Search", "/"),
-                 ("Toggle Runtime", "R"), ("Theme", "T"), ("Multi-select Programs", "M")]),
+                 ("Toggle Runtime", "R"), ("Theme", "T"),
+                 ("Multi-select Programs", "M"), ("Journal", "J")]),
     ("Help", [("Keybindings", "?")]),
 ]
 PALETTE_ALL_CMDS = [
@@ -65,8 +67,20 @@ PALETTE_ALL_CMDS = [
     ("refresh", "Refresh all data"),
     ("consolidate", "Trigger evolution consolidation"),
     ("multi-select", "Multi-select programs to toggle"),
+    ("journal", "Create journal entry"),
+    ("reader-add", "Add reader page by URL"),
     ("help", "Show keybinding help"),
 ]
+
+
+def _fuzzy_match(query: str, text: str) -> bool:
+    query = query.lower()
+    text = text.lower()
+    qi = 0
+    for ch in text:
+        if qi < len(query) and ch == query[qi]:
+            qi += 1
+    return qi == len(query)
 
 
 class RachaelTUI:
@@ -87,7 +101,7 @@ class RachaelTUI:
         self.prev_view = "agenda"
         self.selected_idx = 0
         self.scroll_offset = 0
-        self.expanded_id: Optional[int] = None
+        self.expanded_id = None
         self.minibuffer_active = False
         self.minibuffer_text = ""
         self.minibuffer_prompt = ""
@@ -109,13 +123,17 @@ class RachaelTUI:
         self.sidebar_visible = True
         self.dims = (24, 80)
         self.ctrl_x_pending = False
-        self.reader_reading_id: Optional[int] = None
+        self.reader_reading_id = None
         self.evo_tab = "overview"
+        self.snow_tab = "my-queue"
+        self.tree_state = TreeState()
         self.sparkline_data: deque = deque(maxlen=60)
         self.new_item_ids: set = set()
         self.new_item_time: dict = {}
         self.nc_reader_active = False
         self.nc_selector_active = False
+        self.nc_multiselector_active = False
+        self._multiselector_programs: list = []
 
     def run(self):
         detect_media_capabilities()
@@ -179,8 +197,11 @@ class RachaelTUI:
         if self.sidebar_plane:
             sb_rows, sb_cols = self.sidebar_plane.dim_yx()
             pb_y = min(sb_rows - 3, len(VIEWS) + 6)
-            if pb_y > 0 and pb_y < sb_rows - 1:
+            if 0 < pb_y < sb_rows - 1:
                 self.wm.create_progbar(self.sidebar_plane, pb_y, 2, max(2, sb_cols - 4))
+            bpb_y = pb_y + 1
+            if 0 < bpb_y < sb_rows - 1:
+                self.wm.create_budget_progbar(self.sidebar_plane, bpb_y, 2, max(2, sb_cols - 4))
 
     def _create_main_widgets(self):
         if self.main_plane:
@@ -245,6 +266,7 @@ class RachaelTUI:
             "skills": lambda: self.api.skills(),
             "notes": lambda: self.api.notes(),
             "captures": lambda: self.api.captures(limit=30),
+            "journal": lambda: self.api.journal(limit=30),
         }
         for key, fn in fetches.items():
             try:
@@ -273,7 +295,9 @@ class RachaelTUI:
         spent = budget.get("spent", 0)
         cap = budget.get("dailyCap", 0)
         if cap > 0 and self.wm:
-            self.wm.set_progress(spent / cap)
+            pct = spent / cap
+            self.wm.set_progress(pct)
+            self.wm.set_budget_progress(pct)
         with self.data_lock:
             self.last_refresh = time.time()
 
@@ -333,6 +357,13 @@ class RachaelTUI:
                 if len(degraded) > 5:
                     deg += " +" + str(len(degraded) - 5)
                 self.stdp.putstr_yx(offset, max(0, (cols - len(deg)) // 2), deg[:cols - 2])
+        media_info = [k for k, v in MEDIA_CAPS.items() if v]
+        if media_info:
+            offset += 1
+            if offset < rows:
+                self._set_fg(self.stdp, "success")
+                ml = "Media: " + ", ".join(media_info)
+                self.stdp.putstr_yx(offset, max(0, (cols - len(ml)) // 2), ml[:cols - 2])
         offset += 2
         if offset < rows:
             self._set_fg(self.stdp, "dim")
@@ -385,6 +416,8 @@ class RachaelTUI:
             self._msg("Theme: " + self.theme.current["name"])
         elif "multi" in action_lower:
             self._open_multiselector()
+        elif "journal" in action_lower:
+            self._open_minibuffer("Journal: ", self._do_journal)
         else:
             for v in VIEWS:
                 if v in action_lower:
@@ -393,62 +426,23 @@ class RachaelTUI:
 
     def _handle_input(self, key, ni):
         if self.nc_reader_active:
-            if key == 7:
-                self.wm.close_reader()
-                self.nc_reader_active = False
-                self._msg("Quit")
-                return
-            if key == 27:
-                self.wm.close_reader()
-                self.nc_reader_active = False
-                return
-            if key == 10 or key == 13:
-                text = self.wm.close_reader()
-                self.nc_reader_active = False
-                cb = self.minibuffer_callback
-                if cb and text:
-                    self.minibuffer_history.append(text)
-                    cb(text)
-                return
-            self.wm.reader_offer_input(ni)
+            self._handle_reader_input(key, ni)
             return
-
+        if self.nc_multiselector_active:
+            self._handle_multiselector_input(key, ni)
+            return
         if self.nc_selector_active:
-            if key == 7 or key == 27:
-                self.wm.destroy_selector()
-                self.nc_selector_active = False
-                self.command_palette_active = False
-                return
-            if key == 10 or key == 13:
-                selected = self.wm.selector_selected()
-                self.wm.destroy_selector()
-                self.nc_selector_active = False
-                self.command_palette_active = False
-                if selected:
-                    self._do_command(selected)
-                return
-            self.wm.selector_offer_input(ni)
+            self._handle_selector_input(key, ni)
             return
-
         if self.ctrl_x_pending:
-            self.ctrl_x_pending = False
-            char = chr(key) if 0 < key < 0x110000 else ""
-            if key == 3 or char == "c":
-                self.running = False
-                return
-            if char == "b" or key == 2:
-                self._open_command_palette()
-                return
+            self._handle_ctrl_x(key)
             return
-
         if self.minibuffer_active:
             self._handle_minibuffer(key)
             return
-
         if self.command_palette_active:
             self._handle_palette(key)
             return
-
         char = chr(key) if 0 < key < 0x110000 else ""
         if key == 24:
             self.ctrl_x_pending = True
@@ -467,8 +461,14 @@ class RachaelTUI:
         elif ni.alt and char == "x":
             self._open_command_palette()
         elif char == "\t":
-            self.sidebar_visible = not self.sidebar_visible
-            self._resize_planes()
+            if self.view == "snow":
+                idx = SNOW_TABS.index(self.snow_tab) if self.snow_tab in SNOW_TABS else 0
+                self.snow_tab = SNOW_TABS[(idx + 1) % len(SNOW_TABS)]
+                self.selected_idx = 0
+                self._msg("SNOW: " + self.snow_tab)
+            else:
+                self.sidebar_visible = not self.sidebar_visible
+                self._resize_planes()
         elif char == "q":
             self.running = False
         elif char in VIEW_KEYS:
@@ -482,13 +482,95 @@ class RachaelTUI:
             self._open_minibuffer("M-x ", self._do_command)
         elif char == "M":
             self._open_multiselector()
+        elif char == "J":
+            self._open_minibuffer("Journal: ", self._do_journal)
         else:
             self._handle_view_keys(char, key)
+
+    def _handle_reader_input(self, key, ni):
+        if key == 7:
+            self.wm.close_reader()
+            self.nc_reader_active = False
+            self._msg("Quit")
+        elif key == 27:
+            self.wm.close_reader()
+            self.nc_reader_active = False
+        elif key in (10, 13):
+            text = self.wm.close_reader()
+            self.nc_reader_active = False
+            cb = self.minibuffer_callback
+            if cb and text:
+                self.minibuffer_history.append(text)
+                cb(text)
+        else:
+            self.wm.reader_offer_input(ni)
+
+    def _handle_multiselector_input(self, key, ni):
+        if key == 7 or key == 27:
+            self.wm.destroy_multiselector()
+            self.nc_multiselector_active = False
+            self._multiselector_programs = []
+            self._msg("Cancelled")
+        elif key in (10, 13):
+            selected = self.wm.multiselector_selected()
+            self.wm.destroy_multiselector()
+            self.nc_multiselector_active = False
+            self._execute_bulk_toggle(selected)
+        else:
+            self.wm.multiselector_offer_input(ni)
+
+    def _execute_bulk_toggle(self, selected_items):
+        if not selected_items:
+            self._msg("No programs selected")
+            self._multiselector_programs = []
+            return
+        programs = self._multiselector_programs
+        toggled = 0
+        errors = 0
+        for sel_label in selected_items:
+            for prog in programs:
+                if prog.get("name") == sel_label or str(prog.get("id")) in sel_label:
+                    try:
+                        self.api.toggle_program(prog["id"])
+                        toggled += 1
+                    except APIError:
+                        errors += 1
+                    break
+        self._multiselector_programs = []
+        msg = "Toggled " + str(toggled) + " programs"
+        if errors:
+            msg += ", " + str(errors) + " failed"
+        self._msg(msg)
+        threading.Thread(target=self._refresh_data, daemon=True).start()
+
+    def _handle_selector_input(self, key, ni):
+        if key == 7 or key == 27:
+            self.wm.destroy_selector()
+            self.nc_selector_active = False
+            self.command_palette_active = False
+        elif key in (10, 13):
+            selected = self.wm.selector_selected()
+            self.wm.destroy_selector()
+            self.nc_selector_active = False
+            self.command_palette_active = False
+            if selected:
+                self._do_command(selected)
+        else:
+            self.wm.selector_offer_input(ni)
+
+    def _handle_ctrl_x(self, key):
+        self.ctrl_x_pending = False
+        char = chr(key) if 0 < key < 0x110000 else ""
+        if key == 3 or char == "c":
+            self.running = False
+        elif char == "b" or key == 2:
+            self._open_command_palette()
 
     def _nav_down(self):
         with self.data_lock:
             items = current_items(self.view, self.data_cache, self.api,
-                                  self.evo_tab, self.reader_reading_id, self.cockpit_events)
+                                  self.evo_tab, self.reader_reading_id, self.cockpit_events,
+                                  self.tree_state, self.snow_tab)
         self.selected_idx = min(self.selected_idx + 1, max(0, len(items) - 1))
         if self.view == "cockpit" and self.wm:
             self.wm.reel_next()
@@ -509,24 +591,37 @@ class RachaelTUI:
                 pass
         if self.view == "cockpit" and self.wm:
             self.wm.destroy_reel()
+        if self.view == "evolution" and self.wm:
+            self.wm.destroy_evo_plots()
         self.view = new_view
         self.selected_idx = 0
         self.scroll_offset = 0
         self.expanded_id = None
         self.reader_reading_id = None
-        self.evo_tab = "overview"
+        if new_view != "evolution":
+            self.evo_tab = "overview"
         if self.view == "cockpit" and self.wm and self.main_plane:
-            m_rows, m_cols = self.main_plane.dim_yx()
-            reel = self.wm.create_reel(self.main_plane, max(1, m_rows - 2), max(2, m_cols - 2), 1, 1)
-            if reel:
-                for evt in list(self.cockpit_events)[-20:]:
-                    desc = evt.get("description", "?")[:60]
-                    self.wm.add_reel_tablet(self._cockpit_tablet_draw, evt)
+            self._setup_cockpit_reel()
+        if self.view == "evolution" and self.wm and self.main_plane:
+            self._setup_evo_plots()
         if self.main_plane:
             try:
                 self.main_plane.fadein(150)
             except Exception:
                 pass
+
+    def _setup_cockpit_reel(self):
+        m_rows, m_cols = self.main_plane.dim_yx()
+        reel = self.wm.create_reel(self.main_plane, max(1, m_rows - 2), max(2, m_cols - 2), 1, 1)
+        if reel:
+            for evt in list(self.cockpit_events)[-20:]:
+                self.wm.add_reel_tablet(self._cockpit_tablet_draw, evt)
+
+    def _setup_evo_plots(self):
+        m_rows, m_cols = self.main_plane.dim_yx()
+        plot_w = min(30, m_cols - 4)
+        if plot_w > 5 and m_rows > 12:
+            self.wm.create_evo_plots(self.main_plane, m_rows - 10, m_cols - plot_w - 2, plot_w)
 
     @staticmethod
     def _cockpit_tablet_draw(tablet_plane, data):
@@ -552,7 +647,19 @@ class RachaelTUI:
                     pass
             src = data.get("source", "")[:10]
             desc = data.get("description", "")
-            tablet_plane.putstr_yx(0, 0, (icon + " " + tstr + " [" + src + "] " + desc)[:cols])
+            line = icon + " " + tstr + " [" + src + "] " + desc
+            tablet_plane.putstr_yx(0, 0, line[:cols])
+            event_data = data.get("data", {})
+            if event_data and isinstance(event_data, dict) and cols > 20:
+                try:
+                    detail_parts = []
+                    for k, v in list(event_data.items())[:3]:
+                        detail_parts.append(str(k) + "=" + str(v)[:15])
+                    if detail_parts:
+                        tablet_plane.putstr_yx(1, 2, "  ".join(detail_parts)[:cols - 2])
+                        return 2
+                except Exception:
+                    pass
             return 1
         except Exception:
             return 1
@@ -560,7 +667,8 @@ class RachaelTUI:
     def _handle_view_keys(self, char: str, key: int = 0):
         with self.data_lock:
             items = current_items(self.view, self.data_cache, self.api,
-                                  self.evo_tab, self.reader_reading_id, self.cockpit_events)
+                                  self.evo_tab, self.reader_reading_id, self.cockpit_events,
+                                  self.tree_state, self.snow_tab)
         count = len(items) if items else 0
         if char == "j" or char == "n":
             self.selected_idx = min(self.selected_idx + 1, max(0, count - 1))
@@ -574,6 +682,11 @@ class RachaelTUI:
         elif char == " ":
             if items and 0 <= self.selected_idx < len(items):
                 item = items[self.selected_idx]
+                if isinstance(item, dict) and item.get("_collapsible"):
+                    sec_key = item.get("_sec_key", "")
+                    if sec_key:
+                        self.tree_state.toggle(sec_key)
+                        return
                 iid = item.get("id") if isinstance(item, dict) else None
                 if iid is not None:
                     self.expanded_id = None if self.expanded_id == iid else iid
@@ -595,7 +708,7 @@ class RachaelTUI:
         elif char == "X":
             self._open_minibuffer("CLI> ", self._do_cli)
         elif char == "?":
-            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar M-x:cmd /:srch c:cap T:theme SPC:expand M:multi")
+            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar/snow M-x:cmd /:srch c:cap T:theme M:multi J:journal SPC:expand/collapse")
         elif char == "d" and self.view == "reader":
             self._action_delete_reader(items)
         elif char == "a" and self.view == "snow":
@@ -603,16 +716,21 @@ class RachaelTUI:
         elif char == "x" and self.view == "snow":
             self._action_reject(items)
         elif char == "l" and self.view == "evolution":
-            tabs = ["overview", "versions", "golden", "observations", "costs"]
-            idx = tabs.index(self.evo_tab) if self.evo_tab in tabs else 0
-            self.evo_tab = tabs[(idx + 1) % len(tabs)]
+            idx = EVO_TABS.index(self.evo_tab) if self.evo_tab in EVO_TABS else 0
+            self.evo_tab = EVO_TABS[(idx + 1) % len(EVO_TABS)]
             self.selected_idx = 0
+        elif char == "u" and self.view == "reader":
+            self._open_minibuffer("URL: ", self._do_add_reader)
 
     def _action_enter(self, items):
         if not items or self.selected_idx >= len(items):
             return
         item = items[self.selected_idx]
         if not isinstance(item, dict) or "_section" in item:
+            if isinstance(item, dict) and item.get("_collapsible"):
+                sec_key = item.get("_sec_key", "")
+                if sec_key:
+                    self.tree_state.toggle(sec_key)
             return
         if self.view == "programs":
             pid = item.get("id")
@@ -631,10 +749,16 @@ class RachaelTUI:
                     self._msg("Error: " + str(e))
             else:
                 self.expanded_id = None if self.expanded_id == item.get("id") else item.get("id")
-        elif self.view in ("results", "transcripts", "snow"):
+        elif self.view in ("results", "transcripts", "snow", "evolution"):
             self.expanded_id = None if self.expanded_id == item.get("id") else item.get("id")
         elif self.view == "reader":
-            self.reader_reading_id = item.get("id")
+            rid = item.get("id")
+            if rid:
+                self.reader_reading_id = rid
+                if self.wm and any(MEDIA_CAPS.values()):
+                    img_url = item.get("imageUrl") or item.get("thumbnailUrl")
+                    if img_url:
+                        self._msg("Media rendering: " + ", ".join(k for k, v in MEDIA_CAPS.items() if v))
         elif self.view == "cockpit":
             self.expanded_id = None if self.expanded_id == id(item) else id(item)
 
@@ -714,7 +838,7 @@ class RachaelTUI:
             self._msg("Quit")
         elif key == 27:
             self._close_minibuffer()
-        elif key == 10 or key == 13:
+        elif key in (10, 13):
             cb = self.minibuffer_callback
             text = self.minibuffer_text
             if text:
@@ -722,7 +846,7 @@ class RachaelTUI:
             self._close_minibuffer()
             if cb and text:
                 cb(text)
-        elif key == 127 or key == 263:
+        elif key in (127, 263):
             self.minibuffer_text = self.minibuffer_text[:-1]
         elif key == 11:
             self.minibuffer_text = ""
@@ -758,15 +882,17 @@ class RachaelTUI:
         if not programs:
             self._msg("No programs loaded")
             return
+        self._multiselector_programs = list(programs)
         if self.wm:
             items = [(p.get("name", "?"), "id:" + str(p.get("id", "")), p.get("enabled", False))
                      for p in programs]
-            msel = self.wm.create_multiselector(items, title="Toggle Programs")
+            msel = self.wm.create_multiselector(items, title="Toggle Programs (Enter to apply)")
             if msel:
-                self.nc_selector_active = True
-                self._msg("Select programs to toggle, then Enter")
+                self.nc_multiselector_active = True
+                self._msg("Select programs, Enter to apply bulk toggle")
                 return
         self._msg("NcMultiSelector not available")
+        self._multiselector_programs = []
 
     def _handle_palette(self, key):
         if key == 7 or key == 27:
@@ -779,13 +905,13 @@ class RachaelTUI:
             self.palette_idx = min(self.palette_idx + 1, max(0, len(commands) - 1))
         elif key == 16 or char == "k":
             self.palette_idx = max(self.palette_idx - 1, 0)
-        elif key == 10 or key == 13:
+        elif key in (10, 13):
             if 0 <= self.palette_idx < len(commands):
                 cmd = commands[self.palette_idx][0]
                 self.command_palette_active = False
                 self.palette_filter = ""
                 self._do_command(cmd)
-        elif key == 127 or key == 263:
+        elif key in (127, 263):
             self.palette_filter = self.palette_filter[:-1]
             self.palette_idx = 0
         elif char and char.isprintable():
@@ -794,8 +920,9 @@ class RachaelTUI:
 
     def _filtered_palette(self):
         if self.palette_filter:
-            f = self.palette_filter.lower()
-            return [(c, d) for c, d in PALETTE_ALL_CMDS if f in c.lower() or f in d.lower()]
+            return [(c, d) for c, d in PALETTE_ALL_CMDS
+                    if _fuzzy_match(self.palette_filter, c) or
+                       _fuzzy_match(self.palette_filter, d)]
         return PALETTE_ALL_CMDS
 
     def _do_search(self, query: str):
@@ -825,6 +952,24 @@ class RachaelTUI:
             self._msg(str(output)[:120])
         except APIError as e:
             self._msg("CLI error: " + str(e))
+
+    def _do_journal(self, text: str):
+        if not text.strip():
+            return
+        try:
+            self.api.create_journal_entry({"content": text})
+            self._msg("Journal entry created")
+        except APIError as e:
+            self._msg("Journal error: " + str(e))
+
+    def _do_add_reader(self, url: str):
+        if not url.strip():
+            return
+        try:
+            self.api.create_reader_page(url)
+            self._msg("Added: " + url[:50])
+        except APIError as e:
+            self._msg("Reader error: " + str(e))
 
     def _do_command(self, cmd: str):
         if not cmd:
@@ -870,8 +1015,18 @@ class RachaelTUI:
                 self._open_minibuffer("Search: ", self._do_search)
         elif verb == "multi-select":
             self._open_multiselector()
+        elif verb == "journal":
+            if arg:
+                self._do_journal(arg)
+            else:
+                self._open_minibuffer("Journal: ", self._do_journal)
+        elif verb == "reader-add":
+            if arg:
+                self._do_add_reader(arg)
+            else:
+                self._open_minibuffer("URL: ", self._do_add_reader)
         elif verb == "help":
-            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar M-x:cmd /:search c:cap T:theme M:multi")
+            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar/snow M-x:cmd /:search c:cap T:theme M:multi J:journal SPC:expand/collapse")
         else:
             self._do_cli(cmd)
 
@@ -881,7 +1036,7 @@ class RachaelTUI:
             self._render_sidebar()
         if self.main_plane:
             if self.view == "cockpit" and self.wm and self.wm.reel:
-                self._render_cockpit_header()
+                self._render_cockpit_main()
             else:
                 self._render_main()
         self._render_modeline()
@@ -938,7 +1093,6 @@ class RachaelTUI:
             label = num + " " + v
             self._set_fg(p, "accent" if is_active else "fg")
             p.putstr_yx(y, 1, (prefix + label)[:cols - 2])
-
         info_y = len(VIEWS) + 2
         if info_y < rows - 6:
             self._set_fg(p, "dim")
@@ -953,29 +1107,20 @@ class RachaelTUI:
             self._set_fg(p, "dim")
             bstr = "$" + str(round(spent, 2)) + "/" + str(round(cap, 2))
             p.putstr_yx(info_y + 2, 1, ("Budget: " + bstr)[:cols - 2])
-            if cap > 0 and not self.wm.progbar:
-                pct = min(1.0, spent / cap)
-                bar_w = cols - 4
-                filled = int(bar_w * pct)
-                bar = "\u2588" * filled + "\u2591" * (bar_w - filled)
-                color = "success" if pct < 0.7 else "warn" if pct < 0.9 else "error"
-                self._set_fg(p, color)
-                p.putstr_yx(info_y + 3, 2, bar[:cols - 4])
             ctrl = self.data_cache.get("control", {})
             mode = ctrl.get("mode", "human")
             self._set_fg(p, "info" if mode == "agent" else "warn")
-            if info_y + 4 < rows:
-                p.putstr_yx(info_y + 4, 1, ("Mode: " + mode.upper())[:cols - 2])
-            if self.sparkline_data and info_y + 5 < rows - 1:
+            if info_y + 3 < rows:
+                p.putstr_yx(info_y + 3, 1, ("Mode: " + mode.upper())[:cols - 2])
+            if self.sparkline_data and info_y + 4 < rows - 1:
                 self._set_fg(p, "accent")
                 spark = braille_sparkline_str(list(self.sparkline_data)[-min(cols - 4, 20):])
-                p.putstr_yx(info_y + 5, 1, spark[:cols - 3])
-
+                p.putstr_yx(info_y + 4, 1, spark[:cols - 3])
         for y in range(rows):
             self._set_fg(p, "border")
             p.putstr_yx(y, cols - 1, "\u2502")
 
-    def _render_cockpit_header(self):
+    def _render_cockpit_main(self):
         p = self.main_plane
         if not p:
             return
@@ -999,7 +1144,8 @@ class RachaelTUI:
             return
         with self.data_lock:
             items = current_items(self.view, self.data_cache, self.api,
-                                  self.evo_tab, self.reader_reading_id, self.cockpit_events)
+                                  self.evo_tab, self.reader_reading_id, self.cockpit_events,
+                                  self.tree_state, self.snow_tab)
         view_height = rows - 1
         if view_height < 1:
             return
@@ -1007,15 +1153,15 @@ class RachaelTUI:
             self.scroll_offset = self.selected_idx - view_height + 1
         if self.selected_idx < self.scroll_offset:
             self.scroll_offset = self.selected_idx
-
         self._set_fg(p, "dim")
         title = self.view.upper()
         if items:
             title += " (" + str(len(items)) + ")"
         if self.view == "evolution":
             title += " [" + self.evo_tab + "] (l:cycle)"
+        if self.view == "snow":
+            title += " [" + self.snow_tab + "] (Tab:cycle)"
         p.putstr_yx(0, 1, title[:cols - 2])
-
         y = 1
         for i in range(self.scroll_offset, len(items)):
             if y >= rows:
@@ -1023,8 +1169,7 @@ class RachaelTUI:
             item = items[i]
             is_sel = i == self.selected_idx
             is_exp = isinstance(item, dict) and item.get("id") == self.expanded_id
-            is_new = self._is_new(item)
-            line = format_item(item, cols - 2, self.view, self.data_cache)
+            is_collapsible = isinstance(item, dict) and item.get("_collapsible")
             if is_sel:
                 self._set_bg(p, "sel_bg")
                 self._set_fg(p, "sel_fg")
@@ -1034,12 +1179,13 @@ class RachaelTUI:
             elif isinstance(item, dict) and item.get("status") == "error":
                 self._set_fg(p, "error")
                 self._set_bg(p, "bg")
-            elif is_new:
+            elif self._is_new(item):
                 self._pulse_fg(p, item)
                 self._set_bg(p, "bg")
             else:
                 self._set_fg(p, "fg")
                 self._set_bg(p, "bg")
+            line = format_item(item, cols - 2, self.view, self.data_cache)
             p.putstr_yx(y, 1, line.ljust(cols - 2)[:cols - 2])
             self._set_bg(p, "bg")
             y += 1
@@ -1074,8 +1220,15 @@ class RachaelTUI:
         self._set_fg(p, "dim")
         p.putstr_yx(0, max(1, cols - 11), "[Esc:back]")
         p.putstr_yx(1, 1, (page.get("domain", "") + " \u2014 " + page.get("url", ""))[:cols - 2])
+        if self.wm and any(MEDIA_CAPS.values()):
+            media_line = "[Media: " + ", ".join(k for k, v in MEDIA_CAPS.items() if v) + "]"
+            self._set_fg(p, "success")
+            p.putstr_yx(2, 1, media_line[:cols - 2])
+            img_url = page.get("imageUrl") or page.get("thumbnailUrl")
+            if img_url and os.path.exists(str(img_url)):
+                self.wm.render_visual_media(p, str(img_url), 3, 1, min(8, rows - 6), min(30, cols - 4))
         text = page.get("extractedText", "")
-        y = 3
+        y = 4 if any(MEDIA_CAPS.values()) else 3
         for line in wrap_text(text, cols - 2):
             if y >= rows:
                 break
@@ -1278,7 +1431,13 @@ class CursesFallback:
                 tui._msg("Refreshing...")
                 return
             if ch == 9:
-                tui.sidebar_visible = not tui.sidebar_visible
+                if tui.view == "snow":
+                    idx = SNOW_TABS.index(tui.snow_tab) if tui.snow_tab in SNOW_TABS else 0
+                    tui.snow_tab = SNOW_TABS[(idx + 1) % len(SNOW_TABS)]
+                    tui.selected_idx = 0
+                    tui._msg("SNOW: " + tui.snow_tab)
+                else:
+                    tui.sidebar_visible = not tui.sidebar_visible
                 return
             if ch == 27:
                 self.stdscr.timeout(50)
@@ -1313,7 +1472,6 @@ class CursesFallback:
             elif char and len(char) == 1 and char.isprintable():
                 tui.minibuffer_text += char
             return
-
         if tui.command_palette_active:
             if isinstance(ch, int):
                 tui._handle_palette(ch)
@@ -1321,7 +1479,6 @@ class CursesFallback:
                 tui.palette_filter += char
                 tui.palette_idx = 0
             return
-
         if char == "q":
             tui.running = False
         elif char in VIEW_KEYS:
@@ -1336,6 +1493,8 @@ class CursesFallback:
             tui._open_minibuffer("M-x ", tui._do_command)
         elif char == "M":
             tui._open_multiselector()
+        elif char == "J":
+            tui._open_minibuffer("Journal: ", tui._do_journal)
         else:
             key_int = ch if isinstance(ch, int) else 0
             tui._handle_view_keys(char, key_int)
@@ -1386,7 +1545,8 @@ class CursesFallback:
         if main_w > 2:
             with tui.data_lock:
                 items = current_items(tui.view, tui.data_cache, tui.api,
-                                      tui.evo_tab, tui.reader_reading_id, tui.cockpit_events)
+                                      tui.evo_tab, tui.reader_reading_id, tui.cockpit_events,
+                                      tui.tree_state, tui.snow_tab)
             vh = bottom - top
             if vh > 0:
                 if tui.selected_idx >= tui.scroll_offset + vh:
@@ -1396,6 +1556,8 @@ class CursesFallback:
                 title = tui.view.upper()
                 if items:
                     title += " (" + str(len(items)) + ")"
+                if tui.view == "snow":
+                    title += " [" + tui.snow_tab + "]"
                 try:
                     stdscr.addnstr(top, main_left + 1, title[:main_w - 2], main_w - 2, curses.color_pair(2))
                 except curses.error:
