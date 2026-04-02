@@ -74,6 +74,13 @@ try:
 except ImportError:
     pass
 
+def _create_child_plane(parent, rows, cols, y, x):
+    try:
+        return NcPlane(parent, rows, cols, y, x)
+    except (ValueError, TypeError):
+        return parent.create(rows, cols, y_pos=y, x_pos=x)
+
+
 BRAILLE_BLOCKS = ["\u2800", "\u2801", "\u2803", "\u2807", "\u280F",
                   "\u281F", "\u283F", "\u287F", "\u28FF"]
 QUADRANT_BLOCKS = [" ", "\u2596", "\u2584", "\u2599", "\u2588"]
@@ -390,7 +397,7 @@ class WidgetManager:
             self.log_degradation("NcProgbar", "not available")
             return None
         try:
-            self.progbar_plane = NcPlane(parent_plane, 1, width, y, x)
+            self.progbar_plane = _create_child_plane(parent_plane, 1, width, y, x)
             self.progbar = NcProgbar(self.progbar_plane)
             return self.progbar
         except RuntimeError as e:
@@ -408,7 +415,7 @@ class WidgetManager:
             self.log_degradation("NcProgbar", "not available for budget")
             return None
         try:
-            self.budget_progbar_plane = NcPlane(parent_plane, 1, width, y, x)
+            self.budget_progbar_plane = _create_child_plane(parent_plane, 1, width, y, x)
             self.budget_progbar = NcProgbar(self.budget_progbar_plane)
             return self.budget_progbar
         except RuntimeError as e:
@@ -427,7 +434,7 @@ class WidgetManager:
             return None
         try:
             self.destroy_reel()
-            self.reel_plane = NcPlane(parent_plane, rows, cols, y, x)
+            self.reel_plane = _create_child_plane(parent_plane, rows, cols, y, x)
             if NcReelOptions:
                 opts = NcReelOptions()
                 self.reel = NcReel.create(self.reel_plane, opts)
@@ -486,7 +493,7 @@ class WidgetManager:
             rows, cols = self.dims
             self.destroy_reader()
             p = parent_plane or self.stdp
-            self.reader_plane = NcPlane(p, 1, cols, rows - 1, 0)
+            self.reader_plane = _create_child_plane(p, 1, cols, rows - 1, 0)
             r, g, b = self.theme.rgb("mini_fg")
             self.reader_plane.set_fg_rgb8(r, g, b)
             r, g, b = self.theme.rgb("mini_bg")
@@ -544,7 +551,7 @@ class WidgetManager:
             sx = (cols - sel_w) // 2
             sy = (rows - sel_h) // 2
             self.destroy_selector()
-            self.selector_plane = NcPlane(self.stdp, sel_h, sel_w, sy, sx)
+            self.selector_plane = _create_child_plane(self.stdp, sel_h, sel_w, sy, sx)
             self.set_bg_alpha(self.selector_plane)
             nc_items = [NcSelectorItem(label, desc) for label, desc in items]
             self.selector = NcSelector.create(
@@ -565,7 +572,7 @@ class WidgetManager:
             sx = (cols - sel_w) // 2
             sy = (rows - sel_h) // 2
             self.destroy_multiselector()
-            self.multiselector_plane = NcPlane(self.stdp, sel_h, sel_w, sy, sx)
+            self.multiselector_plane = _create_child_plane(self.stdp, sel_h, sel_w, sy, sx)
             self.set_bg_alpha(self.multiselector_plane)
             nc_items = [NcMultiSelectorItem(label, desc, selected)
                         for label, desc, selected in items]
@@ -629,7 +636,7 @@ class WidgetManager:
             self.log_degradation("NcPlot/NcDPlot", "not available")
             return None
         try:
-            plane = NcPlane(parent_plane, rows_h, cols_w, y, x)
+            plane = _create_child_plane(parent_plane, rows_h, cols_w, y, x)
             opts = {}
             blit = preferred_blitter()
             if blit is not None:
@@ -651,7 +658,7 @@ class WidgetManager:
         if plot_cls is None:
             return False
         try:
-            plane = NcPlane(parent_plane, 1, width, y, x)
+            plane = _create_child_plane(parent_plane, 1, width, y, x)
             opts = {}
             blit = preferred_blitter()
             if blit is not None:
@@ -680,7 +687,7 @@ class WidgetManager:
         for i, name in enumerate(metric_names):
             py = y + i * 3
             try:
-                plane = NcPlane(parent_plane, 2, width, py, x)
+                plane = _create_child_plane(parent_plane, 2, width, py, x)
                 opts = {}
                 blit = preferred_blitter()
                 if blit is not None:
@@ -717,7 +724,7 @@ class WidgetManager:
                 except RuntimeError:
                     pass
             vis = NcVisual.from_file(image_path)
-            self.visual_plane = NcPlane(parent_plane, height, width, y, x)
+            self.visual_plane = _create_child_plane(parent_plane, height, width, y, x)
             vopts = {}
             blit = preferred_blitter()
             if blit is not None:

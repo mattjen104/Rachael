@@ -14,6 +14,7 @@ from nc_widgets import (
     NC_AVAILABLE, NcPlane, Notcurses, NcInput, WidgetManager,
     check_capabilities, detect_media_capabilities,
     NCALPHA_BLEND, BRAILLE_BLOCKS, MEDIA_CAPS, activity_density_grid,
+    _create_child_plane,
 )
 from tui_views import (
     VIEWS, SNOW_TABS, EVO_TABS, STATUS_CHARS, TreeState,
@@ -22,6 +23,23 @@ from tui_views import (
 )
 
 VERSION = "1.0.0"
+
+
+def _nc_stop(nc):
+    if nc is None:
+        return
+    for name in ("stop", "destroy", "__del__"):
+        fn = getattr(nc, name, None)
+        if fn and callable(fn):
+            try:
+                fn()
+            except Exception:
+                pass
+            return
+    try:
+        del nc
+    except Exception:
+        pass
 VIEW_KEYS = {
     "1": "agenda", "2": "tree", "3": "programs", "4": "results",
     "5": "reader", "6": "cockpit", "7": "snow", "8": "evolution",
@@ -167,14 +185,10 @@ class RachaelTUI:
             self._main_loop()
         except KeyboardInterrupt:
             pass
-        except RuntimeError as e:
+        except (RuntimeError, ValueError, AttributeError) as e:
             self.running = False
-            if self.nc:
-                try:
-                    self.nc.stop()
-                except RuntimeError:
-                    pass
-                self.nc = None
+            _nc_stop(self.nc)
+            self.nc = None
             import sys
             sys.stderr.write("notcurses failed: " + str(e) + " — falling back to curses\n")
             self._run_fallback()
@@ -183,29 +197,25 @@ class RachaelTUI:
             self.running = False
             self.api.stop_sse()
             self.api.stop()
-            if self.nc:
-                try:
-                    self.nc.stop()
-                except (RuntimeError, OSError):
-                    pass
+            _nc_stop(self.nc)
 
     def _create_planes(self):
         rows, cols = self.dims
-        self.header_plane = NcPlane(self.stdp, 1, cols, 0, 0)
+        self.header_plane = _create_child_plane(self.stdp, 1, cols, 0, 0)
         sb_h = max(1, rows - 3)
-        self.sidebar_plane = NcPlane(self.stdp, sb_h, self.sidebar_width, 1, 0)
+        self.sidebar_plane = _create_child_plane(self.stdp, sb_h, self.sidebar_width, 1, 0)
         main_left = self.sidebar_width + 1
         main_w = max(2, cols - main_left)
         main_h = max(1, rows - 3)
-        self.main_plane = NcPlane(self.stdp, main_h, main_w, 1, main_left)
-        self.modeline_plane = NcPlane(self.stdp, 1, cols, max(0, rows - 2), 0)
-        self.minibuffer_plane = NcPlane(self.stdp, 1, cols, max(0, rows - 1), 0)
+        self.main_plane = _create_child_plane(self.stdp, main_h, main_w, 1, main_left)
+        self.modeline_plane = _create_child_plane(self.stdp, 1, cols, max(0, rows - 2), 0)
+        self.minibuffer_plane = _create_child_plane(self.stdp, 1, cols, max(0, rows - 1), 0)
         pal_w = min(54, cols - 4)
         pal_h = min(18, rows - 4)
         if pal_w > 12 and pal_h > 5:
             px = (cols - pal_w) // 2
             py = (rows - pal_h) // 2
-            self.palette_plane = NcPlane(self.stdp, pal_h, pal_w, py, px)
+            self.palette_plane = _create_child_plane(self.stdp, pal_h, pal_w, py, px)
             self.wm.set_bg_alpha(self.palette_plane)
             self.palette_plane.move_above(self.main_plane)
 
@@ -1463,7 +1473,7 @@ class RachaelTUI:
                             self._detail_plane.destroy()
                         except RuntimeError:
                             pass
-                    self._detail_plane = NcPlane(p, detail_h, cols - 4, y, 2)
+                    self._detail_plane = _create_child_plane(p, detail_h, cols - 4, y, 2)
                     r, g, b = self.theme.rgb("mini_bg")
                     self._detail_plane.set_bg_rgb8(r, g, b)
                     r, g, b = self.theme.rgb("dim")
