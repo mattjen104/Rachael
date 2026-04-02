@@ -30,6 +30,25 @@ app.use(express.urlencoded({ extended: false }));
 
 app.use(rateLimitMiddleware);
 
+app.get("/launch", (req: Request, res: Response) => {
+  const host = req.headers.host || "localhost:5000";
+  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
+  const baseUrl = `${proto}://${host}`;
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html><head><title>Rachael</title></head>
+<body style="background:#1a1a2e;color:#aaa;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<script>
+var w=420,h=720;
+var left=(screen.width-w)/2,top_=(screen.height-h)/2;
+var win=window.open("${baseUrl}","rachael","width="+w+",height="+h+",left="+left+",top="+top_+",menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no");
+if(win){document.body.innerHTML="<p>Rachael launched. You can close this tab.</p>";}
+else{document.body.innerHTML="<p>Popup blocked. <a href='${baseUrl}' target='_blank' style='color:#bd93f9'>Click here</a> to open Rachael.</p>";}
+</script>
+<noscript><a href="${baseUrl}">Open Rachael</a></noscript>
+</body></html>`);
+});
+
 const API_KEY = process.env.OPENCLAW_API_KEY;
 app.get("/api/auth/check", (_req: Request, res: Response) => {
   res.json({ requiresAuth: !!API_KEY });
