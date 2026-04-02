@@ -413,6 +413,7 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
         run_hist = []
         if rp and isinstance(rp.get("recentResults"), list):
             run_hist = [float(r.get("metric", 0) or 0) for r in rp["recentResults"][-8:]]
+        item["_run_hist"] = run_hist
         spark = braille_sparkline_str(run_hist) if run_hist else ""
         if spark:
             right = " " + spark + right

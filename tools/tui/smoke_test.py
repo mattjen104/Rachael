@@ -165,11 +165,22 @@ check("RachaelTUI has _open_program_filter", hasattr(RachaelTUI, "_open_program_
 check("RachaelTUI has _apply_program_filter", hasattr(RachaelTUI, "_apply_program_filter"))
 check("RachaelTUI has _handle_minibuffer", hasattr(RachaelTUI, "_handle_minibuffer"))
 
+print("\n[Notcurses-first enforcement]")
+import inspect
+run_src = inspect.getsource(RachaelTUI.run)
+check("No curses fallback in run()", "_run_fallback" not in run_src)
+check("sys.exit(1) on missing notcurses", "sys.exit(1)" in run_src)
+check("No CursesFallback class", not hasattr(sys.modules.get("rachael_tui", None), "CursesFallback"))
+
+print("\n[NcPlot inline widgets]")
+check("WidgetManager has create_inline_plot", hasattr(WidgetManager, "create_inline_plot"))
+plot_sig = inspect.signature(WidgetManager.create_inline_plot)
+check("create_inline_plot takes data param", "data" in plot_sig.parameters)
+
 print("\n[Fade transition support]")
 check("fade_out distinct from fade_in", WidgetManager.fade_out is not WidgetManager.fade_in)
 
 print("\n[Emacs minibuffer keybindings]")
-import inspect
 mb_src = inspect.getsource(RachaelTUI._handle_minibuffer)
 check("C-a (key==1) beginning-of-line", "key == 1" in mb_src)
 check("C-e (key==5) end-of-line", "key == 5" in mb_src)
@@ -178,6 +189,17 @@ check("C-y (key==25) yank", "key == 25" in mb_src)
 check("C-d (key==4) delete-char", "key == 4" in mb_src)
 check("C-b (key==2) backward-char", "key == 2" in mb_src)
 check("C-f (key==6) forward-char", "key == 6" in mb_src)
+
+print("\n[NcReader history navigation]")
+reader_src = inspect.getsource(RachaelTUI._handle_reader_input)
+check("C-p (key==16) history-previous", "key == 16" in reader_src)
+check("C-n (key==14) history-next", "key == 14" in reader_src)
+check("Uses minibuffer_hist_idx", "minibuffer_hist_idx" in reader_src)
+
+print("\n[Child plane expansion]")
+render_src = inspect.getsource(RachaelTUI._render_items)
+check("Creates NcPlane child for detail", "detail_plane = NcPlane" in render_src)
+check("Uses mini_bg for detail plane", "mini_bg" in render_src)
 
 print("\n[Program filter]")
 check("current_items accepts program_filter", "program_filter" in inspect.signature(current_items).parameters)
