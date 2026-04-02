@@ -322,7 +322,18 @@ Database-driven scraping system replacing hardcoded adapters:
 - `client/src/components/layout/StatusBar.tsx` — Bottom status bar with runtime indicator (TV-scaled)
 - `client/src/components/editor/Minibuffer.tsx` — Command palette (TV-scaled)
 - `client/src/components/tv/TvShortcutOverlay.tsx` — First-run keyboard shortcut guide for TV mode
-- `client/src/lib/crt-theme.tsx` — CRT phosphor theme provider
+- `client/src/lib/crt-theme.tsx` — CRT phosphor theme provider (7 themes: amber, green, blue, devtools, solarized, dracula, redAlert)
+- `client/src/lib/queryClient.ts` — API client with configurable backend URL (`apiUrl()`, `setApiBase()`, `getApiBase()`)
+
+## Remote Backend (DO Droplet)
+
+The web app can connect to a remote backend (e.g., DigitalOcean droplet) instead of the local server:
+- **Set via env**: `VITE_API_BASE=https://your-domain.com` at build time
+- **Set via localStorage**: `localStorage.setItem("rachael_api_base", "https://your-domain.com")`
+- **Set via command palette**: `M-x set-api-base`, then type the URL (e.g., `https://rachael.yourdomain.com`)
+- **Clear**: `M-x` then type `reset-api-base` or `clear-api-base`
+- All API calls (`fetch`, React Query, SSE) route through `apiUrl()` which prepends the base
+- CORS is enabled on the server (`origin: true, credentials: true`)
 
 ## TV Mode (Google TV Integration)
 

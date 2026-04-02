@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest, getStoredApiKey } from "@/lib/queryClient";
+import { queryClient, apiRequest, getStoredApiKey, apiUrl } from "@/lib/queryClient";
 import type { Transcript } from "@shared/schema";
 
 interface TranscriptsViewProps {
@@ -110,7 +110,7 @@ export default function TranscriptsView({ selectedTranscriptId }: TranscriptsVie
           const headers: Record<string, string> = {};
           const apiKey = getStoredApiKey();
           if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-          await fetch("/api/transcripts/upload", { method: "POST", body: formData, headers, credentials: "include" });
+          await fetch(apiUrl("/api/transcripts/upload"), { method: "POST", body: formData, headers, credentials: "include" });
           queryClient.invalidateQueries({ queryKey: ["/api/transcripts"] });
         } catch (err) {
           console.error("Upload failed:", err);

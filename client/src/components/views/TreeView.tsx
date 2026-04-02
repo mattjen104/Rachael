@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useTreeData, useToggleTask, useBridgeStatus, useMailInbox, useTeamsChats, useSnowRecords } from "@/hooks/use-org-data";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, apiUrl } from "@/lib/queryClient";
 import type { Task, Note } from "@shared/schema";
 
 interface TreeViewProps {
@@ -128,7 +128,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
   useEffect(() => {
     const checkRecStatus = async () => {
       try {
-        const resp = await fetch("/api/epic/record/status");
+        const resp = await fetch(apiUrl("/api/epic/record/status"));
         if (resp.ok) {
           const d = await resp.json();
           setEpicRecording({ active: d.active, env: d.env, stepCount: d.stepCount });
@@ -747,7 +747,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                     e.stopPropagation();
                     if (epicRecording.active) {
                       try {
-                        const resp = await fetch("/api/epic/record/stop", {
+                        const resp = await fetch(apiUrl("/api/epic/record/stop"), {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({}),
@@ -757,11 +757,11 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                           const d = await resp.json();
                           let steps = d.steps || [];
                           await new Promise(r => setTimeout(r, 3000));
-                          const statusResp = await fetch("/api/epic/record/status");
+                          const statusResp = await fetch(apiUrl("/api/epic/record/status"));
                           if (statusResp.ok) {
                             const sd = await statusResp.json();
                             if (sd.stepCount > steps.length) {
-                              const stopResp2 = await fetch("/api/epic/record/stop", {
+                              const stopResp2 = await fetch(apiUrl("/api/epic/record/stop"), {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({}),
@@ -780,7 +780,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                       } catch {}
                     } else {
                       try {
-                        await fetch("/api/epic/record/start", {
+                        await fetch(apiUrl("/api/epic/record/start"), {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ env: "SUP" }),
@@ -1025,7 +1025,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                 if (!recReview.name.trim()) return;
                 const steps = recReview.steps.filter(s => !s.excluded);
                 try {
-                  const resp = await fetch("/api/epic/record/save", {
+                  const resp = await fetch(apiUrl("/api/epic/record/save"), {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name: recReview.name.trim(), steps }),

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
+import { apiUrl } from "@/lib/queryClient";
 import { useTvMode } from "@/hooks/use-tv-mode";
 
 interface Message {
@@ -38,7 +39,7 @@ export default function VoiceView() {
     addMessage("user", text);
 
     try {
-      const res = await fetch("/api/voice-cmd", {
+      const res = await fetch(apiUrl("/api/voice-cmd"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, source: "voice-view", notify: false }),

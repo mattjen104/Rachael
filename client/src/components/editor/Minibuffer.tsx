@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useSearch, useSmartCapture, useToggleRuntime, useCreateReaderPage, usePrograms, useProposals, useTasks, useSiteProfiles, useNavigationPaths } from "@/hooks/use-org-data";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiUrl, getApiBase, setApiBase } from "@/lib/queryClient";
 import type { ViewMode } from "@/components/layout/Sidebar";
 import { useTvMode } from "@/hooks/use-tv-mode";
 import { CAPTURE_TEMPLATES, type CaptureTemplate } from "@shared/capture-templates";
@@ -185,6 +185,19 @@ export default function Minibuffer({
 
   const executeShellCommand = useCallback(async (cmd: string) => {
     if (!cmd.trim()) return;
+    const trimmed = cmd.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      setApiBase(trimmed);
+      setShellOutput("API base set to: " + trimmed + "\nReload the page to connect.");
+      setQuery("");
+      return;
+    }
+    if (trimmed === "reset-api-base" || trimmed === "clear-api-base") {
+      setApiBase("");
+      setShellOutput("API base cleared (using local server).\nReload the page to reconnect.");
+      setQuery("");
+      return;
+    }
     setShellRunning(true);
     setShellOutput("");
     setShellHistory(prev => {
@@ -246,6 +259,7 @@ export default function Minibuffer({
       { id: "add-url", label: "read-url", hint: "u", action: () => { setMode("add-url"); setQuery(""); setSelectedIdx(0); } },
       { id: "scrape-url", label: "scrape-url", hint: "Scrape any URL", action: () => { setMode("scrape-url"); setQuery(""); setSelectedIdx(0); } },
       { id: "cycle-theme", label: "cycle-theme", hint: "#", action: () => exec("Theme cycled", () => onCycleTheme()) },
+      { id: "set-api-base", label: "set-api-base", hint: "Set backend URL", action: () => { setMode("shell"); setQuery(""); setShellOutput("Current: " + (getApiBase() || "(local)")); } },
       { id: "toggle-runtime", label: "toggle-runtime", hint: "R", action: () => exec("Runtime toggled", () => toggleRuntime.mutate()) },
       { id: "budget-status", label: "budget-status", hint: "$", action: () => { setMode("shell"); setQuery("budget"); setShellOutput(""); executeShellCommand("budget"); } },
       { id: "budget-models", label: "budget-models", hint: "Model roster", action: () => { setMode("shell"); setQuery("budget models"); setShellOutput(""); executeShellCommand("budget models"); } },
@@ -520,7 +534,7 @@ export default function Minibuffer({
           const headers: Record<string, string> = {};
           const storedKey = localStorage.getItem("orgcloud_api_key");
           if (storedKey) headers["Authorization"] = `Bearer ${storedKey}`;
-          const res = await fetch("/api/uploads/image", { method: "POST", body: formData, headers, credentials: "include" });
+          const res = await fetch(apiUrl("/api/uploads/image"), { method: "POST", body: formData, headers, credentials: "include" });
           const data = await res.json();
           setCaptureImageUrl(data.url);
         } catch (err) {

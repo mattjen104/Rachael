@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getStoredApiKey } from "@/lib/queryClient";
+import { getStoredApiKey, apiUrl } from "@/lib/queryClient";
 
 export interface CockpitEvent {
   id: string;
@@ -20,7 +20,7 @@ export function useCockpitEvents() {
   useEffect(() => {
     const apiKey = getStoredApiKey();
     const params = apiKey ? `?token=${encodeURIComponent(apiKey)}` : "";
-    const es = new EventSource(`/api/cockpit/events${params}`);
+    const es = new EventSource(apiUrl(`/api/cockpit/events${params}`));
     eventSourceRef.current = es;
 
     es.onopen = () => setConnected(true);

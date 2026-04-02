@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getStoredApiKey } from "@/lib/queryClient";
+import { getStoredApiKey, apiUrl } from "@/lib/queryClient";
 
 function authHeaders(): Record<string, string> {
   const hdrs: Record<string, string> = { "Content-Type": "application/json" };
@@ -83,7 +83,7 @@ export default function EvolutionPanel() {
   const { data: state, isLoading } = useQuery<EvolutionState>({
     queryKey: ["/api/evolution/state"],
     queryFn: async () => {
-      const res = await fetch("/api/evolution/state", { headers: authHeaders() });
+      const res = await fetch(apiUrl("/api/evolution/state"), { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch evolution state");
       return res.json();
     },
@@ -93,7 +93,7 @@ export default function EvolutionPanel() {
   const { data: judgeCosts } = useQuery<JudgeCostSummary>({
     queryKey: ["/api/evolution/judge-costs"],
     queryFn: async () => {
-      const res = await fetch("/api/evolution/judge-costs", { headers: authHeaders() });
+      const res = await fetch(apiUrl("/api/evolution/judge-costs"), { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch judge costs");
       return res.json();
     },
@@ -103,7 +103,7 @@ export default function EvolutionPanel() {
   const { data: goldenSuite = [] } = useQuery<GoldenSuiteEntry[]>({
     queryKey: ["/api/evolution/golden-suite"],
     queryFn: async () => {
-      const res = await fetch("/api/evolution/golden-suite", { headers: authHeaders() });
+      const res = await fetch(apiUrl("/api/evolution/golden-suite"), { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch golden suite");
       return res.json();
     },
@@ -113,7 +113,7 @@ export default function EvolutionPanel() {
   const { data: observations = [] } = useQuery<ObservationEntry[]>({
     queryKey: ["/api/evolution/observations"],
     queryFn: async () => {
-      const res = await fetch("/api/evolution/observations", { headers: authHeaders() });
+      const res = await fetch(apiUrl("/api/evolution/observations"), { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch observations");
       return res.json();
     },
@@ -122,7 +122,7 @@ export default function EvolutionPanel() {
 
   const rollbackMutation = useMutation({
     mutationFn: async (versionId: number) => {
-      const res = await fetch(`/api/evolution/versions/${versionId}/rollback`, {
+      const res = await fetch(apiUrl(`/api/evolution/versions/${versionId}/rollback`), {
         method: "POST",
         headers: authHeaders(),
       });
@@ -136,7 +136,7 @@ export default function EvolutionPanel() {
 
   const consolidateMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/evolution/consolidate", {
+      const res = await fetch(apiUrl("/api/evolution/consolidate"), {
         method: "POST",
         headers: authHeaders(),
       });
@@ -151,7 +151,7 @@ export default function EvolutionPanel() {
 
   const migrateMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/memory/migrate-to-qdrant", {
+      const res = await fetch(apiUrl("/api/memory/migrate-to-qdrant"), {
         method: "POST",
         headers: authHeaders(),
       });

@@ -1,13 +1,13 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useResults } from "@/hooks/use-org-data";
-import { getStoredApiKey } from "@/lib/queryClient";
+import { getStoredApiKey, apiUrl } from "@/lib/queryClient";
 import type { AgentResult } from "@shared/schema";
 
 function trackRadarEngagement(url: string, source: string, title: string) {
   const hdrs: Record<string, string> = { "Content-Type": "application/json" };
   const key = getStoredApiKey();
   if (key) hdrs["Authorization"] = `Bearer ${key}`;
-  fetch("/api/radar/engagement", {
+  fetch(apiUrl("/api/radar/engagement"), {
     method: "POST",
     headers: hdrs,
     body: JSON.stringify({ url, source, title, programName: "research-radar" }),

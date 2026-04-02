@@ -1,6 +1,26 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+const API_BASE_STORAGE = "rachael_api_base";
 const AUTH_KEY_STORAGE = "orgcloud_api_key";
+
+export function getApiBase(): string {
+  const envBase = import.meta.env.VITE_API_BASE;
+  if (envBase) return envBase.replace(/\/$/, "");
+  try {
+    const stored = localStorage.getItem(API_BASE_STORAGE);
+    if (stored) return stored.replace(/\/$/, "");
+  } catch {}
+  return "";
+}
+
+export function setApiBase(url: string) {
+  localStorage.setItem(API_BASE_STORAGE, url.replace(/\/$/, ""));
+}
+
+export function apiUrl(path: string): string {
+  const base = getApiBase();
+  return base ? base + path : path;
+}
 
 export function getStoredApiKey(): string | null {
   return localStorage.getItem(AUTH_KEY_STORAGE);
@@ -39,7 +59,7 @@ export async function apiRequest(
     ...(data ? { "Content-Type": "application/json" } : {}),
   };
 
-  const res = await fetch(url, {
+  const res = await fetch(apiUrl(url), {
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
@@ -56,7 +76,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
+    const res = await fetch(apiUrl(queryKey.join("/") as string), {
       credentials: "include",
       headers: getAuthHeaders(),
     });

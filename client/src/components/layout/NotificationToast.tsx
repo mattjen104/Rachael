@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { apiUrl } from "@/lib/queryClient";
 
 interface Notification {
   id: string;
@@ -26,7 +27,7 @@ export default function NotificationToast() {
       if (!mounted || pollingRef.current) return;
       pollingRef.current = true;
       try {
-        const res = await fetch(`/api/notifications?since=${lastSeenRef.current}`);
+        const res = await fetch(apiUrl(`/api/notifications?since=${lastSeenRef.current}`));
         if (!res.ok || !mounted) return;
         const data = await res.json();
         if (data.notifications && data.notifications.length > 0) {
@@ -61,7 +62,7 @@ export default function NotificationToast() {
 
   const dismiss = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
-    fetch(`/api/notifications/${id}/read`, { method: "POST" }).catch(() => {});
+    fetch(apiUrl(`/api/notifications/${id}/read`), { method: "POST" }).catch(() => {});
   };
 
   if (toasts.length === 0) return null;

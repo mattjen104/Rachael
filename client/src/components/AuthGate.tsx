@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { getStoredApiKey, setStoredApiKey } from "@/lib/queryClient";
+import { getStoredApiKey, setStoredApiKey, apiUrl } from "@/lib/queryClient";
 
 interface AuthGateProps {
   children: React.ReactNode;
@@ -12,7 +12,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   const checkAuth = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/check");
+      const res = await fetch(apiUrl("/api/auth/check"));
       const data = await res.json();
       if (!data.requiresAuth) {
         setState("authenticated");
@@ -20,7 +20,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       }
       const storedKey = getStoredApiKey();
       if (storedKey) {
-        const testRes = await fetch("/api/org-files", {
+        const testRes = await fetch(apiUrl("/api/org-files"), {
           headers: { Authorization: `Bearer ${storedKey}` },
         });
         if (testRes.ok) {
@@ -42,7 +42,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     e.preventDefault();
     setError("");
     try {
-      const res = await fetch("/api/org-files", {
+      const res = await fetch(apiUrl("/api/org-files"), {
         headers: { Authorization: `Bearer ${keyInput.trim()}` },
       });
       if (res.ok) {
