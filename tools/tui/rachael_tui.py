@@ -1442,9 +1442,6 @@ class RachaelTUI:
                         self._prog_plot_ids.add(plot_name)
                         self.wm.create_inline_plot(p, y - 1, cols - plot_w - 2, plot_w,
                                                    run_hist, name=plot_name)
-                    else:
-                        for val in run_hist:
-                            self.wm.add_sparkline_sample(float(val), plot_name)
             if is_exp and isinstance(item, dict):
                 details = format_detail(item, cols - 6, self.view, self.data_cache)
                 detail_h = min(len(details), rows - y)
