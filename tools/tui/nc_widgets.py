@@ -357,11 +357,13 @@ class WidgetManager:
         return False
 
     def log_degradation(self, widget: str, error: str = ""):
+        import sys
         msg = widget
         if error:
-            msg += " (" + error[:40] + ")"
+            msg += " (" + error[:60] + ")"
         if msg not in self.degraded:
             self.degraded.append(msg)
+            print("NOTCURSES DEGRADED: " + msg, file=sys.stderr)
 
     def create_menu(self, sections):
         if NcMenu is None or NcMenuItem is None:

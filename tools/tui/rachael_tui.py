@@ -572,6 +572,24 @@ class RachaelTUI:
             if cb and text:
                 self.minibuffer_history.append(text)
                 cb(text)
+        elif key == 16 and self.minibuffer_history:
+            if self.minibuffer_hist_idx < 0:
+                self.minibuffer_hist_idx = len(self.minibuffer_history) - 1
+            else:
+                self.minibuffer_hist_idx = max(0, self.minibuffer_hist_idx - 1)
+            self.wm.close_reader()
+            self.nc_reader_active = False
+            self.minibuffer_active = True
+            self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
+            self.minibuffer_cursor = len(self.minibuffer_text)
+        elif key == 14 and self.minibuffer_hist_idx >= 0:
+            self.minibuffer_hist_idx = min(len(self.minibuffer_history) - 1,
+                                            self.minibuffer_hist_idx + 1)
+            self.wm.close_reader()
+            self.nc_reader_active = False
+            self.minibuffer_active = True
+            self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
+            self.minibuffer_cursor = len(self.minibuffer_text)
         else:
             self.wm.reader_offer_input(ni)
 
@@ -1385,14 +1403,18 @@ class RachaelTUI:
             self._set_bg(p, "bg")
             y += 1
             if is_exp and isinstance(item, dict):
-                details = format_detail(item, cols - 4, self.view, self.data_cache)
-                for dl in details:
-                    if y >= rows:
-                        break
-                    self._set_fg(p, "dim")
-                    self._set_bg(p, "bg")
-                    p.putstr_yx(y, 3, dl[:cols - 4])
-                    y += 1
+                details = format_detail(item, cols - 6, self.view, self.data_cache)
+                detail_h = min(len(details), rows - y)
+                if detail_h > 0 and self.nc:
+                    detail_plane = NcPlane(p, detail_h, cols - 4, y, 2)
+                    r, g, b = self.theme.rgb("mini_bg")
+                    detail_plane.set_bg_rgb8(r, g, b)
+                    r, g, b = self.theme.rgb("dim")
+                    detail_plane.set_fg_rgb8(r, g, b)
+                    detail_plane.erase()
+                    for di, dl in enumerate(details[:detail_h]):
+                        detail_plane.putstr_yx(di, 1, dl[:cols - 6])
+                    y += detail_h
 
     def _render_reader_content(self, p, rows, cols):
         pages = self.data_cache.get("reader", [])
