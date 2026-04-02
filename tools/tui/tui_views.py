@@ -80,6 +80,8 @@ def build_tree_items(data_cache: dict, tree_state: TreeState) -> list:
     reader = data_cache.get("reader", [])
     snow_records = data_cache.get("snow_records", [])
 
+    journal = data_cache.get("journal", [])
+
     sections = [
         ("RUNTIME", _tree_runtime_children, [runtime]),
         ("BUDGET", _tree_budget_children, [budget]),
@@ -87,6 +89,7 @@ def build_tree_items(data_cache: dict, tree_state: TreeState) -> list:
         ("TASKS (" + str(len(tasks_list)) + ")", _tree_list_children, [tasks_list]),
         ("NOTES (" + str(len(notes)) + ")", _tree_list_children, [notes]),
         ("SKILLS (" + str(len(skills_list)) + ")", _tree_list_children, [skills_list]),
+        ("JOURNAL (" + str(len(journal)) + ")", _tree_list_children, [journal]),
         ("INBOX (" + str(len(captures)) + ")", _tree_list_children, [captures]),
         ("READER (" + str(len(reader)) + ")", _tree_list_children, [reader]),
         ("SNOW (" + str(len(snow_records)) + ")", _tree_list_children, [snow_records]),
@@ -145,7 +148,7 @@ def _tree_list_children(item_list: list) -> list:
     return children
 
 
-def build_snow_items(data_cache: dict, snow_tab: str, api) -> list:
+def build_snow_items(data_cache: dict, snow_tab: str, api=None) -> list:
     items = []
     tab_labels = {"my-queue": "MY QUEUE", "team": "TEAM WORKLOAD", "aging": "AGING / SLA RISK"}
     tab_line = ""
@@ -157,21 +160,9 @@ def build_snow_items(data_cache: dict, snow_tab: str, api) -> list:
     items.append({"_section": tab_line})
 
     snow_data = data_cache.get("snow_queue", {})
-    if not snow_data:
-        try:
-            snow_data = api.snow_queue()
-            data_cache["snow_queue"] = snow_data
-        except (ConnectionError, TimeoutError, OSError, KeyError):
-            snow_data = {}
     records = snow_data.get("records", [])
     if not records:
         records = data_cache.get("snow_records", [])
-        if not records:
-            try:
-                records = api.snow_records()
-                data_cache["snow_records"] = records
-            except (ConnectionError, TimeoutError, OSError, KeyError):
-                records = []
 
     if snow_tab == "my-queue":
         pending = [r for r in records if r.get("state", "").lower() in
@@ -244,10 +235,9 @@ def _snow_record_to_item(r: dict) -> dict:
 
 def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
     items = []
-    try:
-        state = api.evolution_state()
-    except (ConnectionError, TimeoutError, OSError, KeyError) as exc:
-        items.append({"_tree": "error", "_label": "Failed to load evolution state: " + str(exc)[:60]})
+    state = data_cache.get("evolution_state")
+    if not state:
+        items.append({"_tree": "info", "_label": "Loading evolution data... (C-l to refresh)"})
         return items
 
     if evo_tab == "overview":
@@ -294,23 +284,23 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
         for v in versions:
             items.append(v)
     elif evo_tab == "golden":
-        try:
-            suite = api.evolution_golden_suite()
-            items.append({"_section": "GOLDEN SUITE (" + str(len(suite)) + ")"})
+        suite = data_cache.get("evolution_golden", [])
+        items.append({"_section": "GOLDEN SUITE (" + str(len(suite)) + ")"})
+        if suite:
             items.extend(suite)
-        except (ConnectionError, TimeoutError, OSError, KeyError):
-            items.append({"_tree": "error", "_label": "Failed to load golden suite"})
+        else:
+            items.append({"_tree": "info", "_label": "No data cached (C-l to refresh)"})
     elif evo_tab == "observations":
-        try:
-            obs = api.evolution_observations()
-            items.append({"_section": "OBSERVATIONS (" + str(len(obs)) + ")"})
+        obs = data_cache.get("evolution_observations", [])
+        items.append({"_section": "OBSERVATIONS (" + str(len(obs)) + ")"})
+        if obs:
             items.extend(obs)
-        except (ConnectionError, TimeoutError, OSError, KeyError):
-            items.append({"_tree": "error", "_label": "Failed to load observations"})
+        else:
+            items.append({"_tree": "info", "_label": "No data cached (C-l to refresh)"})
     elif evo_tab == "costs":
-        try:
-            costs = api.evolution_judge_costs()
-            items.append({"_section": "JUDGE COSTS"})
+        costs = data_cache.get("evolution_costs", {})
+        items.append({"_section": "JUDGE COSTS"})
+        if costs:
             today_cost = costs.get("today", 0)
             cap_cost = costs.get("cap", 0)
             remaining = costs.get("remaining", 0)
@@ -324,8 +314,8 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
                 for judge, cost in breakdown.items():
                     bar = braille_bar(cost, max(max_cost, 0.001), 5)
                     items.append({"_tree": "cost", "_label": "  " + judge + ": " + bar + " $" + str(round(cost, 4))})
-        except (ConnectionError, TimeoutError, OSError, KeyError):
-            items.append({"_tree": "error", "_label": "Failed to load judge costs"})
+        else:
+            items.append({"_tree": "info", "_label": "No data cached (C-l to refresh)"})
     return items
 
 
@@ -367,7 +357,7 @@ def current_items(view: str, data_cache: dict, api, evo_tab: str,
     elif view == "evolution":
         return build_evolution_items(api, evo_tab, data_cache)
     elif view == "snow":
-        return build_snow_items(data_cache, snow_tab, api)
+        return build_snow_items(data_cache, snow_tab)
     elif view == "transcripts":
         return data_cache.get("transcripts", [])
     elif view == "voice":

@@ -323,7 +323,13 @@ class RachaelTUI:
             "skills": lambda: self.api.skills(),
             "notes": lambda: self.api.notes(),
             "captures": lambda: self.api.captures(limit=30),
+            "journal": lambda: self.api.captures(limit=30),
             "snow_records": lambda: self.api.snow_records(),
+            "snow_queue": lambda: self.api.snow_queue(),
+            "evolution_state": lambda: self.api.evolution_state(),
+            "evolution_golden": lambda: self.api.evolution_golden_suite(),
+            "evolution_observations": lambda: self.api.evolution_observations(),
+            "evolution_costs": lambda: self.api.evolution_judge_costs(),
         }
         for key, fn in fetches.items():
             try:
@@ -520,6 +526,16 @@ class RachaelTUI:
         elif char == "\t":
             if self.view == "snow":
                 self._open_snow_tab_selector()
+            elif self.view == "results":
+                with self.data_lock:
+                    items = current_items(self.view, self.data_cache, self.api,
+                                          self.evo_tab, self.reader_reading_id, self.cockpit_events,
+                                          self.tree_state, self.snow_tab, self._program_filter)
+                if items and 0 <= self.selected_idx < len(items):
+                    item = items[self.selected_idx]
+                    iid = item.get("id") if isinstance(item, dict) else None
+                    if iid is not None:
+                        self.expanded_id = None if self.expanded_id == iid else iid
             else:
                 self.sidebar_visible = not self.sidebar_visible
                 self._resize_planes()
