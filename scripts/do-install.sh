@@ -28,12 +28,12 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # --- System packages ---
-echo "[1/9] Installing system packages..."
+echo "[1/10] Installing system packages..."
 apt-get update -qq
 apt-get install -y -qq curl git build-essential ca-certificates gnupg lsb-release ufw python3 python3-pip cmake pkg-config libncurses-dev libunistring-dev libdeflate-dev libnotcurses-dev libnotcurses3
 
 # --- Node.js ---
-echo "[2/9] Installing Node.js ${NODE_VERSION}..."
+echo "[2/10] Installing Node.js ${NODE_VERSION}..."
 if ! command -v node &>/dev/null || ! node -v | grep -q "v${NODE_VERSION}"; then
   curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
   apt-get install -y -qq nodejs
@@ -41,17 +41,17 @@ fi
 echo "  Node $(node -v), npm $(npm -v)"
 
 # --- PostgreSQL ---
-echo "[3/9] Installing PostgreSQL..."
+echo "[3/10] Installing PostgreSQL..."
 apt-get install -y -qq postgresql postgresql-contrib
 systemctl enable postgresql
 systemctl start postgresql
 
 # --- Chromium (headless browser for future use) ---
-echo "[4/9] Installing Chromium..."
+echo "[4/10] Installing Chromium..."
 apt-get install -y -qq chromium-browser || apt-get install -y -qq chromium || echo "  [warn] Chromium not available in repos, skipping"
 
 # --- Create app user ---
-echo "[5/9] Setting up app user and directory..."
+echo "[5/10] Setting up app user and directory..."
 if ! id "$APP_USER" &>/dev/null; then
   useradd -r -m -s /bin/bash "$APP_USER"
 fi
@@ -69,7 +69,7 @@ fi
 cd "$APP_DIR"
 
 # --- Database setup ---
-echo "[6/9] Setting up database..."
+echo "[6/10] Setting up database..."
 DB_PASSWORD=$(openssl rand -hex 16)
 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${APP_USER}'" | grep -q 1 || \
@@ -82,7 +82,7 @@ DATABASE_URL="postgresql://${APP_USER}:${DB_PASSWORD}@localhost:5432/${APP_USER}
 echo "  Database ready: ${APP_USER}@localhost/${APP_USER}"
 
 # --- Environment file ---
-echo "[7/9] Configuring environment..."
+echo "[7/10] Configuring environment..."
 ENV_FILE="$APP_DIR/.env"
 
 if [ -f "$ENV_FILE" ]; then
@@ -125,14 +125,55 @@ ENVEOF
 fi
 
 # --- Build app ---
-echo "[8/9] Building application..."
+echo "[8/10] Building application..."
 cd "$APP_DIR"
 sudo -u "$APP_USER" bash -c "cd $APP_DIR && npm install --production=false 2>&1 | tail -1"
 sudo -u "$APP_USER" bash -c "cd $APP_DIR && source .env 2>/dev/null; export DATABASE_URL='${DATABASE_URL}'; npm run build 2>&1 | tail -3"
 sudo -u "$APP_USER" bash -c "cd $APP_DIR && source .env 2>/dev/null; export DATABASE_URL='${DATABASE_URL}'; npx tsx scripts/push-schema.ts 2>&1"
 
+# --- Notcurses source build ---
+echo "[9/10] Building notcurses from source..."
+NOTCURSES_OK=false
+NOTCURSES_TAG="v3.0.11"
+if python3 -c "from notcurses import Notcurses" 2>/dev/null; then
+  echo "  notcurses Python bindings already working, skipping build."
+  NOTCURSES_OK=true
+else
+  echo "  Installing build dependencies..."
+  apt-get install -y -qq cmake pkg-config libdeflate-dev libncurses-dev \
+    libunistring-dev python3-dev python3-cffi libavformat-dev libavutil-dev \
+    libswscale-dev 2>/dev/null || true
+
+  NOTCURSES_BUILD_DIR=$(mktemp -d)
+
+  if git clone --depth 1 --branch "$NOTCURSES_TAG" https://github.com/dankamongmen/notcurses.git "$NOTCURSES_BUILD_DIR/notcurses" 2>&1 | tail -1 && \
+     cmake -S "$NOTCURSES_BUILD_DIR/notcurses" -B "$NOTCURSES_BUILD_DIR/build" \
+       -DCMAKE_INSTALL_PREFIX=/usr \
+       -DUSE_PYTHON=ON \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DUSE_DOCTEST=OFF \
+       -DUSE_PANDOC=OFF \
+       -DUSE_QRCODEGEN=OFF 2>&1 | tail -3 && \
+     cmake --build "$NOTCURSES_BUILD_DIR/build" -j"$(nproc)" 2>&1 | tail -3 && \
+     cmake --install "$NOTCURSES_BUILD_DIR/build" 2>&1 | tail -3 && \
+     ldconfig; then
+    echo "  notcurses source build completed."
+  else
+    echo "  [warn] notcurses source build failed. TUI will use curses fallback."
+  fi
+
+  rm -rf "$NOTCURSES_BUILD_DIR"
+
+  if python3 -c "from notcurses import Notcurses" 2>/dev/null; then
+    echo "  notcurses Python import verified."
+    NOTCURSES_OK=true
+  else
+    echo "  [warn] notcurses not available after build. TUI will use curses fallback."
+  fi
+fi
+
 # --- TUI client ---
-echo "[9/9] Setting up TUI client..."
+echo "[10/10] Setting up TUI client..."
 bash "${APP_DIR}/tools/tui/setup.sh" || echo "  [warn] TUI setup had issues; TUI may use curses fallback"
 sudo -u "$APP_USER" mkdir -p "/home/${APP_USER}/.rachael"
 if [ ! -f "/home/${APP_USER}/.rachael/tui.conf" ]; then
