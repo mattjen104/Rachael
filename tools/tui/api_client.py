@@ -123,6 +123,15 @@ class RachaelAPI:
     def trigger_program(self, pid: int) -> dict:
         return self._call(self._post("/api/programs/" + str(pid) + "/trigger")) or {}
 
+    def create_program(self, data: dict) -> dict:
+        return self._call(self._post("/api/programs", body=data)) or {}
+
+    def update_program(self, pid: int, data: dict) -> dict:
+        return self._call(self._patch("/api/programs/" + str(pid), body=data)) or {}
+
+    def delete_program(self, pid: int) -> dict:
+        return self._call(self._delete("/api/programs/" + str(pid))) or {}
+
     def tasks(self, status: Optional[str] = None) -> list:
         p = {}
         if status:

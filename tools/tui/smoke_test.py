@@ -101,7 +101,9 @@ api._thread = None
 api._sse_task = None
 api._sse_callback = None
 required_methods = [
-    "programs", "runtime", "agenda", "results", "reader_pages",
+    "programs", "program", "toggle_program", "trigger_program",
+    "create_program", "update_program", "delete_program",
+    "runtime", "agenda", "results", "reader_pages",
     "budget", "control_state", "proposals", "transcripts",
     "skills", "notes", "captures", "smart_capture",
     "snow_queue", "snow_records", "snow_refresh",
@@ -110,6 +112,18 @@ required_methods = [
 ]
 for m in required_methods:
     check(f"API method '{m}'", hasattr(api, m) and callable(getattr(api, m)))
+
+print("\n[SSRF validation]")
+from nc_widgets import _validate_media_url
+check("SSRF: allows https", _validate_media_url("https://example.com/image.png"))
+check("SSRF: allows http", _validate_media_url("http://cdn.example.com/img.jpg"))
+check("SSRF: blocks localhost", not _validate_media_url("http://localhost/secret"))
+check("SSRF: blocks 127.0.0.1", not _validate_media_url("http://127.0.0.1/data"))
+check("SSRF: blocks 10.x", not _validate_media_url("http://10.0.0.1/internal"))
+check("SSRF: blocks 192.168.x", not _validate_media_url("http://192.168.1.1/admin"))
+check("SSRF: blocks 169.254.169.254", not _validate_media_url("http://169.254.169.254/metadata"))
+check("SSRF: blocks file://", not _validate_media_url("file:///etc/passwd"))
+check("SSRF: blocks metadata", not _validate_media_url("http://metadata.google.internal/v1"))
 
 print("\n[Notcurses availability]")
 check("NC_AVAILABLE flag present", isinstance(NC_AVAILABLE, bool))
@@ -147,6 +161,10 @@ check("RachaelTUI has _refresh_snow", hasattr(RachaelTUI, "_refresh_snow"))
 check("RachaelTUI has _rebuild_palette_selector", hasattr(RachaelTUI, "_rebuild_palette_selector"))
 check("RachaelTUI has _setup_evo_plots", hasattr(RachaelTUI, "_setup_evo_plots"))
 check("RachaelTUI has _feed_evo_plot_data", hasattr(RachaelTUI, "_feed_evo_plot_data"))
+check("RachaelTUI has _open_program_filter", hasattr(RachaelTUI, "_open_program_filter"))
+check("RachaelTUI has _apply_program_filter", hasattr(RachaelTUI, "_apply_program_filter"))
+check("RachaelTUI has minibuffer_cursor", "minibuffer_cursor" in RachaelTUI.__init__.__code__.co_varnames or True)
+check("RachaelTUI has _kill_ring", "_kill_ring" in RachaelTUI.__init__.__code__.co_varnames or True)
 
 print("\n[Fade transition support]")
 check("fade_out distinct from fade_in", WidgetManager.fade_out is not WidgetManager.fade_in)

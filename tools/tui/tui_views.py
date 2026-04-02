@@ -332,9 +332,25 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
 def current_items(view: str, data_cache: dict, api, evo_tab: str,
                   reader_reading_id, cockpit_events,
                   tree_state: Optional[TreeState] = None,
-                  snow_tab: str = "my-queue") -> list:
+                  snow_tab: str = "my-queue",
+                  program_filter: str = "all") -> list:
     if view == "programs":
-        return data_cache.get("programs", [])
+        progs = data_cache.get("programs", [])
+        if program_filter == "all":
+            return progs
+        runtime = data_cache.get("runtime", {})
+        rp_map = {rp.get("name"): rp for rp in runtime.get("programs", []) if rp.get("name")}
+        filtered = []
+        for p in progs:
+            if program_filter == "enabled" and p.get("enabled"):
+                filtered.append(p)
+            elif program_filter == "disabled" and not p.get("enabled"):
+                filtered.append(p)
+            elif program_filter == "running":
+                rp = rp_map.get(p.get("name"))
+                if rp and rp.get("status") == "running":
+                    filtered.append(p)
+        return filtered
     elif view == "results":
         return data_cache.get("results", [])
     elif view == "reader":
@@ -404,6 +420,12 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
             right += " [" + cost + "]"
         if sched:
             right += " " + sched
+        run_hist = []
+        if rp and isinstance(rp.get("recentResults"), list):
+            run_hist = [float(r.get("metric", 0) or 0) for r in rp["recentResults"][-8:]]
+        spark = braille_sparkline_str(run_hist) if run_hist else ""
+        if spark:
+            right = " " + spark + right
         avail = max_width - len(name) - len(right) - 2
         if avail < 0:
             return (sc + " " + name)[:max_width]

@@ -108,6 +108,8 @@ class RachaelTUI:
         self.minibuffer_callback: Optional[Callable] = None
         self.minibuffer_history: list = []
         self.minibuffer_hist_idx = -1
+        self.minibuffer_cursor = 0
+        self._kill_ring = ""
         self.command_palette_active = False
         self.palette_idx = 0
         self.palette_filter = ""
@@ -135,6 +137,8 @@ class RachaelTUI:
         self.nc_multiselector_active = False
         self._multiselector_programs: list = []
         self._snow_selector_active = False
+        self._program_filter = "all"
+        self._program_filter_active = False
 
     def run(self):
         detect_media_capabilities()
@@ -233,6 +237,7 @@ class RachaelTUI:
             self.wm.destroy_selector()
             self.nc_selector_active = False
             self._snow_selector_active = False
+            self._program_filter_active = False
             cancelled = True
         if self.nc_multiselector_active and self.wm:
             self.wm.destroy_multiselector()
@@ -422,14 +427,14 @@ class RachaelTUI:
         if offset < rows:
             self._set_fg(self.stdp, "dim")
             self.stdp.putstr_yx(offset, max(0, (cols - 16) // 2), "Press any key...")
-        self.nc.render()
         if self.wm:
-            self.wm.pulse_plane(self.stdp, 600)
-        self.nc.render()
+            self.wm.fade_in(self.stdp, 600)
+        else:
+            self.nc.render()
         ni = NcInput()
         self.nc.get(ni)
         if self.wm:
-            self.wm.fade_plane(self.stdp, 300)
+            self.wm.fade_out(self.stdp, 300)
 
     def _main_loop(self):
         ni = NcInput()
@@ -598,6 +603,7 @@ class RachaelTUI:
             self.nc_selector_active = False
             self.command_palette_active = False
             self._snow_selector_active = False
+            self._program_filter_active = False
             self.palette_filter = ""
         elif key in (10, 13):
             selected = self.wm.selector_selected()
@@ -605,14 +611,18 @@ class RachaelTUI:
             self.nc_selector_active = False
             was_snow = self._snow_selector_active
             was_palette = self.command_palette_active
+            was_prog_filter = self._program_filter_active
             self.command_palette_active = False
             self._snow_selector_active = False
+            self._program_filter_active = False
             self.palette_filter = ""
             if selected:
                 if was_snow and selected in SNOW_TABS:
                     self.snow_tab = selected
                     self.selected_idx = 0
                     self._msg("SNOW: " + selected)
+                elif was_prog_filter:
+                    self._apply_program_filter(selected)
                 elif was_palette:
                     self._do_command(selected)
                 else:
@@ -648,7 +658,7 @@ class RachaelTUI:
         with self.data_lock:
             items = current_items(self.view, self.data_cache, self.api,
                                   self.evo_tab, self.reader_reading_id, self.cockpit_events,
-                                  self.tree_state, self.snow_tab)
+                                  self.tree_state, self.snow_tab, self._program_filter)
         self.selected_idx = min(self.selected_idx + 1, max(0, len(items) - 1))
         if self.view == "cockpit" and self.wm:
             self.wm.reel_next()
@@ -761,7 +771,7 @@ class RachaelTUI:
         with self.data_lock:
             items = current_items(self.view, self.data_cache, self.api,
                                   self.evo_tab, self.reader_reading_id, self.cockpit_events,
-                                  self.tree_state, self.snow_tab)
+                                  self.tree_state, self.snow_tab, self._program_filter)
         count = len(items) if items else 0
         if char == "j" or char == "n":
             self.selected_idx = min(self.selected_idx + 1, max(0, count - 1))
@@ -794,6 +804,8 @@ class RachaelTUI:
             self._action_enter(items)
         elif char == "r" and self.view == "programs":
             self._action_trigger(items)
+        elif char == "f" and self.view == "programs":
+            self._open_program_filter()
         elif char == "R":
             self._action_toggle_runtime()
         elif char == "c":
@@ -912,6 +924,7 @@ class RachaelTUI:
             return
         self.minibuffer_active = True
         self.minibuffer_text = ""
+        self.minibuffer_cursor = 0
         self.minibuffer_prompt = prompt
         self.minibuffer_hist_idx = -1
 
@@ -925,6 +938,8 @@ class RachaelTUI:
         self.minibuffer_callback = None
 
     def _handle_minibuffer(self, key):
+        t = self.minibuffer_text
+        c = self.minibuffer_cursor
         if key == 7:
             self._close_minibuffer()
             self._msg("Quit")
@@ -932,30 +947,49 @@ class RachaelTUI:
             self._close_minibuffer()
         elif key in (10, 13):
             cb = self.minibuffer_callback
-            text = self.minibuffer_text
-            if text:
-                self.minibuffer_history.append(text)
+            if t:
+                self.minibuffer_history.append(t)
             self._close_minibuffer()
-            if cb and text:
-                cb(text)
+            if cb and t:
+                cb(t)
         elif key in (127, 263):
-            self.minibuffer_text = self.minibuffer_text[:-1]
+            if c > 0:
+                self.minibuffer_text = t[:c - 1] + t[c:]
+                self.minibuffer_cursor = c - 1
+        elif key == 1:
+            self.minibuffer_cursor = 0
+        elif key == 5:
+            self.minibuffer_cursor = len(t)
         elif key == 11:
-            self.minibuffer_text = ""
+            self._kill_ring = t[c:]
+            self.minibuffer_text = t[:c]
+        elif key == 25:
+            self.minibuffer_text = t[:c] + self._kill_ring + t[c:]
+            self.minibuffer_cursor = c + len(self._kill_ring)
+        elif key == 4:
+            if c < len(t):
+                self.minibuffer_text = t[:c] + t[c + 1:]
+        elif key == 2:
+            self.minibuffer_cursor = max(0, c - 1)
+        elif key == 6:
+            self.minibuffer_cursor = min(len(t), c + 1)
         elif key == 16 and self.minibuffer_history:
             if self.minibuffer_hist_idx < 0:
                 self.minibuffer_hist_idx = len(self.minibuffer_history) - 1
             else:
                 self.minibuffer_hist_idx = max(0, self.minibuffer_hist_idx - 1)
             self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
+            self.minibuffer_cursor = len(self.minibuffer_text)
         elif key == 14 and self.minibuffer_hist_idx >= 0:
             self.minibuffer_hist_idx = min(len(self.minibuffer_history) - 1,
                                             self.minibuffer_hist_idx + 1)
             self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
+            self.minibuffer_cursor = len(self.minibuffer_text)
         else:
             char = chr(key) if 0 < key < 0x110000 else ""
             if char and char.isprintable():
-                self.minibuffer_text += char
+                self.minibuffer_text = t[:c] + char + t[c:]
+                self.minibuffer_cursor = c + 1
 
     def _open_command_palette(self):
         self.palette_filter = ""
@@ -968,6 +1002,31 @@ class RachaelTUI:
                 self.command_palette_active = True
                 return
         self.command_palette_active = True
+
+    def _open_program_filter(self):
+        filters = [
+            ("all", "All Programs"),
+            ("enabled", "Enabled Only"),
+            ("disabled", "Disabled Only"),
+            ("running", "Currently Running"),
+        ]
+        items = [(label, desc) for label, desc in filters]
+        if self.wm:
+            sel = self.wm.create_selector(items, "Filter Programs")
+            if sel:
+                self.nc_selector_active = True
+                self._program_filter_active = True
+                return
+        self._msg("Filter: all | enabled | disabled | running")
+
+    def _apply_program_filter(self, selection: str):
+        for label in ("all", "enabled", "disabled", "running"):
+            if label in selection.lower():
+                self._program_filter = label
+                self._msg("Programs filter: " + label)
+                self.selected_idx = 0
+                return
+        self._program_filter = "all"
 
     def _refresh_snow(self):
         try:
@@ -1265,7 +1324,7 @@ class RachaelTUI:
         with self.data_lock:
             items = current_items(self.view, self.data_cache, self.api,
                                   self.evo_tab, self.reader_reading_id, self.cockpit_events,
-                                  self.tree_state, self.snow_tab)
+                                  self.tree_state, self.snow_tab, self._program_filter)
         view_height = rows - 1
         if view_height < 1:
             return
@@ -1673,7 +1732,7 @@ class CursesFallback:
             with tui.data_lock:
                 items = current_items(tui.view, tui.data_cache, tui.api,
                                       tui.evo_tab, tui.reader_reading_id, tui.cockpit_events,
-                                      tui.tree_state, tui.snow_tab)
+                                      tui.tree_state, tui.snow_tab, tui._program_filter)
             vh = bottom - top
             if vh > 0:
                 if tui.selected_idx >= tui.scroll_offset + vh:

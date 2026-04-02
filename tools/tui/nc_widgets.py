@@ -127,6 +127,28 @@ def preferred_blitter():
     return None
 
 
+_PRIVATE_IP_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
+    "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+    "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
+    "192.168.", "127.", "0.", "169.254.", "[::1]", "[fc", "[fd", "[fe80")
+
+
+def _validate_media_url(url: str) -> bool:
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.hostname or ""
+    if not host:
+        return False
+    for prefix in _PRIVATE_IP_PREFIXES:
+        if host.startswith(prefix):
+            return False
+    if host in ("localhost", "metadata.google.internal", "169.254.169.254"):
+        return False
+    return True
+
+
 def check_capabilities():
     degraded = []
     widget_map = [
@@ -736,6 +758,9 @@ class WidgetManager:
         return self.create_selector(items, title)
 
     def download_and_cache_image(self, url: str) -> Optional[str]:
+        if not _validate_media_url(url):
+            self.log_degradation("image_download", "blocked URL (SSRF protection): " + url[:80])
+            return None
         import hashlib
         import tempfile
         cache_dir = os.path.join(tempfile.gettempdir(), "rachael_media_cache")
@@ -749,13 +774,14 @@ class WidgetManager:
         cached = os.path.join(cache_dir, url_hash + ext)
         if os.path.exists(cached):
             return cached
-        try:
-            import urllib.request
-            urllib.request.urlretrieve(url, cached)
-            return cached
-        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
-            self.log_degradation("image_download", str(e))
-            return None
+        import urllib.request
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("User-Agent", "RachaelTUI/1.0")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = resp.read(10 * 1024 * 1024)
+            with open(cached, "wb") as f:
+                f.write(data)
+        return cached
 
     def set_bg_alpha(self, plane, alpha=None):
         if alpha is None:
