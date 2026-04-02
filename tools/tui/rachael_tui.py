@@ -816,7 +816,9 @@ class RachaelTUI:
         if new_view == self.view:
             return
         self.prev_view = self.view
-        if self.main_plane:
+        if self.main_plane and self.wm:
+            self.wm.fade_out(self.main_plane, 80)
+        elif self.main_plane:
             self.main_plane.erase()
         if self.view == "cockpit" and self.wm:
             self.wm.destroy_reel()
