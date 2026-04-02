@@ -81,6 +81,15 @@ def _create_child_plane(parent, rows, cols, y, x):
         return parent.create(rows, cols, y_pos=y, x_pos=x)
 
 
+def _safe_destroy_plane(plane):
+    if plane is None:
+        return
+    try:
+        plane.destroy()
+    except Exception:
+        pass
+
+
 BRAILLE_BLOCKS = ["\u2800", "\u2801", "\u2803", "\u2807", "\u280F",
                   "\u281F", "\u283F", "\u287F", "\u28FF"]
 QUADRANT_BLOCKS = [" ", "\u2596", "\u2584", "\u2599", "\u2588"]
@@ -434,6 +443,8 @@ class WidgetManager:
             self.progbar = NcProgbar(self.progbar_plane)
             return self.progbar
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(self.progbar_plane)
+            self.progbar_plane = None
             self.log_degradation("NcProgbar", str(e))
             return None
 
@@ -452,6 +463,8 @@ class WidgetManager:
             self.budget_progbar = NcProgbar(self.budget_progbar_plane)
             return self.budget_progbar
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(self.budget_progbar_plane)
+            self.budget_progbar_plane = None
             self.log_degradation("NcProgbar budget", str(e))
             return None
 
@@ -476,6 +489,8 @@ class WidgetManager:
             self.reel_tablets = []
             return self.reel
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(self.reel_plane)
+            self.reel_plane = None
             self.log_degradation("NcReel", str(e))
             return None
 
@@ -539,6 +554,8 @@ class WidgetManager:
                 self.reader = NcReader.create(self.reader_plane)
             return True
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(self.reader_plane)
+            self.reader_plane = None
             self.log_degradation("NcReader", str(e))
             return False
 
@@ -591,6 +608,8 @@ class WidgetManager:
                 self.selector_plane, nc_items, title=title, maxdisplay=sel_h - 3)
             return self.selector
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(self.selector_plane)
+            self.selector_plane = None
             self.log_degradation("NcSelector", str(e))
             return None
 
@@ -613,6 +632,8 @@ class WidgetManager:
                 self.multiselector_plane, nc_items, title=title, maxdisplay=sel_h - 3)
             return self.multiselector
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(self.multiselector_plane)
+            self.multiselector_plane = None
             self.log_degradation("NcMultiSelector", str(e))
             return None
 
@@ -682,6 +703,7 @@ class WidgetManager:
                 self._plot_planes[name] = (plot, plane)
             return plot
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(plane)
             self.log_degradation("NcPlot/NcDPlot " + name, str(e))
             return None
 
@@ -702,6 +724,7 @@ class WidgetManager:
             self._plot_planes[name] = (plot, plane)
             return True
         except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+            _safe_destroy_plane(plane)
             self.log_degradation("inline_plot " + name, str(e))
             return False
 
@@ -729,6 +752,7 @@ class WidgetManager:
                 self._plot_planes[name] = (plot, plane)
                 plots[name] = plot
             except (RuntimeError, NotImplementedError, TypeError, AttributeError) as e:
+                _safe_destroy_plane(plane)
                 self.log_degradation("NcDPlot " + name, str(e))
         return plots
 
