@@ -28,12 +28,12 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # --- System packages ---
-echo "[1/8] Installing system packages..."
+echo "[1/9] Installing system packages..."
 apt-get update -qq
-apt-get install -y -qq curl git build-essential ca-certificates gnupg lsb-release ufw
+apt-get install -y -qq curl git build-essential ca-certificates gnupg lsb-release ufw python3 python3-pip
 
 # --- Node.js ---
-echo "[2/8] Installing Node.js ${NODE_VERSION}..."
+echo "[2/9] Installing Node.js ${NODE_VERSION}..."
 if ! command -v node &>/dev/null || ! node -v | grep -q "v${NODE_VERSION}"; then
   curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
   apt-get install -y -qq nodejs
@@ -41,17 +41,17 @@ fi
 echo "  Node $(node -v), npm $(npm -v)"
 
 # --- PostgreSQL ---
-echo "[3/8] Installing PostgreSQL..."
+echo "[3/9] Installing PostgreSQL..."
 apt-get install -y -qq postgresql postgresql-contrib
 systemctl enable postgresql
 systemctl start postgresql
 
 # --- Chromium (headless browser for future use) ---
-echo "[4/8] Installing Chromium..."
+echo "[4/9] Installing Chromium..."
 apt-get install -y -qq chromium-browser || apt-get install -y -qq chromium || echo "  [warn] Chromium not available in repos, skipping"
 
 # --- Create app user ---
-echo "[5/8] Setting up app user and directory..."
+echo "[5/9] Setting up app user and directory..."
 if ! id "$APP_USER" &>/dev/null; then
   useradd -r -m -s /bin/bash "$APP_USER"
 fi
@@ -69,7 +69,7 @@ fi
 cd "$APP_DIR"
 
 # --- Database setup ---
-echo "[6/8] Setting up database..."
+echo "[6/9] Setting up database..."
 DB_PASSWORD=$(openssl rand -hex 16)
 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${APP_USER}'" | grep -q 1 || \
@@ -82,7 +82,7 @@ DATABASE_URL="postgresql://${APP_USER}:${DB_PASSWORD}@localhost:5432/${APP_USER}
 echo "  Database ready: ${APP_USER}@localhost/${APP_USER}"
 
 # --- Environment file ---
-echo "[7/8] Configuring environment..."
+echo "[7/9] Configuring environment..."
 ENV_FILE="$APP_DIR/.env"
 
 if [ -f "$ENV_FILE" ]; then
@@ -125,11 +125,20 @@ ENVEOF
 fi
 
 # --- Build app ---
-echo "[8/8] Building application..."
+echo "[8/9] Building application..."
 cd "$APP_DIR"
 sudo -u "$APP_USER" bash -c "cd $APP_DIR && npm install --production=false 2>&1 | tail -1"
 sudo -u "$APP_USER" bash -c "cd $APP_DIR && source .env 2>/dev/null; export DATABASE_URL='${DATABASE_URL}'; npm run build 2>&1 | tail -3"
 sudo -u "$APP_USER" bash -c "cd $APP_DIR && source .env 2>/dev/null; export DATABASE_URL='${DATABASE_URL}'; npx tsx scripts/push-schema.ts 2>&1"
+
+# --- TUI client ---
+echo "[9/9] Setting up TUI client..."
+bash "${APP_DIR}/tools/tui/setup.sh" || echo "  [warn] TUI setup had issues; TUI may use curses fallback"
+sudo -u "$APP_USER" mkdir -p "/home/${APP_USER}/.rachael"
+if [ ! -f "/home/${APP_USER}/.rachael/tui.conf" ]; then
+  echo '{"theme": "phosphor"}' > "/home/${APP_USER}/.rachael/tui.conf"
+  chown "$APP_USER:$APP_USER" "/home/${APP_USER}/.rachael/tui.conf"
+fi
 
 # --- Systemd service ---
 cat > /etc/systemd/system/rachael.service <<SVCEOF
@@ -213,6 +222,9 @@ fi
 echo "  Logs:         journalctl -u rachael -f"
 echo "  Restart:      systemctl restart rachael"
 echo "  Update:       bash ${APP_DIR}/scripts/do-update.sh"
+echo ""
+echo "  TUI client:   python3 ${APP_DIR}/tools/tui/rachael_tui.py"
+echo "  TUI themes:   phosphor amber cool-blue solarized dracula red-alert"
 echo ""
 echo "  Chrome Extension setup:"
 echo "  1. Open extension options"

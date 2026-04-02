@@ -52,6 +52,18 @@ All data lives in Postgres tables:
 - **Takeover Points** — When agent hits an "approval" action, it emits a takeover point visible in Cockpit stream; human can confirm, reject, or take over
 - **Audit Log** — All actions (human and agent) logged with actor, action, permission level, result, timestamp
 
+## TUI Client (tools/tui/)
+
+Python + notcurses terminal interface for the DO droplet (curses fallback when notcurses unavailable).
+
+- **Entry point**: `python3 tools/tui/rachael_tui.py [--url URL] [--key KEY] [--theme NAME]`
+- **Modules**: `api_client.py` (HTTP client), `themes.py` (6 themes), `rachael_tui.py` (main app)
+- **Themes**: phosphor (default), amber, cool-blue, solarized, dracula, red-alert — persisted to `~/.rachael/tui.conf`
+- **Layout**: Header bar, sidebar (view list + runtime/budget), main content, mode line, minibuffer
+- **Views**: All 10 views (1-0 keys): agenda, tree, programs, results, reader, cockpit, snow, evolution, transcripts, voice
+- **Keybindings**: j/k navigate, g/G jump, Tab expand, Enter act, / search, : or M-x command palette, T cycle theme, c capture, X CLI, q quit
+- **Setup**: `bash tools/tui/setup.sh` (auto-run by do-install.sh step 9/9)
+
 ## Ten-View Architecture
 
 Narrow tab bar at top, full-height views below:
