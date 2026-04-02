@@ -16,22 +16,38 @@ fi
 PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 echo "  Python: ${PYTHON_VERSION}"
 
-echo "[1/4] Installing notcurses system library..."
+echo "[1/6] Installing notcurses system library..."
 if command -v apt-get &>/dev/null; then
   apt-get install -y -qq libnotcurses-dev libnotcurses3 python3-pip 2>/dev/null || true
   apt-get install -y -qq python3-notcurses 2>/dev/null || true
 fi
 
-echo "[2/5] Installing cffi (notcurses dependency)..."
+echo "[2/6] Installing cffi (notcurses dependency)..."
 pip3 install --break-system-packages cffi 2>/dev/null || pip3 install cffi 2>/dev/null || echo "  [warn] cffi install failed"
 
-echo "[3/5] Installing aiohttp async HTTP client..."
-pip3 install --break-system-packages "aiohttp>=3.9.0" 2>/dev/null || pip3 install "aiohttp>=3.9.0" 2>/dev/null || echo "  [error] aiohttp install failed"
+echo "[3/6] Installing aiohttp async HTTP client..."
+pip3 install --break-system-packages "aiohttp>=3.9.0" 2>/dev/null || pip3 install "aiohttp>=3.9.0" 2>/dev/null || {
+  echo "  [error] aiohttp install failed. aiohttp is REQUIRED."
+  exit 1
+}
 
-echo "[4/5] Installing notcurses Python bindings..."
-pip3 install --break-system-packages notcurses 2>/dev/null || pip3 install notcurses 2>/dev/null || echo "  [warn] notcurses pip install failed; will use curses fallback"
+echo "[4/6] Installing notcurses Python bindings..."
+pip3 install --break-system-packages notcurses 2>/dev/null || pip3 install notcurses 2>/dev/null || {
+  echo "  [error] notcurses pip install failed."
+  echo "  notcurses is REQUIRED for the Rachael TUI. Install manually:"
+  echo "    pip3 install notcurses"
+  echo "  Or install the system package: apt install python3-notcurses"
+  exit 1
+}
 
-echo "[5/5] Making TUI executable..."
+echo "[5/6] Verifying notcurses import..."
+python3 -c "from notcurses import Notcurses; print('  notcurses verified')" || {
+  echo "  [error] notcurses installed but cannot be imported."
+  echo "  Check that libnotcurses3 is installed: apt install libnotcurses3"
+  exit 1
+}
+
+echo "[6/6] Making TUI executable..."
 chmod +x "${SCRIPT_DIR}/rachael_tui.py"
 
 CONF_DIR="$HOME/.rachael"

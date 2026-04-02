@@ -293,22 +293,25 @@ class WidgetManager:
             pass
         return False
 
-    def fade_plane(self, plane, duration_ms: int = 300):
-        try:
-            if hasattr(plane, 'fadeout'):
-                plane.fadeout(duration_ms * 1000000)
-                return True
-        except (AttributeError, TypeError, RuntimeError):
-            pass
+    def fade_out(self, plane, duration_ms: int = 300) -> bool:
+        if hasattr(plane, 'fadeout'):
+            plane.fadeout(duration_ms * 1000000)
+            return True
         return False
 
-    def pulse_plane(self, plane, duration_ms: int = 200):
-        try:
-            if hasattr(plane, 'pulse'):
-                plane.pulse(duration_ms * 1000000, None)
-                return True
-        except (AttributeError, TypeError, RuntimeError):
-            pass
+    def fade_in(self, plane, duration_ms: int = 300) -> bool:
+        if hasattr(plane, 'fadein'):
+            plane.fadein(duration_ms * 1000000)
+            return True
+        return False
+
+    def fade_plane(self, plane, duration_ms: int = 300) -> bool:
+        return self.fade_out(plane, duration_ms)
+
+    def pulse_plane(self, plane, duration_ms: int = 200) -> bool:
+        if hasattr(plane, 'pulse'):
+            plane.pulse(duration_ms * 1000000, None)
+            return True
         return False
 
     def log_degradation(self, widget: str, error: str = ""):

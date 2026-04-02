@@ -139,6 +139,12 @@ class RachaelTUI:
     def run(self):
         detect_media_capabilities()
         if not NC_AVAILABLE:
+            import sys
+            print("WARNING: notcurses not available. Running in degraded curses mode.", file=sys.stderr)
+            print("Install notcurses for full TUI capabilities: pip3 install notcurses", file=sys.stderr)
+            degraded = check_capabilities()
+            if degraded:
+                print("Degraded widgets: " + ", ".join(degraded), file=sys.stderr)
             self._run_fallback()
             return
         try:
@@ -657,7 +663,7 @@ class RachaelTUI:
             return
         self.prev_view = self.view
         if self.main_plane and self.wm:
-            self.wm.fade_plane(self.main_plane, 150)
+            self.wm.fade_out(self.main_plane, 150)
         if self.view == "cockpit" and self.wm:
             self.wm.destroy_reel()
         if self.view == "evolution" and self.wm:
@@ -674,7 +680,7 @@ class RachaelTUI:
         if self.view == "evolution" and self.wm and self.main_plane:
             self._setup_evo_plots()
         if self.main_plane and self.wm:
-            self.wm.pulse_plane(self.main_plane, 150)
+            self.wm.fade_in(self.main_plane, 150)
 
     def _setup_cockpit_reel(self):
         m_rows, m_cols = self.main_plane.dim_yx()
@@ -974,8 +980,8 @@ class RachaelTUI:
             self._msg("SNOW refreshed: " + str(len(records)) + " records")
         except APIError as e:
             self._msg("SNOW refresh error: " + str(e))
-        except Exception as e:
-            self._msg("SNOW error: " + str(e))
+        except (ConnectionError, TimeoutError, OSError) as e:
+            self._msg("SNOW network error: " + str(e))
 
     def _open_snow_tab_selector(self):
         tab_labels = {"my-queue": "My Queue", "team": "Team Workload", "aging": "Aging / SLA Risk"}

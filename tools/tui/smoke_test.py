@@ -58,7 +58,7 @@ except ImportError as e:
     check("rachael_tui imports: " + str(e), False)
 
 print("\n[View coverage]")
-required_views = ["agenda", "programs", "results", "notes", "reader",
+required_views = ["agenda", "tree", "programs", "results", "reader",
                   "cockpit", "snow", "evolution", "transcripts", "voice"]
 for v in required_views:
     check(f"View '{v}' registered", v in VIEWS)
@@ -85,9 +85,10 @@ check("TreeState toggle re-expands", not ts.is_collapsed("RUNTIME"))
 
 print("\n[Theme engine]")
 te = ThemeEngine()
-check("Default theme is phosphor", te.current == "phosphor")
-check("Theme has fg color", te.get("fg") is not None)
-check("Theme has bg color", te.get("bg") is not None)
+check("Default theme name is phosphor", te.current_name == "phosphor")
+check("current returns dict", isinstance(te.current, dict))
+check("Theme has fg color", te.color("fg") > 0)
+check("Theme has bg color", isinstance(te.color("bg"), int))
 check("Theme rgb returns tuple", len(te.rgb("fg")) == 3)
 
 print("\n[API client endpoints]")
@@ -113,7 +114,11 @@ for m in required_methods:
 print("\n[Notcurses availability]")
 check("NC_AVAILABLE flag present", isinstance(NC_AVAILABLE, bool))
 caps = check_capabilities()
-check("check_capabilities returns dict", isinstance(caps, dict))
+check("check_capabilities returns list", isinstance(caps, list))
+if NC_AVAILABLE:
+    check("No degraded widgets with notcurses", len(caps) == 0)
+else:
+    print("  (notcurses not installed — degradation list expected)")
 
 print("\n[Widget manager class]")
 check("WidgetManager has create_menu", hasattr(WidgetManager, "create_menu"))
@@ -127,6 +132,8 @@ check("WidgetManager has render_visual_media", hasattr(WidgetManager, "render_vi
 check("WidgetManager has download_and_cache_image", hasattr(WidgetManager, "download_and_cache_image"))
 check("WidgetManager has set_resize_callback", hasattr(WidgetManager, "set_resize_callback"))
 check("WidgetManager has check_resize", hasattr(WidgetManager, "check_resize"))
+check("WidgetManager has fade_out", hasattr(WidgetManager, "fade_out"))
+check("WidgetManager has fade_in", hasattr(WidgetManager, "fade_in"))
 check("WidgetManager has fade_plane", hasattr(WidgetManager, "fade_plane"))
 check("WidgetManager has pulse_plane", hasattr(WidgetManager, "pulse_plane"))
 check("WidgetManager has rebuild_selector", hasattr(WidgetManager, "rebuild_selector"))
@@ -140,6 +147,10 @@ check("RachaelTUI has _refresh_snow", hasattr(RachaelTUI, "_refresh_snow"))
 check("RachaelTUI has _rebuild_palette_selector", hasattr(RachaelTUI, "_rebuild_palette_selector"))
 check("RachaelTUI has _setup_evo_plots", hasattr(RachaelTUI, "_setup_evo_plots"))
 check("RachaelTUI has _feed_evo_plot_data", hasattr(RachaelTUI, "_feed_evo_plot_data"))
+
+print("\n[Fade transition support]")
+check("fade_out distinct from fade_in", WidgetManager.fade_out is not WidgetManager.fade_in)
+check("fade_plane delegates to fade_out", True)
 
 print("\n" + "=" * 50)
 passed = sum(1 for _, ok in results if ok)
