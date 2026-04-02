@@ -78,7 +78,7 @@ def build_tree_items(data_cache: dict, tree_state: TreeState) -> list:
     skills_list = data_cache.get("skills", [])
     captures = data_cache.get("captures", [])
     reader = data_cache.get("reader", [])
-    journal = data_cache.get("journal", [])
+    snow_records = data_cache.get("snow_records", [])
 
     sections = [
         ("RUNTIME", _tree_runtime_children, [runtime]),
@@ -89,7 +89,7 @@ def build_tree_items(data_cache: dict, tree_state: TreeState) -> list:
         ("SKILLS (" + str(len(skills_list)) + ")", _tree_list_children, [skills_list]),
         ("INBOX (" + str(len(captures)) + ")", _tree_list_children, [captures]),
         ("READER (" + str(len(reader)) + ")", _tree_list_children, [reader]),
-        ("JOURNAL (" + str(len(journal)) + ")", _tree_list_children, [journal]),
+        ("SNOW (" + str(len(snow_records)) + ")", _tree_list_children, [snow_records]),
     ]
 
     for sec_label, child_fn, args in sections:
@@ -156,39 +156,65 @@ def build_snow_items(data_cache: dict, snow_tab: str, api) -> list:
             tab_line += "  " + tab_labels[t]
     items.append({"_section": tab_line})
 
-    proposals = data_cache.get("proposals", [])
+    snow_data = data_cache.get("snow_queue", {})
+    if not snow_data:
+        try:
+            snow_data = api.snow_queue()
+            data_cache["snow_queue"] = snow_data
+        except Exception:
+            snow_data = {}
+    records = snow_data.get("records", [])
+    if not records:
+        records = data_cache.get("snow_records", [])
+        if not records:
+            try:
+                records = api.snow_records()
+                data_cache["snow_records"] = records
+            except Exception:
+                records = []
 
     if snow_tab == "my-queue":
-        pending = [p for p in proposals if p.get("status", "").lower() in ("pending", "open", "new")]
+        pending = [r for r in records if r.get("state", "").lower() in
+                   ("new", "pending", "open", "1")]
         items.append({"_section": "PENDING (" + str(len(pending)) + ")"})
-        items.extend(pending)
-        in_progress = [p for p in proposals if p.get("status", "").lower() in ("in_progress", "active")]
+        for r in pending:
+            items.append(_snow_record_to_item(r))
+        in_progress = [r for r in records if r.get("state", "").lower() in
+                       ("in_progress", "active", "2", "work in progress")]
         if in_progress:
             items.append({"_section": "IN PROGRESS (" + str(len(in_progress)) + ")"})
-            items.extend(in_progress)
+            for r in in_progress:
+                items.append(_snow_record_to_item(r))
     elif snow_tab == "team":
         by_assignee: dict = {}
-        for p in proposals:
-            assignee = p.get("assignee", p.get("owner", "unassigned"))
-            by_assignee.setdefault(assignee, []).append(p)
+        for r in records:
+            assignee = (r.get("assigned_to", "") or
+                        r.get("assignedTo", "") or
+                        r.get("assignment_group", "") or "unassigned")
+            by_assignee.setdefault(assignee, []).append(r)
         for assignee, group in sorted(by_assignee.items()):
-            load_bar = braille_bar(len(group), max(10, len(proposals)), 5)
+            load_bar = braille_bar(len(group), max(10, len(records)), 5)
             items.append({"_section": assignee.upper() + " " + load_bar + " (" + str(len(group)) + ")"})
-            items.extend(group)
+            for r in group:
+                items.append(_snow_record_to_item(r))
     elif snow_tab == "aging":
         now = time.time() * 1000
         aged = []
-        for p in proposals:
-            created = p.get("createdAt", 0)
-            if isinstance(created, str):
+        for r in records:
+            created = r.get("sys_created_on", "") or r.get("createdAt", "") or r.get("opened_at", "")
+            ts = 0
+            if isinstance(created, (int, float)):
+                ts = created
+            elif isinstance(created, str) and created:
                 try:
-                    created = datetime.datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp() * 1000
+                    ts = datetime.datetime.fromisoformat(
+                        created.replace("Z", "+00:00")).timestamp() * 1000
                 except ValueError:
-                    created = 0
-            age_hours = (now - created) / 3600000 if created else 0
-            p_copy = dict(p)
-            p_copy["_age_hours"] = age_hours
-            aged.append(p_copy)
+                    ts = 0
+            age_hours = (now - ts) / 3600000 if ts else 0
+            r_copy = _snow_record_to_item(r)
+            r_copy["_age_hours"] = age_hours
+            aged.append(r_copy)
         aged.sort(key=lambda x: x.get("_age_hours", 0), reverse=True)
         sla_risk = [a for a in aged if a.get("_age_hours", 0) > 24]
         normal = [a for a in aged if a.get("_age_hours", 0) <= 24]
@@ -199,6 +225,21 @@ def build_snow_items(data_cache: dict, snow_tab: str, api) -> list:
         items.extend(normal)
 
     return items
+
+
+def _snow_record_to_item(r: dict) -> dict:
+    return {
+        "id": r.get("sys_id", "") or r.get("number", "") or r.get("id", ""),
+        "number": r.get("number", ""),
+        "title": r.get("short_description", "") or r.get("title", "") or r.get("description", ""),
+        "status": r.get("state", "") or r.get("status", ""),
+        "priority": r.get("priority", "") or r.get("urgency", ""),
+        "assignee": (r.get("assigned_to", "") or r.get("assignedTo", "") or
+                     r.get("assignment_group", "")),
+        "category": r.get("category", "") or r.get("type", ""),
+        "createdAt": r.get("sys_created_on", "") or r.get("createdAt", "") or r.get("opened_at", ""),
+        "_raw": r,
+    }
 
 
 def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
@@ -242,6 +283,10 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
             burn_history = [v.get("metricsSnapshot", {}).get("totalRuns", 0) for v in versions]
             items.append({"_tree": "density", "_label": "Activity: " + braille_heatmap_row(
                 [float(x) for x in burn_history], max(1, max(burn_history) if burn_history else 1), 15)})
+            grid_data = [v.get("metricsSnapshot", {}).get("totalRuns", 0) for v in versions]
+            grid_lines = activity_density_grid(grid_data, width=min(20, len(grid_data)), height=2)
+            for gl in grid_lines:
+                items.append({"_tree": "density", "_label": "  " + gl})
 
     elif evo_tab == "versions":
         versions = state.get("recentVersions", [])
@@ -443,8 +488,10 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
             return (consolidated + " [" + ot + "] " + content)[:max_width]
 
     elif view == "snow":
-        title = item.get("title", item.get("description", "?"))
-        status = item.get("status", "")
+        number = item.get("number", "")
+        title = item.get("title", item.get("short_description", item.get("description", "?")))
+        status = item.get("status", item.get("state", ""))
+        priority = item.get("priority", "")
         age_h = item.get("_age_hours")
         age_str = ""
         if age_h is not None:
@@ -452,7 +499,12 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
                 age_str = " \u26A0" + str(int(age_h)) + "h"
             elif age_h > 24:
                 age_str = " " + str(int(age_h)) + "h"
-        return (status[:8].ljust(9) + str(title) + age_str)[:max_width]
+        prefix = ""
+        if number:
+            prefix = number + " "
+        if priority:
+            prefix += "P" + str(priority) + " "
+        return (prefix + status[:8].ljust(9) + str(title) + age_str)[:max_width]
 
     elif view == "transcripts":
         platform = item.get("platform", "?")
@@ -574,13 +626,28 @@ def format_detail(item: dict, max_width: int, view: str, data_cache: dict) -> li
                                  " \u2192 " + str(diff.get("after", ""))[:30])
 
     elif view == "snow":
-        desc = item.get("description", "")
+        number = item.get("number", "")
+        if number:
+            lines.append("Number: " + number)
+        assignee = item.get("assignee", "")
+        if assignee:
+            lines.append("Assigned: " + str(assignee))
+        category = item.get("category", "")
+        if category:
+            lines.append("Category: " + str(category))
+        priority = item.get("priority", "")
+        if priority:
+            lines.append("Priority: " + str(priority))
+        created = item.get("createdAt", "")
+        if created:
+            lines.append("Created: " + str(created)[:19])
+        desc = item.get("title", item.get("description", ""))
         if desc:
             lines.extend(wrap_text(str(desc)[:400], max_width))
         age_h = item.get("_age_hours")
         if age_h is not None:
             lines.append("Age: " + str(int(age_h)) + "h")
-        lines.append("[a:accept  x:reject  Tab:switch-tab]")
+        lines.append("[Tab:switch-tab]")
 
     elif view == "transcripts":
         raw = item.get("rawText", "")

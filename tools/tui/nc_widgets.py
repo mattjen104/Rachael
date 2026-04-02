@@ -455,6 +455,7 @@ class WidgetManager:
             sy = (rows - sel_h) // 2
             self.destroy_selector()
             self.selector_plane = NcPlane(self.stdp, sel_h, sel_w, sy, sx)
+            self.set_bg_alpha(self.selector_plane)
             nc_items = [NcSelectorItem(label, desc) for label, desc in items]
             self.selector = NcSelector.create(
                 self.selector_plane, nc_items, title=title, maxdisplay=sel_h - 3)
@@ -475,6 +476,7 @@ class WidgetManager:
             sy = (rows - sel_h) // 2
             self.destroy_multiselector()
             self.multiselector_plane = NcPlane(self.stdp, sel_h, sel_w, sy, sx)
+            self.set_bg_alpha(self.multiselector_plane)
             nc_items = [NcMultiSelectorItem(label, desc, selected)
                         for label, desc, selected in items]
             self.multiselector = NcMultiSelector.create(

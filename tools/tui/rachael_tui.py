@@ -13,7 +13,7 @@ from themes import ThemeEngine, THEMES, THEME_NAMES
 from nc_widgets import (
     NC_AVAILABLE, NcPlane, Notcurses, NcInput, WidgetManager,
     check_capabilities, detect_media_capabilities, braille_sparkline_str,
-    NCALPHA_BLEND, BRAILLE_BLOCKS, MEDIA_CAPS,
+    NCALPHA_BLEND, BRAILLE_BLOCKS, MEDIA_CAPS, activity_density_grid,
 )
 from tui_views import (
     VIEWS, SNOW_TABS, EVO_TABS, STATUS_CHARS, TreeState,
@@ -246,7 +246,10 @@ class RachaelTUI:
         metric = event.get("data", {}).get("metric") if isinstance(event.get("data"), dict) else None
         if metric and isinstance(metric, (int, float)):
             self.sparkline_data.append(metric)
-            self.wm.add_sparkline_sample(metric)
+            if self.wm:
+                self.wm.add_sparkline_sample(metric)
+        if self.wm and self.view == "cockpit":
+            self.wm.add_reel_tablet(self._cockpit_tablet_draw, event)
 
     def _refresh_loop(self):
         while self.running:
@@ -267,7 +270,7 @@ class RachaelTUI:
             "skills": lambda: self.api.skills(),
             "notes": lambda: self.api.notes(),
             "captures": lambda: self.api.captures(limit=30),
-            "journal": lambda: self.api.journal(limit=30),
+            "snow_records": lambda: self.api.snow_records(),
         }
         for key, fn in fetches.items():
             try:
@@ -756,13 +759,12 @@ class RachaelTUI:
         elif char == "X":
             self._open_minibuffer("CLI> ", self._do_cli)
         elif char == "?":
-            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar/snow M-x:cmd /:srch c:cap T:theme M:multi J:journal SPC:expand/collapse")
+            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar/snow M-x:cmd /:srch c:cap T:theme M:multi J:capture SPC:expand/collapse")
         elif char == "d" and self.view == "reader":
             self._action_delete_reader(items)
-        elif char == "a" and self.view == "snow":
-            self._action_accept(items)
-        elif char == "x" and self.view == "snow":
-            self._action_reject(items)
+        elif char == "r" and self.view == "snow":
+            self._msg("Refreshing SNOW...")
+            threading.Thread(target=self._refresh_snow, daemon=True).start()
         elif char == "l" and self.view == "evolution":
             idx = EVO_TABS.index(self.evo_tab) if self.evo_tab in EVO_TABS else 0
             self.evo_tab = EVO_TABS[(idx + 1) % len(EVO_TABS)]
@@ -925,6 +927,20 @@ class RachaelTUI:
                 return
         self.command_palette_active = True
 
+    def _refresh_snow(self):
+        try:
+            self.api.snow_refresh()
+            time.sleep(2)
+            records = self.api.snow_records()
+            with self.data_lock:
+                self.data_cache["snow_records"] = records
+                self.data_cache.pop("snow_queue", None)
+            self._msg("SNOW refreshed: " + str(len(records)) + " records")
+        except APIError as e:
+            self._msg("SNOW refresh error: " + str(e))
+        except Exception as e:
+            self._msg("SNOW error: " + str(e))
+
     def _open_snow_tab_selector(self):
         tab_labels = {"my-queue": "My Queue", "team": "Team Workload", "aging": "Aging / SLA Risk"}
         if self.wm:
@@ -1019,8 +1035,8 @@ class RachaelTUI:
         if not text.strip():
             return
         try:
-            self.api.create_journal_entry({"content": text})
-            self._msg("Journal entry created")
+            self.api.smart_capture(text)
+            self._msg("Captured: " + text[:40])
         except APIError as e:
             self._msg("Journal error: " + str(e))
 
@@ -1186,13 +1202,19 @@ class RachaelTUI:
         p = self.main_plane
         if not p:
             return
-        _, cols = p.dim_yx()
+        rows, cols = p.dim_yx()
         self._set_fg(p, "accent")
         title = "COCKPIT (" + str(len(self.cockpit_events)) + " events)"
         p.putstr_yx(0, 1, title[:cols - 2])
         conn = "\u25CF CONNECTED" if self.cockpit_connected else "\u25CB DISCONNECTED"
         self._set_fg(p, "success" if self.cockpit_connected else "error")
         p.putstr_yx(0, max(0, cols - len(conn) - 1), conn[:cols])
+        if self.sparkline_data and rows > 6:
+            grid = activity_density_grid(list(self.sparkline_data), width=min(20, cols - 4), height=3)
+            self._set_fg(p, "dim")
+            for gi, gline in enumerate(grid):
+                if rows - 4 + gi < rows:
+                    p.putstr_yx(rows - 4 + gi, 1, gline[:cols - 2])
 
     def _render_main(self):
         p = self.main_plane
