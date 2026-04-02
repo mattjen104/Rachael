@@ -1,0 +1,115 @@
+lcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0-71-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Thu Apr  2 19:53:49 UTC 2026
+
+  System load:  0.1               Processes:             147
+  Usage of /:   81.8% of 8.65GB   Users logged in:       0
+  Memory usage: 27%               IPv4 address for eth0: 146.190.33.157
+  Swap usage:   0%                IPv4 address for eth0: 10.48.0.5
+
+Expanded Security Maintenance for Applications is not enabled.
+
+55 updates can be applied immediately.
+12 of these updates are standard security updates.
+To see these additional updates run: apt list --upgradable
+
+21 additional security updates can be applied with ESM Apps.
+Learn more about enabling ESM Apps service at https://ubuntu.com/esm
+
+
+*** System restart required ***
+Last login: Thu Apr  2 17:12:45 2026 from 162.243.188.66
+root@Phantom:~# python3 tools/tui/rachael_tui.py --theme dracula
+python3: can't open file '/root/tools/tui/rachael_tui.py': [Errno 2] No such file or directory
+root@Phantom:~# git pull
+fatal: not a git repository (or any of the parent directories): .git
+root@Phantom:~# cd /opt/rachael && git pull && python3 tools/tui/rachael_tui.py --theme dracula
+remote: Enumerating objects: 14, done.
+remote: Counting objects: 100% (14/14), done.
+remote: Compressing objects: 100% (2/2), done.
+remote: Total 10 (delta 8), reused 10 (delta 8), pack-reused 0 (from 0)
+Unpacking objects: 100% (10/10), 1.39 KiB | 158.00 KiB/s, done.
+From https://github.com/mattjen104/Rachael
+   a19da64..9f8624c  main       -> origin/main
+Updating a19da64..9f8624c
+Fast-forward
+ tools/tui/rachael_tui.py | 37 ++++++++++++++++++++++---------------
+ 1 file changed, 22 insertions(+), 15 deletions(-)
+corrupted double-linked list
+Aborted (core dumped)
+root@Phantom:/opt/rachael# top -bn1 | head -15
+top - 20:04:48 up 1 day, 20:43,  1 user,  load average: 0.04, 0.09, 0.17
+Tasks: 143 total,   1 running, 142 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  4.3 us,  4.3 sy,  0.0 ni, 91.3 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :   3916.0 total,    282.9 free,    958.1 used,   2998.2 buff/cache     
+MiB Swap:      0.0 total,      0.0 free,      0.0 used.   2958.0 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+ 384638 root      20   0   12364   5376   3328 R   9.1   0.1   0:00.01 top
+      1 root      20   0   23120  14336   9600 S   0.0   0.4   0:45.33 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.37 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+root@Phantom:/opt/rachael# cd /opt/rachael && git pull && python3 tools/tui/rachael_tui.py --theme ice
+Already up to date.
+Segmentation fault (core dumped)
+root@Phantom:/opt/rachael# cd /opt/rachael && git pull && python3 tools/tui/rachael_tui.py --theme ice
+Already up to date.
+Segmentation fault (core dumped)
+root@Phantom:/opt/rachael# python3 -c "
+import sys
+try:
+    from notcurses import Notcurses
+    print('notcurses imported OK')
+    nc = Notcurses()
+    print('Notcurses() created OK')
+    nc.destroy()
+    print('All good — notcurses is working')
+except Exception as e:
+    print(f'FAILED: {type(e).__name__}: {e}', file=sys.stderr)
+"
+notcurses imported OK
+0 failed renders, 0 failed rasters, 0 refreshes, 0 input errors
+RGB emits:elides: def 0:0 fg 0:0 bg 0:0
+Cell emits:elides: 0:0 (0.00%) 0.00% 0.00% 0.00%
+Bmap emits:elides: 0:0 (0.00%) 0B (0.00%) SuM: 0 (0.00%)
+root@Phantom:/opt/rachael# python3 tools/tui/rachael_tui.py 2>/tmp/tui_errors.log
+# after quitting:
+cat /tmp/tui_errors.log
+Aborted (core dumped)
+NOTCURSES DEGRADED: NcMenu (not available)
+NOTCURSES DEGRADED: NcProgbar (not available)
+NOTCURSES DEGRADED: NcProgbar (not available for budget)
+NOTCURSES DEGRADED: NcPlot/NcDPlot (not available)
+corrupted double-linked list
+root@Phantom:/opt/rachael# # Test 1: Does notcurses work at all?
+python3 -c "from notcurses import Notcurses; nc = Notcurses(); nc.destroy(); print('OK')"
+
+# Test 2: Run TUI and capture errors
+python3 tools/tui/rachael_tui.py 2>/tmp/tui_errors.log
+# After quitting, check:
+cat /tmp/tui_errors.log
+0 failed renders, 0 failed rasters, 0 refreshes, 0 input errors
+RGB emits:elides: def 0:0 fg 0:0 bg 0:0
+Cell emits:elides: 0:0 (0.00%) 0.00% 0.00% 0.00%
+Bmap emits:elides: 0:0 (0.00%) 0B (0.00%) SuM: 0 (0.00%)
+While Notcurses was running the following exception was uncaught:
+Traceback (most recent call last):
+
+  File "<string>", line 1, in <module>
+
+AttributeError: 'notcurses.Notcurses' object has no attribute 'destroy'
+Aborted (core dumped)
+NOTCURSES DEGRADED: NcMenu (not available)
+NOTCURSES DEGRADED: NcProgbar (not available)
+NOTCURSES DEGRADED: NcProgbar (not available for budget)
+NOTCURSES DEGRADED: NcPlot/NcDPlot (not available)
+corrupted double-linked list
+root@Phantom:/opt/rachael# 
