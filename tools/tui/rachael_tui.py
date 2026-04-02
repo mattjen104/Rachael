@@ -49,7 +49,7 @@ def _ni_alt(ni):
 def _nc_stop(nc):
     if nc is None:
         return
-    for name in ("stop", "destroy", "__del__"):
+    for name in ("stop", "destroy"):
         fn = getattr(nc, name, None)
         if fn and callable(fn):
             try:
@@ -57,10 +57,6 @@ def _nc_stop(nc):
             except Exception:
                 pass
             return
-    try:
-        del nc
-    except Exception:
-        pass
 VIEW_KEYS = {
     "1": "agenda", "2": "tree", "3": "programs", "4": "results",
     "5": "reader", "6": "cockpit", "7": "snow", "8": "evolution",
@@ -183,12 +179,14 @@ class RachaelTUI:
         self._program_filter = "all"
         self._program_filter_active = False
 
-    def run(self):
+    def run(self, force_curses=False):
         detect_media_capabilities()
-        if not NC_AVAILABLE:
+        if force_curses or not NC_AVAILABLE:
             import sys
-            print("notcurses not available — using curses mode.", file=sys.stderr)
-            print("For full capabilities: build notcurses >= 3.0.11 from source", file=sys.stderr)
+            if not NC_AVAILABLE:
+                print("notcurses not available — using curses mode.", file=sys.stderr)
+            else:
+                print("Using curses mode (--curses flag).", file=sys.stderr)
             self._run_fallback()
             return
         try:
@@ -1764,28 +1762,80 @@ class CursesFallback:
                 pass
 
     def _splash(self):
-        rows, cols = self.stdscr.getmaxyx()
-        self.stdscr.clear()
-        for i, line in enumerate(LOGO):
-            y = rows // 2 - len(LOGO) // 2 + i - 2
-            x = max(0, (cols - len(line)) // 2)
-            if 0 <= y < rows - 1:
-                try:
-                    self.stdscr.addnstr(y, x, line, cols - x, self.curses.color_pair(3))
-                except self.curses.error:
-                    pass
-        sub = "curses mode — press any key"
-        sx = max(0, (cols - len(sub)) // 2)
-        sy = rows // 2 + len(LOGO) // 2
-        if 0 <= sy < rows - 1:
+        import math
+        curses = self.curses
+        stdscr = self.stdscr
+        rows, cols = stdscr.getmaxyx()
+        t_hex = self.tui.theme.current
+        can_change = curses.can_change_color() and curses.COLORS >= 40
+        accent = t_hex.get("accent", 0x66FF66)
+        bg_hex = t_hex.get("bg", 0x0A0A0A)
+        ar, ag, ab = (accent >> 16) & 0xFF, (accent >> 8) & 0xFF, accent & 0xFF
+        dr, dg, db = max(ar // 5, (bg_hex >> 16) & 0xFF), max(ag // 5, (bg_hex >> 8) & 0xFF), max(ab // 5, bg_hex & 0xFF)
+        PULSE_COLOR_ID = 30
+        PULSE_PAIR_ID = 14
+        if can_change:
+            curses.init_pair(PULSE_PAIR_ID, PULSE_COLOR_ID, curses.COLORS > 255 and 0 or -1)
+        version_tag = "v" + VERSION + " | " + t_hex["name"]
+        degraded = check_capabilities()
+        stdscr.clear()
+        vy = rows // 2 + len(LOGO) // 2
+        if 0 <= vy < rows - 1:
             try:
-                self.stdscr.addnstr(sy, sx, sub, cols - sx, self.curses.color_pair(2))
-            except self.curses.error:
+                stdscr.addnstr(vy, max(0, (cols - len(version_tag)) // 2),
+                               version_tag, cols, curses.color_pair(2))
+            except curses.error:
                 pass
-        self.stdscr.refresh()
-        self.stdscr.timeout(-1)
-        self.stdscr.getch()
-        self.stdscr.timeout(100)
+        if degraded:
+            vy += 1
+            deg = "Degraded: " + ", ".join(degraded[:5])
+            if len(degraded) > 5:
+                deg += " +" + str(len(degraded) - 5)
+            if 0 <= vy < rows - 1:
+                try:
+                    stdscr.addnstr(vy, max(0, (cols - len(deg)) // 2),
+                                   deg[:cols - 2], cols, curses.color_pair(5))
+                except curses.error:
+                    pass
+        vy += 2
+        prompt = "Press any key..."
+        if 0 <= vy < rows - 1:
+            try:
+                stdscr.addnstr(vy, max(0, (cols - len(prompt)) // 2),
+                               prompt, cols, curses.color_pair(2))
+            except curses.error:
+                pass
+        stdscr.refresh()
+        stdscr.timeout(40)
+        frame = 0
+        while True:
+            t = (math.sin(frame * 0.12) + 1.0) / 2.0
+            if can_change:
+                cr = int(dr + (ar - dr) * t)
+                cg = int(dg + (ag - dg) * t)
+                cb = int(db + (ab - db) * t)
+                try:
+                    curses.init_color(PULSE_COLOR_ID,
+                                      cr * 1000 // 255, cg * 1000 // 255, cb * 1000 // 255)
+                except curses.error:
+                    pass
+                pair = curses.color_pair(PULSE_PAIR_ID)
+            else:
+                pair = curses.color_pair(3) if t > 0.5 else curses.color_pair(2)
+            for i, line in enumerate(LOGO):
+                y = rows // 2 - len(LOGO) // 2 + i - 2
+                x = max(0, (cols - len(line)) // 2)
+                if 0 <= y < rows - 1:
+                    try:
+                        stdscr.addnstr(y, x, line, cols - x, pair)
+                    except curses.error:
+                        pass
+            stdscr.refresh()
+            ch = stdscr.getch()
+            if ch != -1:
+                break
+            frame += 1
+        stdscr.timeout(100)
 
     def _handle_input(self, ch):
         tui = self.tui
@@ -2074,11 +2124,13 @@ def main():
                         help="API key (reads from OPENCLAW_API_KEY or /opt/rachael/.env)")
     parser.add_argument("--theme", default=None,
                         help="Color theme: " + ", ".join(THEME_NAMES))
+    parser.add_argument("--curses", action="store_true",
+                        help="Force curses mode (skip notcurses)")
     args = parser.parse_args()
     tui = RachaelTUI(base_url=args.url, api_key=args.key)
     if args.theme:
         tui.theme.set_theme(args.theme)
-    tui.run()
+    tui.run(force_curses=args.curses)
 
 
 if __name__ == "__main__":
