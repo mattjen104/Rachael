@@ -148,10 +148,10 @@ class RachaelTUI:
         detect_media_capabilities()
         if not NC_AVAILABLE:
             import sys
-            print("FATAL: notcurses is required but not available.", file=sys.stderr)
-            print("Install: pip3 install notcurses", file=sys.stderr)
-            print("System: apt install libnotcurses-dev libnotcurses3 python3-notcurses", file=sys.stderr)
-            sys.exit(1)
+            print("notcurses not available — using curses mode.", file=sys.stderr)
+            print("For full capabilities: build notcurses >= 3.0.11 from source", file=sys.stderr)
+            self._run_fallback()
+            return
         try:
             self.nc = Notcurses()
             self.stdp = self.nc.stdplane()
@@ -167,6 +167,18 @@ class RachaelTUI:
             self._main_loop()
         except KeyboardInterrupt:
             pass
+        except RuntimeError as e:
+            self.running = False
+            if self.nc:
+                try:
+                    self.nc.stop()
+                except RuntimeError:
+                    pass
+                self.nc = None
+            import sys
+            sys.stderr.write("notcurses failed: " + str(e) + " — falling back to curses\n")
+            self._run_fallback()
+            return
         finally:
             self.running = False
             self.api.stop_sse()
@@ -1579,6 +1591,370 @@ class RachaelTUI:
                 self._set_bg(p, "bg")
             p.putstr_yx(yy, 1, (" " + cmd).ljust(cols - 2)[:cols - 2])
         self._set_bg(p, "bg")
+
+    def _run_fallback(self):
+        import curses as _curses
+        _curses.wrapper(lambda stdscr: CursesFallback(self, stdscr, _curses).run())
+
+
+class CursesFallback:
+    def __init__(self, tui: RachaelTUI, stdscr, curses):
+        self.tui = tui
+        self.stdscr = stdscr
+        self.curses = curses
+
+    def run(self):
+        curses = self.curses
+        stdscr = self.stdscr
+        tui = self.tui
+        curses.curs_set(0)
+        curses.start_color()
+        curses.use_default_colors()
+        self._init_colors()
+        tui.running = True
+        tui._start_background()
+        stdscr.timeout(100)
+        self._splash()
+        while tui.running:
+            tui.dims = stdscr.getmaxyx()
+            self._render()
+            try:
+                ch = stdscr.get_wch()
+            except curses.error:
+                continue
+            except KeyboardInterrupt:
+                break
+            self._handle_input(ch)
+        tui.api.stop_sse()
+        tui.api.stop()
+
+    def _init_colors(self):
+        t = self.tui.theme.current
+        curses = self.curses
+        pairs = [
+            (1, t["fg"], t["bg"]), (2, t["dim"], t["bg"]),
+            (3, t["accent"], t["bg"]), (4, t["error"], t["bg"]),
+            (5, t["warn"], t["bg"]), (6, t["success"], t["bg"]),
+            (7, t["header_fg"], t["header_bg"]), (8, t["sel_fg"], t["sel_bg"]),
+            (9, t["mode_line_fg"], t["mode_line_bg"]),
+            (10, t["mini_fg"], t["mini_bg"]),
+            (11, t["info"], t["bg"]), (12, t["border"], t["bg"]),
+        ]
+        for idx, fg_hex, bg_hex in pairs:
+            try:
+                fg_id = 16 + idx * 2
+                bg_id = 17 + idx * 2
+                curses.init_color(fg_id, ((fg_hex >> 16) & 0xFF) * 1000 // 255,
+                                  ((fg_hex >> 8) & 0xFF) * 1000 // 255,
+                                  (fg_hex & 0xFF) * 1000 // 255)
+                curses.init_color(bg_id, ((bg_hex >> 16) & 0xFF) * 1000 // 255,
+                                  ((bg_hex >> 8) & 0xFF) * 1000 // 255,
+                                  (bg_hex & 0xFF) * 1000 // 255)
+                curses.init_pair(idx, fg_id, bg_id)
+            except curses.error:
+                curses.init_pair(idx, curses.COLOR_GREEN, curses.COLOR_BLACK)
+
+    def _splash(self):
+        rows, cols = self.stdscr.getmaxyx()
+        self.stdscr.clear()
+        for i, line in enumerate(LOGO):
+            y = rows // 2 - len(LOGO) // 2 + i - 2
+            x = max(0, (cols - len(line)) // 2)
+            if 0 <= y < rows - 1:
+                try:
+                    self.stdscr.addnstr(y, x, line, cols - x, self.curses.color_pair(3))
+                except self.curses.error:
+                    pass
+        sub = "curses mode — press any key"
+        sx = max(0, (cols - len(sub)) // 2)
+        sy = rows // 2 + len(LOGO) // 2
+        if 0 <= sy < rows - 1:
+            try:
+                self.stdscr.addnstr(sy, sx, sub, cols - sx, self.curses.color_pair(2))
+            except self.curses.error:
+                pass
+        self.stdscr.refresh()
+        self.stdscr.timeout(-1)
+        self.stdscr.getch()
+        self.stdscr.timeout(100)
+
+    def _handle_input(self, ch):
+        tui = self.tui
+        curses = self.curses
+        if isinstance(ch, int):
+            if ch == 24:
+                tui.ctrl_x_pending = True
+                tui._msg("C-x-")
+                return
+            if tui.ctrl_x_pending:
+                tui.ctrl_x_pending = False
+                char = chr(ch) if 0 < ch < 128 else ""
+                if ch == 3 or char == "c":
+                    tui.running = False
+                elif char == "b" or ch == 2:
+                    tui._open_command_palette()
+                return
+            if ch == 7:
+                tui._cancel_all()
+                return
+            if ch == 14:
+                if tui.command_palette_active:
+                    tui.palette_idx = min(tui.palette_idx + 1, max(0, len(tui._filtered_palette()) - 1))
+                else:
+                    tui._nav_down()
+                return
+            if ch == 16:
+                if tui.command_palette_active:
+                    tui.palette_idx = max(tui.palette_idx - 1, 0)
+                else:
+                    tui._nav_up()
+                return
+            if ch == 19:
+                tui._open_minibuffer("I-search: ", tui._do_search)
+                return
+            if ch == 12:
+                threading.Thread(target=tui._refresh_data, daemon=True).start()
+                tui._msg("Refreshing...")
+                return
+            if ch == 9:
+                if tui.view == "results" and tui.expanded_id is None:
+                    with tui.data_lock:
+                        items = current_items(tui.view, tui.data_cache, tui.api,
+                                              tui.evo_tab, tui.reader_reading_id, tui.cockpit_events,
+                                              tui.tree_state, tui.snow_tab, tui._program_filter)
+                    if items and 0 <= tui.selected_idx < len(items):
+                        item = items[tui.selected_idx]
+                        if isinstance(item, dict):
+                            tui.expanded_id = item.get("id")
+                elif tui.view == "snow":
+                    idx = SNOW_TABS.index(tui.snow_tab) if tui.snow_tab in SNOW_TABS else 0
+                    tui.snow_tab = SNOW_TABS[(idx + 1) % len(SNOW_TABS)]
+                    tui._msg("SNOW: " + tui.snow_tab)
+                else:
+                    tui.sidebar_visible = not tui.sidebar_visible
+                return
+            if ch == 27:
+                self.stdscr.timeout(50)
+                try:
+                    ch2 = self.stdscr.get_wch()
+                except curses.error:
+                    ch2 = None
+                self.stdscr.timeout(100)
+                if ch2 == "x" or ch2 == ord("x"):
+                    tui._open_command_palette()
+                    return
+                if ch2 is None:
+                    tui._cancel_all()
+                return
+            if tui.minibuffer_active:
+                tui._handle_minibuffer(ch)
+                return
+            char = chr(ch) if 0 < ch < 128 else ""
+        else:
+            char = str(ch)
+
+        if tui.minibuffer_active:
+            if char and len(char) == 1 and char.isprintable():
+                tui.minibuffer_text = (tui.minibuffer_text[:tui.minibuffer_cursor]
+                                       + char + tui.minibuffer_text[tui.minibuffer_cursor:])
+                tui.minibuffer_cursor += 1
+            return
+        if tui.command_palette_active:
+            if isinstance(ch, int):
+                tui._handle_palette(ch)
+            elif char and len(char) == 1 and char.isprintable():
+                tui.palette_filter += char
+                tui.palette_idx = 0
+            return
+        if char == "q":
+            tui.running = False
+        elif char in VIEW_KEYS:
+            tui._switch_view(VIEW_KEYS[char])
+        elif char == "T":
+            tui.theme.next_theme()
+            self._init_colors()
+            tui._msg("Theme: " + tui.theme.current["name"])
+        elif char == "/":
+            tui._open_minibuffer("Search: ", tui._do_search)
+        elif char == ":":
+            tui._open_minibuffer("M-x ", tui._do_command)
+        elif char == "J":
+            tui._open_minibuffer("Journal: ", tui._do_journal)
+        elif char == "c":
+            tui._open_minibuffer("Capture: ", tui._do_smart_capture)
+        else:
+            key_int = ch if isinstance(ch, int) else 0
+            tui._handle_view_keys(char, key_int)
+
+    def _render(self):
+        tui = self.tui
+        curses = self.curses
+        stdscr = self.stdscr
+        rows, cols = tui.dims
+        if rows < 3 or cols < 10:
+            return
+        stdscr.erase()
+        header = " RACHAEL"
+        right = tui.view.upper() + " "
+        pad = max(0, cols - len(header) - len(right))
+        try:
+            stdscr.addnstr(0, 0, (header + " " * pad + right)[:cols], cols, curses.color_pair(7))
+        except curses.error:
+            pass
+        top = 1
+        bottom = rows - 2
+        if tui.sidebar_visible:
+            sw = min(tui.sidebar_width, cols - 10)
+            if sw >= 5:
+                for y in range(top, min(bottom + 1, rows)):
+                    try:
+                        stdscr.addch(y, sw, curses.ACS_VLINE, curses.color_pair(12))
+                    except curses.error:
+                        pass
+                try:
+                    stdscr.addnstr(top, 1, "VIEWS", sw - 1, curses.color_pair(2))
+                except curses.error:
+                    pass
+                for i, v in enumerate(VIEWS):
+                    y = top + 1 + i
+                    if y >= bottom:
+                        break
+                    is_active = v == tui.view
+                    num = str(i + 1) if i < 9 else "0"
+                    prefix = "\u25B6 " if is_active else "  "
+                    cp = curses.color_pair(3) if is_active else curses.color_pair(1)
+                    try:
+                        stdscr.addnstr(y, 1, (prefix + num + " " + v)[:sw - 1], sw - 1, cp)
+                    except curses.error:
+                        pass
+                info_y = top + 1 + len(VIEWS) + 1
+                if info_y < bottom - 3:
+                    runtime = tui.data_cache.get("runtime", {})
+                    rt_on = runtime.get("active", False)
+                    cp_rt = curses.color_pair(6) if rt_on else curses.color_pair(4)
+                    try:
+                        stdscr.addnstr(info_y, 1, ("RT:" + ("ON" if rt_on else "OFF"))[:sw - 1],
+                                       sw - 1, cp_rt)
+                    except curses.error:
+                        pass
+                    budget = tui.data_cache.get("budget", {})
+                    spent = budget.get("spent", 0)
+                    cap = budget.get("dailyCap", 0)
+                    bstr = "$" + str(round(spent, 2)) + "/" + str(round(cap, 2))
+                    try:
+                        stdscr.addnstr(info_y + 1, 1, bstr[:sw - 1], sw - 1, curses.color_pair(2))
+                    except curses.error:
+                        pass
+            main_left = tui.sidebar_width + 1
+        else:
+            main_left = 0
+        main_w = cols - main_left
+        if main_w > 2:
+            with tui.data_lock:
+                items = current_items(tui.view, tui.data_cache, tui.api,
+                                      tui.evo_tab, tui.reader_reading_id, tui.cockpit_events,
+                                      tui.tree_state, tui.snow_tab, tui._program_filter)
+            vh = bottom - top
+            if vh > 0:
+                if tui.selected_idx >= tui.scroll_offset + vh:
+                    tui.scroll_offset = tui.selected_idx - vh + 1
+                if tui.selected_idx < tui.scroll_offset:
+                    tui.scroll_offset = tui.selected_idx
+                title = tui.view.upper()
+                if items:
+                    title += " (" + str(len(items)) + ")"
+                if tui.view == "evolution":
+                    title += " [" + tui.evo_tab + "] (l:cycle)"
+                if tui.view == "snow":
+                    title += " [" + tui.snow_tab + "] (Tab:cycle)"
+                try:
+                    stdscr.addnstr(top, main_left + 1, title[:main_w - 2], main_w - 2,
+                                   curses.color_pair(2))
+                except curses.error:
+                    pass
+                y = top + 1
+                for i in range(tui.scroll_offset, len(items)):
+                    if y >= bottom:
+                        break
+                    item = items[i]
+                    is_sel = i == tui.selected_idx
+                    line = format_item(item, main_w - 2, tui.view, tui.data_cache)
+                    if is_sel:
+                        cp = curses.color_pair(8)
+                    elif isinstance(item, dict) and "_section" in item:
+                        cp = curses.color_pair(3)
+                    elif isinstance(item, dict) and item.get("status") == "error":
+                        cp = curses.color_pair(4)
+                    else:
+                        cp = curses.color_pair(1)
+                    try:
+                        stdscr.addnstr(y, main_left + 1, line.ljust(main_w - 2)[:main_w - 2],
+                                       main_w - 2, cp)
+                    except curses.error:
+                        pass
+                    y += 1
+                    is_exp = isinstance(item, dict) and item.get("id") == tui.expanded_id
+                    if is_exp and isinstance(item, dict):
+                        details = format_detail(item, main_w - 4, tui.view, tui.data_cache)
+                        for dl in details:
+                            if y >= bottom:
+                                break
+                            try:
+                                stdscr.addnstr(y, main_left + 3, dl[:main_w - 4],
+                                               main_w - 4, curses.color_pair(2))
+                            except curses.error:
+                                pass
+                            y += 1
+        left = " " + tui.view.upper()
+        rt = "ON" if tui.data_cache.get("runtime", {}).get("active") else "OFF"
+        age = str(int(time.time() - tui.last_refresh)) + "s" if tui.last_refresh > 0 else ""
+        ml_right = tui.theme.current["name"] + " | RT:" + rt + " | " + age + " "
+        ml_pad = max(0, cols - len(left) - len(ml_right))
+        try:
+            stdscr.addnstr(rows - 2, 0, (left + " " * ml_pad + ml_right)[:cols], cols,
+                           curses.color_pair(9))
+        except curses.error:
+            pass
+        if tui.minibuffer_active:
+            mb = tui.minibuffer_prompt + tui.minibuffer_text + "\u2588"
+        elif tui.ctrl_x_pending:
+            mb = "C-x-"
+        elif tui.message and time.time() - tui.message_time < 5:
+            mb = tui.message
+        else:
+            mb = ""
+        try:
+            stdscr.addnstr(rows - 1, 0, mb.ljust(cols)[:cols - 1], cols - 1, curses.color_pair(10))
+        except curses.error:
+            pass
+        if tui.command_palette_active:
+            commands = tui._filtered_palette()
+            pw = min(54, cols - 4)
+            ph = min(len(commands) + 3, rows - 4, 18)
+            px = (cols - pw) // 2
+            py = (rows - ph) // 2
+            try:
+                stdscr.addnstr(py, px, "\u250C" + "\u2500" * (pw - 2) + "\u2510", pw,
+                               curses.color_pair(12))
+                for ii in range(1, ph - 1):
+                    stdscr.addnstr(py + ii, px, "\u2502" + " " * (pw - 2) + "\u2502", pw,
+                                   curses.color_pair(12))
+                stdscr.addnstr(py + ph - 1, px, "\u2514" + "\u2500" * (pw - 2) + "\u2518", pw,
+                               curses.color_pair(12))
+                stdscr.addnstr(py, px + 2, " M-x ", 5, curses.color_pair(3))
+                filt = "Filter: " + tui.palette_filter + "_"
+                stdscr.addnstr(py + 1, px + 2, filt[:pw - 4], pw - 4, curses.color_pair(1))
+                for ii, (cmd, desc) in enumerate(commands):
+                    cy = py + 2 + ii
+                    if cy >= py + ph - 1:
+                        break
+                    cp = curses.color_pair(8) if ii == tui.palette_idx else curses.color_pair(1)
+                    stdscr.addnstr(cy, px + 2, cmd[:pw - 4], pw - 4, cp)
+            except curses.error:
+                pass
+        stdscr.noutrefresh()
+        curses.doupdate()
+
 
 def main():
     import argparse

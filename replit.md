@@ -54,7 +54,7 @@ All data lives in Postgres tables:
 
 ## TUI Client (tools/tui/)
 
-Python + notcurses terminal interface for the DO droplet. Notcurses is required (exits with error if unavailable).
+Python terminal interface for the DO droplet. Uses notcurses when available, falls back to curses (built into Python).
 
 - **Entry point**: `python3 tools/tui/rachael_tui.py [--url URL] [--key KEY] [--theme NAME]`
 - **Modules**: `api_client.py` (HTTP client), `themes.py` (6 themes), `rachael_tui.py` (main app)
