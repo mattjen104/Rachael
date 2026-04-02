@@ -1,0 +1,241 @@
+ systemctl restart systemd-logind.service
+ systemctl restart unattended-upgrades.service
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+[2/6] Installing cffi (notcurses dependency)...
+Collecting cffi
+  Downloading cffi-2.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.6 kB)
+Collecting pycparser (from cffi)
+  Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+Downloading cffi-2.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (219 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 219.6/219.6 kB 5.1 MB/s eta 0:00:00
+Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.2/48.2 kB 3.9 MB/s eta 0:00:00
+Installing collected packages: pycparser, cffi
+Successfully installed cffi-2.0.0 pycparser-3.0
+[3/6] Installing aiohttp async HTTP client...
+Collecting aiohttp>=3.9.0
+  Downloading aiohttp-3.13.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+Collecting aiohappyeyeballs>=2.5.0 (from aiohttp>=3.9.0)
+  Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl.metadata (5.9 kB)
+Collecting aiosignal>=1.4.0 (from aiohttp>=3.9.0)
+  Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Requirement already satisfied: attrs>=17.3.0 in /usr/lib/python3/dist-packages (from aiohttp>=3.9.0) (23.2.0)
+Collecting frozenlist>=1.1.1 (from aiohttp>=3.9.0)
+  Downloading frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+Collecting multidict<7.0,>=4.5 (from aiohttp>=3.9.0)
+  Downloading multidict-6.7.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+Collecting propcache>=0.2.0 (from aiohttp>=3.9.0)
+  Downloading propcache-0.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+Collecting yarl<2.0,>=1.17.0 (from aiohttp>=3.9.0)
+  Downloading yarl-1.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 79.6/79.6 kB 6.7 MB/s eta 0:00:00
+Requirement already satisfied: typing-extensions>=4.2 in /usr/lib/python3/dist-packages (from aiosignal>=1.4.0->aiohttp>=3.9.0) (4.10.0)
+Requirement already satisfied: idna>=2.0 in /usr/lib/python3/dist-packages (from yarl<2.0,>=1.17.0->aiohttp>=3.9.0) (3.6)
+Downloading aiohttp-3.13.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 25.8 MB/s eta 0:00:00
+Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl (15 kB)
+Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Downloading frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (242 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 242.4/242.4 kB 21.2 MB/s eta 0:00:00
+Downloading multidict-6.7.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (256 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 256.3/256.3 kB 23.0 MB/s eta 0:00:00
+Downloading propcache-0.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (221 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 221.6/221.6 kB 17.4 MB/s eta 0:00:00
+Downloading yarl-1.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (100 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.1/100.1 kB 6.7 MB/s eta 0:00:00
+Installing collected packages: propcache, multidict, frozenlist, aiohappyeyeballs, yarl, aiosignal, aiohttp
+Successfully installed aiohappyeyeballs-2.6.1 aiohttp-3.13.5 aiosignal-1.4.0 frozenlist-1.8.0 multidict-6.7.1 propcache-0.4.1 yarl-1.23.0
+[4/6] Installing notcurses Python bindings...
+Requirement already satisfied: notcurses in /usr/lib/python3/dist-packages (3.0.7)
+[5/6] Verifying notcurses import...
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'Notcurses' from 'notcurses' (/usr/lib/python3/dist-packages/notcurses/__init__.py)
+Error in sys.excepthook:
+Traceback (most recent call last):
+  File "/usr/lib/python3/dist-packages/apport_python_hook.py", line 228, in partial_apport_excepthook
+    return apport_excepthook(binary, exc_type, exc_obj, exc_tb)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3/dist-packages/apport_python_hook.py", line 114, in apport_excepthook
+    report["ExecutableTimestamp"] = str(int(os.stat(binary).st_mtime))
+                                            ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/opt/rachael/-c'
+
+Original exception was:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'Notcurses' from 'notcurses' (/usr/lib/python3/dist-packages/notcurses/__init__.py)
+  [error] notcurses installed but cannot be imported.
+  Check that libnotcurses3 is installed: apt install libnotcurses3
+root@Phantom:/opt/rachael# apt install -y libnotcurses3 libnotcurses-dev
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+libnotcurses3 is already the newest version (3.0.7+dfsg.1-1ubuntu5).
+libnotcurses-dev is already the newest version (3.0.7+dfsg.1-1ubuntu5).
+0 upgraded, 0 newly installed, 0 to remove and 55 not upgraded.
+root@Phantom:/opt/rachael# python3 -c "from notcurses import Notcurses; print('OK')"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'Notcurses' from 'notcurses' (/usr/lib/python3/dist-packages/notcurses/__init__.py)
+Error in sys.excepthook:
+Traceback (most recent call last):
+  File "/usr/lib/python3/dist-packages/apport_python_hook.py", line 228, in partial_apport_excepthook
+    return apport_excepthook(binary, exc_type, exc_obj, exc_tb)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3/dist-packages/apport_python_hook.py", line 114, in apport_excepthook
+    report["ExecutableTimestamp"] = str(int(os.stat(binary).st_mtime))
+                                            ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/opt/rachael/-c'
+
+Original exception was:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'Notcurses' from 'notcurses' (/usr/lib/python3/dist-packages/notcurses/__init__.py)
+root@Phantom:/opt/rachael# apt remove -y python3-notcurses
+pip3 install --break-system-packages --force-reinstall notcurses
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following packages will be REMOVED:
+  python3-notcurses
+0 upgraded, 0 newly installed, 1 to remove and 55 not upgraded.
+After this operation, 633 kB disk space will be freed.
+(Reading database ... 118165 files and directories currently installed.)
+Removing python3-notcurses (3.0.7+dfsg.1-1ubuntu5) ...
+Processing triggers for man-db (2.12.0-4build2) ...
+Collecting notcurses
+  Downloading notcurses-3.0.17.tar.gz (69 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 69.1/69.1 kB 2.8 MB/s eta 0:00:00
+  Preparing metadata (setup.py) ... done
+Collecting cffi>=1.0.0 (from notcurses)
+  Using cached cffi-2.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.6 kB)
+Collecting pycparser (from cffi>=1.0.0->notcurses)
+  Using cached pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+Using cached cffi-2.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (219 kB)
+Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+Building wheels for collected packages: notcurses
+  Building wheel for notcurses (setup.py) ... error
+  error: subprocess-exited-with-error
+  
+  × python setup.py bdist_wheel did not run successfully.
+  │ exit code: 1
+  ╰─> [105 lines of output]
+      warning: pypandoc module not found, won't generate man pages
+      /usr/lib/python3/dist-packages/setuptools/__init__.py:84: _DeprecatedInstaller: setuptools.installer and fetch_build_eggs are deprecated.
+      !!
+      
+              ********************************************************************************
+              Requirements should be satisfied by a PEP 517 installer.
+              If you are using pip, you can try `pip install --use-pep517`.
+              ********************************************************************************
+      
+      !!
+        dist.fetch_build_eggs(dist.setup_requires)
+      running bdist_wheel
+      running build
+      running build_py
+      creating build
+      creating build/lib.linux-x86_64-cpython-312
+      creating build/lib.linux-x86_64-cpython-312/notcurses
+      copying src/notcurses/build_notcurses.py -> build/lib.linux-x86_64-cpython-312/notcurses
+      copying src/notcurses/__init__.py -> build/lib.linux-x86_64-cpython-312/notcurses
+      copying src/notcurses/notcurses.py -> build/lib.linux-x86_64-cpython-312/notcurses
+      running egg_info
+      writing src/notcurses.egg-info/PKG-INFO
+      writing dependency_links to src/notcurses.egg-info/dependency_links.txt
+      writing requirements to src/notcurses.egg-info/requires.txt
+      writing top-level names to src/notcurses.egg-info/top_level.txt
+      reading manifest file 'src/notcurses.egg-info/SOURCES.txt'
+      reading manifest template 'MANIFEST.in'
+      adding license file 'LICENSE.txt'
+      writing manifest file 'src/notcurses.egg-info/SOURCES.txt'
+      running build_ext
+      generating cffi module 'build/temp.linux-x86_64-cpython-312/_notcurses.c'
+      creating build/temp.linux-x86_64-cpython-312
+      building '_notcurses' extension
+      creating build/temp.linux-x86_64-cpython-312/build
+      creating build/temp.linux-x86_64-cpython-312/build/temp.linux-x86_64-cpython-312
+      x86_64-linux-gnu-gcc -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O2 -Wall -fPIC -I/usr/include/python3.12 -c build/temp.linux-x86_64-cpython-312/_notcurses.c -o build/temp.linux-x86_64-cpython-312/build/temp.linux-x86_64-cpython-312/_notcurses.o
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_const_NCBLIT_4x2’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:2360:12: error: ‘NCBLIT_4x2’ undeclared (first use in this function); did you mean ‘NCBLIT_4x1’?
+       2360 |   int n = (NCBLIT_4x2) <= 0;
+            |            ^~~~~~~~~~
+            |            NCBLIT_4x1
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:2360:12: note: each undeclared identifier is reported only once for each function it appears in
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_d_ncdirect_canoctant’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:8496:10: warning: implicit declaration of function ‘ncdirect_canoctant’; did you mean ‘ncdirect_cansextant’? [-Wimplicit-function-declaration]
+       8496 |   return ncdirect_canoctant(x0);
+            |          ^~~~~~~~~~~~~~~~~~
+            |          ncdirect_cansextant
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_d_ncplane_at_cursor’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:15235:28: warning: passing argument 1 of ‘ncplane_at_cursor’ discards ‘const’ qualifier from pointer target type [-Wdiscarded-qualifiers]
+      15235 |   return ncplane_at_cursor(x0, x1, x2);
+            |                            ^~
+      In file included from /usr/include/notcurses/direct.h:4,
+                       from build/temp.linux-x86_64-cpython-312/_notcurses.c:574:
+      /usr/include/notcurses/notcurses.h:2012:45: note: expected ‘struct ncplane *’ but argument is of type ‘const struct ncplane *’
+       2012 | API char* ncplane_at_cursor(struct ncplane* n, uint16_t* stylemask, uint64_t* channels)
+            |                             ~~~~~~~~~~~~~~~~^
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_f_ncplane_at_cursor’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:15284:32: warning: passing argument 1 of ‘ncplane_at_cursor’ discards ‘const’ qualifier from pointer target type [-Wdiscarded-qualifiers]
+      15284 |   { result = ncplane_at_cursor(x0, x1, x2); }
+            |                                ^~
+      /usr/include/notcurses/notcurses.h:2012:45: note: expected ‘struct ncplane *’ but argument is of type ‘const struct ncplane *’
+       2012 | API char* ncplane_at_cursor(struct ncplane* n, uint16_t* stylemask, uint64_t* channels)
+            |                             ~~~~~~~~~~~~~~~~^
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_d_ncplane_family_destroy’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:17386:10: warning: implicit declaration of function ‘ncplane_family_destroy’; did you mean ‘ncplane_destroy’? [-Wimplicit-function-declaration]
+      17386 |   return ncplane_family_destroy(x0);
+            |          ^~~~~~~~~~~~~~~~~~~~~~
+            |          ncplane_destroy
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_d_notcurses_canoctant’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:30655:10: warning: implicit declaration of function ‘notcurses_canoctant’; did you mean ‘notcurses_cansextant’? [-Wimplicit-function-declaration]
+      30655 |   return notcurses_canoctant(x0);
+            |          ^~~~~~~~~~~~~~~~~~~
+            |          notcurses_cansextant
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_const_NCINPUT_MAX_EFF_TEXT_CODEPOINTS’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:33347:12: error: ‘NCINPUT_MAX_EFF_TEXT_CODEPOINTS’ undeclared (first use in this function); did you mean ‘_cffi_const_NCINPUT_MAX_EFF_TEXT_CODEPOINTS’?
+      33347 |   int n = (NCINPUT_MAX_EFF_TEXT_CODEPOINTS) <= 0;
+            |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            |            _cffi_const_NCINPUT_MAX_EFF_TEXT_CODEPOINTS
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_checkfld__nccapabilities’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:35006:12: error: ‘nccapabilities’ has no member named ‘octants’
+      35006 |   (void)((p->octants) | 0);  /* check that 'nccapabilities.octants' is an integer */
+            |            ^~
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: In function ‘_cffi_checkfld__ncinput’:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:35051:27: error: ‘ncinput’ has no member named ‘eff_text’
+      35051 |   { uint32_t(*tmp)[4] = &p->eff_text; (void)tmp; }
+            |                           ^~
+      In file included from /usr/include/x86_64-linux-gnu/bits/socket.h:27,
+                       from /usr/include/x86_64-linux-gnu/sys/socket.h:33,
+                       from /usr/include/netinet/in.h:23,
+                       from /usr/include/notcurses/ncport.h:14,
+                       from /usr/include/notcurses/notcurses.h:15:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c: At top level:
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:36295:16: error: ‘nccapabilities’ has no member named ‘octants’
+      36295 |   { "octants", offsetof(nccapabilities, octants),
+            |                ^~~~~~~~
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:36296:44: error: ‘nccapabilities’ has no member named ‘octants’
+      36296 |                sizeof(((nccapabilities *)0)->octants),
+            |                                            ^~
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:36358:17: error: ‘ncinput’ has no member named ‘eff_text’
+      36358 |   { "eff_text", offsetof(ncinput, eff_text),
+            |                 ^~~~~~~~
+      build/temp.linux-x86_64-cpython-312/_notcurses.c:36359:38: error: ‘ncinput’ has no member named ‘eff_text’
+      36359 |                 sizeof(((ncinput *)0)->eff_text),
+            |                                      ^~
+      error: command '/usr/bin/x86_64-linux-gnu-gcc' failed with exit code 1
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+  ERROR: Failed building wheel for notcurses
+  Running setup.py clean for notcurses
+Failed to build notcurses
+ERROR: Could not build wheels for notcurses, which is required to install pyproject.toml-based projects
+root@Phantom:/opt/rachael# 
