@@ -529,6 +529,7 @@ class RachaelTUI:
     def _main_loop(self):
         if self.wm:
             self.wm.set_resize_callback(self._on_resize)
+        _last_render = 0
         while self.running:
             if self.wm:
                 self.wm.check_resize()
@@ -536,21 +537,25 @@ class RachaelTUI:
                 new_dims = self.stdp.dim_yx()
                 if new_dims != self.dims:
                     self._on_resize(*new_dims)
-            self._render_nc()
-            self.nc.render()
             ni = self.nc.get_nblock()
-            if ni is None:
-                time.sleep(0.016)
-                continue
-            key = ni.id if hasattr(ni, 'id') else ni
-            if key == 0:
-                time.sleep(0.016)
-                continue
-            menu_result = self.wm.offer_menu_input(ni) if self.wm else None
-            if menu_result:
-                self._handle_menu_action(menu_result)
-                continue
-            self._handle_input(key, ni)
+            if ni is not None:
+                key = ni.id if hasattr(ni, 'id') else ni
+                if key != 0:
+                    menu_result = self.wm.offer_menu_input(ni) if self.wm else None
+                    if menu_result:
+                        self._handle_menu_action(menu_result)
+                    else:
+                        self._handle_input(key, ni)
+                    self._render_nc()
+                    self.nc.render()
+                    _last_render = time.time()
+                    continue
+            now = time.time()
+            if now - _last_render >= 0.05:
+                self._render_nc()
+                self.nc.render()
+                _last_render = now
+            time.sleep(0.008)
 
     def _handle_menu_action(self, action: str):
         action_lower = action.lower()
@@ -811,8 +816,8 @@ class RachaelTUI:
         if new_view == self.view:
             return
         self.prev_view = self.view
-        if self.main_plane and self.wm:
-            self.wm.fade_out(self.main_plane, 150)
+        if self.main_plane:
+            self.main_plane.erase()
         if self.view == "cockpit" and self.wm:
             self.wm.destroy_reel()
         if self.view == "evolution" and self.wm:
