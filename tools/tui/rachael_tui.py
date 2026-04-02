@@ -491,6 +491,8 @@ class RachaelTUI:
         self.nc.get_blocking()
         if self.wm:
             self.wm.fade_out(self.stdp, 300)
+        self.stdp.erase()
+        self.nc.render()
 
     def _main_loop(self):
         if self.wm:
