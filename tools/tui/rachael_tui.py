@@ -211,6 +211,45 @@ class RachaelTUI:
             if sp_w > 5 and m_rows > 6:
                 self.wm.create_sparkline(self.main_plane, 4, sp_w, 1, m_cols - sp_w - 2)
 
+    def _cancel_all(self):
+        cancelled = False
+        if self.minibuffer_active:
+            self.minibuffer_active = False
+            self.minibuffer_text = ""
+            self.minibuffer_prompt = ""
+            self.minibuffer_callback = None
+            cancelled = True
+        if self.command_palette_active:
+            self.command_palette_active = False
+            self.palette_filter = ""
+            cancelled = True
+        if self.nc_selector_active and self.wm:
+            self.wm.destroy_selector()
+            self.nc_selector_active = False
+            self._snow_selector_active = False
+            cancelled = True
+        if self.nc_multiselector_active and self.wm:
+            self.wm.destroy_multiselector()
+            self.nc_multiselector_active = False
+            cancelled = True
+        if self.nc_reader_active and self.wm:
+            self.wm.destroy_reader()
+            self.nc_reader_active = False
+            cancelled = True
+        if self.ctrl_x_pending:
+            self.ctrl_x_pending = False
+            cancelled = True
+        if self.reader_reading_id:
+            self.reader_reading_id = None
+            cancelled = True
+        if self.expanded_id:
+            self.expanded_id = None
+            cancelled = True
+        if cancelled:
+            self._msg("Cancelled")
+        else:
+            self._msg("C-g")
+
     def _on_resize(self, rows: int, cols: int):
         self.dims = (rows, cols)
         if self.wm:
@@ -230,11 +269,8 @@ class RachaelTUI:
             (self.minibuffer_plane, max(0, rows - 1), 1, cols, 0),
         ]:
             if plane:
-                try:
-                    plane.resize(h, w)
-                    plane.move_yx(y, x)
-                except (RuntimeError, AttributeError, ValueError, OSError):
-                    pass
+                plane.resize(h, w)
+                plane.move_yx(y, x)
 
     def _start_background(self):
         self.api.start()
@@ -381,17 +417,13 @@ class RachaelTUI:
             self._set_fg(self.stdp, "dim")
             self.stdp.putstr_yx(offset, max(0, (cols - 16) // 2), "Press any key...")
         self.nc.render()
-        try:
-            self.stdp.fadein(600)
-        except (RuntimeError, AttributeError, TypeError):
-            pass
+        if self.wm:
+            self.wm.pulse_plane(self.stdp, 600)
         self.nc.render()
         ni = NcInput()
         self.nc.get(ni)
-        try:
-            self.stdp.fadeout(300)
-        except (RuntimeError, AttributeError, TypeError):
-            pass
+        if self.wm:
+            self.wm.fade_plane(self.stdp, 300)
 
     def _main_loop(self):
         ni = NcInput()
@@ -462,7 +494,7 @@ class RachaelTUI:
             self.ctrl_x_pending = True
             self._msg("C-x-")
         elif key == 7:
-            self._msg("Quit")
+            self._cancel_all()
         elif key == 19:
             self._open_minibuffer("I-search: ", self._do_search)
         elif key == 12:
@@ -624,11 +656,8 @@ class RachaelTUI:
         if new_view == self.view:
             return
         self.prev_view = self.view
-        if self.main_plane:
-            try:
-                self.main_plane.fadeout(150)
-            except (RuntimeError, AttributeError, TypeError):
-                pass
+        if self.main_plane and self.wm:
+            self.wm.fade_plane(self.main_plane, 150)
         if self.view == "cockpit" and self.wm:
             self.wm.destroy_reel()
         if self.view == "evolution" and self.wm:
@@ -644,11 +673,8 @@ class RachaelTUI:
             self._setup_cockpit_reel()
         if self.view == "evolution" and self.wm and self.main_plane:
             self._setup_evo_plots()
-        if self.main_plane:
-            try:
-                self.main_plane.fadein(150)
-            except (RuntimeError, AttributeError, TypeError):
-                pass
+        if self.main_plane and self.wm:
+            self.wm.pulse_plane(self.main_plane, 150)
 
     def _setup_cockpit_reel(self):
         m_rows, m_cols = self.main_plane.dim_yx()
@@ -1132,15 +1158,9 @@ class RachaelTUI:
             self._render_minibuffer()
         if self.command_palette_active and not self.nc_selector_active and self.palette_plane:
             self._render_palette()
-            try:
-                self.palette_plane.move_above(self.main_plane)
-            except (RuntimeError, AttributeError):
-                pass
+            self.palette_plane.move_above(self.main_plane)
         elif self.palette_plane and not self.nc_selector_active:
-            try:
-                self.palette_plane.move_below(self.stdp)
-            except (RuntimeError, AttributeError):
-                pass
+            self.palette_plane.move_below(self.stdp)
 
     def _render_header(self):
         p = self.header_plane
@@ -1220,14 +1240,11 @@ class RachaelTUI:
         self._set_fg(p, "success" if self.cockpit_connected else "error")
         p.putstr_yx(0, max(0, cols - len(conn) - 1), conn[:cols])
         if self.sparkline_data and rows > 6:
-            try:
-                grid = activity_density_grid(list(self.sparkline_data), width=min(20, cols - 4), height=3)
-                self._set_fg(p, "dim")
-                for gi, gline in enumerate(grid):
-                    if rows - 4 + gi < rows:
-                        p.putstr_yx(rows - 4 + gi, 1, gline[:cols - 2])
-            except (RuntimeError, TypeError, ValueError):
-                pass
+            grid = activity_density_grid(list(self.sparkline_data), width=min(20, cols - 4), height=3)
+            self._set_fg(p, "dim")
+            for gi, gline in enumerate(grid):
+                if rows - 4 + gi < rows:
+                    p.putstr_yx(rows - 4 + gi, 1, gline[:cols - 2])
 
     def _render_main(self):
         p = self.main_plane

@@ -336,10 +336,7 @@ class WidgetManager:
     def offer_menu_input(self, ni) -> Optional[str]:
         if self.menu is None:
             return None
-        try:
-            return self.menu.offer_input(ni)
-        except (RuntimeError, AttributeError, TypeError):
-            return None
+        return self.menu.offer_input(ni)
 
     def create_progbar(self, parent_plane, y: int, x: int, width: int):
         if NcProgbar is None:
@@ -355,11 +352,8 @@ class WidgetManager:
 
     def set_progress(self, value: float):
         if self.progbar is not None:
-            try:
-                self.progbar.set_progress(max(0.0, min(1.0, value)))
-                return True
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
-                self.log_degradation("NcProgbar.set_progress", str(e))
+            self.progbar.set_progress(max(0.0, min(1.0, value)))
+            return True
         return False
 
     def create_budget_progbar(self, parent_plane, y: int, x: int, width: int):
@@ -376,11 +370,8 @@ class WidgetManager:
 
     def set_budget_progress(self, value: float):
         if self.budget_progbar is not None:
-            try:
-                self.budget_progbar.set_progress(max(0.0, min(1.0, value)))
-                return True
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
-                self.log_degradation("NcProgbar.budget", str(e))
+            self.budget_progbar.set_progress(max(0.0, min(1.0, value)))
+            return True
         return False
 
     def create_reel(self, parent_plane, rows: int, cols: int, y: int, x: int):
@@ -414,24 +405,15 @@ class WidgetManager:
 
     def reel_next(self):
         if self.reel:
-            try:
-                self.reel.next()
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            self.reel.next()
 
     def reel_prev(self):
         if self.reel:
-            try:
-                self.reel.prev()
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            self.reel.prev()
 
     def reel_offer_input(self, ni):
         if self.reel:
-            try:
-                return self.reel.offer_input(ni)
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            return self.reel.offer_input(ni)
         return False
 
     def destroy_reel(self):
@@ -549,17 +531,11 @@ class WidgetManager:
 
     def multiselector_offer_input(self, ni):
         if self.multiselector:
-            try:
-                self.multiselector.offer_input(ni)
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            self.multiselector.offer_input(ni)
 
     def multiselector_selected(self) -> list:
         if self.multiselector:
-            try:
-                return self.multiselector.selected() or []
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            return self.multiselector.selected() or []
         return []
 
     def destroy_multiselector(self):
@@ -578,17 +554,11 @@ class WidgetManager:
 
     def selector_offer_input(self, ni):
         if self.selector:
-            try:
-                self.selector.offer_input(ni)
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            self.selector.offer_input(ni)
 
     def selector_selected(self) -> Optional[str]:
         if self.selector:
-            try:
-                return self.selector.selected()
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            return self.selector.selected()
         return None
 
     def destroy_selector(self):
@@ -631,10 +601,7 @@ class WidgetManager:
     def add_sparkline_sample(self, value: float, name: str = "main"):
         plot = self.sparkline if name == "main" else self._plot_planes.get(name, (None, None))[0]
         if plot:
-            try:
-                plot.add_sample(value)
-            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
-                pass
+            plot.add_sample(value)
 
     def create_evo_plots(self, parent_plane, y: int, x: int, width: int):
         plots = {}
