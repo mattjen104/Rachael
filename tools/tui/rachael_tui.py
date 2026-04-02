@@ -444,83 +444,62 @@ class RachaelTUI:
 
     def _splash_nc(self):
         rows, cols = self.dims
-        degraded = check_capabilities()
-        if self.wm:
-            degraded += [d for d in self.wm.degraded if d not in degraded]
-        self.stdp.erase()
-        self._set_fg(self.stdp, "accent")
-        self._set_bg(self.stdp, "bg")
-        for i, line in enumerate(LOGO):
-            y = rows // 2 - len(LOGO) // 2 + i - 2
-            x = max(0, (cols - len(line)) // 2)
-            if 0 <= y < rows:
-                self.stdp.putstr_yx(y, x, line)
-        self._set_fg(self.stdp, "dim")
-        tag = "v" + VERSION + " | " + self.theme.current["name"] + " | notcurses"
-        self.stdp.putstr_yx(rows // 2 + 3, max(0, (cols - len(tag)) // 2), tag)
-        offset = rows // 2 + 5
-        scan = "\u2591" * min(40, cols - 4)
-        if 0 <= offset < rows:
-            self._set_fg(self.stdp, "border")
-            self.stdp.putstr_yx(offset, max(0, (cols - len(scan)) // 2), scan)
-        if degraded:
-            offset += 1
-            if offset < rows:
-                self._set_fg(self.stdp, "warn")
-                deg = "Degraded: " + ", ".join(degraded[:5])
-                if len(degraded) > 5:
-                    deg += " +" + str(len(degraded) - 5)
-                self.stdp.putstr_yx(offset, max(0, (cols - len(deg)) // 2), deg[:cols - 2])
-        media_info = [k for k, v in MEDIA_CAPS.items() if v]
-        if media_info:
-            offset += 1
-            if offset < rows:
-                self._set_fg(self.stdp, "success")
-                ml = "Media: " + ", ".join(media_info)
-                self.stdp.putstr_yx(offset, max(0, (cols - len(ml)) // 2), ml[:cols - 2])
-        offset += 2
-        if offset < rows:
-            self._set_fg(self.stdp, "dim")
-            self.stdp.putstr_yx(offset, max(0, (cols - 16) // 2), "Press any key...")
-        if self.wm:
-            self.wm.fade_in(self.stdp, 600)
-        else:
-            self.nc.render()
         accent = self.theme.current.get("accent", 0x66FF66)
         bg_hex = self.theme.current.get("bg", 0x0A0A0A)
         ar, ag, ab = (accent >> 16) & 0xFF, (accent >> 8) & 0xFF, accent & 0xFF
-        dr, dg, db = max(ar // 4, (bg_hex >> 16) & 0xFF), max(ag // 4, (bg_hex >> 8) & 0xFF), max(ab // 4, bg_hex & 0xFF)
-        logo_ys = []
+        dr, dg, db = max(ar // 5, (bg_hex >> 16) & 0xFF), max(ag // 5, (bg_hex >> 8) & 0xFF), max(ab // 5, bg_hex & 0xFF)
+        br, bg_r, bb = (bg_hex >> 16) & 0xFF, (bg_hex >> 8) & 0xFF, bg_hex & 0xFF
+        logo_positions = []
         for i in range(len(LOGO)):
             ly = rows // 2 - len(LOGO) // 2 + i - 2
             if 0 <= ly < rows:
-                logo_ys.append(ly)
+                logo_positions.append((ly, i))
         import math
-        pulse_running = True
         frame = 0
-        while pulse_running:
+        while True:
             t = (math.sin(frame * 0.12) + 1.0) / 2.0
             cr = int(dr + (ar - dr) * t)
             cg = int(dg + (ag - dg) * t)
             cb = int(db + (ab - db) * t)
             try:
+                self.stdp.erase()
+                self.stdp.set_bg_rgb8(br, bg_r, bb)
                 self.stdp.set_fg_rgb8(cr, cg, cb)
-                for ly in logo_ys:
-                    li = ly - (rows // 2 - len(LOGO) // 2 + 0 - 2)
-                    if 0 <= li < len(LOGO):
-                        lx = max(0, (cols - len(LOGO[li])) // 2)
-                        self.stdp.putstr_yx(ly, lx, LOGO[li])
+                for ly, li in logo_positions:
+                    lx = max(0, (cols - len(LOGO[li])) // 2)
+                    self.stdp.putstr_yx(ly, lx, LOGO[li])
+                dim_hex = self.theme.current.get("dim", 0x555555)
+                dim_r, dim_g, dim_b = (dim_hex >> 16) & 0xFF, (dim_hex >> 8) & 0xFF, dim_hex & 0xFF
+                self.stdp.set_fg_rgb8(dim_r, dim_g, dim_b)
+                tag = "v" + VERSION + " | " + self.theme.current["name"] + " | notcurses"
+                tag_y = rows // 2 + len(LOGO) // 2
+                if 0 <= tag_y < rows:
+                    self.stdp.putstr_yx(tag_y, max(0, (cols - len(tag)) // 2), tag)
+                degraded = check_capabilities()
+                if self.wm:
+                    degraded += [d for d in self.wm.degraded if d not in degraded]
+                if degraded:
+                    warn_hex = self.theme.current.get("warn", 0xFFAA00)
+                    self.stdp.set_fg_rgb8((warn_hex >> 16) & 0xFF, (warn_hex >> 8) & 0xFF, warn_hex & 0xFF)
+                    deg = "Degraded: " + ", ".join(degraded[:5])
+                    if len(degraded) > 5:
+                        deg += " +" + str(len(degraded) - 5)
+                    deg_y = tag_y + 1
+                    if 0 <= deg_y < rows:
+                        self.stdp.putstr_yx(deg_y, max(0, (cols - len(deg)) // 2), deg[:cols - 2])
+                self.stdp.set_fg_rgb8(dim_r, dim_g, dim_b)
+                prompt_y = tag_y + 3
+                if 0 <= prompt_y < rows:
+                    prompt = "Press any key..."
+                    self.stdp.putstr_yx(prompt_y, max(0, (cols - len(prompt)) // 2), prompt)
                 self.nc.render()
             except (RuntimeError, NotImplementedError, TypeError, AttributeError):
                 break
             ni = self.nc.get_nblock()
             if ni is not None:
-                pulse_running = False
-            else:
-                time.sleep(0.04)
-                frame += 1
-        if self.wm:
-            self.wm.fade_out(self.stdp, 300)
+                break
+            time.sleep(0.04)
+            frame += 1
         self.stdp.erase()
         self.nc.render()
 
