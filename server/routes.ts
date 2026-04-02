@@ -81,6 +81,25 @@ export async function registerRoutes(
     console.error("[seed] Failed to seed database:", e);
   }
 
+  app.get("/launch", (_req, res) => {
+    const host = _req.headers.host || "localhost:5000";
+    const proto = _req.headers["x-forwarded-proto"] || _req.protocol || "http";
+    const baseUrl = `${proto}://${host}`;
+    res.setHeader("Content-Type", "text/html");
+    res.send(`<!DOCTYPE html>
+<html><head><title>Rachael</title></head>
+<body style="background:#1a1a2e;color:#aaa;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<script>
+var w=420,h=720;
+var left=(screen.width-w)/2,top_=(screen.height-h)/2;
+var win=window.open("${baseUrl}","rachael","width="+w+",height="+h+",left="+left+",top="+top_+",menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no");
+if(win){document.body.innerHTML="<p>Rachael launched. You can close this tab.</p>";}
+else{document.body.innerHTML="<p>Popup blocked. <a href='${baseUrl}' target='_blank' style='color:#bd93f9'>Click here</a> to open Rachael.</p>";}
+</script>
+<noscript><a href="${baseUrl}">Open Rachael</a></noscript>
+</body></html>`);
+  });
+
   app.get("/api/programs", async (_req, res) => {
     const progs = await storage.getPrograms();
     res.json(progs);
