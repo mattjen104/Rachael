@@ -1,0 +1,215 @@
+-- Installing: /usr/share/notcurses/chunli45.png
+-- Installing: /usr/share/notcurses/chunli5.bmp
+-- Installing: /usr/share/notcurses/chunli6.bmp
+-- Installing: /usr/share/notcurses/chunli7.bmp
+-- Installing: /usr/share/notcurses/chunli8.bmp
+-- Installing: /usr/share/notcurses/covid19.jpg
+-- Installing: /usr/share/notcurses/dsscaw-purp.png
+-- Installing: /usr/share/notcurses/eagles.png
+-- Installing: /usr/share/notcurses/fm6.mov
+-- Installing: /usr/share/notcurses/fonts.jpg
+-- Installing: /usr/share/notcurses/freebsd.png
+-- Installing: /usr/share/notcurses/lamepatents.jpg
+-- Installing: /usr/share/notcurses/megaman2.bmp
+-- Installing: /usr/share/notcurses/natasha-blur.png
+-- Installing: /usr/share/notcurses/normal.png
+-- Installing: /usr/share/notcurses/notcurses.png
+-- Installing: /usr/share/notcurses/notcursesIII.mov
+-- Installing: /usr/share/notcurses/onedot.png
+-- Installing: /usr/share/notcurses/samoa.avi
+-- Installing: /usr/share/notcurses/spaceship.png
+-- Installing: /usr/share/notcurses/tetris-background.jpg
+-- Installing: /usr/share/notcurses/warmech.bmp
+-- Installing: /usr/share/notcurses/worldmap.png
+-- Installing: /usr/share/doc/notcurses/CONTRIBUTING.md
+-- Installing: /usr/share/doc/notcurses/NEWS.md
+-- Installing: /usr/share/doc/notcurses/README.md
+-- Installing: /usr/share/doc/notcurses/TERMINALS.md
+-- Installing: /usr/share/doc/notcurses/USAGE.md
+-- Installing: /usr/bin/notcurses-demo
+-- Set non-toolchain portion of runtime path of "/usr/bin/notcurses-demo" to ""
+-- Installing: /usr/bin/notcurses-info
+-- Set non-toolchain portion of runtime path of "/usr/bin/notcurses-info" to ""
+-- Installing: /usr/bin/ncneofetch
+-- Set non-toolchain portion of runtime path of "/usr/bin/ncneofetch" to ""
+-- Installing: /usr/bin/tfman
+-- Set non-toolchain portion of runtime path of "/usr/bin/tfman" to ""
+-- Installing: /usr/bin/notcurses-input
+-- Set non-toolchain portion of runtime path of "/usr/bin/notcurses-input" to ""
+-- Installing: /usr/bin/nctetris
+-- Set non-toolchain portion of runtime path of "/usr/bin/nctetris" to ""
+-- Installing: /usr/bin/ncls
+-- Set non-toolchain portion of runtime path of "/usr/bin/ncls" to ""
+-- Installing: /usr/bin/ncplayer
+-- Set non-toolchain portion of runtime path of "/usr/bin/ncplayer" to ""
+-- Installing: /usr/lib/x86_64-linux-gnu/libnotcurses-ffi.so.3.0.11
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses-ffi.so.3
+-- Set non-toolchain portion of runtime path of "/usr/lib/x86_64-linux-gnu/libnotcurses-ffi.so.3.0.11" to ""
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses-ffi.so
+-- Installing: /usr/lib/x86_64-linux-gnu/libnotcurses-core.so.3.0.11
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses-core.so.3
+-- Set non-toolchain portion of runtime path of "/usr/lib/x86_64-linux-gnu/libnotcurses-core.so.3.0.11" to ""
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses-core.so
+-- Installing: /usr/lib/x86_64-linux-gnu/libnotcurses.so.3.0.11
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses.so.3
+-- Set non-toolchain portion of runtime path of "/usr/lib/x86_64-linux-gnu/libnotcurses.so.3.0.11" to ""
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses.so
+-- Installing: /usr/lib/x86_64-linux-gnu/libnotcurses++.so.3.0.11
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses++.so.3
+-- Set non-toolchain portion of runtime path of "/usr/lib/x86_64-linux-gnu/libnotcurses++.so.3.0.11" to ""
+-- Up-to-date: /usr/lib/x86_64-linux-gnu/libnotcurses++.so
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'notcurses'
+root@Phantom:/tmp/nc-build/notcurses/build# find /usr -name "notcurses" -type d 2>/dev/null
+find /usr -name "*notcurses*.py" 2>/dev/null
+find /usr -name "*notcurses*.so" 2>/dev/null
+/usr/share/doc/notcurses
+/usr/share/notcurses
+/usr/include/notcurses
+/usr/lib/x86_64-linux-gnu/libnotcurses++.so
+/usr/lib/x86_64-linux-gnu/libnotcurses-ffi.so
+/usr/lib/x86_64-linux-gnu/libnotcurses.so
+/usr/lib/x86_64-linux-gnu/libnotcurses-core.so
+root@Phantom:/tmp/nc-build/notcurses/build# ^[[200~ls /tmp/nc-build/notcurses/python/
+ls: command not found
+root@Phantom:/tmp/nc-build/notcurses/build# cat /tmp/nc-build/notcurses/build/CMakeCache.txt | grep -i python~
+root@Phantom:/tmp/nc-build/notcurses/build# ls /tmp/nc-build/notcurses/python/
+cat /tmp/nc-build/notcurses/build/CMakeCache.txt | grep -i python
+CMakeLists.txt  LICENSE  examples   setup.py
+HACKING.md      docs     notcurses
+//Build dummy python module used for compile check and Clangd
+DUMMY_PYTHON:BOOL=OFF
+USE_PYTHON:UNINITIALIZED=ON
+root@Phantom:/tmp/nc-build/notcurses/build# cd /tmp/nc-build/notcurses/python
+pip3 install --break-system-packages .
+python3 -c "from notcurses import Notcurses; print('ok')"
+Processing /tmp/nc-build/notcurses/python
+  Preparing metadata (setup.py) ... done
+Building wheels for collected packages: notcurses
+  Building wheel for notcurses (setup.py) ... done
+  Created wheel for notcurses: filename=notcurses-3.0.10-cp312-cp312-linux_x86_64.whl size=153414 sha256=89ec79dcb8da7600ee5c1370d3c2fe1f15835c9ac279aef2f20d58097620b003
+  Stored in directory: /tmp/pip-ephem-wheel-cache-33u920jp/wheels/c6/7e/9d/22059eb95c41d4626bf6efe02802bbb10eedf62850bc70fe24
+Successfully built notcurses
+Installing collected packages: notcurses
+Successfully installed notcurses-3.0.10
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/tmp/nc-build/notcurses/python/notcurses/__init__.py", line 17, in <module>
+    from .notcurses import (
+ImportError: cannot import name 'NCBOXASCII' from 'notcurses.notcurses' (/tmp/nc-build/notcurses/python/notcurses/notcurses.py)
+root@Phantom:/tmp/nc-build/notcurses/python# cd /opt/rachael
+python3 tools/tui/rachael_tui.py
+0 failed renders, 0 failed rasters, 0 refreshes, 0 input errors
+RGB emits:elides: def 0:0 fg 0:0 bg 0:0
+Cell emits:elides: 0:0 (0.00%) 0.00% 0.00% 0.00%
+Bmap emits:elides: 0:0 (0.00%) 0B (0.00%) SuM: 0 (0.00%)
+While Notcurses was running the following exception was uncaught:
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 161, in run
+    self._create_planes()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 194, in _create_planes
+    self.header_plane = NcPlane(self.stdp, 1, cols, 0, 0)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ValueError: NcPlane should NOT be initialied directly.
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2004, in <module>
+    main()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2000, in main
+    tui.run()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 188, in run
+    self.nc.stop()
+    ^^^^^^^^^^^^
+
+AttributeError: 'notcurses.Notcurses' object has no attribute 'stop'. Did you mean: 'top'?
+root@Phantom:/opt/rachael# python3 tools/tui/rachael_tui.py
+0 failed renders, 0 failed rasters, 0 refreshes, 0 input errors
+RGB emits:elides: def 0:0 fg 0:0 bg 0:0
+Cell emits:elides: 0:0 (0.00%) 0.00% 0.00% 0.00%
+Bmap emits:elides: 0:0 (0.00%) 0B (0.00%) SuM: 0 (0.00%)
+While Notcurses was running the following exception was uncaught:
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 161, in run
+    self._create_planes()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 194, in _create_planes
+    self.header_plane = NcPlane(self.stdp, 1, cols, 0, 0)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ValueError: NcPlane should NOT be initialied directly.
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2004, in <module>
+    main()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2000, in main
+    tui.run()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 188, in run
+    self.nc.stop()
+    ^^^^^^^^^^^^
+
+AttributeError: 'notcurses.Notcurses' object has no attribute 'stop'. Did you mean: 'top'?
+root@Phantom:/opt/rachael# ls /tmp/nc-build/notcurses/python/cd /opt/rachael && git pull
+python3 tools/tui/rachael_tui.py
+ls: cannot access '/tmp/nc-build/notcurses/python/cd': No such file or directory
+/opt/rachael:
+attached_assets    openclaw-sync      server
+chrome-extension   package-lock.json  shared
+client             package.json       skills
+components.json    postcss.config.js  tools
+dist               replit.md          tsconfig.json
+drizzle.config.ts  script             vite-plugin-meta-images.ts
+node_modules       scripts            vite.config.ts
+0 failed renders, 0 failed rasters, 0 refreshes, 0 input errors
+RGB emits:elides: def 0:0 fg 0:0 bg 0:0
+Cell emits:elides: 0:0 (0.00%) 0.00% 0.00% 0.00%
+Bmap emits:elides: 0:0 (0.00%) 0B (0.00%) SuM: 0 (0.00%)
+While Notcurses was running the following exception was uncaught:
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 161, in run
+    self._create_planes()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 194, in _create_planes
+    self.header_plane = NcPlane(self.stdp, 1, cols, 0, 0)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ValueError: NcPlane should NOT be initialied directly.
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2004, in <module>
+    main()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2000, in main
+    tui.run()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 188, in run
+    self.nc.stop()
+    ^^^^^^^^^^^^
+
+AttributeError: 'notcurses.Notcurses' object has no attribute 'stop'. Did you mean: 'top'?
+root@Phantom:/opt/rachael# 

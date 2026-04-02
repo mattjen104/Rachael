@@ -1,0 +1,122 @@
+
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2004, in <module>
+    main()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2000, in main
+    tui.run()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 188, in run
+    self.nc.stop()
+    ^^^^^^^^^^^^
+
+AttributeError: 'notcurses.Notcurses' object has no attribute 'stop'. Did you mean: 'top'?
+root@Phantom:/opt/rachael# ls /tmp/nc-build/notcurses/python/cd /opt/rachael && git pull
+python3 tools/tui/rachael_tui.py
+ls: cannot access '/tmp/nc-build/notcurses/python/cd': No such file or directory
+/opt/rachael:
+attached_assets    openclaw-sync      server
+chrome-extension   package-lock.json  shared
+client             package.json       skills
+components.json    postcss.config.js  tools
+dist               replit.md          tsconfig.json
+drizzle.config.ts  script             vite-plugin-meta-images.ts
+node_modules       scripts            vite.config.ts
+0 failed renders, 0 failed rasters, 0 refreshes, 0 input errors
+RGB emits:elides: def 0:0 fg 0:0 bg 0:0
+Cell emits:elides: 0:0 (0.00%) 0.00% 0.00% 0.00%
+Bmap emits:elides: 0:0 (0.00%) 0B (0.00%) SuM: 0 (0.00%)
+While Notcurses was running the following exception was uncaught:
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 161, in run
+    self._create_planes()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 194, in _create_planes
+    self.header_plane = NcPlane(self.stdp, 1, cols, 0, 0)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ValueError: NcPlane should NOT be initialied directly.
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2004, in <module>
+    main()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2000, in main
+    tui.run()
+
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 188, in run
+    self.nc.stop()
+    ^^^^^^^^^^^^
+
+AttributeError: 'notcurses.Notcurses' object has no attribute 'stop'. Did you mean: 'top'?
+root@Phantom:/opt/rachael# ls /tmp/nc-build/notcurses/python/cd /opt/rachael && git pull
+ls: cannot access '/tmp/nc-build/notcurses/python/cd': No such file or directory
+/opt/rachael:
+attached_assets    openclaw-sync      server
+chrome-extension   package-lock.json  shared
+client             package.json       skills
+components.json    postcss.config.js  tools
+dist               replit.md          tsconfig.json
+drizzle.config.ts  script             vite-plugin-meta-images.ts
+node_modules       scripts            vite.config.ts
+root@Phantom:/opt/rachael# git pull
+remote: Enumerating objects: 14, done.
+remote: Counting objects: 100% (14/14), done.
+remote: Compressing objects: 100% (2/2), done.
+remote: Total 8 (delta 6), reused 8 (delta 6), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 2.72 KiB | 279.00 KiB/s, done.
+From https://github.com/mattjen104/Rachael
+   428382a..08dfd2e  main       -> origin/main
+Updating 428382a..08dfd2e
+Fast-forward
+ ...ses-build-ls-tmp-nc-bui_1775153983144.txt | 61 ++++++++++++++++++
+ tools/tui/nc_widgets.py                      | 27 +++++---
+ tools/tui/rachael_tui.py                     | 48 ++++++++------
+ 3 files changed, 107 insertions(+), 29 deletions(-)
+ create mode 100644 attached_assets/Pasted-root-Phantom-tmp-nc-build-notcurses-build-ls-tmp-nc-bui_1775153983144.txt
+root@Phantom:/opt/rachael# python3 tools/tui/rachael_tui.py
+signals weren't registered for 0x22e88530 (had (nil))Segmentation fault (core dumped)
+root@Phantom:/opt/rachael# python3 tools/tui/rachael_tui.py
+Traceback (most recent call last):
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 184, in run
+    self._splash_nc()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 460, in _splash_nc
+    self.wm.fade_in(self.stdp, 600)
+  File "/opt/rachael/tools/tui/nc_widgets.py", line 353, in fade_in
+    plane.fadein(duration_ms * 1000000)
+NotImplementedError: TODO when fader is added
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2014, in <module>
+    main()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 2010, in main
+    tui.run()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 194, in run
+    self._run_fallback()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1607, in _run_fallback
+    _curses.wrapper(lambda stdscr: CursesFallback(self, stdscr, _curses).run())
+  File "/usr/lib/python3.12/curses/__init__.py", line 94, in wrapper
+    return func(stdscr, *args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1607, in <lambda>
+    _curses.wrapper(lambda stdscr: CursesFallback(self, stdscr, _curses).run())
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1637, in run
+    self._handle_input(ch)
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1810, in _handle_input
+    tui._switch_view(VIEW_KEYS[char])
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 751, in _switch_view
+    self.wm.fade_out(self.main_plane, 150)
+  File "/opt/rachael/tools/tui/nc_widgets.py", line 347, in fade_out
+    plane.fadeout(duration_ms * 1000000)
+NotImplementedError: TODO when fader is added
+root@Phantom:/opt/rachael# 

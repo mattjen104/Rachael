@@ -344,14 +344,20 @@ class WidgetManager:
 
     def fade_out(self, plane, duration_ms: int = 300) -> bool:
         if hasattr(plane, 'fadeout'):
-            plane.fadeout(duration_ms * 1000000)
-            return True
+            try:
+                plane.fadeout(duration_ms * 1000000)
+                return True
+            except (NotImplementedError, RuntimeError):
+                pass
         return False
 
     def fade_in(self, plane, duration_ms: int = 300) -> bool:
         if hasattr(plane, 'fadein'):
-            plane.fadein(duration_ms * 1000000)
-            return True
+            try:
+                plane.fadein(duration_ms * 1000000)
+                return True
+            except (NotImplementedError, RuntimeError):
+                pass
         return False
 
     def fade_plane(self, plane, duration_ms: int = 300) -> bool:
@@ -359,8 +365,11 @@ class WidgetManager:
 
     def pulse_plane(self, plane, duration_ms: int = 200) -> bool:
         if hasattr(plane, 'pulse'):
-            plane.pulse(duration_ms * 1000000, None)
-            return True
+            try:
+                plane.pulse(duration_ms * 1000000, None)
+                return True
+            except (NotImplementedError, RuntimeError):
+                pass
         return False
 
     def log_degradation(self, widget: str, error: str = ""):

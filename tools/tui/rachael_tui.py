@@ -185,7 +185,7 @@ class RachaelTUI:
             self._main_loop()
         except KeyboardInterrupt:
             pass
-        except (RuntimeError, ValueError, AttributeError) as e:
+        except (RuntimeError, ValueError, AttributeError, NotImplementedError) as e:
             self.running = False
             _nc_stop(self.nc)
             self.nc = None
