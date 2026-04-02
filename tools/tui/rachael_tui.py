@@ -102,6 +102,10 @@ class RachaelTUI:
         self.selected_idx = 0
         self.scroll_offset = 0
         self.expanded_id = None
+        self._detail_plane = None
+        self._sidebar_budget_created = False
+        self._sidebar_plot_created = False
+        self._prog_plot_ids: set = set()
         self.minibuffer_active = False
         self.minibuffer_text = ""
         self.minibuffer_prompt = ""
@@ -228,6 +232,10 @@ class RachaelTUI:
             self._snow_selector_active = False
             self._program_filter_active = False
             cancelled = True
+        if self.expanded_id is not None:
+            self.expanded_id = None
+            self._destroy_detail_plane()
+            cancelled = True
         if self.nc_multiselector_active and self.wm:
             self.wm.destroy_multiselector()
             self.nc_multiselector_active = False
@@ -254,6 +262,10 @@ class RachaelTUI:
         self.dims = (rows, cols)
         if self.wm:
             self.wm.dims = self.dims
+        self._destroy_detail_plane()
+        self._destroy_prog_plots()
+        self._sidebar_budget_created = False
+        self._sidebar_plot_created = False
         self._resize_planes()
 
     def _resize_planes(self):
@@ -691,6 +703,24 @@ class RachaelTUI:
         if self.view == "cockpit" and self.wm:
             self.wm.reel_prev()
 
+    def _destroy_detail_plane(self):
+        if self._detail_plane is not None:
+            try:
+                self._detail_plane.destroy()
+            except RuntimeError:
+                pass
+            self._detail_plane = None
+
+    def _destroy_prog_plots(self):
+        for name in self._prog_plot_ids:
+            pair = self.wm._plot_planes.pop(name, None)
+            if pair and pair[1]:
+                try:
+                    pair[1].destroy()
+                except RuntimeError:
+                    pass
+        self._prog_plot_ids.clear()
+
     def _switch_view(self, new_view: str):
         if new_view == self.view:
             return
@@ -705,6 +735,8 @@ class RachaelTUI:
         self.selected_idx = 0
         self.scroll_offset = 0
         self.expanded_id = None
+        self._destroy_detail_plane()
+        self._destroy_prog_plots()
         self.reader_reading_id = None
         if new_view != "evolution":
             self.evo_tab = "overview"
@@ -1302,7 +1334,9 @@ class RachaelTUI:
             p.putstr_yx(info_y + 2, 1, ("Budget: " + bstr)[:cols - 2])
             if cap > 0 and cols > 10:
                 prog = min(1.0, spent / cap)
-                self.wm.create_budget_progbar(p, info_y + 3, 1, cols - 3)
+                if not self._sidebar_budget_created:
+                    self.wm.create_budget_progbar(p, info_y + 3, 1, cols - 3)
+                    self._sidebar_budget_created = True
                 self.wm.set_budget_progress(prog)
             ctrl = self.data_cache.get("control", {})
             mode = ctrl.get("mode", "human")
@@ -1312,9 +1346,14 @@ class RachaelTUI:
                 p.putstr_yx(mode_y, 1, ("Mode: " + mode.upper())[:cols - 2])
             spark_y = mode_y + 1
             if self.sparkline_data and spark_y < rows - 1:
-                self.wm.create_inline_plot(p, spark_y, 1, cols - 3,
-                                           list(self.sparkline_data)[-min(cols - 4, 20):],
-                                           name="sidebar_activity")
+                recent = list(self.sparkline_data)[-min(cols - 4, 20):]
+                if not self._sidebar_plot_created:
+                    self.wm.create_inline_plot(p, spark_y, 1, cols - 3,
+                                               recent, name="sidebar_activity")
+                    self._sidebar_plot_created = True
+                else:
+                    if recent:
+                        self.wm.add_sparkline_sample(float(recent[-1]), "sidebar_activity")
         for y in range(rows):
             self._set_fg(p, "border")
             p.putstr_yx(y, cols - 1, "\u2502")
@@ -1399,20 +1438,30 @@ class RachaelTUI:
                 if run_hist and len(run_hist) >= 2 and cols > 30:
                     plot_w = min(12, cols - 20)
                     plot_name = "prog_" + str(i)
-                    self.wm.create_inline_plot(p, y - 1, cols - plot_w - 2, plot_w,
-                                               run_hist, name=plot_name)
+                    if plot_name not in self._prog_plot_ids:
+                        self._prog_plot_ids.add(plot_name)
+                        self.wm.create_inline_plot(p, y - 1, cols - plot_w - 2, plot_w,
+                                                   run_hist, name=plot_name)
+                    else:
+                        for val in run_hist:
+                            self.wm.add_sparkline_sample(float(val), plot_name)
             if is_exp and isinstance(item, dict):
                 details = format_detail(item, cols - 6, self.view, self.data_cache)
                 detail_h = min(len(details), rows - y)
                 if detail_h > 0 and self.nc:
-                    detail_plane = NcPlane(p, detail_h, cols - 4, y, 2)
+                    if self._detail_plane is not None:
+                        try:
+                            self._detail_plane.destroy()
+                        except RuntimeError:
+                            pass
+                    self._detail_plane = NcPlane(p, detail_h, cols - 4, y, 2)
                     r, g, b = self.theme.rgb("mini_bg")
-                    detail_plane.set_bg_rgb8(r, g, b)
+                    self._detail_plane.set_bg_rgb8(r, g, b)
                     r, g, b = self.theme.rgb("dim")
-                    detail_plane.set_fg_rgb8(r, g, b)
-                    detail_plane.erase()
+                    self._detail_plane.set_fg_rgb8(r, g, b)
+                    self._detail_plane.erase()
                     for di, dl in enumerate(details[:detail_h]):
-                        detail_plane.putstr_yx(di, 1, dl[:cols - 6])
+                        self._detail_plane.putstr_yx(di, 1, dl[:cols - 6])
                     y += detail_h
 
     def _render_reader_content(self, p, rows, cols):

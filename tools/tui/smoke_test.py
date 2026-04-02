@@ -197,7 +197,7 @@ check("C-n (key==14) history-next", "key == 14" in reader_src)
 check("Uses minibuffer_hist_idx", "minibuffer_hist_idx" in reader_src)
 
 print("\n[Child plane expansion]")
-render_src = inspect.getsource(RachaelTUI._render_items)
+render_src = inspect.getsource(RachaelTUI._render_main)
 check("Creates NcPlane child for detail", "detail_plane = NcPlane" in render_src)
 check("Uses mini_bg for detail plane", "mini_bg" in render_src)
 
