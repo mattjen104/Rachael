@@ -1210,11 +1210,14 @@ class RachaelTUI:
         self._set_fg(p, "success" if self.cockpit_connected else "error")
         p.putstr_yx(0, max(0, cols - len(conn) - 1), conn[:cols])
         if self.sparkline_data and rows > 6:
-            grid = activity_density_grid(list(self.sparkline_data), width=min(20, cols - 4), height=3)
-            self._set_fg(p, "dim")
-            for gi, gline in enumerate(grid):
-                if rows - 4 + gi < rows:
-                    p.putstr_yx(rows - 4 + gi, 1, gline[:cols - 2])
+            try:
+                grid = activity_density_grid(list(self.sparkline_data), width=min(20, cols - 4), height=3)
+                self._set_fg(p, "dim")
+                for gi, gline in enumerate(grid):
+                    if rows - 4 + gi < rows:
+                        p.putstr_yx(rows - 4 + gi, 1, gline[:cols - 2])
+            except Exception:
+                pass
 
     def _render_main(self):
         p = self.main_plane

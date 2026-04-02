@@ -208,16 +208,40 @@ def quadrant_bar(value: float, max_val: float = 1.0, width: int = 10) -> str:
     return result
 
 
-def activity_density_grid(data_2d: list, rows: int, cols: int) -> list:
+def activity_density_grid(data, width: int = 10, height: int = 3) -> list:
+    flat = []
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, (list, tuple)):
+                flat.extend(item)
+            else:
+                flat.append(item)
+    if not flat:
+        return [" " * width for _ in range(height)]
+    max_val = max(abs(float(v)) for v in flat) if flat else 1.0
+    if max_val == 0:
+        max_val = 1.0
+    total_cells = width * height
+    normalized = []
+    for v in flat:
+        normalized.append(float(v) / max_val)
+    while len(normalized) < total_cells:
+        normalized.append(0.0)
+    if len(normalized) > total_cells:
+        step = len(normalized) / total_cells
+        sampled = []
+        for i in range(total_cells):
+            idx = int(i * step)
+            sampled.append(normalized[min(idx, len(normalized) - 1)])
+        normalized = sampled
     lines = []
-    for r in range(min(rows, len(data_2d))):
-        row = data_2d[r] if r < len(data_2d) else []
+    for r in range(height):
         line = ""
-        for c in range(min(cols, len(row))):
-            val = row[c] if c < len(row) else 0
-            ratio = max(0.0, min(1.0, float(val)))
-            idx = int(ratio * (len(BRAILLE_BLOCKS) - 1))
-            line += BRAILLE_BLOCKS[idx]
+        for c in range(width):
+            cell_idx = r * width + c
+            ratio = max(0.0, min(1.0, normalized[cell_idx] if cell_idx < len(normalized) else 0.0))
+            bi = int(ratio * (len(BRAILLE_BLOCKS) - 1))
+            line += BRAILLE_BLOCKS[bi]
         lines.append(line)
     return lines
 

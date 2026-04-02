@@ -283,10 +283,13 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
             burn_history = [v.get("metricsSnapshot", {}).get("totalRuns", 0) for v in versions]
             items.append({"_tree": "density", "_label": "Activity: " + braille_heatmap_row(
                 [float(x) for x in burn_history], max(1, max(burn_history) if burn_history else 1), 15)})
-            grid_data = [v.get("metricsSnapshot", {}).get("totalRuns", 0) for v in versions]
-            grid_lines = activity_density_grid(grid_data, width=min(20, len(grid_data)), height=2)
-            for gl in grid_lines:
-                items.append({"_tree": "density", "_label": "  " + gl})
+            try:
+                grid_data = [v.get("metricsSnapshot", {}).get("totalRuns", 0) for v in versions]
+                grid_lines = activity_density_grid(grid_data, width=min(20, max(1, len(grid_data))), height=2)
+                for gl in grid_lines:
+                    items.append({"_tree": "density", "_label": "  " + gl})
+            except Exception:
+                pass
 
     elif evo_tab == "versions":
         versions = state.get("recentVersions", [])
