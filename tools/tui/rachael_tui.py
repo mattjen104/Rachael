@@ -25,6 +25,19 @@ from tui_views import (
 VERSION = "1.0.0"
 
 
+def _plane_resize(plane, h, w):
+    try:
+        plane.resize_simple(h, w)
+    except (AttributeError, NotImplementedError):
+        try:
+            plane.resize(0, 0, h, w, 0, 0, h, w)
+        except TypeError:
+            try:
+                plane.resize(h, w)
+            except Exception:
+                pass
+
+
 def _ni_alt(ni):
     if hasattr(ni, 'alt'):
         return ni.alt
@@ -193,10 +206,17 @@ class RachaelTUI:
             self._main_loop()
         except KeyboardInterrupt:
             pass
-        except (RuntimeError, ValueError, AttributeError, NotImplementedError) as e:
+        except (RuntimeError, ValueError, AttributeError, NotImplementedError, TypeError) as e:
             self.running = False
             _nc_stop(self.nc)
             self.nc = None
+            self.wm = None
+            self.main_plane = None
+            self.header_plane = None
+            self.sidebar_plane = None
+            self.modeline_plane = None
+            self.minibuffer_plane = None
+            self.palette_plane = None
             import sys
             sys.stderr.write("notcurses failed: " + str(e) + " — falling back to curses\n")
             self._run_fallback()
@@ -311,7 +331,7 @@ class RachaelTUI:
             (self.minibuffer_plane, max(0, rows - 1), 1, cols, 0),
         ]:
             if plane:
-                plane.resize(h, w)
+                _plane_resize(plane, h, w)
                 plane.move_yx(y, x)
 
     def _start_background(self):
@@ -739,7 +759,7 @@ class RachaelTUI:
         if self._detail_plane is not None:
             try:
                 self._detail_plane.destroy()
-            except RuntimeError:
+            except (RuntimeError, NotImplementedError, TypeError, AttributeError):
                 pass
             self._detail_plane = None
 
@@ -749,7 +769,7 @@ class RachaelTUI:
             if pair and pair[1]:
                 try:
                     pair[1].destroy()
-                except RuntimeError:
+                except (RuntimeError, NotImplementedError, TypeError, AttributeError):
                     pass
         self._prog_plot_ids.clear()
 
@@ -848,7 +868,7 @@ class RachaelTUI:
                     tablet_plane.putstr_yx(1, 2, "  ".join(detail_parts)[:cols - 2])
                     return 2
             return 1
-        except RuntimeError:
+        except (RuntimeError, NotImplementedError, TypeError, AttributeError):
             return 1
 
     def _handle_view_keys(self, char: str, key: int = 0):
@@ -1481,7 +1501,7 @@ class RachaelTUI:
                     if self._detail_plane is not None:
                         try:
                             self._detail_plane.destroy()
-                        except RuntimeError:
+                        except (RuntimeError, NotImplementedError, TypeError, AttributeError):
                             pass
                     self._detail_plane = _create_child_plane(p, detail_h, cols - 4, y, 2)
                     r, g, b = self.theme.rgb("mini_bg")
