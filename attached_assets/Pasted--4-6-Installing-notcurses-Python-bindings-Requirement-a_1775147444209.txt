@@ -1,0 +1,45 @@
+[4/6] Installing notcurses Python bindings...
+Requirement already satisfied: notcurses in /usr/lib/python3/dist-packages (3.0.7)
+[5/6] Verifying notcurses import...
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'Notcurses' from 'notcurses' (/usr/lib/python3/dist-packages/notcurses/__init__.py)
+Error in sys.excepthook:
+Traceback (most recent call last):
+  File "/usr/lib/python3/dist-packages/apport_python_hook.py", line 228, in partial_apport_excepthook
+    return apport_excepthook(binary, exc_type, exc_obj, exc_tb)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3/dist-packages/apport_python_hook.py", line 114, in apport_excepthook
+    report["ExecutableTimestamp"] = str(int(os.stat(binary).st_mtime))
+                                            ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/opt/rachael/-c'
+
+Original exception was:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'Notcurses' from 'notcurses' (/usr/lib/python3/dist-packages/notcurses/__init__.py)
+  [error] notcurses installed but cannot be imported.
+  Check that libnotcurses3 is installed: apt install libnotcurses3
+notcurses not available — using curses mode.
+For full capabilities: build notcurses >= 3.0.11 from source
+Traceback (most recent call last):
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1976, in <module>
+    main()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1972, in main
+    tui.run()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 153, in run
+    self._run_fallback()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1597, in _run_fallback
+    _curses.wrapper(lambda stdscr: CursesFallback(self, stdscr, _curses).run())
+  File "/usr/lib/python3.12/curses/__init__.py", line 94, in wrapper
+    return func(stdscr, *args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1597, in <lambda>
+    _curses.wrapper(lambda stdscr: CursesFallback(self, stdscr, _curses).run())
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1613, in run
+    self._init_colors()
+  File "/opt/rachael/tools/tui/rachael_tui.py", line 1647, in _init_colors
+    curses.init_color(fg_id, ((fg_hex >> 16) & 0xFF) * 1000 // 255,
+ValueError: Color number is greater than COLORS-1 (7).
+root@Phantom:/opt/rachael# 

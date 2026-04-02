@@ -1629,30 +1629,58 @@ class CursesFallback:
         tui.api.stop()
 
     def _init_colors(self):
-        t = self.tui.theme.current
         curses = self.curses
-        pairs = [
-            (1, t["fg"], t["bg"]), (2, t["dim"], t["bg"]),
-            (3, t["accent"], t["bg"]), (4, t["error"], t["bg"]),
-            (5, t["warn"], t["bg"]), (6, t["success"], t["bg"]),
-            (7, t["header_fg"], t["header_bg"]), (8, t["sel_fg"], t["sel_bg"]),
-            (9, t["mode_line_fg"], t["mode_line_bg"]),
-            (10, t["mini_fg"], t["mini_bg"]),
-            (11, t["info"], t["bg"]), (12, t["border"], t["bg"]),
-        ]
-        for idx, fg_hex, bg_hex in pairs:
+        can_change = curses.can_change_color() and curses.COLORS >= 40
+        if can_change:
+            t = self.tui.theme.current
+            pairs = [
+                (1, t["fg"], t["bg"]), (2, t["dim"], t["bg"]),
+                (3, t["accent"], t["bg"]), (4, t["error"], t["bg"]),
+                (5, t["warn"], t["bg"]), (6, t["success"], t["bg"]),
+                (7, t["header_fg"], t["header_bg"]), (8, t["sel_fg"], t["sel_bg"]),
+                (9, t["mode_line_fg"], t["mode_line_bg"]),
+                (10, t["mini_fg"], t["mini_bg"]),
+                (11, t["info"], t["bg"]), (12, t["border"], t["bg"]),
+            ]
+            for idx, fg_hex, bg_hex in pairs:
+                try:
+                    fg_id = 16 + idx * 2
+                    bg_id = 17 + idx * 2
+                    curses.init_color(fg_id, ((fg_hex >> 16) & 0xFF) * 1000 // 255,
+                                      ((fg_hex >> 8) & 0xFF) * 1000 // 255,
+                                      (fg_hex & 0xFF) * 1000 // 255)
+                    curses.init_color(bg_id, ((bg_hex >> 16) & 0xFF) * 1000 // 255,
+                                      ((bg_hex >> 8) & 0xFF) * 1000 // 255,
+                                      (bg_hex & 0xFF) * 1000 // 255)
+                    curses.init_pair(idx, fg_id, bg_id)
+                except (curses.error, ValueError):
+                    can_change = False
+                    break
+        if not can_change:
+            G = curses.COLOR_GREEN
+            K = curses.COLOR_BLACK
+            W = curses.COLOR_WHITE
+            C = curses.COLOR_CYAN
+            R = curses.COLOR_RED
+            Y = curses.COLOR_YELLOW
             try:
-                fg_id = 16 + idx * 2
-                bg_id = 17 + idx * 2
-                curses.init_color(fg_id, ((fg_hex >> 16) & 0xFF) * 1000 // 255,
-                                  ((fg_hex >> 8) & 0xFF) * 1000 // 255,
-                                  (fg_hex & 0xFF) * 1000 // 255)
-                curses.init_color(bg_id, ((bg_hex >> 16) & 0xFF) * 1000 // 255,
-                                  ((bg_hex >> 8) & 0xFF) * 1000 // 255,
-                                  (bg_hex & 0xFF) * 1000 // 255)
-                curses.init_pair(idx, fg_id, bg_id)
+                curses.init_pair(1, G, K)
+                curses.init_pair(2, W, K)
+                curses.init_pair(3, C, K)
+                curses.init_pair(4, R, K)
+                curses.init_pair(5, Y, K)
+                curses.init_pair(6, G, K)
+                curses.init_pair(7, K, G)
             except curses.error:
-                curses.init_pair(idx, curses.COLOR_GREEN, curses.COLOR_BLACK)
+                pass
+            try:
+                curses.init_pair(8, K, C)
+                curses.init_pair(9, K, W)
+                curses.init_pair(10, G, K)
+                curses.init_pair(11, C, K)
+                curses.init_pair(12, W, K)
+            except curses.error:
+                pass
 
     def _splash(self):
         rows, cols = self.stdscr.getmaxyx()
