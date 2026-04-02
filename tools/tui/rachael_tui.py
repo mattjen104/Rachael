@@ -25,6 +25,14 @@ from tui_views import (
 VERSION = "1.0.0"
 
 
+def _ni_alt(ni):
+    if hasattr(ni, 'alt'):
+        return ni.alt
+    if hasattr(ni, 'modifiers'):
+        return bool(ni.modifiers & 0x04)
+    return False
+
+
 def _nc_stop(nc):
     if nc is None:
         return
@@ -460,13 +468,11 @@ class RachaelTUI:
             self.wm.fade_in(self.stdp, 600)
         else:
             self.nc.render()
-        ni = NcInput()
-        self.nc.get(ni)
+        self.nc.get_blocking()
         if self.wm:
             self.wm.fade_out(self.stdp, 300)
 
     def _main_loop(self):
-        ni = NcInput()
         if self.wm:
             self.wm.set_resize_callback(self._on_resize)
         while self.running:
@@ -478,8 +484,12 @@ class RachaelTUI:
                     self._on_resize(*new_dims)
             self._render_nc()
             self.nc.render()
-            key = self.nc.get_nblock(ni)
-            if key is None or key == 0:
+            ni = self.nc.get_nblock()
+            if ni is None:
+                time.sleep(0.016)
+                continue
+            key = ni.id if hasattr(ni, 'id') else ni
+            if key == 0:
                 time.sleep(0.016)
                 continue
             menu_result = self.wm.offer_menu_input(ni) if self.wm else None
@@ -544,7 +554,7 @@ class RachaelTUI:
             self._nav_down()
         elif key == 16:
             self._nav_up()
-        elif ni.alt and char == "x":
+        elif _ni_alt(ni) and char == "x":
             self._open_command_palette()
         elif char == "\t":
             if self.view == "snow":
