@@ -157,7 +157,7 @@ class RachaelAPI:
         return self._call(self._get("/api/captures", params={"limit": str(limit)})) or []
 
     def smart_capture(self, text: str) -> dict:
-        return self._call(self._post("/api/captures/smart", body={"rawText": text})) or {}
+        return self._call(self._post("/api/captures/smart", body={"content": text})) or {}
 
     def results(self, program: Optional[str] = None, limit: int = 100) -> list:
         p: dict = {"limit": str(limit)}

@@ -17,67 +17,53 @@ NcReader = None
 NcReaderOptions = None
 NcSelector = None
 NcSelectorItem = None
+NcMultiSelector = None
+NcMultiSelectorItem = None
 NcMenu = None
 NcMenuItem = None
 NcPlot = None
+NcDPlot = None
 NCALPHA_BLEND = None
 NCALPHA_TRANSPARENT = None
 NCBLIT_BRAILLE = None
 NCBLIT_2x2 = None
+NCBLIT_4x2 = None
+
+NC_CAPS = {}
+
+def _try_import(name, fallback=None):
+    try:
+        mod = __import__("notcurses", fromlist=[name])
+        val = getattr(mod, name, None)
+        if val is not None:
+            NC_CAPS[name] = True
+            return val
+    except (ImportError, AttributeError):
+        pass
+    NC_CAPS[name] = False
+    return fallback
 
 try:
     from notcurses import Notcurses, NcInput, NcPlane
     NC_AVAILABLE = True
-    try:
-        from notcurses import NcReel as _NcReel, NcReelOptions as _NcReelOpts
-        NcReel = _NcReel
-        NcReelOptions = _NcReelOpts
-    except ImportError:
-        pass
-    try:
-        from notcurses import NcProgbar as _NcProgbar
-        NcProgbar = _NcProgbar
-    except ImportError:
-        pass
-    try:
-        from notcurses import NcReader as _NcReader
-        NcReader = _NcReader
-        try:
-            from notcurses import NcReaderOptions as _NcReaderOpts
-            NcReaderOptions = _NcReaderOpts
-        except ImportError:
-            pass
-    except ImportError:
-        pass
-    try:
-        from notcurses import NcSelector as _NcSelector, NcSelectorItem as _NcSelectorItem
-        NcSelector = _NcSelector
-        NcSelectorItem = _NcSelectorItem
-    except ImportError:
-        pass
-    try:
-        from notcurses import NcMenu as _NcMenu, NcMenuItem as _NcMenuItem
-        NcMenu = _NcMenu
-        NcMenuItem = _NcMenuItem
-    except ImportError:
-        pass
-    try:
-        from notcurses import NcPlot as _NcPlot
-        NcPlot = _NcPlot
-    except ImportError:
-        pass
-    try:
-        from notcurses import NCALPHA_BLEND as _AB, NCALPHA_TRANSPARENT as _AT
-        NCALPHA_BLEND = _AB
-        NCALPHA_TRANSPARENT = _AT
-    except ImportError:
-        pass
-    try:
-        from notcurses import NCBLIT_BRAILLE as _BB, NCBLIT_2x2 as _B2
-        NCBLIT_BRAILLE = _BB
-        NCBLIT_2x2 = _B2
-    except ImportError:
-        pass
+    NcReel = _try_import("NcReel")
+    NcReelOptions = _try_import("NcReelOptions")
+    NcProgbar = _try_import("NcProgbar")
+    NcReader = _try_import("NcReader")
+    NcReaderOptions = _try_import("NcReaderOptions")
+    NcSelector = _try_import("NcSelector")
+    NcSelectorItem = _try_import("NcSelectorItem")
+    NcMultiSelector = _try_import("NcMultiSelector")
+    NcMultiSelectorItem = _try_import("NcMultiSelectorItem")
+    NcMenu = _try_import("NcMenu")
+    NcMenuItem = _try_import("NcMenuItem")
+    NcPlot = _try_import("NcPlot")
+    NcDPlot = _try_import("NcDPlot")
+    NCALPHA_BLEND = _try_import("NCALPHA_BLEND")
+    NCALPHA_TRANSPARENT = _try_import("NCALPHA_TRANSPARENT")
+    NCBLIT_BRAILLE = _try_import("NCBLIT_BRAILLE")
+    NCBLIT_2x2 = _try_import("NCBLIT_2x2")
+    NCBLIT_4x2 = _try_import("NCBLIT_4x2")
 except ImportError:
     pass
 
@@ -204,6 +190,8 @@ class RachaelTUI:
         self._reel_tablets: list = []
         self._menu_created = False
         self._nc_reader_active = False
+        self._degraded_widgets: list = []
+        self._cap_report_shown = False
 
     def run(self):
         if not NC_AVAILABLE:
@@ -277,8 +265,8 @@ class RachaelTUI:
                 sections.append((sec_name, items))
             self.planes.menu_widget = NcMenu.create(self.nc, sections)
             self._menu_created = True
-        except Exception:
-            pass
+        except Exception as e:
+            self._degraded_widgets.append("NcMenu (init: " + str(e)[:30] + ")")
 
     def _create_nc_progbar(self):
         if NcProgbar is None or self.planes.sidebar is None:
@@ -294,7 +282,10 @@ class RachaelTUI:
             pass
 
     def _create_nc_sparkline(self):
-        if NcPlot is None or self.planes.main is None:
+        plot_cls = NcDPlot or NcPlot
+        if plot_cls is None or self.planes.main is None:
+            if NcPlot is None and NcDPlot is None:
+                self._degraded_widgets.append("NcPlot (sparkline)")
             return
         try:
             m_rows, m_cols = self.planes.main.dim_yx()
@@ -303,12 +294,13 @@ class RachaelTUI:
             if sp_w > 5 and m_rows > sp_h + 2:
                 self.planes.sparkline_plane = NcPlane(self.planes.main, sp_h, sp_w, 1, m_cols - sp_w - 2)
                 opts = {}
-                if NCBLIT_BRAILLE is not None:
-                    opts["gridtype"] = NCBLIT_BRAILLE
-                self.planes.sparkline_widget = NcPlot.create(
+                blit = NCBLIT_BRAILLE or NCBLIT_4x2 or NCBLIT_2x2
+                if blit is not None:
+                    opts["gridtype"] = blit
+                self.planes.sparkline_widget = plot_cls.create(
                     self.planes.sparkline_plane, **opts)
-        except Exception:
-            pass
+        except Exception as e:
+            self._degraded_widgets.append("NcPlot/NcDPlot (init: " + str(e)[:30] + ")")
 
     def _create_nc_reel(self):
         if NcReel is None or self.planes.main is None:
@@ -347,6 +339,26 @@ class RachaelTUI:
             self.planes.selector_plane = sel_plane
             self.planes.selector_widget = selector
             return selector
+        except Exception:
+            return None
+
+    def _create_nc_multiselector(self, items_list: list, title: str = "Select"):
+        if NcMultiSelector is None or NcMultiSelectorItem is None:
+            return None
+        try:
+            rows, cols = self.dims
+            sel_w = min(50, cols - 6)
+            sel_h = min(len(items_list) + 4, rows - 6)
+            sx = (cols - sel_w) // 2
+            sy = (rows - sel_h) // 2
+            sel_plane = NcPlane(self.stdp, sel_h, sel_w, sy, sx)
+            nc_items = []
+            for label, desc, selected in items_list:
+                nc_items.append(NcMultiSelectorItem(label, desc, selected))
+            mselector = NcMultiSelector.create(sel_plane, nc_items, title=title, maxdisplay=sel_h - 3)
+            self.planes.selector_plane = sel_plane
+            self.planes.selector_widget = mselector
+            return mselector
         except Exception:
             return None
 
@@ -546,8 +558,29 @@ class RachaelTUI:
             return True
         return False
 
+    def _check_capabilities(self):
+        widget_names = [
+            ("NcMenu", NcMenu),
+            ("NcProgbar", NcProgbar),
+            ("NcReader", NcReader),
+            ("NcSelector", NcSelector),
+            ("NcMultiSelector", NcMultiSelector),
+            ("NcReel", NcReel),
+            ("NcPlot", NcPlot),
+            ("NcDPlot", NcDPlot),
+            ("NCALPHA_BLEND", NCALPHA_BLEND),
+            ("NCBLIT_BRAILLE", NCBLIT_BRAILLE),
+            ("NCBLIT_4x2", NCBLIT_4x2),
+        ]
+        self._degraded_widgets = []
+        for name, val in widget_names:
+            if val is None:
+                self._degraded_widgets.append(name)
+        return self._degraded_widgets
+
     def _splash_nc(self):
         rows, cols = self.dims
+        degraded = self._check_capabilities()
         self.stdp.erase()
         self._set_fg(self.stdp, "accent")
         self._set_bg(self.stdp, "bg")
@@ -564,6 +597,13 @@ class RachaelTUI:
         if 0 <= scanline_y < rows:
             self._set_fg(self.stdp, "border")
             self.stdp.putstr_yx(scanline_y, max(0, (cols - len(scan_text)) // 2), scan_text)
+        if degraded and scanline_y + 2 < rows:
+            self._set_fg(self.stdp, "warn")
+            deg_text = "Degraded: " + ", ".join(degraded[:4])
+            if len(degraded) > 4:
+                deg_text += " +" + str(len(degraded) - 4)
+            self.stdp.putstr_yx(scanline_y + 2, max(0, (cols - len(deg_text)) // 2), deg_text[:cols - 2])
+            scanline_y += 1
         sub = "Press any key..."
         if scanline_y + 2 < rows:
             self._set_fg(self.stdp, "dim")
@@ -1657,7 +1697,10 @@ class RachaelTUI:
             summary = item.get("summary", "") or ""
             metric = item.get("metric")
             line = sc + " " + prog.ljust(13) + summary
-            if metric:
+            if metric and isinstance(metric, (int, float)):
+                bar = _braille_bar(metric, max_val=1.0, width=5)
+                line += " " + bar + " " + str(round(metric, 2))
+            elif metric:
                 line += " =" + str(metric)
             return line[:max_width]
         elif self.view == "reader":
@@ -2368,6 +2411,23 @@ class RachaelTUI:
                 stdscr.addnstr(cy, px + 2, cmd[:pw - 4], pw - 4, cp)
         except curses.error:
             pass
+
+
+def _braille_bar(value: float, max_val: float = 1.0, width: int = 5) -> str:
+    if max_val <= 0:
+        max_val = 1.0
+    ratio = max(0.0, min(1.0, value / max_val))
+    total_dots = width * 8
+    filled = int(ratio * total_dots)
+    result = ""
+    for i in range(width):
+        dots_in_char = min(8, max(0, filled - i * 8))
+        if dots_in_char <= 0:
+            result += BRAILLE_BLOCKS[0]
+        else:
+            idx = min(len(BRAILLE_BLOCKS) - 1, dots_in_char)
+            result += BRAILLE_BLOCKS[idx]
+    return result
 
 
 def _wrap(text: str, width: int) -> list:

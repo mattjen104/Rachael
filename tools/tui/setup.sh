@@ -22,13 +22,16 @@ if command -v apt-get &>/dev/null; then
   apt-get install -y -qq python3-notcurses 2>/dev/null || true
 fi
 
-echo "[2/4] Installing aiohttp async HTTP client..."
+echo "[2/5] Installing cffi (notcurses dependency)..."
+pip3 install --break-system-packages cffi 2>/dev/null || pip3 install cffi 2>/dev/null || echo "  [warn] cffi install failed"
+
+echo "[3/5] Installing aiohttp async HTTP client..."
 pip3 install --break-system-packages "aiohttp>=3.9.0" 2>/dev/null || pip3 install "aiohttp>=3.9.0" 2>/dev/null || echo "  [error] aiohttp install failed"
 
-echo "[3/4] Installing notcurses Python bindings..."
+echo "[4/5] Installing notcurses Python bindings..."
 pip3 install --break-system-packages notcurses 2>/dev/null || pip3 install notcurses 2>/dev/null || echo "  [warn] notcurses pip install failed; will use curses fallback"
 
-echo "[4/4] Making TUI executable..."
+echo "[5/5] Making TUI executable..."
 chmod +x "${SCRIPT_DIR}/rachael_tui.py"
 
 CONF_DIR="$HOME/.rachael"
