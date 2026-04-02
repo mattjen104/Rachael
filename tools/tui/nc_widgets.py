@@ -698,6 +698,32 @@ class WidgetManager:
             self.log_degradation("sixel render", str(e))
         return False
 
+    def rebuild_selector(self, items: list, title: str = "Select"):
+        self.destroy_selector()
+        return self.create_selector(items, title)
+
+    def download_and_cache_image(self, url: str) -> Optional[str]:
+        import hashlib
+        import tempfile
+        cache_dir = os.path.join(tempfile.gettempdir(), "rachael_media_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        url_hash = hashlib.md5(url.encode()).hexdigest()
+        ext = ".png"
+        for e in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
+            if url.lower().endswith(e):
+                ext = e
+                break
+        cached = os.path.join(cache_dir, url_hash + ext)
+        if os.path.exists(cached):
+            return cached
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(url, cached)
+            return cached
+        except Exception as e:
+            self.log_degradation("image_download", str(e))
+            return None
+
     def set_bg_alpha(self, plane, alpha=None):
         if alpha is None:
             alpha = NCALPHA_BLEND

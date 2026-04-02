@@ -134,6 +134,7 @@ class RachaelTUI:
         self.nc_selector_active = False
         self.nc_multiselector_active = False
         self._multiselector_programs: list = []
+        self._snow_selector_active = False
 
     def run(self):
         detect_media_capabilities()
@@ -462,10 +463,7 @@ class RachaelTUI:
             self._open_command_palette()
         elif char == "\t":
             if self.view == "snow":
-                idx = SNOW_TABS.index(self.snow_tab) if self.snow_tab in SNOW_TABS else 0
-                self.snow_tab = SNOW_TABS[(idx + 1) % len(SNOW_TABS)]
-                self.selected_idx = 0
-                self._msg("SNOW: " + self.snow_tab)
+                self._open_snow_tab_selector()
             else:
                 self.sidebar_visible = not self.sidebar_visible
                 self._resize_planes()
@@ -548,15 +546,44 @@ class RachaelTUI:
             self.wm.destroy_selector()
             self.nc_selector_active = False
             self.command_palette_active = False
+            self._snow_selector_active = False
+            self.palette_filter = ""
         elif key in (10, 13):
             selected = self.wm.selector_selected()
             self.wm.destroy_selector()
             self.nc_selector_active = False
+            was_snow = self._snow_selector_active
+            was_palette = self.command_palette_active
             self.command_palette_active = False
+            self._snow_selector_active = False
+            self.palette_filter = ""
             if selected:
-                self._do_command(selected)
+                if was_snow and selected in SNOW_TABS:
+                    self.snow_tab = selected
+                    self.selected_idx = 0
+                    self._msg("SNOW: " + selected)
+                elif was_palette:
+                    self._do_command(selected)
+                else:
+                    self._do_command(selected)
+        elif self.command_palette_active:
+            char = chr(key) if 0 < key < 0x110000 else ""
+            if key in (127, 263):
+                self.palette_filter = self.palette_filter[:-1]
+                self._rebuild_palette_selector()
+            elif char and char.isprintable():
+                self.palette_filter += char
+                self._rebuild_palette_selector()
+            else:
+                self.wm.selector_offer_input(ni)
         else:
             self.wm.selector_offer_input(ni)
+
+    def _rebuild_palette_selector(self):
+        filtered = self._filtered_palette()
+        if not filtered:
+            return
+        self.wm.rebuild_selector(filtered, title="M-x [" + self.palette_filter + "]")
 
     def _handle_ctrl_x(self, key):
         self.ctrl_x_pending = False
@@ -621,7 +648,28 @@ class RachaelTUI:
         m_rows, m_cols = self.main_plane.dim_yx()
         plot_w = min(30, m_cols - 4)
         if plot_w > 5 and m_rows > 12:
-            self.wm.create_evo_plots(self.main_plane, m_rows - 10, m_cols - plot_w - 2, plot_w)
+            plots = self.wm.create_evo_plots(self.main_plane, m_rows - 10, m_cols - plot_w - 2, plot_w)
+            if plots:
+                self._feed_evo_plot_data(plots)
+
+    def _feed_evo_plot_data(self, plots):
+        try:
+            state = self.api.evolution_state()
+            versions = state.get("recentVersions", [])
+            for v in versions:
+                ms = v.get("metricsSnapshot", {})
+                if ms:
+                    sr = ms.get("successRate", 0)
+                    cr = ms.get("correctionRate", 0)
+                    tokens = ms.get("tokensUsed", 0)
+                    if "success" in plots:
+                        self.wm.add_sparkline_sample(float(sr), "success")
+                    if "corrections" in plots:
+                        self.wm.add_sparkline_sample(float(cr), "corrections")
+                    if "tokens" in plots:
+                        self.wm.add_sparkline_sample(float(tokens), "tokens")
+        except Exception:
+            pass
 
     @staticmethod
     def _cockpit_tablet_draw(tablet_plane, data):
@@ -866,16 +914,30 @@ class RachaelTUI:
                 self.minibuffer_text += char
 
     def _open_command_palette(self):
+        self.palette_filter = ""
+        self.palette_idx = 0
         if self.wm:
             items = [(cmd, desc) for cmd, desc in PALETTE_ALL_CMDS]
-            sel = self.wm.create_selector(items, title="M-x")
+            sel = self.wm.create_selector(items, title="M-x (type to filter)")
             if sel:
                 self.nc_selector_active = True
                 self.command_palette_active = True
                 return
         self.command_palette_active = True
-        self.palette_idx = 0
-        self.palette_filter = ""
+
+    def _open_snow_tab_selector(self):
+        tab_labels = {"my-queue": "My Queue", "team": "Team Workload", "aging": "Aging / SLA Risk"}
+        if self.wm:
+            items = [(tab, tab_labels.get(tab, tab)) for tab in SNOW_TABS]
+            sel = self.wm.create_selector(items, title="SNOW Tab")
+            if sel:
+                self.nc_selector_active = True
+                self._snow_selector_active = True
+                return
+        idx = SNOW_TABS.index(self.snow_tab) if self.snow_tab in SNOW_TABS else 0
+        self.snow_tab = SNOW_TABS[(idx + 1) % len(SNOW_TABS)]
+        self.selected_idx = 0
+        self._msg("SNOW: " + self.snow_tab)
 
     def _open_multiselector(self):
         programs = self.data_cache.get("programs", [])
@@ -1224,9 +1286,19 @@ class RachaelTUI:
             media_line = "[Media: " + ", ".join(k for k, v in MEDIA_CAPS.items() if v) + "]"
             self._set_fg(p, "success")
             p.putstr_yx(2, 1, media_line[:cols - 2])
-            img_url = page.get("imageUrl") or page.get("thumbnailUrl")
-            if img_url and os.path.exists(str(img_url)):
-                self.wm.render_visual_media(p, str(img_url), 3, 1, min(8, rows - 6), min(30, cols - 4))
+            img_url = page.get("imageUrl") or page.get("thumbnailUrl") or page.get("ogImage")
+            if img_url:
+                local_path = None
+                if os.path.exists(str(img_url)):
+                    local_path = str(img_url)
+                elif str(img_url).startswith("http"):
+                    local_path = self.wm.download_and_cache_image(str(img_url))
+                if local_path:
+                    rendered = self.wm.render_visual_media(
+                        p, local_path, 3, 1, min(8, rows - 6), min(30, cols - 4))
+                    if not rendered:
+                        self._set_fg(p, "dim")
+                        p.putstr_yx(3, 1, "[Image: " + str(img_url)[:cols - 12] + "]")
         text = page.get("extractedText", "")
         y = 4 if any(MEDIA_CAPS.values()) else 3
         for line in wrap_text(text, cols - 2):
@@ -1432,10 +1504,7 @@ class CursesFallback:
                 return
             if ch == 9:
                 if tui.view == "snow":
-                    idx = SNOW_TABS.index(tui.snow_tab) if tui.snow_tab in SNOW_TABS else 0
-                    tui.snow_tab = SNOW_TABS[(idx + 1) % len(SNOW_TABS)]
-                    tui.selected_idx = 0
-                    tui._msg("SNOW: " + tui.snow_tab)
+                    tui._open_snow_tab_selector()
                 else:
                     tui.sidebar_visible = not tui.sidebar_visible
                 return
