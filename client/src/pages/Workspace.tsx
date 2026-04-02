@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import Sidebar from "@/components/layout/Sidebar";
 import type { ViewMode } from "@/components/layout/Sidebar";
 import StatusBar from "@/components/layout/StatusBar";
@@ -47,6 +48,13 @@ function sendClosePopup() {
     }
   } catch (_) {}
 }
+
+const viewTransition = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0.15 },
+};
 
 export default function Workspace() {
   const urlParams = getUrlParams();
@@ -203,21 +211,36 @@ export default function Workspace() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [minibufferOpen, viewMode, editorItem]);
 
+  const renderView = () => {
+    switch (viewMode) {
+      case "agenda": return <AgendaView onNavigate={handleNavigate} onEditItem={handleEditItem} />;
+      case "tree": return <TreeView onNavigate={handleNavigate} onRunCommand={handleRunCommand} onEditItem={handleEditItem} />;
+      case "programs": return <ProgramsView onNavigate={handleNavigate} />;
+      case "results": return <ResultsView selectedResultId={selectedItemId} />;
+      case "reader": return <ReaderView selectedPageId={selectedItemId} />;
+      case "transcripts": return <TranscriptsView selectedTranscriptId={selectedItemId} />;
+      case "cockpit": return <CockpitView />;
+      case "snow": return <SnowView />;
+      case "voice": return <VoiceView />;
+      case "evolution": return <EvolutionPanel />;
+      default: return null;
+    }
+  };
+
   return (
     <div className={`flex flex-col h-screen w-full mx-auto bg-background text-foreground overflow-hidden ${isTvMode ? "max-w-full px-4" : "max-w-[500px]"}`} data-testid="workspace">
       <Sidebar current={viewMode} onSwitch={setViewMode} />
 
       <div className="flex-1 overflow-hidden">
-        {viewMode === "agenda" && <AgendaView onNavigate={handleNavigate} onEditItem={handleEditItem} />}
-        {viewMode === "tree" && <TreeView onNavigate={handleNavigate} onRunCommand={handleRunCommand} onEditItem={handleEditItem} />}
-        {viewMode === "programs" && <ProgramsView onNavigate={handleNavigate} />}
-        {viewMode === "results" && <ResultsView selectedResultId={selectedItemId} />}
-        {viewMode === "reader" && <ReaderView selectedPageId={selectedItemId} />}
-        {viewMode === "transcripts" && <TranscriptsView selectedTranscriptId={selectedItemId} />}
-        {viewMode === "cockpit" && <CockpitView />}
-        {viewMode === "snow" && <SnowView />}
-        {viewMode === "voice" && <VoiceView />}
-        {viewMode === "evolution" && <EvolutionPanel />}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={viewMode}
+            {...viewTransition}
+            className="h-full"
+          >
+            {renderView()}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       <NotificationToast />
@@ -228,19 +251,28 @@ export default function Workspace() {
         onOpenMinibuffer={() => setMinibufferOpen(true)}
       />
 
-      {minibufferOpen && (
-        <Minibuffer
-          initialMode={minibufferInitialMode}
-          initialShellCmd={pendingShellCmd}
-          initialTemplate={urlParams.template}
-          initialCaptureContext={captureContext}
-          onClose={handleMinibufferClose}
-          onSwitchView={setViewMode}
-          onNavigate={handleNavigate}
-          onCycleTheme={cycleTheme}
-          onCommandExecuted={handleCommandExecuted}
-        />
-      )}
+      <AnimatePresence>
+        {minibufferOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.15 }}
+          >
+            <Minibuffer
+              initialMode={minibufferInitialMode}
+              initialShellCmd={pendingShellCmd}
+              initialTemplate={urlParams.template}
+              initialCaptureContext={captureContext}
+              onClose={handleMinibufferClose}
+              onSwitchView={setViewMode}
+              onNavigate={handleNavigate}
+              onCycleTheme={cycleTheme}
+              onCommandExecuted={handleCommandExecuted}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {editorItem && (
         <InlineEditor

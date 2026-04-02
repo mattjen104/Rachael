@@ -26,7 +26,7 @@ export default function Sidebar({ current, onSwitch }: SidebarProps) {
 
   return (
     <div
-      className={`flex flex-row items-center gap-0 border-b border-border bg-background font-mono ${
+      className={`flex flex-row items-center gap-0 border-b border-border bg-card font-mono ${
         isTvMode ? "text-[22px] px-3 py-1" : "text-[10px] px-1"
       }`}
       data-testid="sidebar"
@@ -35,16 +35,19 @@ export default function Sidebar({ current, onSwitch }: SidebarProps) {
         <button
           key={v.mode}
           data-testid={`nav-${v.mode}`}
-          className={`cursor-pointer select-none transition-colors tv-focus-ring ${
-            isTvMode ? "px-5 py-3" : "px-2 py-1"
+          className={`cursor-pointer select-none transition-colors tv-focus-ring relative ${
+            isTvMode ? "px-5 py-3" : "px-2 py-1.5"
           } ${
             current === v.mode
-              ? "text-primary bg-primary/10 font-bold"
-              : "text-muted-foreground hover:text-primary"
+              ? "text-primary font-bold"
+              : "text-muted-foreground hover:text-foreground"
           }`}
           onClick={() => onSwitch(v.mode)}
         >
           {v.key}:{isTvMode ? v.fullLabel : v.label}
+          {current === v.mode && (
+            <span className="absolute bottom-0 left-1 right-1 h-[2px] bg-primary rounded-full" />
+          )}
         </button>
       ))}
     </div>

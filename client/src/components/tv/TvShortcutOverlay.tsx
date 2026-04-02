@@ -4,7 +4,7 @@ import { useTvMode } from "@/hooks/use-tv-mode";
 const TV_OVERLAY_SEEN_KEY = "orgcloud-tv-overlay-seen";
 
 const SHORTCUTS = [
-  { keys: "1–8", desc: "Switch views (Agenda, Tree, Programs, Results, Reader, Transcripts, Cockpit, Snow)" },
+  { keys: "1\u20138", desc: "Switch views (Agenda, Tree, Programs, Results, Reader, Transcripts, Cockpit, Snow)" },
   { keys: "Space", desc: "Open command palette" },
   { keys: "/", desc: "Search everything" },
   { keys: ":", desc: "Shell / CLI commands" },
@@ -51,7 +51,7 @@ export default function TvShortcutOverlay() {
       data-testid="tv-shortcut-overlay"
     >
       <div className="max-w-[800px] w-full mx-8 font-mono text-foreground">
-        <h1 className="text-[48px] font-bold mb-2 phosphor-glow-bright text-center">
+        <h1 className="text-[48px] font-bold mb-2 text-primary text-center">
           Rachael TV Mode
         </h1>
         <p className="text-[24px] text-muted-foreground mb-8 text-center">
@@ -59,8 +59,8 @@ export default function TvShortcutOverlay() {
         </p>
         <div className="space-y-3">
           {SHORTCUTS.map((s) => (
-            <div key={s.keys} className="flex items-center gap-6 px-6 py-3 bg-muted/30 rounded">
-              <span className="text-[28px] font-bold text-primary w-[140px] shrink-0 text-right phosphor-glow">
+            <div key={s.keys} className="flex items-center gap-6 px-6 py-3 border border-border rounded bg-card/50">
+              <span className="text-[28px] font-bold text-primary w-[140px] shrink-0 text-right">
                 {s.keys}
               </span>
               <span className="text-[22px] text-foreground">

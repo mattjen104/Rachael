@@ -25,19 +25,19 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
 
   return (
     <div
-      className={`flex items-center justify-between border-t border-border bg-background shrink-0 cursor-pointer select-none font-mono text-muted-foreground ${
-        isTvMode ? "px-4 py-2 text-[20px]" : "px-2 py-0.5 text-[10px]"
+      className={`flex items-center justify-between border-t border-border bg-card shrink-0 cursor-pointer select-none font-mono text-muted-foreground ${
+        isTvMode ? "px-4 py-2 text-[20px]" : "px-2 py-1 text-[10px]"
       }`}
       data-testid="status-bar"
       onClick={onOpenMinibuffer}
     >
-      <div className={`flex items-center ${isTvMode ? "gap-4" : "gap-2"}`}>
-        <span className={runtime?.active ? "text-green-500" : "text-red-500"}>
-          {runtime?.active ? "●" : "○"}
+      <div className={`flex items-center ${isTvMode ? "gap-4" : "gap-3"}`}>
+        <span className={runtime?.active ? "text-green-500" : "text-red-500"} data-testid="status-runtime">
+          {runtime?.active ? "\u25CF" : "\u25CB"}
         </span>
         <span
           className={`font-bold rounded ${
-            isTvMode ? "px-2 py-0.5 text-[18px]" : "px-1 py-0 text-[9px]"
+            isTvMode ? "px-2 py-0.5 text-[18px]" : "px-1.5 py-0.5 text-[9px]"
           } ${
             controlMode === "agent" ? "bg-blue-500/20 text-blue-400" : "bg-orange-500/20 text-orange-400"
           }`}
@@ -47,7 +47,7 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
         </span>
         {pendingCount > 0 && (
           <span className="text-yellow-400 font-bold" data-testid="status-pending-count">
-            ⚡{pendingCount}
+            {pendingCount}
           </span>
         )}
         <span className="text-primary font-bold">{viewMode.toUpperCase()}</span>
@@ -56,14 +56,16 @@ export default function StatusBar({ viewMode, lastCommand, onOpenMinibuffer }: S
             ${(budget.estimatedCostToday || 0).toFixed(2)} {budgetPct}%
           </span>
         )}
-        <span className={bridgeConnected ? "text-green-500" : "text-muted-foreground/50"} data-testid="status-bridge" title={bridgeConnected ? "Bridge connected" : "Bridge offline"}>
-          {bridgeConnected ? "⚡" : "⚡"}
+        <span className={bridgeConnected ? "text-green-500" : "text-muted-foreground/40"} data-testid="status-bridge" title={bridgeConnected ? "Bridge connected" : "Bridge offline"}>
+          {bridgeConnected ? "\u26A1" : "\u26A1"}
         </span>
-        {lastCommand && <span className="text-muted-foreground">— {lastCommand}</span>}
+        {lastCommand && <span className="text-muted-foreground">\u2014 {lastCommand}</span>}
       </div>
-      <div className={`flex items-center ${isTvMode ? "gap-4" : "gap-2"}`}>
+      <div className={`flex items-center ${isTvMode ? "gap-4" : "gap-3"} text-muted-foreground`}>
         <span>M-x / Space</span>
+        <span className="text-border">\u2502</span>
         <span>Tab:control</span>
+        <span className="text-border">\u2502</span>
         <span>6:cockpit</span>
       </div>
     </div>

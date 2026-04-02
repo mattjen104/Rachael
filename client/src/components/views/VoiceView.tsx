@@ -167,8 +167,8 @@ export default function VoiceView() {
   };
 
   const roleColor = (role: string) => {
-    if (role === "user") return "text-[var(--crt-green,#00ff41)]";
-    if (role === "assistant") return "text-[var(--crt-amber,#ffb000)]";
+    if (role === "user") return "text-green-400";
+    if (role === "assistant") return "text-primary";
     return "text-muted-foreground";
   };
 

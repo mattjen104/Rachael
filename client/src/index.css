@@ -46,50 +46,45 @@
 }
 
 :root {
-  --background: 30 80% 3%;
-  --foreground: 30 100% 50%;
+  --background: 25 30% 5%;
+  --foreground: 35 90% 68%;
 
-  --card: 30 80% 2%;
-  --card-foreground: 30 100% 50%;
+  --card: 25 25% 7%;
+  --card-foreground: 35 90% 68%;
 
-  --popover: 30 80% 2%;
-  --popover-foreground: 30 100% 50%;
+  --popover: 25 25% 7%;
+  --popover-foreground: 35 90% 68%;
 
   --primary: 30 100% 50%;
-  --primary-foreground: 30 80% 3%;
+  --primary-foreground: 25 30% 5%;
 
-  --secondary: 30 100% 50%;
-  --secondary-foreground: 30 80% 3%;
+  --secondary: 35 40% 55%;
+  --secondary-foreground: 25 30% 5%;
 
-  --muted: 30 60% 8%;
-  --muted-foreground: 30 70% 28%;
+  --muted: 25 20% 10%;
+  --muted-foreground: 30 40% 40%;
 
-  --accent: 30 100% 50%;
-  --accent-foreground: 30 80% 3%;
+  --accent: 20 100% 60%;
+  --accent-foreground: 25 30% 5%;
 
-  --destructive: 30 100% 50%;
-  --destructive-foreground: 30 80% 3%;
+  --destructive: 0 70% 55%;
+  --destructive-foreground: 0 0% 100%;
 
-  --border: 30 50% 10%;
-  --input: 30 50% 8%;
+  --border: 25 20% 14%;
+  --input: 25 20% 10%;
   --ring: 30 100% 50%;
 
-  --crt-glow: 255, 129, 0;
-  --crt-font-color: #ff8100;
-  --crt-bright: #ffc940;
-  --crt-dim: #aa5500;
-
-  --org-keyword: 30 70% 28%;
+  --org-keyword: 30 40% 40%;
   --org-document-title: 30 100% 50%;
-  --org-level-1: 30 100% 50%;
-  --org-level-2: 30 100% 50%;
-  --org-level-3: 30 100% 50%;
-  --org-level-4: 30 100% 50%;
+  --org-level-1: 30 100% 55%;
+  --org-level-2: 20 100% 60%;
+  --org-level-3: 40 90% 55%;
+  --org-level-4: 45 80% 50%;
   --org-todo: 39 100% 63%;
-  --org-done: 30 70% 28%;
-  --org-link: 30 100% 50%;
-  --org-date: 30 70% 28%;
-  --org-code: 30 100% 50%;
+  --org-done: 30 30% 35%;
+  --org-link: 200 70% 55%;
+  --org-date: 45 60% 50%;
+  --org-code: 180 40% 55%;
 }
 
 @layer base {
@@ -108,124 +103,19 @@
   }
 
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: hsl(var(--background));
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: hsl(var(--muted));
-    border-radius: 4px;
+    border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground));
   }
-}
-
-@keyframes crt-scanline-scroll {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100vh); }
-}
-
-@keyframes crt-noise-drift {
-  0% { background-position: 0 0; }
-  100% { background-position: 100px 50px; }
-}
-
-@keyframes crt-flicker-global {
-  0%   { opacity: 0.97; }
-  5%   { opacity: 1; }
-  10%  { opacity: 0.98; }
-  50%  { opacity: 1; }
-  80%  { opacity: 0.985; }
-  100% { opacity: 0.975; }
-}
-
-@keyframes crt-glowbar-anim {
-  0% { top: -4px; }
-  100% { top: 100%; }
-}
-
-.crt-overlay {
-  position: relative;
-  animation: crt-flicker-global 8s infinite;
-}
-
-.crt-overlay::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 1px,
-    rgba(0, 0, 0, 0.04) 1px,
-    rgba(0, 0, 0, 0.04) 2px
-  );
-  pointer-events: none;
-  z-index: 9998;
-}
-
-.crt-overlay::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: radial-gradient(
-    ellipse at center,
-    transparent 75%,
-    rgba(0, 0, 0, 0.15) 100%
-  );
-  pointer-events: none;
-  z-index: 9997;
-}
-
-.crt-noise-overlay {
-  position: fixed;
-  inset: 0;
-  opacity: 0.02;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 80px 80px;
-  animation: crt-noise-drift 0.3s steps(4) infinite;
-  pointer-events: none;
-  z-index: 9996;
-  mix-blend-mode: overlay;
-}
-
-.crt-glow-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    rgba(var(--crt-glow), 0.03),
-    transparent
-  );
-  animation: crt-glowbar-anim 6s linear infinite;
-  pointer-events: none;
-  z-index: 9995;
-}
-
-.phosphor-glow {
-  text-shadow: 0 0 4px rgba(var(--crt-glow), 0.3),
-               0 0 8px rgba(var(--crt-glow), 0.15);
-}
-
-.phosphor-glow-bright {
-  text-shadow: 0 0 6px rgba(var(--crt-glow), 0.5),
-               0 0 12px rgba(var(--crt-glow), 0.25),
-               0 0 2px var(--crt-bright);
-}
-
-.phosphor-glow-dim {
-  text-shadow: 0 0 3px rgba(var(--crt-glow), 0.2);
-}
-
-.crt-border-glow {
-  box-shadow: 0 0 6px rgba(var(--crt-glow), 0.05),
-              inset 0 0 4px rgba(var(--crt-glow), 0.02);
 }
 
 .tv-mode body {
@@ -246,52 +136,13 @@
 .tv-mode .tv-focus-ring[data-selected="true"] {
   outline: 3px solid hsl(var(--primary));
   outline-offset: 2px;
-  box-shadow: 0 0 12px rgba(var(--crt-glow), 0.4),
-              0 0 24px rgba(var(--crt-glow), 0.2);
 }
 
 .tv-mode .tv-item-highlight[data-selected="true"],
 .tv-mode .tv-item-highlight:focus {
-  background: hsl(var(--primary) / 0.2);
+  background: hsl(var(--primary) / 0.15);
   outline: 2px solid hsl(var(--primary));
   outline-offset: -2px;
-  box-shadow: 0 0 8px rgba(var(--crt-glow), 0.3);
-}
-
-.tv-mode .crt-overlay::before {
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 0, 0, 0.03) 2px,
-    rgba(0, 0, 0, 0.03) 4px
-  );
-}
-
-.tv-mode .phosphor-glow {
-  text-shadow: 0 0 6px rgba(var(--crt-glow), 0.35),
-               0 0 12px rgba(var(--crt-glow), 0.18);
-}
-
-.tv-mode .phosphor-glow-bright {
-  text-shadow: 0 0 8px rgba(var(--crt-glow), 0.5),
-               0 0 16px rgba(var(--crt-glow), 0.3),
-               0 0 3px var(--crt-bright);
-}
-
-.tv-mode .crt-glow-bar {
-  height: 6px;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    rgba(var(--crt-glow), 0.04),
-    transparent
-  );
-}
-
-.tv-mode .crt-noise-overlay {
-  opacity: 0.015;
-  background-size: 120px 120px;
 }
 
 .tv-mode [data-testid="agenda-view"],
@@ -326,7 +177,6 @@
 .tv-mode [data-selected="true"] {
   outline: 2px solid hsl(var(--primary));
   outline-offset: -2px;
-  box-shadow: 0 0 10px rgba(var(--crt-glow), 0.3);
 }
 
 .tv-mode [data-testid="agenda-view"] .text-\[10px\],

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { apiUrl } from "@/lib/queryClient";
 
 interface Notification {
@@ -69,55 +70,34 @@ export default function NotificationToast() {
 
   return (
     <div
-      style={{
-        position: "fixed",
-        top: "3rem",
-        right: "0.5rem",
-        zIndex: 9999,
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.5rem",
-        maxWidth: "22rem",
-        pointerEvents: "auto",
-      }}
+      className="fixed top-12 right-2 z-[9999] flex flex-col gap-2 max-w-[22rem] pointer-events-auto"
       data-testid="notification-toast-container"
     >
-      {toasts.slice(0, 3).map((t) => (
-        <div
-          key={t.id}
-          data-testid={`notification-toast-${t.id}`}
-          onClick={() => dismiss(t.id)}
-          style={{
-            background: "#0d1117",
-            border: "1px solid #00ff41",
-            borderLeft: "3px solid #00ff41",
-            padding: "0.5rem 0.75rem",
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: "0.75rem",
-            color: "#00ff41",
-            cursor: "pointer",
-            animation: "slideIn 0.3s ease-out",
-            boxShadow: "0 0 10px rgba(0,255,65,0.15)",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem" }}>
-            <span style={{ fontWeight: 700 }}>[{t.source.toUpperCase()}]</span>
-            <span style={{ opacity: 0.5 }}>x</span>
-          </div>
-          <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>{t.label}</div>
-          {t.output && (
-            <div style={{ opacity: 0.7, whiteSpace: "pre-wrap", maxHeight: "4rem", overflow: "hidden" }}>
-              {t.output.slice(0, 120)}{t.output.length > 120 ? "..." : ""}
+      <AnimatePresence>
+        {toasts.slice(0, 3).map((t) => (
+          <motion.div
+            key={t.id}
+            initial={{ opacity: 0, x: 40 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 40 }}
+            transition={{ duration: 0.15 }}
+            data-testid={`notification-toast-${t.id}`}
+            onClick={() => dismiss(t.id)}
+            className="bg-card border border-border border-l-2 border-l-primary px-3 py-2 font-mono text-xs text-foreground cursor-pointer rounded"
+          >
+            <div className="flex justify-between mb-1">
+              <span className="font-bold text-primary">[{t.source.toUpperCase()}]</span>
+              <span className="text-muted-foreground">x</span>
             </div>
-          )}
-        </div>
-      ))}
-      <style>{`
-        @keyframes slideIn {
-          from { transform: translateX(100%); opacity: 0; }
-          to { transform: translateX(0); opacity: 1; }
-        }
-      `}</style>
+            <div className="font-semibold mb-1">{t.label}</div>
+            {t.output && (
+              <div className="text-muted-foreground whitespace-pre-wrap max-h-16 overflow-hidden">
+                {t.output.slice(0, 120)}{t.output.length > 120 ? "..." : ""}
+              </div>
+            )}
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
