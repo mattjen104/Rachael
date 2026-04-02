@@ -153,6 +153,9 @@ else
        -DCMAKE_BUILD_TYPE=Release \
        -DUSE_DOCTEST=OFF \
        -DUSE_PANDOC=OFF \
+       -DUSE_POC=OFF \
+       -DUSE_FFMPEG=OFF \
+       -DUSE_OIIO=OFF \
        -DUSE_QRCODEGEN=OFF 2>&1 | tail -3 && \
      cmake --build "$NOTCURSES_BUILD_DIR/build" -j"$(nproc)" 2>&1 | tail -3 && \
      cmake --install "$NOTCURSES_BUILD_DIR/build" 2>&1 | tail -3 && \

@@ -73,6 +73,8 @@ if [ "$NC_OK" = false ]; then
     -DUSE_POC=OFF \
     -DUSE_PYTHON=ON \
     -DUSE_STATIC=OFF \
+    -DUSE_FFMPEG=OFF \
+    -DUSE_OIIO=OFF \
     -DPYTHON_SITE_PACKAGES="$PYTHON_SITE" \
     2>&1 | tail -5
 
