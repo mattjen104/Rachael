@@ -442,6 +442,12 @@ class RachaelTUI:
         r, g, b = self.theme.rgb(key)
         plane.set_bg_rgb8(r, g, b)
 
+    def _putstr_clipped(self, plane, y, x, text, plane_cols):
+        avail = plane_cols - x - 1
+        if avail <= 0:
+            return
+        plane.putstr_yx(y, x, text[:avail])
+
     def _splash_nc(self):
         rows, cols = self.dims
         accent = self.theme.current.get("accent", 0x66FF66)
@@ -1357,17 +1363,18 @@ class RachaelTUI:
         p.erase()
         self._set_bg(p, "header_bg")
         self._set_fg(p, "header_fg")
-        p.putstr_yx(0, 0, " " * cols)
-        p.putstr_yx(0, 0, " RACHAEL")
-        view_label = " " + self.view.upper() + " "
-        p.putstr_yx(0, max(0, cols - len(view_label)), view_label)
+        p.putstr_yx(0, 0, " " * (cols - 1))
+        self._putstr_clipped(p, 0, 0, " RACHAEL", cols)
+        view_label = self.view.upper()
+        vx = max(0, cols - len(view_label) - 2)
+        self._putstr_clipped(p, 0, vx, view_label, cols)
         ctrl = self.data_cache.get("control", {})
         mode = ctrl.get("mode", "human")
         sse = "\u25CF" if self.cockpit_connected else "\u25CB"
         mid_label = sse + " [" + mode.upper() + "]"
         mid = cols // 2 - len(mid_label) // 2
         if mid > 10:
-            p.putstr_yx(0, mid, mid_label)
+            self._putstr_clipped(p, 0, mid, mid_label, cols)
 
     def _render_sidebar(self):
         p = self.sidebar_plane
@@ -1377,7 +1384,10 @@ class RachaelTUI:
         p.erase()
         self._set_bg(p, "bg")
         self._set_fg(p, "dim")
-        p.putstr_yx(0, 1, "VIEWS")
+        for ry in range(rows):
+            p.putstr_yx(ry, 0, " " * (cols - 1))
+        self._set_fg(p, "dim")
+        self._putstr_clipped(p, 0, 1, "VIEWS", cols)
         for i, v in enumerate(VIEWS):
             y = 1 + i
             if y >= rows - 1:
@@ -1387,21 +1397,21 @@ class RachaelTUI:
             prefix = "\u25B6 " if is_active else "  "
             label = num + " " + v
             self._set_fg(p, "accent" if is_active else "fg")
-            p.putstr_yx(y, 1, (prefix + label)[:cols - 2])
+            self._putstr_clipped(p, y, 1, prefix + label, cols)
         info_y = len(VIEWS) + 2
         if info_y < rows - 6:
             self._set_fg(p, "dim")
-            p.putstr_yx(info_y, 1, "\u2500" * (cols - 2))
+            self._putstr_clipped(p, info_y, 1, "\u2500" * (cols - 2), cols)
             runtime = self.data_cache.get("runtime", {})
             rt_on = runtime.get("active", False)
             self._set_fg(p, "success" if rt_on else "error")
-            p.putstr_yx(info_y + 1, 1, ("Runtime: " + ("ON" if rt_on else "OFF"))[:cols - 2])
+            self._putstr_clipped(p, info_y + 1, 1, "Runtime: " + ("ON" if rt_on else "OFF"), cols)
             budget = self.data_cache.get("budget", {})
             spent = budget.get("spent", 0)
             cap = budget.get("dailyCap", 0)
             self._set_fg(p, "dim")
             bstr = "$" + str(round(spent, 2)) + "/" + str(round(cap, 2))
-            p.putstr_yx(info_y + 2, 1, ("Budget: " + bstr)[:cols - 2])
+            self._putstr_clipped(p, info_y + 2, 1, "Budget: " + bstr, cols)
             if cap > 0 and cols > 10:
                 prog = min(1.0, spent / cap)
                 if not self._sidebar_budget_created:
@@ -1413,7 +1423,7 @@ class RachaelTUI:
             self._set_fg(p, "info" if mode == "agent" else "warn")
             mode_y = info_y + 4 if cap > 0 else info_y + 3
             if mode_y < rows:
-                p.putstr_yx(mode_y, 1, ("Mode: " + mode.upper())[:cols - 2])
+                self._putstr_clipped(p, mode_y, 1, "Mode: " + mode.upper(), cols)
             spark_y = mode_y + 1
             if self.sparkline_data and spark_y < rows - 1:
                 recent = list(self.sparkline_data)[-min(cols - 4, 20):]
@@ -1475,7 +1485,7 @@ class RachaelTUI:
             title += " [" + self.evo_tab + "] (l:cycle)"
         if self.view == "snow":
             title += " [" + self.snow_tab + "] (Tab:cycle)"
-        p.putstr_yx(0, 1, title[:cols - 2])
+        self._putstr_clipped(p, 0, 1, title, cols)
         y = 1
         for i in range(self.scroll_offset, len(items)):
             if y >= rows:
@@ -1586,7 +1596,7 @@ class RachaelTUI:
         p.erase()
         self._set_bg(p, "mode_line_bg")
         self._set_fg(p, "mode_line_fg")
-        p.putstr_yx(0, 0, " " * cols)
+        p.putstr_yx(0, 0, " " * (cols - 1))
         left = " " + self.view.upper()
         runtime = self.data_cache.get("runtime", {})
         rt = "ON" if runtime.get("active") else "OFF"
@@ -1595,7 +1605,8 @@ class RachaelTUI:
         sb = "SB" if self.sidebar_visible else "  "
         right = t_name + " | RT:" + rt + " | " + sb + " | " + age + " "
         pad = max(0, cols - len(left) - len(right))
-        p.putstr_yx(0, 0, left + " " * pad + right)
+        full = (left + " " * pad + right)[:cols - 1]
+        p.putstr_yx(0, 0, full)
 
     def _render_minibuffer(self):
         p = self.minibuffer_plane
@@ -1605,7 +1616,7 @@ class RachaelTUI:
         p.erase()
         self._set_bg(p, "mini_bg")
         self._set_fg(p, "mini_fg")
-        p.putstr_yx(0, 0, " " * cols)
+        p.putstr_yx(0, 0, " " * (cols - 1))
         if self.minibuffer_active:
             text = self.minibuffer_prompt + self.minibuffer_text + "\u2588"
         elif self.ctrl_x_pending:
@@ -1614,7 +1625,7 @@ class RachaelTUI:
             text = self.message
         else:
             text = ""
-        p.putstr_yx(0, 0, text[:cols])
+        self._putstr_clipped(p, 0, 0, text, cols)
 
     def _render_palette(self):
         p = self.palette_plane
