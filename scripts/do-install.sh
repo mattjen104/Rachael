@@ -30,7 +30,7 @@ fi
 # --- System packages ---
 echo "[1/9] Installing system packages..."
 apt-get update -qq
-apt-get install -y -qq curl git build-essential ca-certificates gnupg lsb-release ufw python3 python3-pip
+apt-get install -y -qq curl git build-essential ca-certificates gnupg lsb-release ufw python3 python3-pip cmake pkg-config libncurses-dev libunistring-dev libdeflate-dev libnotcurses-dev libnotcurses3
 
 # --- Node.js ---
 echo "[2/9] Installing Node.js ${NODE_VERSION}..."
