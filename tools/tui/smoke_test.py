@@ -163,12 +163,24 @@ check("RachaelTUI has _setup_evo_plots", hasattr(RachaelTUI, "_setup_evo_plots")
 check("RachaelTUI has _feed_evo_plot_data", hasattr(RachaelTUI, "_feed_evo_plot_data"))
 check("RachaelTUI has _open_program_filter", hasattr(RachaelTUI, "_open_program_filter"))
 check("RachaelTUI has _apply_program_filter", hasattr(RachaelTUI, "_apply_program_filter"))
-check("RachaelTUI has minibuffer_cursor", "minibuffer_cursor" in RachaelTUI.__init__.__code__.co_varnames or True)
-check("RachaelTUI has _kill_ring", "_kill_ring" in RachaelTUI.__init__.__code__.co_varnames or True)
+check("RachaelTUI has _handle_minibuffer", hasattr(RachaelTUI, "_handle_minibuffer"))
 
 print("\n[Fade transition support]")
 check("fade_out distinct from fade_in", WidgetManager.fade_out is not WidgetManager.fade_in)
-check("fade_plane delegates to fade_out", True)
+
+print("\n[Emacs minibuffer keybindings]")
+import inspect
+mb_src = inspect.getsource(RachaelTUI._handle_minibuffer)
+check("C-a (key==1) beginning-of-line", "key == 1" in mb_src)
+check("C-e (key==5) end-of-line", "key == 5" in mb_src)
+check("C-k (key==11) kill-line", "key == 11" in mb_src)
+check("C-y (key==25) yank", "key == 25" in mb_src)
+check("C-d (key==4) delete-char", "key == 4" in mb_src)
+check("C-b (key==2) backward-char", "key == 2" in mb_src)
+check("C-f (key==6) forward-char", "key == 6" in mb_src)
+
+print("\n[Program filter]")
+check("current_items accepts program_filter", "program_filter" in inspect.signature(current_items).parameters)
 
 print("\n" + "=" * 50)
 passed = sum(1 for _, ok in results if ok)

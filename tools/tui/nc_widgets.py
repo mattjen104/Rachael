@@ -133,6 +133,15 @@ _PRIVATE_IP_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
     "192.168.", "127.", "0.", "169.254.", "[::1]", "[fc", "[fd", "[fe80")
 
 
+def _is_private_ip(ip_str: str) -> bool:
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip_str)
+        return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+    except ValueError:
+        return False
+
+
 def _validate_media_url(url: str) -> bool:
     from urllib.parse import urlparse
     parsed = urlparse(url)
@@ -145,6 +154,17 @@ def _validate_media_url(url: str) -> bool:
         if host.startswith(prefix):
             return False
     if host in ("localhost", "metadata.google.internal", "169.254.169.254"):
+        return False
+    if _is_private_ip(host):
+        return False
+    import socket
+    try:
+        resolved = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, stype, proto, canonname, sockaddr in resolved:
+            ip = sockaddr[0]
+            if _is_private_ip(ip):
+                return False
+    except (socket.gaierror, OSError):
         return False
     return True
 
