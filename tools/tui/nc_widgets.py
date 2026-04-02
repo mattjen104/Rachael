@@ -342,6 +342,28 @@ class WidgetManager:
             pass
         return False
 
+    def _manual_fade(self, plane, duration_ms: int, fade_in: bool) -> bool:
+        steps = max(4, min(duration_ms // 30, 20))
+        bg = self.theme.current.get("bg", 0x000000)
+        bg_r, bg_g, bg_b = (bg >> 16) & 0xFF, (bg >> 8) & 0xFF, bg & 0xFF
+        fg_hex = self.theme.current.get("fg", 0x00FF00)
+        fg_r, fg_g, fg_b = (fg_hex >> 16) & 0xFF, (fg_hex >> 8) & 0xFF, fg_hex & 0xFF
+        delay = duration_ms / 1000.0 / steps
+        for i in range(steps + 1):
+            t = i / steps if fade_in else 1.0 - (i / steps)
+            cr = int(bg_r + (fg_r - bg_r) * t)
+            cg = int(bg_g + (fg_g - bg_g) * t)
+            cb = int(bg_b + (fg_b - bg_b) * t)
+            try:
+                plane.set_fg_rgb8(max(0, min(255, cr)),
+                                  max(0, min(255, cg)),
+                                  max(0, min(255, cb)))
+                self.nc.render()
+            except (RuntimeError, NotImplementedError):
+                return False
+            time.sleep(delay)
+        return True
+
     def fade_out(self, plane, duration_ms: int = 300) -> bool:
         if hasattr(plane, 'fadeout'):
             try:
@@ -349,7 +371,7 @@ class WidgetManager:
                 return True
             except (NotImplementedError, RuntimeError):
                 pass
-        return False
+        return self._manual_fade(plane, duration_ms, False)
 
     def fade_in(self, plane, duration_ms: int = 300) -> bool:
         if hasattr(plane, 'fadein'):
@@ -358,7 +380,7 @@ class WidgetManager:
                 return True
             except (NotImplementedError, RuntimeError):
                 pass
-        return False
+        return self._manual_fade(plane, duration_ms, True)
 
     def fade_plane(self, plane, duration_ms: int = 300) -> bool:
         return self.fade_out(plane, duration_ms)
@@ -370,7 +392,9 @@ class WidgetManager:
                 return True
             except (NotImplementedError, RuntimeError):
                 pass
-        return False
+        self._manual_fade(plane, duration_ms // 2, False)
+        self._manual_fade(plane, duration_ms // 2, True)
+        return True
 
     def log_degradation(self, widget: str, error: str = ""):
         import sys
