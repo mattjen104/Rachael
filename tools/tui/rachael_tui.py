@@ -488,7 +488,39 @@ class RachaelTUI:
             self.wm.fade_in(self.stdp, 600)
         else:
             self.nc.render()
-        self.nc.get_blocking()
+        accent = self.theme.current.get("accent", 0x66FF66)
+        bg_hex = self.theme.current.get("bg", 0x0A0A0A)
+        ar, ag, ab = (accent >> 16) & 0xFF, (accent >> 8) & 0xFF, accent & 0xFF
+        dr, dg, db = max(ar // 4, (bg_hex >> 16) & 0xFF), max(ag // 4, (bg_hex >> 8) & 0xFF), max(ab // 4, bg_hex & 0xFF)
+        logo_ys = []
+        for i in range(len(LOGO)):
+            ly = rows // 2 - len(LOGO) // 2 + i - 2
+            if 0 <= ly < rows:
+                logo_ys.append(ly)
+        import math
+        pulse_running = True
+        frame = 0
+        while pulse_running:
+            t = (math.sin(frame * 0.12) + 1.0) / 2.0
+            cr = int(dr + (ar - dr) * t)
+            cg = int(dg + (ag - dg) * t)
+            cb = int(db + (ab - db) * t)
+            try:
+                self.stdp.set_fg_rgb8(cr, cg, cb)
+                for ly in logo_ys:
+                    li = ly - (rows // 2 - len(LOGO) // 2 + 0 - 2)
+                    if 0 <= li < len(LOGO):
+                        lx = max(0, (cols - len(LOGO[li])) // 2)
+                        self.stdp.putstr_yx(ly, lx, LOGO[li])
+                self.nc.render()
+            except (RuntimeError, NotImplementedError, TypeError, AttributeError):
+                break
+            ni = self.nc.get_nblock()
+            if ni is not None:
+                pulse_running = False
+            else:
+                time.sleep(0.04)
+                frame += 1
         if self.wm:
             self.wm.fade_out(self.stdp, 300)
         self.stdp.erase()
