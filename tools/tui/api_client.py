@@ -51,7 +51,7 @@ class RachaelAPI:
             future = asyncio.run_coroutine_threadsafe(self._session.close(), self._loop)
             try:
                 future.result(timeout=5)
-            except Exception:
+            except (TimeoutError, asyncio.CancelledError, RuntimeError, OSError):
                 pass
         if self._loop:
             self._loop.call_soon_threadsafe(self._loop.stop)
@@ -246,7 +246,10 @@ class RachaelAPI:
         return self._call(self._get("/api/evolution/judge-costs")) or {}
 
     def notifications(self) -> list:
-        return self._call(self._get("/api/notifications")) or []
+        result = self._call(self._get("/api/notifications"))
+        if isinstance(result, dict):
+            return result.get("notifications", [])
+        return result or []
 
     def mark_notification_read(self, nid: str) -> Any:
         return self._call(self._post("/api/notifications/" + nid + "/read"))
@@ -321,7 +324,7 @@ class RachaelAPI:
                                     pass
             except asyncio.CancelledError:
                 return
-            except Exception:
+            except (aiohttp.ClientError, ConnectionError, TimeoutError, OSError):
                 await asyncio.sleep(3)
 
 

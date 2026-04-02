@@ -159,7 +159,7 @@ class RachaelTUI:
             if self.nc:
                 try:
                     self.nc.stop()
-                except Exception:
+                except (RuntimeError, OSError):
                     pass
                 self.nc = None
             sys.stderr.write("notcurses init failed, falling back to curses: " + str(e) + "\n")
@@ -171,7 +171,7 @@ class RachaelTUI:
             if self.nc:
                 try:
                     self.nc.stop()
-                except Exception:
+                except (RuntimeError, OSError):
                     pass
 
     def _create_planes(self):
@@ -211,6 +211,12 @@ class RachaelTUI:
             if sp_w > 5 and m_rows > 6:
                 self.wm.create_sparkline(self.main_plane, 4, sp_w, 1, m_cols - sp_w - 2)
 
+    def _on_resize(self, rows: int, cols: int):
+        self.dims = (rows, cols)
+        if self.wm:
+            self.wm.dims = self.dims
+        self._resize_planes()
+
     def _resize_planes(self):
         rows, cols = self.dims
         for plane, y, h, w, x in [
@@ -227,7 +233,7 @@ class RachaelTUI:
                 try:
                     plane.resize(h, w)
                     plane.move_yx(y, x)
-                except Exception:
+                except (RuntimeError, AttributeError, ValueError, OSError):
                     pass
 
     def _start_background(self):
@@ -286,10 +292,10 @@ class RachaelTUI:
                                 if iid and iid not in old_ids:
                                     self.new_item_ids.add(iid)
                                     self.new_item_time[iid] = time.time()
-            except APIError:
-                pass
-            except Exception:
-                pass
+            except APIError as ae:
+                self.data_cache.setdefault("_errors", {})[key] = str(ae)
+            except (ConnectionError, TimeoutError, OSError) as ne:
+                self.data_cache.setdefault("_errors", {})[key] = str(ne)
         now = time.time()
         expired = [k for k, t in self.new_item_time.items() if now - t > 5]
         for k in expired:
@@ -315,6 +321,8 @@ class RachaelTUI:
     def _pulse_fg(self, plane, item):
         if self._is_new(item):
             elapsed = time.time() - self.new_item_time.get(item.get("id"), 0)
+            if self.wm and elapsed < 0.5:
+                self.wm.pulse_plane(plane, 200)
             pulse = abs(math.sin(elapsed * 3.0))
             r0, g0, b0 = self.theme.rgb("accent")
             r1, g1, b1 = self.theme.rgb("fg")
@@ -375,25 +383,27 @@ class RachaelTUI:
         self.nc.render()
         try:
             self.stdp.fadein(600)
-        except Exception:
+        except (RuntimeError, AttributeError, TypeError):
             pass
         self.nc.render()
         ni = NcInput()
         self.nc.get(ni)
         try:
             self.stdp.fadeout(300)
-        except Exception:
+        except (RuntimeError, AttributeError, TypeError):
             pass
 
     def _main_loop(self):
         ni = NcInput()
+        if self.wm:
+            self.wm.set_resize_callback(self._on_resize)
         while self.running:
-            new_dims = self.stdp.dim_yx()
-            if new_dims != self.dims:
-                self.dims = new_dims
-                if self.wm:
-                    self.wm.dims = self.dims
-                self._resize_planes()
+            if self.wm:
+                self.wm.check_resize()
+            else:
+                new_dims = self.stdp.dim_yx()
+                if new_dims != self.dims:
+                    self._on_resize(*new_dims)
             self._render_nc()
             self.nc.render()
             key = self.nc.get_nblock(ni)
@@ -617,7 +627,7 @@ class RachaelTUI:
         if self.main_plane:
             try:
                 self.main_plane.fadeout(150)
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError):
                 pass
         if self.view == "cockpit" and self.wm:
             self.wm.destroy_reel()
@@ -637,7 +647,7 @@ class RachaelTUI:
         if self.main_plane:
             try:
                 self.main_plane.fadein(150)
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError):
                 pass
 
     def _setup_cockpit_reel(self):
@@ -671,7 +681,7 @@ class RachaelTUI:
                         self.wm.add_sparkline_sample(float(cr), "corrections")
                     if "tokens" in plots:
                         self.wm.add_sparkline_sample(float(tokens), "tokens")
-        except Exception:
+        except (APIError, ConnectionError, TimeoutError, KeyError):
             pass
 
     @staticmethod
@@ -694,7 +704,7 @@ class RachaelTUI:
                 try:
                     import datetime
                     tstr = datetime.datetime.fromtimestamp(ts / 1000).strftime("%H:%M:%S")
-                except Exception:
+                except (RuntimeError, AttributeError, ValueError, OSError):
                     pass
             src = data.get("source", "")[:10]
             desc = data.get("description", "")
@@ -709,10 +719,10 @@ class RachaelTUI:
                     if detail_parts:
                         tablet_plane.putstr_yx(1, 2, "  ".join(detail_parts)[:cols - 2])
                         return 2
-                except Exception:
+                except (RuntimeError, AttributeError, ValueError, OSError):
                     pass
             return 1
-        except Exception:
+        except (RuntimeError, AttributeError, TypeError, ValueError):
             return 1
 
     def _handle_view_keys(self, char: str, key: int = 0):
@@ -1124,12 +1134,12 @@ class RachaelTUI:
             self._render_palette()
             try:
                 self.palette_plane.move_above(self.main_plane)
-            except Exception:
+            except (RuntimeError, AttributeError):
                 pass
         elif self.palette_plane and not self.nc_selector_active:
             try:
                 self.palette_plane.move_below(self.stdp)
-            except Exception:
+            except (RuntimeError, AttributeError):
                 pass
 
     def _render_header(self):
@@ -1216,7 +1226,7 @@ class RachaelTUI:
                 for gi, gline in enumerate(grid):
                     if rows - 4 + gi < rows:
                         p.putstr_yx(rows - 4 + gi, 1, gline[:cols - 2])
-            except Exception:
+            except (RuntimeError, TypeError, ValueError):
                 pass
 
     def _render_main(self):
@@ -1296,7 +1306,7 @@ class RachaelTUI:
         if not page:
             try:
                 page = self.api.reader_page(self.reader_reading_id)
-            except Exception:
+            except (APIError, ConnectionError, TimeoutError):
                 pass
         if not page:
             self._set_fg(p, "error")

@@ -273,6 +273,43 @@ class WidgetManager:
         self.budget_progbar_plane = None
         self.visual_plane = None
         self._plot_planes = {}
+        self._resize_callback = None
+        self._last_dims = dims
+
+    def set_resize_callback(self, callback):
+        self._resize_callback = callback
+
+    def check_resize(self):
+        try:
+            rows, cols = self.stdp.dim_yx()
+            new_dims = (rows, cols)
+            if new_dims != self._last_dims:
+                self._last_dims = new_dims
+                self.dims = new_dims
+                if self._resize_callback:
+                    self._resize_callback(rows, cols)
+                return True
+        except (AttributeError, ValueError):
+            pass
+        return False
+
+    def fade_plane(self, plane, duration_ms: int = 300):
+        try:
+            if hasattr(plane, 'fadeout'):
+                plane.fadeout(duration_ms * 1000000)
+                return True
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+        return False
+
+    def pulse_plane(self, plane, duration_ms: int = 200):
+        try:
+            if hasattr(plane, 'pulse'):
+                plane.pulse(duration_ms * 1000000, None)
+                return True
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+        return False
 
     def log_degradation(self, widget: str, error: str = ""):
         msg = widget
@@ -292,7 +329,7 @@ class WidgetManager:
                 nc_sections.append((sec_name, items))
             self.menu = NcMenu.create(self.nc, nc_sections)
             return self.menu
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcMenu", str(e))
             return None
 
@@ -301,7 +338,7 @@ class WidgetManager:
             return None
         try:
             return self.menu.offer_input(ni)
-        except Exception:
+        except (RuntimeError, AttributeError, TypeError):
             return None
 
     def create_progbar(self, parent_plane, y: int, x: int, width: int):
@@ -312,7 +349,7 @@ class WidgetManager:
             self.progbar_plane = NcPlane(parent_plane, 1, width, y, x)
             self.progbar = NcProgbar(self.progbar_plane)
             return self.progbar
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcProgbar", str(e))
             return None
 
@@ -321,7 +358,7 @@ class WidgetManager:
             try:
                 self.progbar.set_progress(max(0.0, min(1.0, value)))
                 return True
-            except Exception as e:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
                 self.log_degradation("NcProgbar.set_progress", str(e))
         return False
 
@@ -333,7 +370,7 @@ class WidgetManager:
             self.budget_progbar_plane = NcPlane(parent_plane, 1, width, y, x)
             self.budget_progbar = NcProgbar(self.budget_progbar_plane)
             return self.budget_progbar
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcProgbar budget", str(e))
             return None
 
@@ -342,7 +379,7 @@ class WidgetManager:
             try:
                 self.budget_progbar.set_progress(max(0.0, min(1.0, value)))
                 return True
-            except Exception as e:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
                 self.log_degradation("NcProgbar.budget", str(e))
         return False
 
@@ -360,7 +397,7 @@ class WidgetManager:
                 self.reel = NcReel.create(self.reel_plane)
             self.reel_tablets = []
             return self.reel
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcReel", str(e))
             return None
 
@@ -371,7 +408,7 @@ class WidgetManager:
             tablet = self.reel.add(None, None, draw_callback, data)
             self.reel_tablets.append(tablet)
             return tablet
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcReel.add_tablet", str(e))
             return None
 
@@ -379,21 +416,21 @@ class WidgetManager:
         if self.reel:
             try:
                 self.reel.next()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
 
     def reel_prev(self):
         if self.reel:
             try:
                 self.reel.prev()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
 
     def reel_offer_input(self, ni):
         if self.reel:
             try:
                 return self.reel.offer_input(ni)
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
         return False
 
@@ -401,13 +438,13 @@ class WidgetManager:
         if self.reel:
             try:
                 self.reel.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.reel = None
         if self.reel_plane:
             try:
                 self.reel_plane.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.reel_plane = None
         self.reel_tablets = []
@@ -432,7 +469,7 @@ class WidgetManager:
             else:
                 self.reader = NcReader.create(self.reader_plane)
             return True
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcReader", str(e))
             return False
 
@@ -440,7 +477,7 @@ class WidgetManager:
         if self.reader:
             try:
                 self.reader.offer_input(ni)
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
 
     def close_reader(self) -> str:
@@ -448,7 +485,7 @@ class WidgetManager:
         if self.reader:
             try:
                 text = self.reader.contents() or ""
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
         self.destroy_reader()
         return text.strip()
@@ -457,13 +494,13 @@ class WidgetManager:
         if self.reader:
             try:
                 self.reader.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.reader = None
         if self.reader_plane:
             try:
                 self.reader_plane.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.reader_plane = None
 
@@ -484,7 +521,7 @@ class WidgetManager:
             self.selector = NcSelector.create(
                 self.selector_plane, nc_items, title=title, maxdisplay=sel_h - 3)
             return self.selector
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcSelector", str(e))
             return None
 
@@ -506,7 +543,7 @@ class WidgetManager:
             self.multiselector = NcMultiSelector.create(
                 self.multiselector_plane, nc_items, title=title, maxdisplay=sel_h - 3)
             return self.multiselector
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcMultiSelector", str(e))
             return None
 
@@ -514,14 +551,14 @@ class WidgetManager:
         if self.multiselector:
             try:
                 self.multiselector.offer_input(ni)
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
 
     def multiselector_selected(self) -> list:
         if self.multiselector:
             try:
                 return self.multiselector.selected() or []
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
         return []
 
@@ -529,13 +566,13 @@ class WidgetManager:
         if self.multiselector:
             try:
                 self.multiselector.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.multiselector = None
         if self.multiselector_plane:
             try:
                 self.multiselector_plane.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.multiselector_plane = None
 
@@ -543,14 +580,14 @@ class WidgetManager:
         if self.selector:
             try:
                 self.selector.offer_input(ni)
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
 
     def selector_selected(self) -> Optional[str]:
         if self.selector:
             try:
                 return self.selector.selected()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
         return None
 
@@ -558,13 +595,13 @@ class WidgetManager:
         if self.selector:
             try:
                 self.selector.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.selector = None
         if self.selector_plane:
             try:
                 self.selector_plane.destroy()
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
             self.selector_plane = None
 
@@ -587,7 +624,7 @@ class WidgetManager:
             else:
                 self._plot_planes[name] = (plot, plane)
             return plot
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcPlot/NcDPlot " + name, str(e))
             return None
 
@@ -596,7 +633,7 @@ class WidgetManager:
         if plot:
             try:
                 plot.add_sample(value)
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
 
     def create_evo_plots(self, parent_plane, y: int, x: int, width: int):
@@ -617,7 +654,7 @@ class WidgetManager:
                 plot = plot_cls.create(plane, **opts)
                 self._plot_planes[name] = (plot, plane)
                 plots[name] = plot
-            except Exception as e:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
                 self.log_degradation("NcDPlot " + name, str(e))
         return plots
 
@@ -628,11 +665,11 @@ class WidgetManager:
                 plot, plane = entry
                 try:
                     plot.destroy()
-                except Exception:
+                except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                     pass
                 try:
                     plane.destroy()
-                except Exception:
+                except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                     pass
 
     def render_visual_media(self, parent_plane, image_path: str, y: int, x: int,
@@ -643,7 +680,7 @@ class WidgetManager:
             if self.visual_plane:
                 try:
                     self.visual_plane.destroy()
-                except Exception:
+                except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                     pass
             vis = NcVisual.from_file(image_path)
             self.visual_plane = NcPlane(parent_plane, height, width, y, x)
@@ -655,7 +692,7 @@ class WidgetManager:
                 vopts["scaling"] = NCSCALE_STRETCH
             vis.blit(self.visual_plane, **vopts)
             return True
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("NcVisual.render", str(e))
             return self._render_media_escape(image_path, y, x, height, width)
 
@@ -746,7 +783,7 @@ class WidgetManager:
             import urllib.request
             urllib.request.urlretrieve(url, cached)
             return cached
-        except Exception as e:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as e:
             self.log_degradation("image_download", str(e))
             return None
 
@@ -757,6 +794,6 @@ class WidgetManager:
             try:
                 plane.set_bg_alpha(alpha)
                 return True
-            except Exception:
+            except (RuntimeError, AttributeError, TypeError, ValueError, OSError):
                 pass
         return False

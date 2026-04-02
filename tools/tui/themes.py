@@ -143,7 +143,7 @@ class ThemeEngine:
                 name = data.get("theme", "phosphor")
                 if name in THEMES:
                     self._current = name
-            except Exception:
+            except (IOError, json.JSONDecodeError, KeyError):
                 pass
 
     def _save(self):
@@ -153,7 +153,7 @@ class ThemeEngine:
             try:
                 with open(CONF_FILE) as f:
                     data = json.load(f)
-            except Exception:
+            except (IOError, json.JSONDecodeError):
                 pass
         data["theme"] = self._current
         with open(CONF_FILE, "w") as f:

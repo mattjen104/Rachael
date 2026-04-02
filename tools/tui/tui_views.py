@@ -161,7 +161,7 @@ def build_snow_items(data_cache: dict, snow_tab: str, api) -> list:
         try:
             snow_data = api.snow_queue()
             data_cache["snow_queue"] = snow_data
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError, KeyError):
             snow_data = {}
     records = snow_data.get("records", [])
     if not records:
@@ -170,7 +170,7 @@ def build_snow_items(data_cache: dict, snow_tab: str, api) -> list:
             try:
                 records = api.snow_records()
                 data_cache["snow_records"] = records
-            except Exception:
+            except (ConnectionError, TimeoutError, OSError, KeyError):
                 records = []
 
     if snow_tab == "my-queue":
@@ -246,8 +246,8 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
     items = []
     try:
         state = api.evolution_state()
-    except Exception:
-        items.append({"_tree": "error", "_label": "Failed to load evolution state"})
+    except (ConnectionError, TimeoutError, OSError, KeyError) as exc:
+        items.append({"_tree": "error", "_label": "Failed to load evolution state: " + str(exc)[:60]})
         return items
 
     if evo_tab == "overview":
@@ -288,7 +288,7 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
                 grid_lines = activity_density_grid(grid_data, width=min(20, max(1, len(grid_data))), height=2)
                 for gl in grid_lines:
                     items.append({"_tree": "density", "_label": "  " + gl})
-            except Exception:
+            except (ConnectionError, TimeoutError, OSError, KeyError):
                 pass
 
     elif evo_tab == "versions":
@@ -301,14 +301,14 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
             suite = api.evolution_golden_suite()
             items.append({"_section": "GOLDEN SUITE (" + str(len(suite)) + ")"})
             items.extend(suite)
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError, KeyError):
             items.append({"_tree": "error", "_label": "Failed to load golden suite"})
     elif evo_tab == "observations":
         try:
             obs = api.evolution_observations()
             items.append({"_section": "OBSERVATIONS (" + str(len(obs)) + ")"})
             items.extend(obs)
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError, KeyError):
             items.append({"_tree": "error", "_label": "Failed to load observations"})
     elif evo_tab == "costs":
         try:
@@ -327,7 +327,7 @@ def build_evolution_items(api, evo_tab: str, data_cache: dict) -> list:
                 for judge, cost in breakdown.items():
                     bar = braille_bar(cost, max(max_cost, 0.001), 5)
                     items.append({"_tree": "cost", "_label": "  " + judge + ": " + bar + " $" + str(round(cost, 4))})
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError, KeyError):
             items.append({"_tree": "error", "_label": "Failed to load judge costs"})
     return items
 
@@ -443,7 +443,7 @@ def format_item(item, max_width: int, view: str, data_cache: dict) -> str:
         if ts:
             try:
                 tstr = datetime.datetime.fromtimestamp(ts / 1000).strftime("%H:%M:%S")
-            except Exception:
+            except (ConnectionError, TimeoutError, OSError, KeyError):
                 pass
         etype = item.get("eventType", "")
         icon = "\u25CF"
