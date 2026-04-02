@@ -5,41 +5,79 @@ import time
 import threading
 import traceback
 import datetime
+import math
 from collections import deque
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 
 NC_AVAILABLE = False
+NcReel = None
+NcReelOptions = None
+NcProgbar = None
+NcReader = None
+NcReaderOptions = None
+NcSelector = None
+NcSelectorItem = None
+NcMenu = None
+NcMenuItem = None
+NcPlot = None
+NCALPHA_BLEND = None
+NCALPHA_TRANSPARENT = None
+NCBLIT_BRAILLE = None
+NCBLIT_2x2 = None
+
 try:
     from notcurses import Notcurses, NcInput, NcPlane
-    try:
-        from notcurses import NcReel, NcReelOptions
-    except ImportError:
-        NcReel = None
-        NcReelOptions = None
-    try:
-        from notcurses import NcProgbar
-    except ImportError:
-        NcProgbar = None
-    try:
-        from notcurses import NcReader, NcReaderOptions
-    except ImportError:
-        NcReader = None
-        NcReaderOptions = None
-    try:
-        from notcurses import NcSelector, NcSelectorItem
-    except ImportError:
-        NcSelector = None
-        NcSelectorItem = None
-    try:
-        from notcurses import NcMenu, NcMenuItem
-    except ImportError:
-        NcMenu = None
-        NcMenuItem = None
-    try:
-        from notcurses import NcPlot
-    except ImportError:
-        NcPlot = None
     NC_AVAILABLE = True
+    try:
+        from notcurses import NcReel as _NcReel, NcReelOptions as _NcReelOpts
+        NcReel = _NcReel
+        NcReelOptions = _NcReelOpts
+    except ImportError:
+        pass
+    try:
+        from notcurses import NcProgbar as _NcProgbar
+        NcProgbar = _NcProgbar
+    except ImportError:
+        pass
+    try:
+        from notcurses import NcReader as _NcReader
+        NcReader = _NcReader
+        try:
+            from notcurses import NcReaderOptions as _NcReaderOpts
+            NcReaderOptions = _NcReaderOpts
+        except ImportError:
+            pass
+    except ImportError:
+        pass
+    try:
+        from notcurses import NcSelector as _NcSelector, NcSelectorItem as _NcSelectorItem
+        NcSelector = _NcSelector
+        NcSelectorItem = _NcSelectorItem
+    except ImportError:
+        pass
+    try:
+        from notcurses import NcMenu as _NcMenu, NcMenuItem as _NcMenuItem
+        NcMenu = _NcMenu
+        NcMenuItem = _NcMenuItem
+    except ImportError:
+        pass
+    try:
+        from notcurses import NcPlot as _NcPlot
+        NcPlot = _NcPlot
+    except ImportError:
+        pass
+    try:
+        from notcurses import NCALPHA_BLEND as _AB, NCALPHA_TRANSPARENT as _AT
+        NCALPHA_BLEND = _AB
+        NCALPHA_TRANSPARENT = _AT
+    except ImportError:
+        pass
+    try:
+        from notcurses import NCBLIT_BRAILLE as _BB, NCBLIT_2x2 as _B2
+        NCBLIT_BRAILLE = _BB
+        NCBLIT_2x2 = _B2
+    except ImportError:
+        pass
 except ImportError:
     pass
 
@@ -59,6 +97,8 @@ STATUS_CHARS = {
     "running": "\u27F3", "queued": "\u2026", "error": "\u2717",
     "completed": "\u2713", "enabled": "\u25CF", "disabled": "\u25CB",
 }
+BRAILLE_BLOCKS = ["\u2800", "\u2801", "\u2803", "\u2807", "\u280F",
+                  "\u281F", "\u283F", "\u287F", "\u28FF"]
 LOGO = [
     " ____            _                _",
     "|  _ \\ __ _  ___| |__   __ _  ___| |",
@@ -76,22 +116,50 @@ MENU_SECTIONS = [
                  ("Toggle Runtime", "R"), ("Theme", "T")]),
     ("Help", [("Keybindings", "?")]),
 ]
+PALETTE_ALL_CMDS = [
+    ("quit", "Exit Rachael TUI"),
+    ("theme phosphor", "Phosphor Green theme"),
+    ("theme amber", "Amber CRT theme"),
+    ("theme cool-blue", "Cool Blue theme"),
+    ("theme solarized", "Solarized Dark theme"),
+    ("theme dracula", "Dracula theme"),
+    ("theme red-alert", "Red Alert theme"),
+    ("view agenda", "Switch to Agenda"),
+    ("view tree", "Switch to Tree"),
+    ("view programs", "Switch to Programs"),
+    ("view results", "Switch to Results"),
+    ("view reader", "Switch to Reader"),
+    ("view cockpit", "Switch to Cockpit"),
+    ("view snow", "Switch to SNOW"),
+    ("view evolution", "Switch to Evolution"),
+    ("view transcripts", "Switch to Transcripts"),
+    ("view voice", "Switch to Voice"),
+    ("runtime-toggle", "Toggle runtime ON/OFF"),
+    ("refresh", "Refresh all data"),
+    ("consolidate", "Trigger evolution consolidation"),
+    ("help", "Show keybinding help"),
+]
 
 
 class PlaneSet:
     def __init__(self):
-        self.header = None
-        self.sidebar = None
-        self.main = None
-        self.modeline = None
-        self.minibuffer = None
-        self.palette_overlay = None
-        self.progbar_plane = None
-        self.reel = None
-        self.reader_widget = None
-        self.selector = None
-        self.menu = None
-        self.sparkline_plane = None
+        self.header: Any = None
+        self.sidebar: Any = None
+        self.main: Any = None
+        self.modeline: Any = None
+        self.minibuffer: Any = None
+        self.palette_overlay: Any = None
+        self.progbar_widget: Any = None
+        self.progbar_plane: Any = None
+        self.reel_widget: Any = None
+        self.reel_plane: Any = None
+        self.reader_widget: Any = None
+        self.reader_plane: Any = None
+        self.selector_widget: Any = None
+        self.selector_plane: Any = None
+        self.menu_widget: Any = None
+        self.sparkline_widget: Any = None
+        self.sparkline_plane: Any = None
 
 
 class RachaelTUI:
@@ -110,9 +178,12 @@ class RachaelTUI:
         self.minibuffer_active = False
         self.minibuffer_text = ""
         self.minibuffer_prompt = ""
-        self.minibuffer_callback = None
+        self.minibuffer_callback: Optional[Callable] = None
+        self.minibuffer_history: list = []
+        self.minibuffer_hist_idx = -1
         self.command_palette_active = False
         self.palette_idx = 0
+        self.palette_filter = ""
         self.message = ""
         self.message_time = 0.0
         self.cockpit_events: deque = deque(maxlen=500)
@@ -127,6 +198,12 @@ class RachaelTUI:
         self.ctrl_x_pending = False
         self.reader_reading_id: Optional[int] = None
         self.evo_tab = "overview"
+        self.sparkline_data: deque = deque(maxlen=60)
+        self.new_item_ids: set = set()
+        self.new_item_time: dict = {}
+        self._reel_tablets: list = []
+        self._menu_created = False
+        self._nc_reader_active = False
 
     def run(self):
         if not NC_AVAILABLE:
@@ -138,6 +215,7 @@ class RachaelTUI:
             self.running = True
             self.dims = self.stdp.dim_yx()
             self._create_planes()
+            self._create_nc_menu()
             self._start_background()
             self._splash_nc()
             self._main_loop()
@@ -164,34 +242,172 @@ class RachaelTUI:
     def _create_planes(self):
         rows, cols = self.dims
         self.planes.header = NcPlane(self.stdp, 1, cols, 0, 0)
-        sb_h = rows - 3
-        if sb_h > 0:
-            self.planes.sidebar = NcPlane(self.stdp, sb_h, self.sidebar_width, 1, 0)
-        main_w = cols - self.sidebar_width - 1
-        main_h = rows - 3
-        if main_w > 2 and main_h > 0:
-            self.planes.main = NcPlane(self.stdp, main_h, main_w, 1, self.sidebar_width + 1)
-        self.planes.modeline = NcPlane(self.stdp, 1, cols, rows - 2, 0)
-        self.planes.minibuffer = NcPlane(self.stdp, 1, cols, rows - 1, 0)
-        pal_w = min(50, cols - 4)
-        pal_h = min(16, rows - 4)
-        if pal_w > 10 and pal_h > 4:
+        sb_h = max(1, rows - 3)
+        self.planes.sidebar = NcPlane(self.stdp, sb_h, self.sidebar_width, 1, 0)
+        main_left = self.sidebar_width + 1
+        main_w = max(2, cols - main_left)
+        main_h = max(1, rows - 3)
+        self.planes.main = NcPlane(self.stdp, main_h, main_w, 1, main_left)
+        self.planes.modeline = NcPlane(self.stdp, 1, cols, max(0, rows - 2), 0)
+        self.planes.minibuffer = NcPlane(self.stdp, 1, cols, max(0, rows - 1), 0)
+        pal_w = min(54, cols - 4)
+        pal_h = min(18, rows - 4)
+        if pal_w > 12 and pal_h > 5:
             px = (cols - pal_w) // 2
             py = (rows - pal_h) // 2
             self.planes.palette_overlay = NcPlane(self.stdp, pal_h, pal_w, py, px)
+            if NCALPHA_BLEND is not None:
+                try:
+                    self.planes.palette_overlay.set_bg_alpha(NCALPHA_BLEND)
+                except Exception:
+                    pass
             self.planes.palette_overlay.move_above(self.planes.main)
-        if NcProgbar and self.planes.sidebar:
+        self._create_nc_progbar()
+        self._create_nc_sparkline()
+
+    def _create_nc_menu(self):
+        if NcMenu is None or NcMenuItem is None or self._menu_created:
+            return
+        try:
+            sections = []
+            for sec_name, sec_items in MENU_SECTIONS:
+                items = []
+                for label, shortcut in sec_items:
+                    items.append(NcMenuItem(label, shortcut))
+                sections.append((sec_name, items))
+            self.planes.menu_widget = NcMenu.create(self.nc, sections)
+            self._menu_created = True
+        except Exception:
+            pass
+
+    def _create_nc_progbar(self):
+        if NcProgbar is None or self.planes.sidebar is None:
+            return
+        try:
+            sb_rows, sb_cols = self.planes.sidebar.dim_yx()
+            pb_w = max(2, sb_cols - 4)
+            pb_y = min(sb_rows - 3, len(VIEWS) + 6)
+            if pb_y > 0 and pb_y < sb_rows - 1:
+                self.planes.progbar_plane = NcPlane(self.planes.sidebar, 1, pb_w, pb_y, 2)
+                self.planes.progbar_widget = NcProgbar(self.planes.progbar_plane)
+        except Exception:
+            pass
+
+    def _create_nc_sparkline(self):
+        if NcPlot is None or self.planes.main is None:
+            return
+        try:
+            m_rows, m_cols = self.planes.main.dim_yx()
+            sp_w = min(30, m_cols - 4)
+            sp_h = 4
+            if sp_w > 5 and m_rows > sp_h + 2:
+                self.planes.sparkline_plane = NcPlane(self.planes.main, sp_h, sp_w, 1, m_cols - sp_w - 2)
+                opts = {}
+                if NCBLIT_BRAILLE is not None:
+                    opts["gridtype"] = NCBLIT_BRAILLE
+                self.planes.sparkline_widget = NcPlot.create(
+                    self.planes.sparkline_plane, **opts)
+        except Exception:
+            pass
+
+    def _create_nc_reel(self):
+        if NcReel is None or self.planes.main is None:
+            return
+        try:
+            m_rows, m_cols = self.planes.main.dim_yx()
+            if self.planes.reel_plane:
+                try:
+                    self.planes.reel_plane.destroy()
+                except Exception:
+                    pass
+            self.planes.reel_plane = NcPlane(self.planes.main, max(1, m_rows - 2), max(2, m_cols - 2), 1, 1)
+            if NcReelOptions:
+                opts = NcReelOptions()
+                self.planes.reel_widget = NcReel.create(self.planes.reel_plane, opts)
+            else:
+                self.planes.reel_widget = NcReel.create(self.planes.reel_plane)
+            self._reel_tablets = []
+        except Exception:
+            self.planes.reel_widget = None
+
+    def _create_nc_selector(self, items_list: list, title: str = "Select"):
+        if NcSelector is None or NcSelectorItem is None:
+            return None
+        try:
+            rows, cols = self.dims
+            sel_w = min(50, cols - 6)
+            sel_h = min(len(items_list) + 4, rows - 6)
+            sx = (cols - sel_w) // 2
+            sy = (rows - sel_h) // 2
+            sel_plane = NcPlane(self.stdp, sel_h, sel_w, sy, sx)
+            nc_items = []
+            for label, desc in items_list:
+                nc_items.append(NcSelectorItem(label, desc))
+            selector = NcSelector.create(sel_plane, nc_items, title=title, maxdisplay=sel_h - 3)
+            self.planes.selector_plane = sel_plane
+            self.planes.selector_widget = selector
+            return selector
+        except Exception:
+            return None
+
+    def _destroy_nc_selector(self):
+        if self.planes.selector_widget:
             try:
-                pb_plane = NcPlane(self.planes.sidebar, 1, self.sidebar_width - 4, sb_h - 2, 2)
-                self.planes.progbar_plane = pb_plane
+                self.planes.selector_widget.destroy()
             except Exception:
                 pass
-        if NcPlot and self.planes.main:
+            self.planes.selector_widget = None
+        if self.planes.selector_plane:
             try:
-                sp_plane = NcPlane(self.planes.main, 4, min(30, main_w - 2), 0, 1)
-                self.planes.sparkline_plane = sp_plane
+                self.planes.selector_plane.destroy()
             except Exception:
                 pass
+            self.planes.selector_plane = None
+
+    def _open_nc_reader(self, prompt: str):
+        if NcReader is None:
+            return False
+        try:
+            rows, cols = self.dims
+            if self.planes.reader_plane:
+                try:
+                    self.planes.reader_plane.destroy()
+                except Exception:
+                    pass
+            self.planes.reader_plane = NcPlane(self.stdp, 1, cols, rows - 1, 0)
+            self._set_fg(self.planes.reader_plane, "mini_fg")
+            self._set_bg(self.planes.reader_plane, "mini_bg")
+            self.planes.reader_plane.putstr_yx(0, 0, prompt)
+            if NcReaderOptions:
+                opts = NcReaderOptions()
+                self.planes.reader_widget = NcReader.create(self.planes.reader_plane, opts)
+            else:
+                self.planes.reader_widget = NcReader.create(self.planes.reader_plane)
+            self._nc_reader_active = True
+            return True
+        except Exception:
+            return False
+
+    def _close_nc_reader(self) -> str:
+        text = ""
+        if self.planes.reader_widget:
+            try:
+                text = self.planes.reader_widget.contents() or ""
+            except Exception:
+                pass
+            try:
+                self.planes.reader_widget.destroy()
+            except Exception:
+                pass
+            self.planes.reader_widget = None
+        if self.planes.reader_plane:
+            try:
+                self.planes.reader_plane.destroy()
+            except Exception:
+                pass
+            self.planes.reader_plane = None
+        self._nc_reader_active = False
+        return text.strip()
 
     def _resize_planes(self):
         rows, cols = self.dims
@@ -201,33 +417,35 @@ class RachaelTUI:
                 self.planes.header.move_yx(0, 0)
         except Exception:
             pass
-        sb_h = rows - 3
+        sb_h = max(1, rows - 3)
         main_left = self.sidebar_width + 1 if self.sidebar_visible else 0
-        main_w = cols - main_left
-        main_h = rows - 3
+        main_w = max(2, cols - main_left)
+        main_h = max(1, rows - 3)
         try:
             if self.planes.sidebar:
                 if self.sidebar_visible:
-                    self.planes.sidebar.resize(max(1, sb_h), self.sidebar_width)
+                    self.planes.sidebar.resize(sb_h, self.sidebar_width)
                     self.planes.sidebar.move_yx(1, 0)
+                else:
+                    self.planes.sidebar.move_yx(-9999, -9999)
         except Exception:
             pass
         try:
             if self.planes.main:
-                self.planes.main.resize(max(1, main_h), max(1, main_w))
+                self.planes.main.resize(main_h, main_w)
                 self.planes.main.move_yx(1, main_left)
         except Exception:
             pass
         try:
             if self.planes.modeline:
                 self.planes.modeline.resize(1, cols)
-                self.planes.modeline.move_yx(rows - 2, 0)
+                self.planes.modeline.move_yx(max(0, rows - 2), 0)
         except Exception:
             pass
         try:
             if self.planes.minibuffer:
                 self.planes.minibuffer.resize(1, cols)
-                self.planes.minibuffer.move_yx(rows - 1, 0)
+                self.planes.minibuffer.move_yx(max(0, rows - 1), 0)
         except Exception:
             pass
 
@@ -239,7 +457,19 @@ class RachaelTUI:
 
     def _on_cockpit_event(self, event):
         self.cockpit_connected = True
+        event_id = event.get("id")
+        if event_id:
+            self.new_item_ids.add(event_id)
+            self.new_item_time[event_id] = time.time()
         self.cockpit_events.append(event)
+        if self.planes.sparkline_widget:
+            try:
+                val = event.get("data", {}).get("metric")
+                if val and isinstance(val, (int, float)):
+                    self.sparkline_data.append(val)
+                    self.planes.sparkline_widget.add_sample(val)
+            except Exception:
+                pass
 
     def _refresh_loop(self):
         while self.running:
@@ -265,15 +495,56 @@ class RachaelTUI:
             try:
                 value = fn()
                 with self.data_lock:
+                    old = self.data_cache.get(key)
                     self.data_cache[key] = value
+                    if isinstance(value, list) and isinstance(old, list):
+                        old_ids = {item.get("id") for item in old if isinstance(item, dict) and item.get("id")}
+                        for item in value:
+                            if isinstance(item, dict):
+                                iid = item.get("id")
+                                if iid and iid not in old_ids:
+                                    self.new_item_ids.add(iid)
+                                    self.new_item_time[iid] = time.time()
             except Exception:
                 pass
+        now = time.time()
+        expired = [k for k, t in self.new_item_time.items() if now - t > 5]
+        for k in expired:
+            self.new_item_ids.discard(k)
+            del self.new_item_time[k]
+        if self.planes.progbar_widget:
+            budget = self.data_cache.get("budget", {})
+            spent = budget.get("spent", 0)
+            cap = budget.get("dailyCap", 0)
+            if cap > 0:
+                try:
+                    self.planes.progbar_widget.set_progress(min(1.0, spent / cap))
+                except Exception:
+                    pass
         with self.data_lock:
             self.last_refresh = time.time()
 
     def _msg(self, text: str):
         self.message = text
         self.message_time = time.time()
+
+    def _is_item_new(self, item) -> bool:
+        if isinstance(item, dict):
+            return item.get("id") in self.new_item_ids
+        return False
+
+    def _pulse_fg(self, plane, item):
+        if self._is_item_new(item):
+            elapsed = time.time() - self.new_item_time.get(item.get("id"), 0)
+            pulse = abs(math.sin(elapsed * 3.0))
+            r0, g0, b0 = self.theme.rgb("accent")
+            r1, g1, b1 = self.theme.rgb("fg")
+            r = int(r0 * pulse + r1 * (1 - pulse))
+            g = int(g0 * pulse + g1 * (1 - pulse))
+            b = int(b0 * pulse + b1 * (1 - pulse))
+            plane.set_fg_rgb8(r, g, b)
+            return True
+        return False
 
     def _splash_nc(self):
         rows, cols = self.dims
@@ -288,11 +559,18 @@ class RachaelTUI:
         self._set_fg(self.stdp, "dim")
         tag = "v" + VERSION + " | " + self.theme.current["name"] + " | notcurses"
         self.stdp.putstr_yx(rows // 2 + 3, max(0, (cols - len(tag)) // 2), tag)
+        scanline_y = rows // 2 + 5
+        scan_text = "\u2591" * min(40, cols - 4)
+        if 0 <= scanline_y < rows:
+            self._set_fg(self.stdp, "border")
+            self.stdp.putstr_yx(scanline_y, max(0, (cols - len(scan_text)) // 2), scan_text)
         sub = "Press any key..."
-        self.stdp.putstr_yx(rows // 2 + 5, max(0, (cols - len(sub)) // 2), sub)
+        if scanline_y + 2 < rows:
+            self._set_fg(self.stdp, "dim")
+            self.stdp.putstr_yx(scanline_y + 2, max(0, (cols - len(sub)) // 2), sub)
         self.nc.render()
         try:
-            self.stdp.fadein(500)
+            self.stdp.fadein(600)
         except Exception:
             pass
         self.nc.render()
@@ -327,26 +605,70 @@ class RachaelTUI:
         plane.set_bg_rgb8(r, g, b)
 
     def _handle_input_nc(self, key, ni):
+        if self._nc_reader_active and self.planes.reader_widget:
+            if key == 7:
+                self._close_nc_reader()
+                self._msg("Quit")
+                return
+            if key == 27:
+                self._close_nc_reader()
+                return
+            if key == 10 or key == 13:
+                text = self._close_nc_reader()
+                cb = self.minibuffer_callback
+                if cb and text:
+                    self.minibuffer_history.append(text)
+                    cb(text)
+                return
+            try:
+                self.planes.reader_widget.offer_input(ni)
+            except Exception:
+                pass
+            return
+
+        if self.planes.selector_widget:
+            if key == 7 or key == 27:
+                self._destroy_nc_selector()
+                self.command_palette_active = False
+                return
+            if key == 10 or key == 13:
+                try:
+                    selected = self.planes.selector_widget.selected()
+                    self._destroy_nc_selector()
+                    self.command_palette_active = False
+                    if selected:
+                        self._do_command(selected)
+                except Exception:
+                    self._destroy_nc_selector()
+                    self.command_palette_active = False
+                return
+            try:
+                self.planes.selector_widget.offer_input(ni)
+            except Exception:
+                pass
+            return
+
         if self.ctrl_x_pending:
             self.ctrl_x_pending = False
             char = chr(key) if 0 < key < 0x110000 else ""
             if key == 3 or char == "c":
                 self.running = False
                 return
-            if char == "b":
-                self._open_command_palette()
-                return
-            if key == 2 or char == "B":
+            if char == "b" or key == 2:
                 self._open_command_palette()
                 return
             return
+
         if self.minibuffer_active:
             self._handle_minibuffer_nc(key, ni)
             return
+
         if self.command_palette_active:
             self._handle_palette_nc(key, ni)
             return
+
         char = chr(key) if 0 < key < 0x110000 else ""
+
         if key == 24:
             self.ctrl_x_pending = True
             self._msg("C-x-")
@@ -368,7 +690,11 @@ class RachaelTUI:
             self._navigate_up()
             return
         if ni.alt and char == "x":
-            self._open_minibuffer("M-x ", self._do_command)
+            self._open_command_palette()
+            return
+        if char == "\t":
+            self.sidebar_visible = not self.sidebar_visible
+            self._resize_planes()
             return
         if char == "q":
             self.running = False
@@ -379,10 +705,6 @@ class RachaelTUI:
         if char == "T":
             self.theme.next_theme()
             self._msg("Theme: " + self.theme.current["name"])
-            return
-        if char == "b":
-            self.sidebar_visible = not self.sidebar_visible
-            self._resize_planes()
             return
         if char == "/":
             self._open_minibuffer("Search: ", self._do_search)
@@ -416,6 +738,16 @@ class RachaelTUI:
         self.expanded_id = None
         self.reader_reading_id = None
         self.evo_tab = "overview"
+        if self.view == "cockpit" and NcReel:
+            self._create_nc_reel()
+        elif self.planes.reel_widget:
+            try:
+                if self.planes.reel_plane:
+                    self.planes.reel_plane.destroy()
+            except Exception:
+                pass
+            self.planes.reel_widget = None
+            self.planes.reel_plane = None
         if self.planes.main:
             try:
                 self.planes.main.fadein(150)
@@ -426,6 +758,7 @@ class RachaelTUI:
         with self.data_lock:
             items = self._current_items()
         count = len(items) if items else 0
+
         if char == "j":
             self.selected_idx = min(self.selected_idx + 1, max(0, count - 1))
         elif char == "k":
@@ -435,7 +768,7 @@ class RachaelTUI:
             self.scroll_offset = 0
         elif char == "G":
             self.selected_idx = max(0, count - 1)
-        elif char == "\t":
+        elif char == " ":
             if items and 0 <= self.selected_idx < len(items):
                 item = items[self.selected_idx]
                 item_id = item.get("id") if isinstance(item, dict) else None
@@ -453,14 +786,13 @@ class RachaelTUI:
         elif char == "r" and self.view == "programs":
             self._action_trigger(items)
         elif char == "R":
-            if self.view == "programs":
-                self._action_toggle_runtime()
+            self._action_toggle_runtime()
         elif char == "c":
             self._open_minibuffer("Capture: ", self._do_capture)
         elif char == "X":
             self._open_minibuffer("CLI> ", self._do_cli)
         elif char == "?":
-            self._msg("C-n/C-p:nav j/k:nav g/G:jump Tab:expand Enter:act /:srch M-x:cmd C-x C-c:quit T:theme")
+            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar M-x:cmd /:srch c:cap T:theme SPC:expand")
         elif char == "d" and self.view == "reader":
             self._action_delete_reader(items)
         elif char == "a" and self.view == "snow":
@@ -512,15 +844,15 @@ class RachaelTUI:
         upcoming = agenda.get("upcoming", [])
         briefings = agenda.get("briefings", [])
         if overdue:
-            items.append({"_section": "OVERDUE (" + str(len(overdue)) + ")", "_key": "overdue"})
+            items.append({"_section": "OVERDUE (" + str(len(overdue)) + ")"})
             items.extend(overdue)
-        items.append({"_section": "TODAY (" + str(len(today)) + ")", "_key": "today"})
+        items.append({"_section": "TODAY (" + str(len(today)) + ")"})
         items.extend(today)
         if upcoming:
-            items.append({"_section": "UPCOMING (" + str(len(upcoming)) + ")", "_key": "upcoming"})
+            items.append({"_section": "UPCOMING (" + str(len(upcoming)) + ")"})
             items.extend(upcoming)
         if briefings:
-            items.append({"_section": "BRIEFINGS (" + str(len(briefings)) + ")", "_key": "briefings"})
+            items.append({"_section": "BRIEFINGS (" + str(len(briefings)) + ")"})
             items.extend(briefings)
         return items
 
@@ -535,42 +867,36 @@ class RachaelTUI:
         captures = self.data_cache.get("captures", [])
         reader = self.data_cache.get("reader", [])
 
-        items.append({"_section": "RUNTIME", "_key": "runtime"})
+        items.append({"_section": "RUNTIME"})
         items.append({"_tree": "status", "_label": "Active: " + str(runtime.get("active", False))})
         rp = runtime.get("programs", [])
         running_count = sum(1 for p in rp if p.get("status") == "running")
         items.append({"_tree": "status", "_label": "Running: " + str(running_count) + "/" + str(len(rp))})
 
-        items.append({"_section": "BUDGET", "_key": "budget"})
+        items.append({"_section": "BUDGET"})
         items.append({"_tree": "budget", "_label": "Spent: $" + str(round(budget.get("spent", 0), 4))})
         items.append({"_tree": "budget", "_label": "Cap: $" + str(round(budget.get("dailyCap", 0), 2))})
         remaining = budget.get("dailyCap", 0) - budget.get("spent", 0)
         items.append({"_tree": "budget", "_label": "Remaining: $" + str(round(max(0, remaining), 4))})
 
-        items.append({"_section": "PROGRAMS (" + str(len(programs)) + ")", "_key": "programs"})
+        items.append({"_section": "PROGRAMS (" + str(len(programs)) + ")"})
         for p in programs:
             items.append(p)
-
-        items.append({"_section": "TASKS (" + str(len(tasks_list)) + ")", "_key": "tasks"})
+        items.append({"_section": "TASKS (" + str(len(tasks_list)) + ")"})
         for t in tasks_list:
             items.append(t)
-
-        items.append({"_section": "NOTES (" + str(len(notes)) + ")", "_key": "notes"})
-        for n in notes:
-            items.append(n)
-
-        items.append({"_section": "SKILLS (" + str(len(skills_list)) + ")", "_key": "skills"})
+        items.append({"_section": "NOTES (" + str(len(notes)) + ")"})
+        for n_item in notes:
+            items.append(n_item)
+        items.append({"_section": "SKILLS (" + str(len(skills_list)) + ")"})
         for s in skills_list:
             items.append(s)
-
-        items.append({"_section": "INBOX (" + str(len(captures)) + ")", "_key": "captures"})
+        items.append({"_section": "INBOX (" + str(len(captures)) + ")"})
         for c in captures:
             items.append(c)
-
-        items.append({"_section": "READER (" + str(len(reader)) + ")", "_key": "reader"})
+        items.append({"_section": "READER (" + str(len(reader)) + ")"})
         for r in reader:
             items.append(r)
-
         return items
 
     def _build_evolution_items(self) -> list:
@@ -582,7 +908,7 @@ class RachaelTUI:
             return items
 
         if self.evo_tab == "overview":
-            items.append({"_section": "EVOLUTION v" + str(state.get("currentVersion", 0)), "_key": "evo"})
+            items.append({"_section": "EVOLUTION v" + str(state.get("currentVersion", 0))})
             m = state.get("metrics", {})
             sr = m.get("successRate", 0)
             items.append({"_tree": "metric", "_label": "Success Rate: " + str(round(sr * 100, 1)) + "%"})
@@ -594,13 +920,13 @@ class RachaelTUI:
             items.append({"_tree": "metric", "_label": "Pending Observations: " + str(state.get("unconsolidatedObservations", 0))})
         elif self.evo_tab == "versions":
             versions = state.get("recentVersions", [])
-            items.append({"_section": "VERSIONS (" + str(len(versions)) + ")", "_key": "versions"})
+            items.append({"_section": "VERSIONS (" + str(len(versions)) + ")"})
             for v in versions:
                 items.append(v)
         elif self.evo_tab == "golden":
             try:
                 suite = self.api.evolution_golden_suite()
-                items.append({"_section": "GOLDEN SUITE (" + str(len(suite)) + ")", "_key": "golden"})
+                items.append({"_section": "GOLDEN SUITE (" + str(len(suite)) + ")"})
                 for entry in suite:
                     items.append(entry)
             except Exception:
@@ -608,7 +934,7 @@ class RachaelTUI:
         elif self.evo_tab == "observations":
             try:
                 obs = self.api.evolution_observations()
-                items.append({"_section": "OBSERVATIONS (" + str(len(obs)) + ")", "_key": "obs"})
+                items.append({"_section": "OBSERVATIONS (" + str(len(obs)) + ")"})
                 for o in obs:
                     items.append(o)
             except Exception:
@@ -616,7 +942,7 @@ class RachaelTUI:
         elif self.evo_tab == "costs":
             try:
                 costs = self.api.evolution_judge_costs()
-                items.append({"_section": "JUDGE COSTS", "_key": "costs"})
+                items.append({"_section": "JUDGE COSTS"})
                 items.append({"_tree": "cost", "_label": "Today: $" + str(round(costs.get("today", 0), 4))})
                 items.append({"_tree": "cost", "_label": "Cap: $" + str(round(costs.get("cap", 0), 2))})
                 items.append({"_tree": "cost", "_label": "Remaining: $" + str(round(costs.get("remaining", 0), 4))})
@@ -631,9 +957,7 @@ class RachaelTUI:
         if not items or self.selected_idx >= len(items):
             return
         item = items[self.selected_idx]
-        if not isinstance(item, dict):
-            return
-        if "_section" in item:
+        if not isinstance(item, dict) or "_section" in item:
             return
         if self.view == "programs":
             pid = item.get("id")
@@ -657,7 +981,7 @@ class RachaelTUI:
         elif self.view == "reader":
             self.reader_reading_id = item.get("id")
         elif self.view == "cockpit":
-            self.expanded_id = None if self.expanded_id == item.get("id") else item.get("id")
+            self.expanded_id = None if self.expanded_id == id(item) else id(item)
         elif self.view == "transcripts":
             self.expanded_id = None if self.expanded_id == item.get("id") else item.get("id")
         elif self.view == "snow":
@@ -719,12 +1043,18 @@ class RachaelTUI:
                 self._msg("Error: " + str(e))
 
     def _open_minibuffer(self, prompt: str, callback):
+        if self._open_nc_reader(prompt):
+            self.minibuffer_callback = callback
+            return
         self.minibuffer_active = True
         self.minibuffer_text = ""
         self.minibuffer_prompt = prompt
         self.minibuffer_callback = callback
+        self.minibuffer_hist_idx = -1
 
     def _close_minibuffer(self):
+        if self._nc_reader_active:
+            self._close_nc_reader()
         self.minibuffer_active = False
         self.minibuffer_text = ""
         self.minibuffer_prompt = ""
@@ -741,8 +1071,10 @@ class RachaelTUI:
         if key == 10 or key == 13:
             cb = self.minibuffer_callback
             text = self.minibuffer_text
+            if text:
+                self.minibuffer_history.append(text)
             self._close_minibuffer()
-            if cb:
+            if cb and text:
                 cb(text)
             return
         if key == 127 or key == 263:
@@ -755,14 +1087,33 @@ class RachaelTUI:
         if key == 11:
             self.minibuffer_text = ""
             return
+        if key == 16:
+            if self.minibuffer_history:
+                if self.minibuffer_hist_idx < 0:
+                    self.minibuffer_hist_idx = len(self.minibuffer_history) - 1
+                else:
+                    self.minibuffer_hist_idx = max(0, self.minibuffer_hist_idx - 1)
+                self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
+            return
+        if key == 14:
+            if self.minibuffer_hist_idx >= 0:
+                self.minibuffer_hist_idx = min(len(self.minibuffer_history) - 1,
+                                                self.minibuffer_hist_idx + 1)
+                self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
+            return
         char = chr(key) if 0 < key < 0x110000 else ""
         if char and char.isprintable():
             self.minibuffer_text += char
 
     def _open_command_palette(self):
+        items_list = [(cmd, desc) for cmd, desc in PALETTE_ALL_CMDS]
+        selector = self._create_nc_selector(items_list, title="M-x")
+        if selector:
+            self.command_palette_active = True
+            return
         self.command_palette_active = True
         self.palette_idx = 0
-        self.minibuffer_text = ""
+        self.palette_filter = ""
 
     def _handle_palette_nc(self, key, ni):
         if key == 7 or key == 27:
@@ -771,7 +1122,7 @@ class RachaelTUI:
         commands = self._palette_commands()
         char = chr(key) if 0 < key < 0x110000 else ""
         if key == 14 or char == "j":
-            self.palette_idx = min(self.palette_idx + 1, len(commands) - 1)
+            self.palette_idx = min(self.palette_idx + 1, max(0, len(commands) - 1))
             return
         if key == 16 or char == "k":
             self.palette_idx = max(self.palette_idx - 1, 0)
@@ -780,42 +1131,22 @@ class RachaelTUI:
             if 0 <= self.palette_idx < len(commands):
                 cmd = commands[self.palette_idx]
                 self.command_palette_active = False
+                self.palette_filter = ""
                 self._do_command(cmd[0])
             return
         if key == 127 or key == 263:
-            self.minibuffer_text = self.minibuffer_text[:-1]
+            self.palette_filter = self.palette_filter[:-1]
+            self.palette_idx = 0
             return
         if char and char.isprintable():
-            self.minibuffer_text += char
+            self.palette_filter += char
             self.palette_idx = 0
 
     def _palette_commands(self) -> list:
-        all_cmds = [
-            ("quit", "Exit Rachael TUI"),
-            ("theme phosphor", "Phosphor Green theme"),
-            ("theme amber", "Amber CRT theme"),
-            ("theme cool-blue", "Cool Blue theme"),
-            ("theme solarized", "Solarized Dark theme"),
-            ("theme dracula", "Dracula theme"),
-            ("theme red-alert", "Red Alert theme"),
-            ("view agenda", "Switch to Agenda"),
-            ("view tree", "Switch to Tree"),
-            ("view programs", "Switch to Programs"),
-            ("view results", "Switch to Results"),
-            ("view reader", "Switch to Reader"),
-            ("view cockpit", "Switch to Cockpit"),
-            ("view snow", "Switch to SNOW"),
-            ("view evolution", "Switch to Evolution"),
-            ("view transcripts", "Switch to Transcripts"),
-            ("view voice", "Switch to Voice"),
-            ("runtime-toggle", "Toggle runtime ON/OFF"),
-            ("refresh", "Refresh all data"),
-            ("help", "Show keybinding help"),
-        ]
-        if self.minibuffer_text:
-            filt = self.minibuffer_text.lower()
-            return [(c, d) for c, d in all_cmds if filt in c.lower() or filt in d.lower()]
-        return all_cmds
+        if self.palette_filter:
+            filt = self.palette_filter.lower()
+            return [(c, d) for c, d in PALETTE_ALL_CMDS if filt in c.lower() or filt in d.lower()]
+        return PALETTE_ALL_CMDS
 
     def _do_search(self, query: str):
         if not query.strip():
@@ -873,6 +1204,12 @@ class RachaelTUI:
         elif verb == "refresh":
             threading.Thread(target=self._refresh_data, daemon=True).start()
             self._msg("Refreshing...")
+        elif verb == "consolidate":
+            try:
+                self.api.evolution_consolidate()
+                self._msg("Consolidation triggered")
+            except Exception as e:
+                self._msg("Error: " + str(e))
         elif verb == "capture" or verb == "cap":
             if arg:
                 self._do_capture(arg)
@@ -889,7 +1226,7 @@ class RachaelTUI:
             else:
                 self._open_minibuffer("Search: ", self._do_search)
         elif verb == "help":
-            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav j/k:nav M-x:cmd /:search c:cap T:theme 1-0:views")
+            self._msg("C-x C-c:quit C-g:cancel C-n/C-p:nav Tab:sidebar M-x:cmd /:search c:cap T:theme")
         else:
             self._do_cli(cmd)
 
@@ -898,14 +1235,24 @@ class RachaelTUI:
         if self.sidebar_visible and self.planes.sidebar:
             self._render_sidebar_plane()
         if self.planes.main:
-            self._render_main_plane()
+            if self.view == "cockpit" and self.planes.reel_widget:
+                self._render_cockpit_reel()
+            else:
+                self._render_main_plane()
         self._render_modeline_plane()
-        self._render_minibuffer_plane()
-        if self.command_palette_active and self.planes.palette_overlay:
+        if not self._nc_reader_active:
+            self._render_minibuffer_plane()
+        if self.command_palette_active and not self.planes.selector_widget and self.planes.palette_overlay:
             self._render_palette_plane()
-            self.planes.palette_overlay.move_above(self.planes.main)
-        elif self.planes.palette_overlay:
-            self.planes.palette_overlay.move_below(self.stdp)
+            try:
+                self.planes.palette_overlay.move_above(self.planes.main)
+            except Exception:
+                pass
+        elif self.planes.palette_overlay and not self.planes.selector_widget:
+            try:
+                self.planes.palette_overlay.move_below(self.stdp)
+            except Exception:
+                pass
 
     def _render_header_plane(self):
         p = self.planes.header
@@ -921,10 +1268,11 @@ class RachaelTUI:
         p.putstr_yx(0, max(0, cols - len(view_label)), view_label)
         ctrl = self.data_cache.get("control", {})
         mode = ctrl.get("mode", "human")
-        mode_label = "[" + mode.upper() + "]"
-        mid = cols // 2 - len(mode_label) // 2
+        sse = "\u25CF" if self.cockpit_connected else "\u25CB"
+        mid_label = sse + " [" + mode.upper() + "]"
+        mid = cols // 2 - len(mid_label) // 2
         if mid > 10:
-            p.putstr_yx(0, mid, mode_label)
+            p.putstr_yx(0, mid, mid_label)
 
     def _render_sidebar_plane(self):
         p = self.planes.sidebar
@@ -948,40 +1296,33 @@ class RachaelTUI:
             else:
                 self._set_fg(p, "fg")
             p.putstr_yx(y, 1, (prefix + label)[:cols - 2])
+
         info_y = len(VIEWS) + 2
-        if info_y < rows - 4:
+        if info_y < rows - 6:
             self._set_fg(p, "dim")
             p.putstr_yx(info_y, 1, "\u2500" * (cols - 2))
             runtime = self.data_cache.get("runtime", {})
             rt_on = runtime.get("active", False)
             self._set_fg(p, "success" if rt_on else "error")
             p.putstr_yx(info_y + 1, 1, ("Runtime: " + ("ON" if rt_on else "OFF"))[:cols - 2])
+
             budget = self.data_cache.get("budget", {})
             spent = budget.get("spent", 0)
             cap = budget.get("dailyCap", 0)
             self._set_fg(p, "dim")
             bstr = "$" + str(round(spent, 2)) + "/" + str(round(cap, 2))
             p.putstr_yx(info_y + 2, 1, ("Budget: " + bstr)[:cols - 2])
-            if NcProgbar and self.planes.progbar_plane and cap > 0:
-                try:
-                    pgb = NcProgbar(self.planes.progbar_plane)
-                    pgb.set_progress(min(1.0, spent / cap))
-                except Exception:
-                    pct = min(1.0, spent / cap)
+
+            if cap > 0:
+                pct = min(1.0, spent / cap)
+                if not self.planes.progbar_widget:
                     bar_w = cols - 4
                     filled = int(bar_w * pct)
                     bar = "\u2588" * filled + "\u2591" * (bar_w - filled)
                     color = "success" if pct < 0.7 else "warn" if pct < 0.9 else "error"
                     self._set_fg(p, color)
                     p.putstr_yx(info_y + 3, 2, bar[:cols - 4])
-            elif cap > 0:
-                pct = min(1.0, spent / cap)
-                bar_w = cols - 4
-                filled = int(bar_w * pct)
-                bar = "\u2588" * filled + "\u2591" * (bar_w - filled)
-                color = "success" if pct < 0.7 else "warn" if pct < 0.9 else "error"
-                self._set_fg(p, color)
-                p.putstr_yx(info_y + 3, 2, bar[:cols - 4])
+
             ctrl = self.data_cache.get("control", {})
             mode = ctrl.get("mode", "human")
             mode_y = info_y + 4
@@ -989,9 +1330,103 @@ class RachaelTUI:
                 mc = "info" if mode == "agent" else "warn"
                 self._set_fg(p, mc)
                 p.putstr_yx(mode_y, 1, ("Mode: " + mode.upper())[:cols - 2])
+
+            if self.sparkline_data and info_y + 5 < rows - 1:
+                self._render_braille_sparkline(p, info_y + 5, 1, cols - 3, list(self.sparkline_data)[-20:])
+
         for y in range(rows):
             self._set_fg(p, "border")
             p.putstr_yx(y, cols - 1, "\u2502")
+
+    def _render_braille_sparkline(self, plane, y: int, x: int, width: int, data: list):
+        if not data or width <= 0:
+            return
+        mn = min(data) if data else 0
+        mx = max(data) if data else 1
+        rng = mx - mn if mx != mn else 1
+        self._set_fg(plane, "accent")
+        for i in range(min(width, len(data))):
+            val = data[i]
+            normalized = (val - mn) / rng
+            idx = int(normalized * (len(BRAILLE_BLOCKS) - 1))
+            idx = max(0, min(len(BRAILLE_BLOCKS) - 1, idx))
+            plane.putstr_yx(y, x + i, BRAILLE_BLOCKS[idx])
+
+    def _render_cockpit_reel(self):
+        p = self.planes.main
+        if not p:
+            return
+        rows, cols = p.dim_yx()
+        p.erase()
+        self._set_bg(p, "bg")
+        self._set_fg(p, "accent")
+        title = "COCKPIT (" + str(len(self.cockpit_events)) + " events)"
+        p.putstr_yx(0, 1, title[:cols - 2])
+        conn_str = "\u25CF CONNECTED" if self.cockpit_connected else "\u25CB DISCONNECTED"
+        ry = max(0, cols - len(conn_str) - 2)
+        self._set_fg(p, "success" if self.cockpit_connected else "error")
+        p.putstr_yx(0, ry, conn_str[:cols - ry])
+        events = list(self.cockpit_events)
+        events.reverse()
+        y = 2
+        for i, evt in enumerate(events):
+            if y >= rows:
+                break
+            is_sel = i == self.selected_idx
+            is_new = self._is_item_new(evt)
+            self._set_bg(p, "bg")
+            self._set_fg(p, "dim")
+            ts = evt.get("timestamp", 0)
+            tstr = ""
+            if ts:
+                try:
+                    tstr = datetime.datetime.fromtimestamp(ts / 1000).strftime("%H:%M:%S")
+                except Exception:
+                    pass
+            p.putstr_yx(y, 1, "\u2500" * (cols - 2))
+            y += 1
+            if y >= rows:
+                break
+            etype = evt.get("eventType", "")
+            icon = "\u25CF"
+            if etype == "error":
+                icon = "\u2717"
+            elif etype == "take-over-point":
+                icon = "\u26A1"
+            elif etype == "decision":
+                icon = "\u25B6"
+            elif etype == "result":
+                icon = "\u2713"
+            if is_sel:
+                self._set_bg(p, "sel_bg")
+                self._set_fg(p, "sel_fg")
+            elif is_new:
+                self._pulse_fg(p, evt)
+            else:
+                color = "error" if etype == "error" else "fg"
+                self._set_fg(p, color)
+            src = evt.get("source", "")[:12]
+            desc = evt.get("description", "")
+            header_line = icon + " " + tstr + " [" + src + "] " + etype
+            p.putstr_yx(y, 1, header_line[:cols - 2])
+            y += 1
+            if y >= rows:
+                break
+            self._set_fg(p, "fg" if not is_sel else "sel_fg")
+            self._set_bg(p, "bg" if not is_sel else "sel_bg")
+            p.putstr_yx(y, 3, desc[:cols - 4])
+            y += 1
+            if is_sel and self.expanded_id == id(evt):
+                data = evt.get("data", {})
+                if data and isinstance(data, dict):
+                    for k, v in data.items():
+                        if y >= rows:
+                            break
+                        self._set_fg(p, "dim")
+                        self._set_bg(p, "bg")
+                        p.putstr_yx(y, 5, (str(k) + ": " + str(v))[:cols - 6])
+                        y += 1
+        self._set_bg(p, "bg")
 
     def _render_main_plane(self):
         p = self.planes.main
@@ -1005,6 +1440,7 @@ class RachaelTUI:
             return
         with self.data_lock:
             items = self._current_items()
+
         view_height = rows - 1
         if view_height < 1:
             return
@@ -1012,6 +1448,7 @@ class RachaelTUI:
             self.scroll_offset = self.selected_idx - view_height + 1
         if self.selected_idx < self.scroll_offset:
             self.scroll_offset = self.selected_idx
+
         self._set_fg(p, "dim")
         title = self.view.upper()
         if items:
@@ -1019,6 +1456,7 @@ class RachaelTUI:
         if self.view == "evolution":
             title += " [" + self.evo_tab + "] (l:cycle)"
         p.putstr_yx(0, 1, title[:cols - 2])
+
         y = 1
         for i in range(self.scroll_offset, len(items)):
             if y >= rows:
@@ -1026,7 +1464,9 @@ class RachaelTUI:
             item = items[i]
             is_sel = i == self.selected_idx
             is_exp = isinstance(item, dict) and item.get("id") == self.expanded_id
+            is_new = self._is_item_new(item)
             line = self._format_item(item, cols - 2)
+
             if is_sel:
                 self._set_bg(p, "sel_bg")
                 self._set_fg(p, "sel_fg")
@@ -1036,9 +1476,13 @@ class RachaelTUI:
             elif isinstance(item, dict) and item.get("status") == "error":
                 self._set_fg(p, "error")
                 self._set_bg(p, "bg")
+            elif is_new:
+                self._pulse_fg(p, item)
+                self._set_bg(p, "bg")
             else:
                 self._set_fg(p, "fg")
                 self._set_bg(p, "bg")
+
             padded = line.ljust(cols - 2)[:cols - 2]
             p.putstr_yx(y, 1, padded)
             self._set_bg(p, "bg")
@@ -1072,9 +1516,7 @@ class RachaelTUI:
         self._set_fg(p, "accent")
         p.putstr_yx(0, 1, (page.get("title", "?"))[:cols - 12])
         self._set_fg(p, "dim")
-        back_label = "[Esc:back]"
-        p.putstr_yx(0, max(1, cols - len(back_label) - 1), back_label)
-        self._set_fg(p, "dim")
+        p.putstr_yx(0, max(1, cols - 11), "[Esc:back]")
         p.putstr_yx(1, 1, (page.get("domain", "") + " \u2014 " + page.get("url", ""))[:cols - 2])
         text = page.get("extractedText", "")
         text_lines = text.split("\n")
@@ -1109,7 +1551,8 @@ class RachaelTUI:
         if self.last_refresh > 0:
             secs = int(time.time() - self.last_refresh)
             age = str(secs) + "s ago"
-        right = t_name + " | RT:" + rt + " | " + age + " "
+        sb = "SB" if self.sidebar_visible else "  "
+        right = t_name + " | RT:" + rt + " | " + sb + " | " + age + " "
         pad = cols - len(left) - len(right)
         if pad < 0:
             pad = 0
@@ -1145,17 +1588,20 @@ class RachaelTUI:
         p.putstr_yx(0, 0, "\u250C" + "\u2500" * (cols - 2) + "\u2510")
         for y in range(1, rows - 1):
             p.putstr_yx(y, 0, "\u2502")
+            self._set_bg(p, "bg")
+            p.putstr_yx(y, 1, " " * (cols - 2))
+            self._set_fg(p, "border")
             p.putstr_yx(y, cols - 1, "\u2502")
         p.putstr_yx(rows - 1, 0, "\u2514" + "\u2500" * (cols - 2) + "\u2518")
         self._set_fg(p, "accent")
         p.putstr_yx(0, 2, " M-x ")
-        filter_line = "Filter: " + self.minibuffer_text + "\u2588"
+        filter_line = "Filter: " + self.palette_filter + "\u2588"
         self._set_fg(p, "fg")
         p.putstr_yx(1, 2, filter_line[:cols - 4])
         commands = self._palette_commands()
         for i, (cmd, desc) in enumerate(commands):
-            y = 2 + i
-            if y >= rows - 1:
+            yy = 2 + i
+            if yy >= rows - 1:
                 break
             is_sel = i == self.palette_idx
             if is_sel:
@@ -1165,7 +1611,7 @@ class RachaelTUI:
                 self._set_fg(p, "fg")
                 self._set_bg(p, "bg")
             entry = (" " + cmd).ljust(cols - 2)[:cols - 2]
-            p.putstr_yx(y, 1, entry)
+            p.putstr_yx(yy, 1, entry)
         self._set_bg(p, "bg")
 
     def _format_item(self, item, max_width: int) -> str:
@@ -1185,9 +1631,9 @@ class RachaelTUI:
             runtime = self.data_cache.get("runtime", {})
             rp_list = runtime.get("programs", [])
             rp = None
-            for p in rp_list:
-                if p.get("name") == name:
-                    rp = p
+            for rp_item in rp_list:
+                if rp_item.get("name") == name:
+                    rp = rp_item
                     break
             if not enabled:
                 sc = STATUS_CHARS["disabled"]
@@ -1258,7 +1704,7 @@ class RachaelTUI:
             if item.get("version") is not None:
                 v = "v" + str(item.get("version", 0))
                 st = item.get("status", "")
-                applied = item.get("appliedAt", "")[:10]
+                applied = str(item.get("appliedAt", ""))[:10]
                 return (v + " [" + st + "] " + applied)[:max_width]
             if item.get("input"):
                 return ("\u25CF " + str(item.get("input", ""))[:max_width - 2])[:max_width]
@@ -1300,9 +1746,9 @@ class RachaelTUI:
             runtime = self.data_cache.get("runtime", {})
             rp_list = runtime.get("programs", [])
             rp = None
-            for p in rp_list:
-                if p.get("name") == item.get("name"):
-                    rp = p
+            for rp_item in rp_list:
+                if rp_item.get("name") == item.get("name"):
+                    rp = rp_item
                     break
             if rp:
                 lines.append("iter: " + str(rp.get("iteration", 0)) + "  status: " + str(rp.get("status", "?")))
@@ -1340,9 +1786,6 @@ class RachaelTUI:
             sid = item.get("sessionId")
             if sid:
                 lines.append("session: " + str(sid))
-            prog = item.get("program")
-            if prog:
-                lines.append("program: " + str(prog))
         elif self.view == "agenda":
             body = item.get("body") or item.get("rawOutput") or ""
             tags = item.get("tags")
@@ -1376,9 +1819,6 @@ class RachaelTUI:
             rb = item.get("rolledBackAt")
             if rb:
                 lines.append("Rolled back: " + str(rb))
-                reason = item.get("rollbackReason", "")
-                if reason:
-                    lines.append("Reason: " + str(reason))
         elif self.view == "snow":
             desc = item.get("description", "")
             if desc:
@@ -1513,10 +1953,16 @@ class RachaelTUI:
                     self._msg("Quit")
                 return
             if ch == 14:
-                self._navigate_down()
+                if self.command_palette_active:
+                    self.palette_idx = min(self.palette_idx + 1, max(0, len(self._palette_commands()) - 1))
+                else:
+                    self._navigate_down()
                 return
             if ch == 16:
-                self._navigate_up()
+                if self.command_palette_active:
+                    self.palette_idx = max(self.palette_idx - 1, 0)
+                else:
+                    self._navigate_up()
                 return
             if ch == 19:
                 self._open_minibuffer("I-search: ", self._do_search)
@@ -1524,6 +1970,9 @@ class RachaelTUI:
             if ch == 12:
                 threading.Thread(target=self._refresh_data, daemon=True).start()
                 self._msg("Refreshing...")
+                return
+            if ch == 9:
+                self.sidebar_visible = not self.sidebar_visible
                 return
             if ch == 27:
                 self.stdscr.timeout(50)
@@ -1533,7 +1982,7 @@ class RachaelTUI:
                     ch2 = None
                 self.stdscr.timeout(100)
                 if ch2 == "x" or ch2 == ord("x"):
-                    self._open_minibuffer("M-x ", self._do_command)
+                    self._open_command_palette()
                     return
                 if ch2 is None:
                     if self.minibuffer_active:
@@ -1568,9 +2017,6 @@ class RachaelTUI:
             self._init_curses_colors(curses)
             self._msg("Theme: " + self.theme.current["name"])
             return
-        if char == "b":
-            self.sidebar_visible = not self.sidebar_visible
-            return
         if char == "/":
             self._open_minibuffer("Search: ", self._do_search)
             return
@@ -1592,8 +2038,10 @@ class RachaelTUI:
             if ch == 10 or ch == 13:
                 cb = self.minibuffer_callback
                 text = self.minibuffer_text
+                if text:
+                    self.minibuffer_history.append(text)
                 self._close_minibuffer()
-                if cb:
+                if cb and text:
                     cb(text)
                 return
             if ch == 127 or ch == 263 or ch == 8:
@@ -1601,6 +2049,20 @@ class RachaelTUI:
                 return
             if ch == 11:
                 self.minibuffer_text = ""
+                return
+            if ch == 16:
+                if self.minibuffer_history:
+                    if self.minibuffer_hist_idx < 0:
+                        self.minibuffer_hist_idx = len(self.minibuffer_history) - 1
+                    else:
+                        self.minibuffer_hist_idx = max(0, self.minibuffer_hist_idx - 1)
+                    self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
+                return
+            if ch == 14:
+                if self.minibuffer_hist_idx >= 0:
+                    self.minibuffer_hist_idx = min(len(self.minibuffer_history) - 1,
+                                                    self.minibuffer_hist_idx + 1)
+                    self.minibuffer_text = self.minibuffer_history[self.minibuffer_hist_idx]
                 return
             char = chr(ch) if 0 < ch < 128 else ""
         if char and len(char) == 1 and char.isprintable():
@@ -1611,33 +2073,28 @@ class RachaelTUI:
         if isinstance(ch, int):
             if ch == 7 or ch == 27:
                 self.command_palette_active = False
-                return
-            if ch == 14:
-                self.palette_idx = min(self.palette_idx + 1, len(commands) - 1)
-                return
-            if ch == 16:
-                self.palette_idx = max(self.palette_idx - 1, 0)
+                self.palette_filter = ""
                 return
             if ch == 10 or ch == 13:
                 if 0 <= self.palette_idx < len(commands):
                     cmd = commands[self.palette_idx][0]
                     self.command_palette_active = False
-                    self.minibuffer_text = ""
+                    self.palette_filter = ""
                     self._do_command(cmd)
                 return
             if ch == 127 or ch == 263 or ch == 8:
-                self.minibuffer_text = self.minibuffer_text[:-1]
+                self.palette_filter = self.palette_filter[:-1]
                 self.palette_idx = 0
                 return
             char = chr(ch) if 0 < ch < 128 else ""
         if char == "j":
-            self.palette_idx = min(self.palette_idx + 1, len(commands) - 1)
+            self.palette_idx = min(self.palette_idx + 1, max(0, len(commands) - 1))
             return
         if char == "k":
             self.palette_idx = max(self.palette_idx - 1, 0)
             return
         if char and len(char) == 1 and char.isprintable():
-            self.minibuffer_text += char
+            self.palette_filter += char
             self.palette_idx = 0
 
     def _render_curses(self, stdscr, curses):
@@ -1664,9 +2121,6 @@ class RachaelTUI:
     def _render_header_curses(self, stdscr, curses, cols):
         header = " RACHAEL"
         right = self.view.upper() + " "
-        ctrl = self.data_cache.get("control", {})
-        mode = ctrl.get("mode", "human")
-        mid = "[" + mode.upper() + "]"
         pad = cols - len(header) - len(right)
         if pad < 0:
             pad = 0
@@ -1736,6 +2190,27 @@ class RachaelTUI:
                 stdscr.addnstr(info_y + 3, 2, bar[:sw - 4], sw - 4, curses.color_pair(color))
             except curses.error:
                 pass
+        if info_y + 4 < bottom and self.sparkline_data:
+            data_slice = list(self.sparkline_data)[-min(sw - 4, 20):]
+            spark_str = self._braille_sparkline_str(data_slice)
+            try:
+                stdscr.addnstr(info_y + 4, 2, spark_str[:sw - 4], sw - 4, curses.color_pair(3))
+            except curses.error:
+                pass
+
+    def _braille_sparkline_str(self, data: list) -> str:
+        if not data:
+            return ""
+        mn = min(data)
+        mx = max(data) if max(data) != mn else mn + 1
+        rng = mx - mn
+        result = ""
+        for val in data:
+            normalized = (val - mn) / rng
+            idx = int(normalized * (len(BRAILLE_BLOCKS) - 1))
+            idx = max(0, min(len(BRAILLE_BLOCKS) - 1, idx))
+            result += BRAILLE_BLOCKS[idx]
+        return result
 
     def _render_main_curses(self, stdscr, curses, top, bottom, left, width):
         if self.view == "reader" and self.reader_reading_id:
@@ -1845,7 +2320,8 @@ class RachaelTUI:
         if self.last_refresh > 0:
             secs = int(time.time() - self.last_refresh)
             age = str(secs) + "s"
-        right = t_name + " | RT:" + rt + " | " + age + " "
+        sb = "SB" if self.sidebar_visible else "  "
+        right = t_name + " | RT:" + rt + " | " + sb + " | " + age + " "
         pad = cols - len(left) - len(right)
         if pad < 0:
             pad = 0
@@ -1871,8 +2347,8 @@ class RachaelTUI:
 
     def _render_palette_curses_overlay(self, stdscr, curses, rows, cols):
         commands = self._palette_commands()
-        pw = min(50, cols - 4)
-        ph = min(len(commands) + 3, rows - 4)
+        pw = min(54, cols - 4)
+        ph = min(len(commands) + 3, rows - 4, 18)
         px = (cols - pw) // 2
         py = (rows - ph) // 2
         try:
@@ -1881,7 +2357,7 @@ class RachaelTUI:
                 stdscr.addnstr(py + i, px, "\u2502" + " " * (pw - 2) + "\u2502", pw, curses.color_pair(12))
             stdscr.addnstr(py + ph - 1, px, "\u2514" + "\u2500" * (pw - 2) + "\u2518", pw, curses.color_pair(12))
             stdscr.addnstr(py, px + 2, " M-x ", 5, curses.color_pair(3))
-            filt = "Filter: " + self.minibuffer_text + "_"
+            filt = "Filter: " + self.palette_filter + "_"
             stdscr.addnstr(py + 1, px + 2, filt[:pw - 4], pw - 4, curses.color_pair(1))
             for i, (cmd, desc) in enumerate(commands):
                 cy = py + 2 + i
