@@ -2372,11 +2372,8 @@ ${fullHtml}`;
     return ok(results.join("\n"));
   });
 
-  registerCommand("outlook", "Browse Outlook inbox/calendar via bridge", "outlook [inbox|calendar|read <n>] [--limit N] [--refresh]", async (args) => {
+  registerCommand("outlook", "Browse Outlook inbox/calendar via bridge", "outlook [inbox|calendar|read <n>|search <term>|sync] [--limit N] [--refresh]", async (args) => {
     const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
-    if (!isExtensionConnected()) {
-      return fail("[outlook] Chrome extension bridge not connected. Outlook requires your real browser session.\nRun: bridge-status");
-    }
     const sub = args[0] || "inbox";
     const refresh = args.includes("--refresh");
     const limitIdx = args.indexOf("--limit");
@@ -2419,6 +2416,24 @@ ${fullHtml}`;
             }
           }
         }
+      }
+
+      if (!isExtensionConnected()) {
+        const staleEmails = await storage.getOutlookEmails({ limit });
+        if (staleEmails.length > 0) {
+          const lastSync = await storage.getOutlookSyncTimestamp();
+          const ageMin = lastSync ? Math.round((Date.now() - lastSync.getTime()) / 60000) : -1;
+          const lines = [`=== OUTLOOK INBOX === (from DB, synced ${ageMin > 0 ? ageMin + "m" : "?"}  ago — bridge offline)`, ""];
+          staleEmails.forEach((e, i) => {
+            const unread = e.unread ? "*" : " ";
+            const from = (e.from || "").padEnd(25).slice(0, 25);
+            const date = (e.date || "").padEnd(12).slice(0, 12);
+            lines.push(`${unread}${String(i + 1).padStart(3)}  ${date}  ${from}  ${(e.subject || "").slice(0, 60)}`);
+          });
+          lines.push("", "Bridge not connected — showing last synced data. Connect extension to refresh.");
+          return ok(lines.join("\n"));
+        }
+        return fail("[outlook] Bridge not connected and no persisted data available.\nRun: bridge-status");
       }
 
       emitEvent("cli", "Fetching Outlook inbox via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
@@ -2498,6 +2513,7 @@ ${fullHtml}`;
     }
 
     if (sub === "calendar") {
+      if (!isExtensionConnected()) return fail("[outlook] Calendar requires bridge connection.\nRun: bridge-status");
       emitEvent("cli", "Fetching Outlook calendar via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
       const result = await smartFetch("https://outlook.office.com/calendar/view/week", "dom", "cli-outlook-cal", {
         maxText: 30000,
@@ -2751,10 +2767,14 @@ ${fullHtml}`;
     return ok(lines.length > 0 ? lines.join("\n") : "Nothing on the agenda today.");
   });
 
-  registerCommand("snow", "ServiceNow command center", "snow [home|incidents|changes|requests|detail <number>|queue|refresh]", async (args) => {
+  registerCommand("snow", "ServiceNow command center", "snow [home|incidents|changes|requests|detail <number>|queue|refresh|search|persisted]", async (args) => {
     const { isExtensionConnected } = await import("./bridge-queue");
-    if (!isExtensionConnected()) {
-      return fail("[snow] Chrome extension bridge not connected. ServiceNow requires your real browser session.\nRun: bridge-status");
+    const sub = args[0] || "incidents";
+    const refresh = args.includes("--refresh");
+
+    const persistedOnlyCmds = ["search", "persisted"];
+    if (!isExtensionConnected() && !persistedOnlyCmds.includes(sub) && refresh) {
+      return fail("[snow] Chrome extension bridge not connected. Scraping requires your real browser session.\nRun: bridge-status\nFor persisted data, omit --refresh.");
     }
 
     let instanceConfig = await storage.getAgentConfig("snow_instance");
@@ -2765,9 +2785,6 @@ ${fullHtml}`;
       emitEvent("cli", `Auto-configured snow_instance: ${instanceUrl}`, "info", { metadata: { command: "snow" } });
     }
     const baseUrl = instanceUrl.replace(/\/+$/, "");
-
-    const sub = args[0] || "incidents";
-    const refresh = args.includes("--refresh");
     const nl = String.fromCharCode(10);
 
     const snowProfile = await storage.getSiteProfileByName("servicenow");
@@ -2862,6 +2879,14 @@ ${fullHtml}`;
       }
     }
 
+    function snowTicketsToRecords(tickets: any[]) {
+      return tickets.map((t: any) => ({
+        number: t.number, shortDescription: t.shortDescription || "", state: t.state || "",
+        priority: t.priority || "", type: t.type as any, assignedTo: t.assignedTo || "",
+        assignmentGroup: t.assignmentGroup || "", url: "", slaBreached: false,
+      }));
+    }
+
     async function snowPersistedFirst(typeFilter: string, label: string, navPathName: string): Promise<CommandResult> {
       const cached = snowCache;
       if (cached && !refresh) {
@@ -2874,25 +2899,34 @@ ${fullHtml}`;
 
       if (!refresh) {
         const lastSync = await storage.getSnowSyncTimestamp();
+        const bridgeOnline = isExtensionConnected();
         if (lastSync) {
           const ageMs = Date.now() - lastSync.getTime();
           const STALE_THRESHOLD = 30 * 60 * 1000;
-          if (ageMs < STALE_THRESHOLD) {
+          if (ageMs < STALE_THRESHOLD || !bridgeOnline) {
             const persisted = await storage.getSnowTickets({ type: typeFilter, limit: 50 });
             if (persisted.length > 0) {
               const ageMin = Math.round(ageMs / 60000);
-              const asRecords = persisted.map(t => ({
-                number: t.number, shortDescription: t.shortDescription || "", state: t.state || "",
-                priority: t.priority || "", type: t.type as any, assignedTo: t.assignedTo || "",
-                assignmentGroup: t.assignmentGroup || "", url: "", slaBreached: false,
-              }));
-              return ok(formatSnowList(label + " [db]", asRecords) + `${nl}Synced ${ageMin}m ago. Use: snow ${navPathName} --refresh to re-scrape`);
+              const suffix = !bridgeOnline ? " (bridge offline)" : "";
+              return ok(formatSnowList(label + " [db]", snowTicketsToRecords(persisted)) + `${nl}Synced ${ageMin}m ago${suffix}. Use: snow ${navPathName} --refresh to re-scrape`);
             }
           }
         }
+        if (!bridgeOnline) {
+          const anyPersisted = await storage.getSnowTickets({ type: typeFilter, limit: 50 });
+          if (anyPersisted.length > 0) {
+            return ok(formatSnowList(label + " [db]", snowTicketsToRecords(anyPersisted)) + `${nl}Bridge offline — showing last synced data.`);
+          }
+          return fail(`[snow] Bridge not connected and no persisted ${typeFilter}s available.\nRun: bridge-status`);
+        }
       }
 
-      const records = await scrapeSnowNavPath(navPathName === "incidents" ? "list-my-incidents" : navPathName === "changes" ? "list-my-changes" : "list-my-requests", typeFilter);
+      if (!isExtensionConnected()) {
+        return fail(`[snow] Bridge not connected. Cannot scrape with --refresh.\nRun: bridge-status`);
+      }
+
+      const pathName = navPathName === "incidents" ? "list-my-incidents" : navPathName === "changes" ? "list-my-changes" : "list-my-requests";
+      const records = await scrapeSnowNavPath(pathName, typeFilter);
       mergeSnowCache(records, typeFilter);
       if (records.length > 0) await persistSnowResults(records, navPathName);
       if (records.length === 0) return ok(`=== SNOW ${label} ===${nl}${nl}No ${typeFilter}s found or could not parse. Try: snow refresh`);
@@ -2922,6 +2956,27 @@ ${fullHtml}`;
       else if (/^REQ|^RITM/i.test(recordNumber)) tableName = "sc_req_item";
       const detailUrl = buildSnowRecordUrl(baseUrl, tableName, recordNumber);
 
+      const infoSource = cachedRecord || dbTicket;
+
+      if (!isExtensionConnected() || !refresh) {
+        if (infoSource) {
+          const lines = [`=== ${recordNumber} ===`, ""];
+          lines.push(`Short Description: ${infoSource.shortDescription || ""}`);
+          lines.push(`State: ${infoSource.state || ""}`);
+          lines.push(`Priority: ${infoSource.priority || ""}`);
+          lines.push(`Assigned To: ${infoSource.assignedTo || ""}`);
+          lines.push(`Group: ${infoSource.assignmentGroup || ""}`);
+          if ("updatedOn" in infoSource) lines.push(`Updated: ${(infoSource as any).updatedOn || ""}`);
+          lines.push("", `Open in browser: ${detailUrl}`);
+          if (!isExtensionConnected()) lines.push("", "Bridge offline — showing cached data only.");
+          else lines.push("", "Use: snow detail " + recordNumber + " --refresh to re-scrape from browser");
+          return ok(lines.join(nl));
+        }
+        if (!isExtensionConnected()) {
+          return fail(`[snow] Bridge offline and no cached data for ${recordNumber}.\nRun: bridge-status`);
+        }
+      }
+
       const detailNavPath = navPathMap["view-record-detail"];
       emitEvent("cli", `Opening ServiceNow record: ${recordNumber}`, "info", { metadata: { command: "snow detail" } });
 
@@ -2948,13 +3003,13 @@ ${fullHtml}`;
       }
 
       const lines = [`=== ${recordNumber} ===`, ""];
-      if (cachedRecord) {
-        lines.push(`Short Description: ${cachedRecord.shortDescription}`);
-        lines.push(`State: ${cachedRecord.state}`);
-        lines.push(`Priority: ${cachedRecord.priority}`);
-        lines.push(`Assigned To: ${cachedRecord.assignedTo}`);
-        lines.push(`Group: ${cachedRecord.assignmentGroup}`);
-        lines.push(`Updated: ${cachedRecord.updatedOn}`);
+      if (infoSource) {
+        lines.push(`Short Description: ${infoSource.shortDescription || ""}`);
+        lines.push(`State: ${infoSource.state || ""}`);
+        lines.push(`Priority: ${infoSource.priority || ""}`);
+        lines.push(`Assigned To: ${infoSource.assignedTo || ""}`);
+        lines.push(`Group: ${infoSource.assignmentGroup || ""}`);
+        if ("updatedOn" in infoSource) lines.push(`Updated: ${(infoSource as any).updatedOn || ""}`);
         lines.push("");
       }
       lines.push("--- Page Content ---", "");
@@ -3137,6 +3192,60 @@ ${fullHtml}`;
 
     return fail(`[snow] unknown subcommand "${sub}"${nl}Usage: snow [home|incidents|changes|requests|detail <number>|queue|refresh|search <term>|persisted]`);
   });
+
+  let citrixKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  const CITRIX_KEEPALIVE_INTERVAL = 10 * 60 * 1000;
+
+  async function doCitrixPing(): Promise<void> {
+    try {
+      const cfg = await storage.getAgentConfig("citrix_keepalive");
+      if (cfg?.value !== "true") { stopCitrixKeepalive(); return; }
+
+      const { isExtensionConnected, smartFetch } = await import("./bridge-queue");
+      if (!isExtensionConnected()) {
+        emitEvent("citrix", "Keepalive skipped — bridge not connected", "warn");
+        return;
+      }
+
+      const portals = await storage.getAgentConfig("citrix_portals");
+      let portalUrl = "https://workspace.uchealth.org";
+      if (portals?.value) {
+        try {
+          const parsed = JSON.parse(portals.value);
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].url) portalUrl = parsed[0].url;
+        } catch {}
+      }
+
+      const result = await smartFetch(portalUrl, "dom", "citrix-keepalive", { maxText: 1000 }, 30000);
+      const status = result.error ? `error: ${result.error}` : "OK";
+      await storage.setAgentConfig("citrix_last_ping", new Date().toISOString(), "citrix");
+      emitEvent("citrix", `Keepalive ping: ${status}`, result.error ? "warn" : "info");
+    } catch (e: any) {
+      emitEvent("citrix", `Keepalive ping failed: ${e.message}`, "warn");
+    }
+  }
+
+  function startCitrixKeepalive(): void {
+    if (citrixKeepaliveTimer) return;
+    citrixKeepaliveTimer = setInterval(doCitrixPing, CITRIX_KEEPALIVE_INTERVAL);
+    doCitrixPing();
+    emitEvent("citrix", "Keepalive timer started (10m interval)", "info");
+  }
+
+  function stopCitrixKeepalive(): void {
+    if (citrixKeepaliveTimer) {
+      clearInterval(citrixKeepaliveTimer);
+      citrixKeepaliveTimer = null;
+      emitEvent("citrix", "Keepalive timer stopped", "info");
+    }
+  }
+
+  (async () => {
+    try {
+      const cfg = await storage.getAgentConfig("citrix_keepalive");
+      if (cfg?.value === "true") startCitrixKeepalive();
+    } catch {}
+  })();
 
   registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--save] | citrix clean | citrix portal [add|list|remove|scan]", async (args) => {
     const CITRIX_JUNK_SET = new Set(["open", "restart", "request", "cancel request", "add to favorites", "remove from favorites", "install", "more", "less", "cancel", "save", "refresh"]);
@@ -3468,14 +3577,18 @@ ${fullHtml}`;
       const nl = String.fromCharCode(10);
       if (args[1] === "on") {
         await storage.setAgentConfig("citrix_keepalive", "true", "citrix");
+        startCitrixKeepalive();
         return ok(`Citrix keepalive enabled. Portal pinged every 10 minutes to prevent idle timeout.`);
       }
       if (args[1] === "off") {
         await storage.setAgentConfig("citrix_keepalive", "false", "citrix");
+        stopCitrixKeepalive();
         return ok("Citrix keepalive disabled.");
       }
       const cfg = await storage.getAgentConfig("citrix_keepalive");
-      return ok(`Citrix keepalive is ${cfg?.value === "true" ? "ON" : "OFF"}.${nl}Usage: citrix keepalive on|off`);
+      const lastPing = await storage.getAgentConfig("citrix_last_ping");
+      const pingInfo = lastPing?.value ? ` Last ping: ${lastPing.value}` : "";
+      return ok(`Citrix keepalive is ${cfg?.value === "true" ? "ON" : "OFF"}.${pingInfo}${nl}Usage: citrix keepalive on|off`);
     }
 
     if (args[0] === "clean") {
