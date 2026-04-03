@@ -5574,12 +5574,101 @@ ${fullHtml}`;
       return ok(outLines.join(nl));
     }
 
+    if (args[0] === "context") {
+      const { scrapeGalaxyContext, isGalaxyContextEnabled } = await import("./galaxy-scraper");
+      const term = args.slice(1).join(" ");
+      if (!term) return fail("[galaxy] Usage: galaxy context <term or topic>");
+
+      const enabled = await isGalaxyContextEnabled();
+      if (!enabled) {
+        return fail("[galaxy] Galaxy context mode is OFF. Enable with: galaxy auto on");
+      }
+
+      emitEvent("galaxy-context", `Manual context scrape: "${term}"`, "info");
+      const result = await scrapeGalaxyContext(term);
+      if (result.error) {
+        return fail(`[galaxy] Context scrape failed: ${result.error}`);
+      }
+      return ok([
+        `Galaxy context scrape complete:`,
+        `  Term:     ${term}`,
+        `  Guides:   ${result.guidesRead} read`,
+        `  Memories: ${result.memoriesCreated} created`,
+        "",
+        "Content stored as semantic memories for agent use.",
+      ].join(nl));
+    }
+
+    if (args[0] === "auto") {
+      const { isGalaxyContextEnabled, setGalaxyContextEnabled, getGalaxyContextStats, getContextQueue } = await import("./galaxy-scraper");
+
+      if (args[1] === "on") {
+        await setGalaxyContextEnabled(true);
+        emitEvent("galaxy-context", "Galaxy context mode ENABLED", "info");
+        return ok("Galaxy context mode is now ON. The agent will proactively search Galaxy for Epic context.");
+      }
+
+      if (args[1] === "off") {
+        await setGalaxyContextEnabled(false);
+        emitEvent("galaxy-context", "Galaxy context mode DISABLED", "info");
+        return ok("Galaxy context mode is now OFF.");
+      }
+
+      const enabled = await isGalaxyContextEnabled();
+      const stats = await getGalaxyContextStats();
+      const queue = await getContextQueue();
+
+      const lines = [
+        `=== GALAXY CONTEXT MODE ===`,
+        `  Status:           ${enabled ? "ON" : "OFF"}`,
+        `  Last run:         ${stats.lastRun || "never"}`,
+        `  Total searches:   ${stats.totalSearches}`,
+        `  Guides read:      ${stats.totalGuidesRead}`,
+        `  Memories created: ${stats.memoriesCreated}`,
+        `  Errors:           ${stats.errors}`,
+        "",
+        `  Queue (${queue.length}):`,
+      ];
+      if (queue.length > 0) {
+        for (const t of queue.slice(0, 10)) {
+          lines.push(`    - ${t}`);
+        }
+        if (queue.length > 10) lines.push(`    ... +${queue.length - 10} more`);
+      } else {
+        lines.push("    (empty)");
+      }
+      if (stats.lastTerms.length > 0) {
+        lines.push("", `  Recent terms:`);
+        for (const t of stats.lastTerms.slice(0, 10)) {
+          lines.push(`    - ${t}`);
+        }
+      }
+      lines.push("", "  galaxy auto on   - Enable context mode");
+      lines.push("  galaxy auto off  - Disable context mode");
+      return ok(lines.join(nl));
+    }
+
+    if (args[0] === "queue") {
+      const { addToContextQueue, getContextQueue } = await import("./galaxy-scraper");
+      const terms = args.slice(1).join(" ").split(",").map(t => t.trim()).filter(t => t.length > 2);
+      if (terms.length === 0) {
+        const queue = await getContextQueue();
+        if (queue.length === 0) return ok("Galaxy context queue is empty.");
+        return ok([`Galaxy context queue (${queue.length}):`, ...queue.map(t => `  - ${t}`)].join(nl));
+      }
+      await addToContextQueue(terms);
+      return ok(`Added ${terms.length} term(s) to Galaxy context queue: ${terms.join(", ")}`);
+    }
+
     return ok([
       "Galaxy Knowledge Base (galaxy.epic.com)",
       "========================================",
       "  galaxy search <query>    - Search Galaxy for articles/guides",
       "  galaxy read <url or #>   - Fetch & save a guide to Reader",
       "  galaxy recent            - Show recently saved Galaxy guides",
+      "  galaxy context <term>    - Scrape Galaxy for context on a term",
+      "  galaxy auto [on|off]     - Toggle/view autonomous context mode",
+      "  galaxy queue [terms,...] - View/add to the context queue",
       "",
       "Galaxy is behind Epic SSO. Requires Chrome extension bridge.",
       "Rate limited: 3-8s between requests, max 5 per session.",

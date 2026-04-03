@@ -18,6 +18,7 @@ import type { Program } from "@shared/schema";
 import { initQdrant } from "./qdrant-client";
 import { storeMemoryWithQdrant, searchMemoriesHybrid, getMemoryContextHybrid, runConsolidation } from "./memory-consolidation";
 import { runEvolutionPipeline, checkAutoRollback, validateProposal, addToGoldenSuite, consolidateObservations } from "./evolution-engine";
+import { runGalaxyContextCycle, extractTermsFromEpicResults, addToContextQueue, isGalaxyContextEnabled } from "./galaxy-scraper";
 
 export type ProgramStatus = "idle" | "queued" | "running" | "completed" | "error";
 
@@ -1004,6 +1005,21 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       console.error("[agent-runtime] Auto-rollback check failed:", e);
     }
 
+    try {
+      const isEpicRelated = programName.toLowerCase().includes("epic") ||
+        output.toLowerCase().includes("hyperspace") ||
+        output.toLowerCase().includes("galaxy.epic.com");
+      if (isEpicRelated && await isGalaxyContextEnabled()) {
+        const terms = await extractTermsFromEpicResults(output);
+        if (terms.length > 0) {
+          await addToContextQueue(terms);
+          emitEvent("galaxy-context", `Queued ${terms.length} terms from "${programName}": ${terms.join(", ")}`, "info", { program: programName });
+        }
+      }
+    } catch (e) {
+      console.error("[agent-runtime] Galaxy term extraction failed:", e);
+    }
+
     const nextRun = parseSchedule(prog.schedule, ps.lastRun, prog.cronExpression);
     ps.nextRun = nextRun;
     await storage.updateProgramLastRun(prog.id, ps.lastRun, nextRun);
@@ -1137,6 +1153,12 @@ async function tick(): Promise<void> {
   } catch (err) {
     console.error("[agent-runtime] Observation consolidation tick error:", err);
   }
+
+  try {
+    await tickGalaxyContext();
+  } catch (err) {
+    console.error("[agent-runtime] Galaxy context tick error:", err);
+  }
 }
 
 let lastObservationConsolidation = 0;
@@ -1158,6 +1180,21 @@ async function tickObservationConsolidation(): Promise<void> {
     }
   } catch (e) {
     console.error("[agent-runtime] Periodic observation consolidation failed:", e);
+  }
+}
+
+let lastGalaxyContextTick = 0;
+const GALAXY_CONTEXT_INTERVAL_MS = 15 * 60 * 1000;
+
+async function tickGalaxyContext(): Promise<void> {
+  const now = Date.now();
+  if (now - lastGalaxyContextTick < GALAXY_CONTEXT_INTERVAL_MS) return;
+  lastGalaxyContextTick = now;
+
+  try {
+    await runGalaxyContextCycle();
+  } catch (e) {
+    console.error("[agent-runtime] Galaxy context cycle failed:", e);
   }
 }
 
