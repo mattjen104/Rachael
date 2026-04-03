@@ -2440,6 +2440,23 @@ ${fullHtml}`;
       const emails = parseOutlookInbox(source, text, extracted);
       setMailCache({ emails, fetchedAt: Date.now() });
 
+      for (const email of emails) {
+        try {
+          const msgId = `${email.from}-${email.date}-${email.subject}`.substring(0, 200);
+          const isSnow = /servicenow|service-now|INC\d|CHG\d|REQ\d|RITM\d/i.test(email.subject);
+          await storage.upsertOutlookEmail({
+            messageId: msgId,
+            from: email.from,
+            subject: email.subject,
+            date: email.date,
+            preview: email.subject.substring(0, 200),
+            unread: email.unread,
+            isSnowNotification: isSnow,
+          });
+        } catch {}
+      }
+      await storage.setAgentConfig("outlook_last_sync", new Date().toISOString(), "boot");
+
       if (emails.length === 0) {
         const sampleText = text.slice(0, 500).split(/[\n\r]+/).filter(l => l.trim().length > 0).slice(0, 10).join(String.fromCharCode(10));
         return ok(`=== OUTLOOK INBOX ===\n\nPage loaded (${text.length} chars) but could not parse emails.\nExtracted rows: ${extracted?.rows?.length || 0}\n\nSample text:\n${sampleText}\n\nTry: outlook --raw   for full debug output\nOr:  outlook --refresh`);
@@ -2578,7 +2595,36 @@ ${fullHtml}`;
       return ok(lines.join(nl));
     }
 
-    return fail(`[outlook] unknown subcommand "${sub}"\nUsage: outlook [inbox|calendar|read <n>] [--limit N] [--refresh]`);
+    if (sub === "search") {
+      const query = args.slice(1).join(" ").trim();
+      if (!query) return fail("[outlook] Usage: outlook search <term>");
+      const results = await storage.searchOutlookEmails(query, 30);
+      if (results.length === 0) return ok(`No emails found matching "${query}".`);
+      const lines = [`=== OUTLOOK SEARCH: "${query}" === (${results.length} results)`, ""];
+      results.forEach((e, i) => {
+        const unread = e.unread ? "*" : " ";
+        const from = e.from.padEnd(25).slice(0, 25);
+        const date = e.date.padEnd(12).slice(0, 12);
+        lines.push(`${unread}${String(i + 1).padStart(3)}  ${date}  ${from}  ${e.subject.slice(0, 60)}`);
+      });
+      return ok(lines.join("\n"));
+    }
+
+    if (sub === "sync") {
+      const persisted = await storage.getOutlookEmails({ unreadOnly: false, limit: 50 });
+      if (persisted.length === 0) return ok("No persisted emails. Run: outlook inbox --refresh");
+      const unread = persisted.filter(e => e.unread);
+      const lines = [`=== OUTLOOK PERSISTED === (${persisted.length} total, ${unread.length} unread)`, ""];
+      unread.forEach((e, i) => {
+        const from = e.from.padEnd(25).slice(0, 25);
+        const date = e.date.padEnd(12).slice(0, 12);
+        lines.push(`* ${String(i + 1).padStart(3)}  ${date}  ${from}  ${e.subject.slice(0, 60)}`);
+      });
+      if (unread.length === 0) lines.push("  No unread emails.");
+      return ok(lines.join("\n"));
+    }
+
+    return fail(`[outlook] unknown subcommand "${sub}"\nUsage: outlook [inbox|calendar|read <n>|search <term>|sync] [--limit N] [--refresh]`);
   });
 
   registerCommand("teams", "Browse Microsoft Teams chats via bridge", "teams [chats|channels] [--refresh]", async (args) => {
@@ -2770,6 +2816,24 @@ ${fullHtml}`;
           rawOutput,
           status: "ok",
         });
+        for (const r of records) {
+          try {
+            await storage.upsertSnowTicket({
+              number: r.number,
+              type: r.type,
+              shortDescription: r.shortDescription,
+              state: r.state,
+              priority: r.priority,
+              assignedTo: r.assignedTo,
+              assignmentGroup: r.assignmentGroup,
+              updatedOn: r.updatedOn,
+              source: r.source || "personal",
+              slaBreached: r.slaBreached || false,
+              url: r.url || null,
+            });
+          } catch {}
+        }
+        await storage.setAgentConfig("snow_last_sync", new Date().toISOString(), "boot");
       } catch (e: any) {
         console.error(`[snow] Failed to persist results: ${e.message}`);
       }
@@ -3014,7 +3078,39 @@ ${fullHtml}`;
       return ok(lines.join(nl));
     }
 
-    return fail(`[snow] unknown subcommand "${sub}"${nl}Usage: snow [home|incidents|changes|requests|detail <number>|queue|refresh]`);
+    if (sub === "search") {
+      const query = args.slice(1).join(" ").trim();
+      if (!query) return fail("[snow] Usage: snow search <term>");
+      const results = await storage.searchSnowTickets(query, 30);
+      if (results.length === 0) return ok(`No tickets found matching "${query}".`);
+      const lines = [`=== SNOW SEARCH: "${query}" === (${results.length} results)`, ""];
+      results.forEach((t) => {
+        const sla = t.slaBreached ? " !!SLA" : "";
+        lines.push(`  ${t.number.padEnd(15)} ${t.state.padEnd(12)} ${t.shortDescription.slice(0, 50)}${sla}`);
+      });
+      return ok(lines.join(nl));
+    }
+
+    if (sub === "persisted" || sub === "db") {
+      const tickets = await storage.getSnowTickets({ limit: 50 });
+      if (tickets.length === 0) return ok("No persisted tickets. Run: snow refresh");
+      const byType = new Map<string, typeof tickets>();
+      for (const t of tickets) {
+        if (!byType.has(t.type)) byType.set(t.type, []);
+        byType.get(t.type)!.push(t);
+      }
+      const lines = [`=== SNOW PERSISTED === (${tickets.length} tickets)`, ""];
+      for (const [type, items] of byType) {
+        lines.push(`  ${type.toUpperCase()} (${items.length})`);
+        for (const t of items.slice(0, 10)) {
+          lines.push(`    ${t.number.padEnd(15)} ${t.state.padEnd(12)} ${t.shortDescription.slice(0, 45)}`);
+        }
+        if (items.length > 10) lines.push(`    ... +${items.length - 10} more`);
+      }
+      return ok(lines.join(nl));
+    }
+
+    return fail(`[snow] unknown subcommand "${sub}"${nl}Usage: snow [home|incidents|changes|requests|detail <number>|queue|refresh|search <term>|persisted]`);
   });
 
   registerCommand("citrix", "Scrape Citrix workspace portal apps", "citrix [--save] | citrix clean | citrix portal [add|list|remove|scan]", async (args) => {
@@ -3676,6 +3772,135 @@ ${fullHtml}`;
         return fail(`[epic] ${e.message}`);
       }
     }
+    if (args[0] === "login") {
+      const { getSecret } = await import("./secrets");
+      const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+
+      if (args[1] === "--setup") {
+        const epicUser = await getSecret("epic_username");
+        const epicPass = await getSecret("epic_password");
+        const lines = [
+          "=== EPIC LOGIN SETUP ===",
+          "",
+          `  EPIC_USERNAME: ${epicUser ? "configured" : "NOT SET"}`,
+          `  EPIC_PASSWORD: ${epicPass ? "configured" : "NOT SET"}`,
+          `  Bridge:        ${isExtensionConnected() ? "connected" : "NOT connected"}`,
+          "",
+        ];
+        if (!epicUser || !epicPass) {
+          lines.push("  To configure credentials:");
+          lines.push("    secrets request epic_username epic_password --purpose \"Epic CWP/Hyperspace login\"");
+        }
+        if (!isExtensionConnected()) {
+          lines.push("  Bridge extension must be connected for web form fill.");
+        }
+        if (epicUser && epicPass && isExtensionConnected()) {
+          lines.push("  All systems ready. Run: epic login");
+        }
+        return ok(lines.join(nl));
+      }
+
+      const epicUser = await getSecret("epic_username");
+      const epicPass = await getSecret("epic_password");
+      if (!epicUser || !epicPass) {
+        return fail("[epic login] Credentials not configured. Run: epic login --setup");
+      }
+      if (!isExtensionConnected()) {
+        return fail("[epic login] Bridge extension not connected. Run: bridge-status");
+      }
+
+      const target = args[1] || "all";
+      const results: string[] = ["=== EPIC LOGIN ===", ""];
+      let cwpDone = false;
+      let hswDone = false;
+
+      if (target === "all" || target === "cwp") {
+        emitEvent("cli", "Authenticating CWP portal...", "info", { metadata: { command: "epic login" } });
+        try {
+          const cwpResult = await smartFetch("https://cwp.ucsd.edu", "dom", "epic-login-cwp", {
+            reuseTab: true,
+            spaWaitMs: 5000,
+            fillFields: {
+              'input[name="username"], input[type="text"][id*="user"], #username, input[name="login"]': epicUser,
+              'input[name="password"], input[type="password"], #password': epicPass,
+            },
+            submitSelector: 'button[type="submit"], input[type="submit"], #loginButton, button[name="submit"]',
+            fillDelayMs: 300,
+            waitAfterSubmitMs: 8000,
+            maxText: 5000,
+          }, 60000);
+          if (cwpResult.error) {
+            results.push(`  CWP: FAILED - ${cwpResult.error}`);
+          } else {
+            cwpDone = true;
+            results.push("  CWP: Credentials filled. Waiting for Duo approval...");
+            results.push("       (Approve the Duo push on your phone)");
+          }
+        } catch (e: any) {
+          results.push(`  CWP: ERROR - ${e.message}`);
+        }
+      }
+
+      if (target === "all" || target === "hsw") {
+        emitEvent("cli", "Authenticating Hyperspace Web...", "info", { metadata: { command: "epic login" } });
+        try {
+          const hswUrl = "https://epicweb.ucsd.edu";
+          const hswResult = await smartFetch(hswUrl, "dom", "epic-login-hsw", {
+            reuseTab: true,
+            spaWaitMs: 5000,
+            fillFields: {
+              'input[name="username"], input[type="text"][id*="user"], #username': epicUser,
+              'input[name="password"], input[type="password"], #password': epicPass,
+            },
+            submitSelector: 'button[type="submit"], input[type="submit"], #loginButton',
+            fillDelayMs: 300,
+            waitAfterSubmitMs: 8000,
+            maxText: 5000,
+          }, 60000);
+          if (hswResult.error) {
+            results.push(`  Hyperspace Web: FAILED - ${hswResult.error}`);
+          } else {
+            hswDone = true;
+            results.push("  Hyperspace Web: Credentials filled. Waiting for Duo approval...");
+          }
+        } catch (e: any) {
+          results.push(`  Hyperspace Web: ERROR - ${e.message}`);
+        }
+      }
+
+      if (target === "all" || target === "text") {
+        const agentPort = process.env.PORT || 5000;
+        try {
+          const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "login",
+              credentials: { username: epicUser, password: epicPass },
+            }),
+          });
+          const data = await resp.json() as any;
+          if (data.ok) {
+            results.push("  Text/PuTTY: Login command sent to desktop agent.");
+            results.push("              Agent will handle the double-login sequence.");
+          } else {
+            results.push("  Text/PuTTY: Desktop agent not responding. Run: epic setup");
+          }
+        } catch {
+          results.push("  Text/PuTTY: Desktop agent not reachable (skipped).");
+        }
+      }
+
+      await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
+
+      results.push("");
+      if (cwpDone || hswDone) {
+        results.push("  Tap Duo approve on your phone to complete authentication.");
+      }
+      results.push("  Re-run specific targets: epic login cwp | epic login hsw | epic login text");
+      return ok(results.join(nl));
+    }
+
     if (args[0] === "setup") {
       return ok([
         "Epic Desktop Agent Setup",
@@ -6285,6 +6510,124 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         "  meals tonight accept|skip           - Accept or skip recommendation",
       ].join(nl));
     });
+
+  registerCommand("boot", "Morning startup sequence", "boot [--status|--skip-login]", async (args) => {
+    const nl = String.fromCharCode(10);
+    const { isExtensionConnected } = await import("./bridge-queue");
+    const { getSecret } = await import("./secrets");
+
+    if (args[0] === "--status" || args[0] === "status") {
+      const bridgeConnected = isExtensionConnected();
+      const epicUser = await getSecret("epic_username");
+      const lastLogin = await storage.getAgentConfig("boot_last_login");
+      const lastOutlook = await storage.getAgentConfig("outlook_last_sync");
+      const lastSnow = await storage.getAgentConfig("snow_last_sync");
+      const keepalive = await storage.getAgentConfig("citrix_keepalive");
+
+      const emailCount = (await storage.getOutlookEmails({ limit: 1 })).length > 0;
+      const ticketCount = (await storage.getSnowTickets({ limit: 1 })).length > 0;
+
+      function ageStr(isoStr: string | undefined): string {
+        if (!isoStr) return "never";
+        const age = Math.round((Date.now() - new Date(isoStr).getTime()) / 60000);
+        if (age < 60) return `${age}m ago`;
+        if (age < 1440) return `${Math.round(age / 60)}h ago`;
+        return `${Math.round(age / 1440)}d ago`;
+      }
+
+      const lines = [
+        "=== BOOT STATUS ===",
+        "",
+        `  Bridge:          ${bridgeConnected ? "CONNECTED" : "OFFLINE"}`,
+        `  Epic Credentials: ${epicUser ? "configured" : "NOT SET"}`,
+        `  Last Login:      ${ageStr(lastLogin?.value)}`,
+        `  Last Outlook:    ${ageStr(lastOutlook?.value)} ${emailCount ? "(data persisted)" : "(no data)"}`,
+        `  Last SNOW:       ${ageStr(lastSnow?.value)} ${ticketCount ? "(data persisted)" : "(no data)"}`,
+        `  Citrix Keepalive: ${keepalive?.value === "true" ? "ON" : "OFF"}`,
+        "",
+        "  boot             - Run full startup",
+        "  boot --skip-login - Skip login, just sync data",
+      ];
+      return ok(lines.join(nl));
+    }
+
+    const skipLogin = args.includes("--skip-login") || args.includes("--skip");
+    const steps: Array<{ name: string; run: () => Promise<string> }> = [];
+
+    if (!skipLogin) {
+      steps.push({
+        name: "Epic Login",
+        run: async () => {
+          const epicUser = await getSecret("epic_username");
+          const epicPass = await getSecret("epic_password");
+          if (!epicUser || !epicPass) return "SKIPPED (credentials not configured)";
+          if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+          const result = await executeCommand("epic", ["login"]);
+          return result.success ? "done (check Duo)" : `failed: ${result.output.slice(0, 80)}`;
+        },
+      });
+    }
+
+    steps.push({
+      name: "Outlook Sync",
+      run: async () => {
+        if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+        const result = await executeCommand("outlook", ["inbox", "--refresh"]);
+        if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
+        const match = result.output.match(/(\d+) messages/);
+        return match ? `done (${match[1]} emails)` : "done";
+      },
+    });
+
+    steps.push({
+      name: "ServiceNow Sync",
+      run: async () => {
+        if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+        const result = await executeCommand("snow", ["refresh"]);
+        if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
+        const match = result.output.match(/Total:\s+(\d+)/);
+        return match ? `done (${match[1]} tickets)` : "done";
+      },
+    });
+
+    steps.push({
+      name: "Citrix Keepalive",
+      run: async () => {
+        await storage.setAgentConfig("citrix_keepalive", "true", "citrix");
+        return "enabled";
+      },
+    });
+
+    const lines = ["=== MORNING BOOT ===", ""];
+    let failed = 0;
+    for (const step of steps) {
+      emitEvent("cli", `Boot: ${step.name}...`, "info", { metadata: { command: "boot" } });
+      try {
+        const result = await step.run();
+        const icon = result.startsWith("SKIPPED") || result.startsWith("failed") ? "x" : "+";
+        if (result.startsWith("failed")) failed++;
+        lines.push(`  [${icon}] ${step.name}: ${result}`);
+      } catch (e: any) {
+        failed++;
+        lines.push(`  [x] ${step.name}: ERROR - ${e.message}`);
+      }
+    }
+
+    await storage.setAgentConfig("boot_last_run", new Date().toISOString(), "boot");
+
+    lines.push("");
+    if (failed > 0) {
+      lines.push(`  ${steps.length - failed}/${steps.length} steps completed. ${failed} failed.`);
+    } else {
+      lines.push(`  All ${steps.length} steps completed.`);
+    }
+    lines.push("");
+    lines.push("  boot --status    - Check system status");
+    lines.push("  outlook sync     - View persisted emails");
+    lines.push("  snow persisted   - View persisted tickets");
+
+    return ok(lines.join(nl));
+  });
 }
 
 registerBuiltinCommands();

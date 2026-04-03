@@ -30,6 +30,19 @@ All data lives in Postgres tables:
 - `radar_engagement` — User engagement tracking for research radar briefing items (url, source, title)
 - `galaxy_kb` — Galaxy Knowledge Base entries (title, url, category, summary, fullText, verified/flagged status, userNotes, memoryCount, searchTerm)
 - `agent_memories.source_kb_id` — Links agent memories to their source Galaxy KB entry
+- `outlook_emails` — Persisted Outlook emails (messageId, from, subject, date, body, unread, syncedAt)
+- `snow_tickets` — Persisted ServiceNow tickets (number, type, shortDescription, state, priority, assignedTo, assignmentGroup, updatedOn, source, syncedAt)
+
+## Morning Boot System
+
+- **`boot` command** — Sequences workday startup: epic login → outlook sync → snow sync → citrix keepalive
+- **`epic login`** — Bridge form-fill for CWP/Hyperspace/Text with native React SPA setter; credentials via `secrets` module (`epic_username`/`epic_password`)
+- **`outlook sync`** — Incremental Outlook inbox scraping with DB persistence; `outlook search` for historical lookups
+- **`snow search`/`snow persisted`** — ServiceNow ticket persistence with upsert sync; historical search across persisted tickets
+- **Boot status tracking** — `agent_config` keys: `boot_last_login`, `outlook_last_sync`, `snow_last_sync`, `boot_last_run`
+- **Shared bridge rate limiter** — `waitForBridgeRateLimit`/`bridgeRequestDone` in bridge-queue.ts; 2-5s minimum gap, 10-request cooldown window
+- **API routes**: `/api/outlook-emails`, `/api/snow-tickets`, `/api/boot/status`
+- **TreeView fallback** — Shows persisted DB data with `[db]` indicator when bridge data unavailable
 
 ## Secure Credential Collection
 

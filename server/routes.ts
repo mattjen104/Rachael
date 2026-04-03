@@ -1196,6 +1196,28 @@ export async function registerRoutes(
       galaxyKbEntries = (await storage.getGalaxyKbEntries()).map(({ fullText, ...rest }) => rest);
     } catch {}
 
+    let persistedEmails: any[] = [];
+    try {
+      persistedEmails = await storage.getOutlookEmails({ unreadOnly: true, limit: 50 });
+    } catch {}
+
+    let persistedTickets: any[] = [];
+    try {
+      persistedTickets = await storage.getSnowTickets({ limit: 100 });
+    } catch {}
+
+    let bootStatus: Record<string, string> = {};
+    try {
+      const lastLogin = await storage.getAgentConfig("boot_last_login");
+      const lastOutlook = await storage.getAgentConfig("outlook_last_sync");
+      const lastSnow = await storage.getAgentConfig("snow_last_sync");
+      const lastBoot = await storage.getAgentConfig("boot_last_run");
+      if (lastLogin?.value) bootStatus.lastLogin = lastLogin.value;
+      if (lastOutlook?.value) bootStatus.lastOutlook = lastOutlook.value;
+      if (lastSnow?.value) bootStatus.lastSnow = lastSnow.value;
+      if (lastBoot?.value) bootStatus.lastBoot = lastBoot.value;
+    } catch {}
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -1212,6 +1234,9 @@ export async function registerRoutes(
       galaxyKb: galaxyKbEntries,
       citrixPortals,
       citrixPortalApps,
+      persistedEmails,
+      persistedTickets,
+      bootStatus,
     });
   });
 
@@ -2639,6 +2664,69 @@ export async function registerRoutes(
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
     await storage.deleteGalaxyKbEntry(id);
     res.json({ ok: true });
+  });
+
+  app.get("/api/outlook-emails", async (req, res) => {
+    const unreadOnly = req.query.unread === "true";
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const emails = await storage.getOutlookEmails({ unreadOnly, limit });
+    res.json(emails);
+  });
+
+  app.get("/api/outlook-emails/search", async (req, res) => {
+    const q = req.query.q as string;
+    if (!q) return res.status(400).json({ message: "q parameter required" });
+    const results = await storage.searchOutlookEmails(q);
+    res.json(results);
+  });
+
+  app.post("/api/outlook-emails/:id/read", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    await storage.markEmailRead(id);
+    res.json({ ok: true });
+  });
+
+  app.get("/api/snow-tickets", async (req, res) => {
+    const type = req.query.type as string | undefined;
+    const source = req.query.source as string | undefined;
+    const limit = parseInt(req.query.limit as string, 10) || 100;
+    const tickets = await storage.getSnowTickets({ type, source, limit });
+    res.json(tickets);
+  });
+
+  app.get("/api/snow-tickets/search", async (req, res) => {
+    const q = req.query.q as string;
+    if (!q) return res.status(400).json({ message: "q parameter required" });
+    const results = await storage.searchSnowTickets(q);
+    res.json(results);
+  });
+
+  app.get("/api/snow-tickets/:number", async (req, res) => {
+    const ticket = await storage.getSnowTicketByNumber(req.params.number);
+    if (!ticket) return res.status(404).json({ message: "Ticket not found" });
+    res.json(ticket);
+  });
+
+  app.get("/api/boot/status", async (_req, res) => {
+    const { isExtensionConnected } = await import("./bridge-queue");
+    const { getSecret } = await import("./secrets");
+    const epicUser = await getSecret("epic_username");
+    const lastLogin = await storage.getAgentConfig("boot_last_login");
+    const lastOutlook = await storage.getAgentConfig("outlook_last_sync");
+    const lastSnow = await storage.getAgentConfig("snow_last_sync");
+    const lastBoot = await storage.getAgentConfig("boot_last_run");
+    const keepalive = await storage.getAgentConfig("citrix_keepalive");
+
+    res.json({
+      bridgeConnected: isExtensionConnected(),
+      credentialsConfigured: !!epicUser,
+      lastLogin: lastLogin?.value || null,
+      lastOutlook: lastOutlook?.value || null,
+      lastSnow: lastSnow?.value || null,
+      lastBoot: lastBoot?.value || null,
+      citrixKeepalive: keepalive?.value === "true",
+    });
   });
 
   return httpServer;

@@ -811,6 +811,57 @@ async function executeJob(job) {
         };
       }
 
+      const fillFields = options?.fillFields || null;
+      if (fillFields && Object.keys(fillFields).length > 0) {
+        const fillDelayMs = options?.fillDelayMs || 200;
+        const submitSelector = options?.submitSelector || null;
+        const waitAfterSubmitMs = options?.waitAfterSubmitMs || 5000;
+        console.log(`[bridge] filling ${Object.keys(fillFields).length} form fields`);
+        
+        const fillResults = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: async (fields, delay, submitSel, waitMs) => {
+            const filled = {};
+            for (const [selector, value] of Object.entries(fields)) {
+              await new Promise(r => setTimeout(r, delay));
+              const el = document.querySelector(selector);
+              if (el) {
+                el.focus();
+                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                  window.HTMLInputElement.prototype, 'value'
+                )?.set;
+                if (nativeInputValueSetter) {
+                  nativeInputValueSetter.call(el, value);
+                } else {
+                  el.value = value;
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                filled[selector] = true;
+              } else {
+                filled[selector] = false;
+              }
+            }
+            if (submitSel) {
+              await new Promise(r => setTimeout(r, delay));
+              const btn = document.querySelector(submitSel);
+              if (btn) {
+                btn.click();
+                filled['__submitted'] = true;
+                await new Promise(r => setTimeout(r, waitMs));
+              } else {
+                filled['__submitted'] = false;
+              }
+            }
+            return { filled, url: location.href, title: document.title };
+          },
+          args: [fillFields, fillDelayMs, submitSelector, waitAfterSubmitMs],
+        });
+        
+        const fillData = fillResults?.[0]?.result || {};
+        console.log(`[bridge] form fill result:`, JSON.stringify(fillData.filled || {}));
+      }
+
       if (clickSelector && clickMatchText) {
         const pollTimeout = options?.pollTimeoutMs || 15000;
         console.log(`[bridge] polling for text "${clickMatchText}" with selector "${clickSelector}" (timeout=${pollTimeout}ms)`);

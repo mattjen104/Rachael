@@ -27,6 +27,8 @@ import {
   type EvolutionObservation, type InsertEvolutionObservation, evolutionObservations,
   type JudgeCost, type InsertJudgeCost, judgeCostTracking,
   type GalaxyKbEntry, type InsertGalaxyKb, galaxyKb,
+  type OutlookEmail, type InsertOutlookEmail, outlookEmails,
+  type SnowTicket, type InsertSnowTicket, snowTickets,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
@@ -210,6 +212,22 @@ export interface IStorage {
   flagGalaxyKbEntry(id: number, reason: string): Promise<GalaxyKbEntry | undefined>;
   incrementGalaxyKbAccess(id: number): Promise<void>;
   getGalaxyKbStats(): Promise<{ total: number; verified: number; flagged: number; categories: string[] }>;
+
+  getOutlookEmails(opts?: { unreadOnly?: boolean; limit?: number }): Promise<OutlookEmail[]>;
+  getOutlookEmail(id: number): Promise<OutlookEmail | undefined>;
+  getOutlookEmailByMessageId(messageId: string): Promise<OutlookEmail | undefined>;
+  createOutlookEmail(e: InsertOutlookEmail): Promise<OutlookEmail>;
+  upsertOutlookEmail(e: InsertOutlookEmail): Promise<OutlookEmail>;
+  markEmailRead(id: number): Promise<void>;
+  searchOutlookEmails(query: string, limit?: number): Promise<OutlookEmail[]>;
+  getOutlookSyncTimestamp(): Promise<Date | null>;
+
+  getSnowTickets(opts?: { type?: string; source?: string; limit?: number }): Promise<SnowTicket[]>;
+  getSnowTicket(id: number): Promise<SnowTicket | undefined>;
+  getSnowTicketByNumber(number: string): Promise<SnowTicket | undefined>;
+  upsertSnowTicket(t: InsertSnowTicket): Promise<SnowTicket>;
+  searchSnowTickets(query: string, limit?: number): Promise<SnowTicket[]>;
+  getSnowSyncTimestamp(): Promise<Date | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1020,6 +1038,118 @@ export class DatabaseStorage implements IStorage {
       flagged: all.filter(e => e.flagged).length,
       categories,
     };
+  }
+  async getOutlookEmails(opts?: { unreadOnly?: boolean; limit?: number }): Promise<OutlookEmail[]> {
+    const conditions = [];
+    if (opts?.unreadOnly) conditions.push(eq(outlookEmails.unread, true));
+    const q = conditions.length > 0
+      ? db.select().from(outlookEmails).where(and(...conditions)).orderBy(desc(outlookEmails.syncedAt))
+      : db.select().from(outlookEmails).orderBy(desc(outlookEmails.syncedAt));
+    if (opts?.limit) return (q as any).limit(opts.limit);
+    return q;
+  }
+
+  async getOutlookEmail(id: number): Promise<OutlookEmail | undefined> {
+    const [e] = await db.select().from(outlookEmails).where(eq(outlookEmails.id, id));
+    return e;
+  }
+
+  async getOutlookEmailByMessageId(messageId: string): Promise<OutlookEmail | undefined> {
+    const [e] = await db.select().from(outlookEmails).where(eq(outlookEmails.messageId, messageId));
+    return e;
+  }
+
+  async createOutlookEmail(e: InsertOutlookEmail): Promise<OutlookEmail> {
+    const [created] = await db.insert(outlookEmails).values(e).returning();
+    return created;
+  }
+
+  async upsertOutlookEmail(e: InsertOutlookEmail): Promise<OutlookEmail> {
+    if (e.messageId) {
+      const existing = await this.getOutlookEmailByMessageId(e.messageId);
+      if (existing) {
+        const [updated] = await db.update(outlookEmails).set({
+          ...e,
+          syncedAt: new Date(),
+        }).where(eq(outlookEmails.id, existing.id)).returning();
+        return updated;
+      }
+    }
+    return this.createOutlookEmail(e);
+  }
+
+  async markEmailRead(id: number): Promise<void> {
+    await db.update(outlookEmails).set({ unread: false }).where(eq(outlookEmails.id, id));
+  }
+
+  async searchOutlookEmails(query: string, limit: number = 20): Promise<OutlookEmail[]> {
+    const pattern = `%${query}%`;
+    return db.select().from(outlookEmails).where(
+      or(
+        ilike(outlookEmails.subject, pattern),
+        ilike(outlookEmails.from, pattern),
+        ilike(outlookEmails.body, pattern),
+        ilike(outlookEmails.preview, pattern)
+      )
+    ).orderBy(desc(outlookEmails.syncedAt)).limit(limit);
+  }
+
+  async getOutlookSyncTimestamp(): Promise<Date | null> {
+    const [latest] = await db.select({ syncedAt: outlookEmails.syncedAt })
+      .from(outlookEmails).orderBy(desc(outlookEmails.syncedAt)).limit(1);
+    return latest?.syncedAt || null;
+  }
+
+  async getSnowTickets(opts?: { type?: string; source?: string; limit?: number }): Promise<SnowTicket[]> {
+    const conditions = [];
+    if (opts?.type) conditions.push(eq(snowTickets.type, opts.type));
+    if (opts?.source) conditions.push(eq(snowTickets.source, opts.source));
+    const q = conditions.length > 0
+      ? db.select().from(snowTickets).where(and(...conditions)).orderBy(desc(snowTickets.syncedAt))
+      : db.select().from(snowTickets).orderBy(desc(snowTickets.syncedAt));
+    if (opts?.limit) return (q as any).limit(opts.limit);
+    return q;
+  }
+
+  async getSnowTicket(id: number): Promise<SnowTicket | undefined> {
+    const [t] = await db.select().from(snowTickets).where(eq(snowTickets.id, id));
+    return t;
+  }
+
+  async getSnowTicketByNumber(number: string): Promise<SnowTicket | undefined> {
+    const [t] = await db.select().from(snowTickets).where(eq(snowTickets.number, number));
+    return t;
+  }
+
+  async upsertSnowTicket(t: InsertSnowTicket): Promise<SnowTicket> {
+    const existing = await this.getSnowTicketByNumber(t.number);
+    if (existing) {
+      const [updated] = await db.update(snowTickets).set({
+        ...t,
+        syncedAt: new Date(),
+      }).where(eq(snowTickets.id, existing.id)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(snowTickets).values(t).returning();
+    return created;
+  }
+
+  async searchSnowTickets(query: string, limit: number = 20): Promise<SnowTicket[]> {
+    const pattern = `%${query}%`;
+    return db.select().from(snowTickets).where(
+      or(
+        ilike(snowTickets.number, pattern),
+        ilike(snowTickets.shortDescription, pattern),
+        ilike(snowTickets.assignedTo, pattern),
+        ilike(snowTickets.assignmentGroup, pattern)
+      )
+    ).orderBy(desc(snowTickets.syncedAt)).limit(limit);
+  }
+
+  async getSnowSyncTimestamp(): Promise<Date | null> {
+    const [latest] = await db.select({ syncedAt: snowTickets.syncedAt })
+      .from(snowTickets).orderBy(desc(snowTickets.syncedAt)).limit(1);
+    return latest?.syncedAt || null;
   }
 }
 

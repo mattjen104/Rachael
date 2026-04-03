@@ -721,3 +721,63 @@ export const insertGalaxyKbSchema = z.object({
 });
 export type InsertGalaxyKb = z.infer<typeof insertGalaxyKbSchema>;
 export type GalaxyKbEntry = typeof galaxyKb.$inferSelect;
+
+export const outlookEmails = pgTable("outlook_emails", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  messageId: text("message_id").unique(),
+  from: text("from_address").notNull(),
+  subject: text("subject").notNull(),
+  date: text("date").notNull(),
+  body: text("body"),
+  preview: text("preview"),
+  unread: boolean("unread").notNull().default(true),
+  isSnowNotification: boolean("is_snow_notification").notNull().default(false),
+  syncedAt: timestamp("synced_at").notNull().defaultNow(),
+});
+
+export const insertOutlookEmailSchema = z.object({
+  messageId: z.string().nullable().optional(),
+  from: z.string(),
+  subject: z.string(),
+  date: z.string(),
+  body: z.string().nullable().optional(),
+  preview: z.string().nullable().optional(),
+  unread: z.boolean().default(true),
+  isSnowNotification: z.boolean().default(false),
+});
+export type InsertOutlookEmail = z.infer<typeof insertOutlookEmailSchema>;
+export type OutlookEmail = typeof outlookEmails.$inferSelect;
+
+export const snowTickets = pgTable("snow_tickets", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  number: text("number").notNull().unique(),
+  type: text("type").notNull().default("incident"),
+  shortDescription: text("short_description").notNull(),
+  state: text("state").notNull().default("New"),
+  priority: text("priority").notNull().default(""),
+  assignedTo: text("assigned_to").notNull().default(""),
+  assignmentGroup: text("assignment_group").notNull().default(""),
+  updatedOn: text("updated_on").notNull().default(""),
+  source: text("source").notNull().default("personal"),
+  slaBreached: boolean("sla_breached").notNull().default(false),
+  url: text("url"),
+  detailCached: text("detail_cached"),
+  syncedAt: timestamp("synced_at").notNull().defaultNow(),
+});
+
+export const insertSnowTicketSchema = z.object({
+  number: z.string(),
+  type: z.string().default("incident"),
+  shortDescription: z.string(),
+  state: z.string().default("New"),
+  priority: z.string().default(""),
+  assignedTo: z.string().default(""),
+  assignmentGroup: z.string().default(""),
+  updatedOn: z.string().default(""),
+  source: z.string().default("personal"),
+  slaBreached: z.boolean().default(false),
+  url: z.string().nullable().optional(),
+  detailCached: z.string().nullable().optional(),
+});
+export type InsertSnowTicket = z.infer<typeof insertSnowTicketSchema>;
+export type SnowTicket = typeof snowTickets.$inferSelect;

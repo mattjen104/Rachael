@@ -29,6 +29,10 @@ export interface BridgeJob {
     reuseTab?: boolean;
     autoOpenDownload?: boolean;
     pollTimeoutMs?: number;
+    fillFields?: Record<string, string>;
+    submitSelector?: string;
+    fillDelayMs?: number;
+    waitAfterSubmitMs?: number;
   };
   submittedBy: string;
   submittedAt: number;
@@ -253,6 +257,55 @@ export function getQueueStatus(): {
   };
 }
 
+export const bridgeRateLimiter = {
+  lastFetchTime: 0,
+  inFlight: false,
+  requestCount: 0,
+  sessionStart: 0,
+};
+
+function randomDelay(minMs: number, maxMs: number): number {
+  return minMs + Math.floor(Math.random() * (maxMs - minMs));
+}
+
+export async function waitForBridgeRateLimit(caller: string): Promise<string | null> {
+  if (bridgeRateLimiter.inFlight) {
+    return `Bridge request already in progress (${caller}).`;
+  }
+
+  const now = Date.now();
+  const SESSION_WINDOW = 10 * 60 * 1000;
+  if (now - bridgeRateLimiter.sessionStart > SESSION_WINDOW) {
+    bridgeRateLimiter.requestCount = 0;
+    bridgeRateLimiter.sessionStart = now;
+  }
+
+  if (bridgeRateLimiter.requestCount >= 10) {
+    const cooldown = randomDelay(15000, 30000);
+    const sinceLast = now - bridgeRateLimiter.lastFetchTime;
+    if (sinceLast < cooldown) {
+      return `Bridge cooldown active (${bridgeRateLimiter.requestCount} requests). Waiting.`;
+    }
+    bridgeRateLimiter.requestCount = 0;
+    bridgeRateLimiter.sessionStart = now;
+  }
+
+  const sinceLast = now - bridgeRateLimiter.lastFetchTime;
+  const minWait = randomDelay(2000, 5000);
+  if (sinceLast < minWait && bridgeRateLimiter.lastFetchTime > 0) {
+    await new Promise(resolve => setTimeout(resolve, minWait - sinceLast));
+  }
+
+  bridgeRateLimiter.inFlight = true;
+  bridgeRateLimiter.lastFetchTime = Date.now();
+  bridgeRateLimiter.requestCount++;
+  return null;
+}
+
+export function bridgeRequestDone(): void {
+  bridgeRateLimiter.inFlight = false;
+}
+
 export async function smartFetch(
   url: string,
   type: "fetch" | "dom",
@@ -263,14 +316,22 @@ export async function smartFetch(
   const bridgeOnly = isBridgeOnlyDomain(url);
 
   if (isExtensionConnected()) {
-    const jobId = submitJob(type, url, submittedBy, options);
-    const result = await waitForResult(jobId, timeoutMs);
-    if (!result.error) return result;
-    if (bridgeOnly) {
-      emitEvent("bridge", `Bridge-only domain ${url} failed: ${result.error} (no direct fallback allowed)`, "warn");
-      return result;
+    const rateLimitMsg = await waitForBridgeRateLimit(submittedBy);
+    if (rateLimitMsg) {
+      emitEvent("bridge", rateLimitMsg, "info");
     }
-    emitEvent("bridge", `Extension bridge failed for ${url}: ${result.error}, trying direct fetch`, "warn");
+    try {
+      const jobId = submitJob(type, url, submittedBy, options);
+      const result = await waitForResult(jobId, timeoutMs);
+      if (!result.error) return result;
+      if (bridgeOnly) {
+        emitEvent("bridge", `Bridge-only domain ${url} failed: ${result.error} (no direct fallback allowed)`, "warn");
+        return result;
+      }
+      emitEvent("bridge", `Extension bridge failed for ${url}: ${result.error}, trying direct fetch`, "warn");
+    } finally {
+      bridgeRequestDone();
+    }
   }
 
   if (bridgeOnly) {

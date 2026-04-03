@@ -523,15 +523,21 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
 
     const emails = mailInbox.data || [];
     const chats = teamsChats.data || [];
+    const persistedEmails = (data as any)?.persistedEmails || [];
+    const persistedTickets = (data as any)?.persistedTickets || [];
+    const bootStatus = (data as any)?.bootStatus || {};
     const bridgeHint = bridgeConnected
       ? (mailInbox.isFetching ? "Loading inbox..." : "Enter: fetch")
       : "Not connected — check extension options";
 
-    const mailLabel = mailInbox.isFetching ? "MAIL (loading...)" : "MAIL (Outlook)";
-    nodes.push({ type: "section", label: mailLabel, key: "mail", count: emails.length || (bridgeConnected ? -1 : 0) });
+    const displayEmails = emails.length > 0 ? emails : persistedEmails.map((e: any, i: number) => ({
+      index: i, from: e.from || e.from_address || "", subject: e.subject || "", unread: e.unread, date: e.date || "",
+    }));
+    const mailLabel = mailInbox.isFetching ? "MAIL (loading...)" : `MAIL (Outlook)${emails.length === 0 && persistedEmails.length > 0 ? " [db]" : ""}`;
+    nodes.push({ type: "section", label: mailLabel, key: "mail", count: displayEmails.length || (bridgeConnected ? -1 : 0) });
     if (expanded.has("mail")) {
-      if (emails.length > 0) {
-        for (const e of emails.slice(0, 10)) {
+      if (displayEmails.length > 0) {
+        for (const e of displayEmails.slice(0, 15)) {
           nodes.push({ type: "mail", index: e.index || 0, from: e.from, subject: e.subject, unread: e.unread, date: e.date || "" });
         }
       } else if (mailInbox.isFetching) {
@@ -553,12 +559,17 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
     }
 
     const snowData = snowRecords.data?.records || [];
-    const snowIncidents = snowData.filter(r => r.type === "incident");
-    const snowChanges = snowData.filter(r => r.type === "change");
-    const snowRequests = snowData.filter(r => r.type === "request");
-    const snowTotal = snowData.length;
+    const displaySnow = snowData.length > 0 ? snowData : persistedTickets.map((t: any) => ({
+      number: t.number, shortDescription: t.shortDescription || t.short_description || "", state: t.state,
+      priority: t.priority, type: t.type, slaBreached: t.slaBreached || t.sla_breached || false, url: t.url,
+    }));
+    const snowIncidents = displaySnow.filter((r: any) => r.type === "incident");
+    const snowChanges = displaySnow.filter((r: any) => r.type === "change");
+    const snowRequests = displaySnow.filter((r: any) => r.type === "request");
+    const snowTotal = displaySnow.length;
 
-    nodes.push({ type: "section", label: "SNOW (ServiceNow)", key: "snow", count: snowTotal || (bridgeConnected ? -1 : 0) });
+    const snowLabel = `SNOW (ServiceNow)${snowData.length === 0 && persistedTickets.length > 0 ? " [db]" : ""}`;
+    nodes.push({ type: "section", label: snowLabel, key: "snow", count: snowTotal || (bridgeConnected ? -1 : 0) });
     if (expanded.has("snow")) {
       if (snowTotal > 0) {
         if (snowIncidents.length > 0) {
