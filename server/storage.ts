@@ -26,6 +26,7 @@ import {
   type GoldenSuiteEntry, type InsertGoldenSuite, goldenSuite,
   type EvolutionObservation, type InsertEvolutionObservation, evolutionObservations,
   type JudgeCost, type InsertJudgeCost, judgeCostTracking,
+  type GalaxyKbEntry, type InsertGalaxyKb, galaxyKb,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
@@ -196,6 +197,17 @@ export interface IStorage {
   getJudgeCostsForDate(date: string): Promise<JudgeCost[]>;
   createJudgeCost(c: InsertJudgeCost): Promise<JudgeCost>;
   getJudgeCostSummary(): Promise<JudgeCost[]>;
+
+  getGalaxyKbEntries(category?: string): Promise<GalaxyKbEntry[]>;
+  getGalaxyKbEntry(id: number): Promise<GalaxyKbEntry | undefined>;
+  getGalaxyKbByUrl(url: string): Promise<GalaxyKbEntry | undefined>;
+  createGalaxyKbEntry(e: InsertGalaxyKb): Promise<GalaxyKbEntry>;
+  updateGalaxyKbEntry(id: number, data: Partial<InsertGalaxyKb>): Promise<GalaxyKbEntry | undefined>;
+  deleteGalaxyKbEntry(id: number): Promise<void>;
+  searchGalaxyKb(query: string, limit?: number): Promise<GalaxyKbEntry[]>;
+  verifyGalaxyKbEntry(id: number, verifiedBy: string): Promise<GalaxyKbEntry | undefined>;
+  flagGalaxyKbEntry(id: number, reason: string): Promise<GalaxyKbEntry | undefined>;
+  getGalaxyKbStats(): Promise<{ total: number; verified: number; flagged: number; categories: string[] }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -909,6 +921,84 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(judgeCostTracking)
       .orderBy(desc(judgeCostTracking.createdAt))
       .limit(100);
+  }
+
+  async getGalaxyKbEntries(category?: string): Promise<GalaxyKbEntry[]> {
+    if (category) {
+      return db.select().from(galaxyKb).where(eq(galaxyKb.category, category)).orderBy(desc(galaxyKb.createdAt));
+    }
+    return db.select().from(galaxyKb).orderBy(desc(galaxyKb.createdAt));
+  }
+
+  async getGalaxyKbEntry(id: number): Promise<GalaxyKbEntry | undefined> {
+    const [e] = await db.select().from(galaxyKb).where(eq(galaxyKb.id, id));
+    return e;
+  }
+
+  async getGalaxyKbByUrl(url: string): Promise<GalaxyKbEntry | undefined> {
+    const [e] = await db.select().from(galaxyKb).where(eq(galaxyKb.url, url));
+    return e;
+  }
+
+  async createGalaxyKbEntry(e: InsertGalaxyKb): Promise<GalaxyKbEntry> {
+    const [created] = await db.insert(galaxyKb).values(e).returning();
+    return created;
+  }
+
+  async updateGalaxyKbEntry(id: number, data: Partial<InsertGalaxyKb>): Promise<GalaxyKbEntry | undefined> {
+    const [updated] = await db.update(galaxyKb).set({ ...data, updatedAt: new Date() }).where(eq(galaxyKb.id, id)).returning();
+    return updated;
+  }
+
+  async deleteGalaxyKbEntry(id: number): Promise<void> {
+    await db.delete(galaxyKb).where(eq(galaxyKb.id, id));
+  }
+
+  async searchGalaxyKb(query: string, limit = 20): Promise<GalaxyKbEntry[]> {
+    return db.select().from(galaxyKb).where(
+      or(
+        ilike(galaxyKb.title, `%${query}%`),
+        ilike(galaxyKb.summary, `%${query}%`),
+        ilike(galaxyKb.category, `%${query}%`)
+      )
+    ).orderBy(desc(galaxyKb.createdAt)).limit(limit);
+  }
+
+  async verifyGalaxyKbEntry(id: number, verifiedBy: string): Promise<GalaxyKbEntry | undefined> {
+    const [updated] = await db.update(galaxyKb).set({
+      verified: true,
+      verifiedAt: new Date(),
+      verifiedBy,
+      flagged: false,
+      flagReason: null,
+      updatedAt: new Date(),
+    }).where(eq(galaxyKb.id, id)).returning();
+    if (updated) {
+      await db.update(agentMemories).set({ relevanceScore: 95 }).where(
+        and(eq(agentMemories.sourceKbId, id), sql`${agentMemories.relevanceScore} < 95`)
+      );
+    }
+    return updated;
+  }
+
+  async flagGalaxyKbEntry(id: number, reason: string): Promise<GalaxyKbEntry | undefined> {
+    const [updated] = await db.update(galaxyKb).set({
+      flagged: true,
+      flagReason: reason,
+      updatedAt: new Date(),
+    }).where(eq(galaxyKb.id, id)).returning();
+    return updated;
+  }
+
+  async getGalaxyKbStats(): Promise<{ total: number; verified: number; flagged: number; categories: string[] }> {
+    const all = await db.select().from(galaxyKb);
+    const categories = [...new Set(all.map(e => e.category))].sort();
+    return {
+      total: all.length,
+      verified: all.filter(e => e.verified).length,
+      flagged: all.filter(e => e.flagged).length,
+      categories,
+    };
   }
 }
 

@@ -28,6 +28,8 @@ All data lives in Postgres tables:
 - `action_permissions` — Per-action permission overrides for navigation paths
 - `radar_seen_items` — Cross-run deduplication store for research radar (content hashes, 7-day window)
 - `radar_engagement` — User engagement tracking for research radar briefing items (url, source, title)
+- `galaxy_kb` — Galaxy Knowledge Base entries (title, url, category, summary, fullText, verified/flagged status, userNotes, memoryCount, searchTerm)
+- `agent_memories.source_kb_id` — Links agent memories to their source Galaxy KB entry
 
 ## Secure Credential Collection
 
@@ -112,16 +114,26 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - **Cockpit events**: CLI commands emit events to the cockpit activity stream (recipe save/run/approve, memory store/forget, scrape)
 - **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`, `GET /api/budget`, `GET /api/models`
 
-## Galaxy Context Scraper (server/galaxy-scraper.ts)
+## Galaxy Context Scraper & Knowledge Base (server/galaxy-scraper.ts)
 
 - **Autonomous Galaxy browsing**: When enabled, proactively searches Epic Galaxy (galaxy.epic.com) for documentation on terms discovered during Epic agent runs
 - **Toggle**: `galaxy auto on` / `galaxy auto off` — OFF by default
 - **Human-like behavior**: Randomized 3-8s delays, natural referrer navigation (search page → article), 5-guide-per-session limit, 30-60s cooldowns, robots.txt compliance
 - **Shared rate limiting**: CLI `galaxy search/read` and autonomous scraper share a single global lock — cannot run concurrently
-- **Memory integration**: Extracted Galaxy content is chunked and stored as semantic memories in Qdrant with subject tags (`epic:galaxy:<term>`), making it available for future agent context retrieval
+- **Memory integration**: Extracted Galaxy content is chunked and stored as semantic memories with subject tags (`epic:galaxy:<term>`), linked to KB entries via `sourceKbId`
 - **Agent runtime hook**: After Epic-related programs run, terms are extracted from output and queued for Galaxy lookup (15-min tick cycle)
+- **Galaxy KB** (`galaxy_kb` table): Structured knowledge base with LLM-generated summaries, Epic breadcrumb categories, verification workflow, user notes
+  - `galaxy kb` — Browse KB entries by category
+  - `galaxy kb search <q>` — Search KB by title/summary/category
+  - `galaxy kb <id>` — View full entry details
+  - `galaxy kb verify <id>` — Mark verified (boosts linked memory relevance to 95)
+  - `galaxy kb flag <id> [reason]` — Flag for review
+  - `galaxy kb note <id> <text>` — Add user annotation
+  - `galaxy kb stats` — Total/verified/flagged/category counts
+- **Unified pipeline** (`ingestToKb`): `galaxy read`, `galaxy context`, and auto scraper all produce KB entries linked to agent memories
 - **CLI commands**: `galaxy context <term>` (manual scrape), `galaxy auto [on|off]` (toggle/status), `galaxy queue [terms,...]` (view/add queue)
-- **Vision goal**: Building knowledge base for future autonomous computer-use agent that responds to natural language commands ("show me last 3 lab results for MRN X")
+- **TreeView**: GALAXY KB section shows entries organized by Epic category, with verification status icons and memory counts
+- **API routes**: `/api/galaxy-kb` (GET list), `/api/galaxy-kb/:id` (GET/PATCH/DELETE), `/api/galaxy-kb/:id/verify` (POST), `/api/galaxy-kb/:id/flag` (POST)
 
 ## Token Budget & Model Router (server/model-router.ts)
 

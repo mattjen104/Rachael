@@ -5492,16 +5492,36 @@ ${fullHtml}`;
           "galaxy"
         );
 
-        return ok([
-          `Galaxy guide saved to Reader:`,
+        let kbId: number | null = null;
+        let kbMemories = 0;
+        try {
+          const { ingestToKb } = await import("./galaxy-scraper");
+          const kbResult = await ingestToKb(
+            url,
+            title,
+            category,
+            extractedText.substring(0, 50000),
+            ["galaxy", "epic", category.toLowerCase()],
+          );
+          kbId = kbResult.kbEntry.id;
+          kbMemories = kbResult.memoriesCreated;
+        } catch (kbErr: any) {
+          console.error("[galaxy read] KB ingest failed:", kbErr.message);
+        }
+
+        const lines = [
+          `Galaxy guide saved:`,
           `  Title:    ${title}`,
           `  Category: ${category}`,
           `  URL:      ${url}`,
-          `  ID:       ${saved.id}`,
+          `  Reader:   #${saved.id}`,
           `  Size:     ${extractedText.length} chars`,
-          "",
-          "View in Reader (C-c r) or TreeView GALAXY section.",
-        ].join(nl));
+        ];
+        if (kbId) {
+          lines.push(`  KB Entry: #${kbId} (${kbMemories} memories created)`);
+        }
+        lines.push("", "View in TreeView GALAXY KB section.");
+        return ok(lines.join(nl));
       } finally {
         galaxyDone();
       }
@@ -5612,15 +5632,136 @@ ${fullHtml}`;
       return ok(`Added ${terms.length} term(s) to Galaxy context queue: ${terms.join(", ")}`);
     }
 
+    if (args[0] === "kb") {
+      const kbSub = (args[1] || "").toLowerCase();
+
+      if (kbSub === "search") {
+        const query = args.slice(2).join(" ");
+        if (!query) return fail("[galaxy] Usage: galaxy kb search <query>");
+        const results = await storage.searchGalaxyKb(query);
+        if (results.length === 0) return ok(`No KB entries match "${query}".`);
+        const lines = [`=== GALAXY KB SEARCH: "${query}" === (${results.length} results)`, ""];
+        for (const e of results) {
+          const v = e.verified ? " [VERIFIED]" : e.flagged ? " [FLAGGED]" : "";
+          lines.push(`  #${String(e.id).padStart(4)} ${e.title.substring(0, 60)}${v}`);
+          lines.push(`         ${e.category} | ${e.memoryCount} memories | ${new Date(e.createdAt).toLocaleDateString()}`);
+          if (e.summary) lines.push(`         ${e.summary.substring(0, 80)}`);
+        }
+        return ok(lines.join(nl));
+      }
+
+      if (kbSub === "verify") {
+        const id = parseInt(args[2], 10);
+        if (isNaN(id)) return fail("[galaxy] Usage: galaxy kb verify <id>");
+        const entry = await storage.verifyGalaxyKbEntry(id, "user");
+        if (!entry) return fail(`[galaxy] KB entry #${id} not found.`);
+        return ok(`KB entry #${id} verified: "${entry.title}"${nl}Linked memories will receive a relevance boost.`);
+      }
+
+      if (kbSub === "flag") {
+        const id = parseInt(args[2], 10);
+        if (isNaN(id)) return fail("[galaxy] Usage: galaxy kb flag <id> [reason]");
+        const reason = args.slice(3).join(" ") || "Flagged by user";
+        const entry = await storage.flagGalaxyKbEntry(id, reason);
+        if (!entry) return fail(`[galaxy] KB entry #${id} not found.`);
+        return ok(`KB entry #${id} flagged: "${entry.title}"${nl}Reason: ${reason}`);
+      }
+
+      if (kbSub === "note") {
+        const id = parseInt(args[2], 10);
+        if (isNaN(id)) return fail("[galaxy] Usage: galaxy kb note <id> <note text>");
+        const noteText = args.slice(3).join(" ");
+        if (!noteText) return fail("[galaxy] Provide note text after the ID.");
+        const existing = await storage.getGalaxyKbEntry(id);
+        if (!existing) return fail(`[galaxy] KB entry #${id} not found.`);
+        const combined = existing.userNotes ? `${existing.userNotes}\n---\n${noteText}` : noteText;
+        await storage.updateGalaxyKbEntry(id, { userNotes: combined });
+        return ok(`Note added to KB entry #${id}: "${existing.title}"`);
+      }
+
+      if (kbSub === "stats") {
+        const stats = await storage.getGalaxyKbStats();
+        const lines = [
+          "=== GALAXY KB STATS ===",
+          `  Total entries:  ${stats.total}`,
+          `  Verified:       ${stats.verified}`,
+          `  Flagged:        ${stats.flagged}`,
+          `  Categories:     ${stats.categories.length}`,
+        ];
+        if (stats.categories.length > 0) {
+          lines.push("", "  Categories:");
+          for (const c of stats.categories) {
+            lines.push(`    - ${c}`);
+          }
+        }
+        return ok(lines.join(nl));
+      }
+
+      const idNum = parseInt(kbSub, 10);
+      if (!isNaN(idNum) && idNum > 0) {
+        const entry = await storage.getGalaxyKbEntry(idNum);
+        if (!entry) return fail(`[galaxy] KB entry #${idNum} not found.`);
+        const lines = [
+          `=== GALAXY KB #${entry.id} ===`,
+          `  Title:     ${entry.title}`,
+          `  Category:  ${entry.category}`,
+          `  URL:       ${entry.url}`,
+          `  Status:    ${entry.verified ? "VERIFIED" : entry.flagged ? "FLAGGED" : "unverified"}`,
+          `  Memories:  ${entry.memoryCount}`,
+          `  Tags:      ${entry.tags.join(", ") || "(none)"}`,
+          `  Created:   ${new Date(entry.createdAt).toLocaleString()}`,
+        ];
+        if (entry.summary) lines.push("", `  Summary:`, `    ${entry.summary}`);
+        if (entry.userNotes) lines.push("", `  Notes:`, `    ${entry.userNotes}`);
+        if (entry.flagReason) lines.push("", `  Flag reason: ${entry.flagReason}`);
+        if (entry.verifiedBy) lines.push(`  Verified by: ${entry.verifiedBy} at ${entry.verifiedAt ? new Date(entry.verifiedAt).toLocaleString() : "?"}`);
+        lines.push("", "  galaxy kb verify <id>  - Mark as verified");
+        lines.push("  galaxy kb flag <id>    - Flag for review");
+        lines.push("  galaxy kb note <id>    - Add a note");
+        return ok(lines.join(nl));
+      }
+
+      const entries = await storage.getGalaxyKbEntries();
+      if (entries.length === 0) {
+        return ok("Galaxy KB is empty. Use: galaxy search + galaxy read to populate.");
+      }
+      const catMap = new Map<string, typeof entries>();
+      for (const e of entries) {
+        if (!catMap.has(e.category)) catMap.set(e.category, []);
+        catMap.get(e.category)!.push(e);
+      }
+      const lines = [`=== GALAXY KNOWLEDGE BASE === (${entries.length} entries)`, ""];
+      for (const [cat, items] of Array.from(catMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+        lines.push(`  ${cat} (${items.length})`);
+        for (const e of items.slice(0, 8)) {
+          const v = e.verified ? " [V]" : e.flagged ? " [F]" : "";
+          lines.push(`    #${String(e.id).padStart(4)} ${e.title.substring(0, 55)}${v}`);
+        }
+        if (items.length > 8) lines.push(`    ... +${items.length - 8} more`);
+      }
+      lines.push("", "  galaxy kb <id>         - View entry details");
+      lines.push("  galaxy kb search <q>   - Search KB");
+      lines.push("  galaxy kb verify <id>  - Mark verified");
+      lines.push("  galaxy kb flag <id>    - Flag for review");
+      lines.push("  galaxy kb note <id>    - Add user note");
+      lines.push("  galaxy kb stats        - KB statistics");
+      return ok(lines.join(nl));
+    }
+
     return ok([
       "Galaxy Knowledge Base (galaxy.epic.com)",
       "========================================",
       "  galaxy search <query>    - Search Galaxy for articles/guides",
-      "  galaxy read <url or #>   - Fetch & save a guide to Reader",
+      "  galaxy read <url or #>   - Fetch & save a guide to Reader + KB",
       "  galaxy recent            - Show recently saved Galaxy guides",
       "  galaxy context <term>    - Scrape Galaxy for context on a term",
       "  galaxy auto [on|off]     - Toggle/view autonomous context mode",
       "  galaxy queue [terms,...] - View/add to the context queue",
+      "  galaxy kb [search|<id>]  - Browse/search the Knowledge Base",
+      "  galaxy kb verify <id>    - Verify a KB entry",
+      "  galaxy kb flag <id>      - Flag a KB entry for review",
+      "  galaxy kb note <id>      - Add a note to a KB entry",
+      "  galaxy kb stats          - KB statistics",
       "",
       "Galaxy is behind Epic SSO. Requires Chrome extension bridge.",
       "Rate limited: 3-8s between requests, max 5 per session.",

@@ -1191,6 +1191,11 @@ export async function registerRoutes(
       }
     } catch {}
 
+    let galaxyKbEntries: any[] = [];
+    try {
+      galaxyKbEntries = await storage.getGalaxyKbEntries();
+    } catch {}
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -1204,6 +1209,7 @@ export async function registerRoutes(
       epicWorkflows,
       pulseLinks,
       galaxyCategories,
+      galaxyKb: galaxyKbEntries,
       citrixPortals,
       citrixPortalApps,
     });
@@ -2566,6 +2572,41 @@ export async function registerRoutes(
     const host = req.headers["host"] || "localhost:5000";
     const formUrl = `${protocol}://${host}/api/secrets/form/${requestId}?token=${encodeURIComponent(magicToken)}`;
     res.json({ requestId, formUrl });
+  });
+
+  app.get("/api/galaxy-kb", async (req, res) => {
+    const category = req.query.category as string | undefined;
+    const entries = await storage.getGalaxyKbEntries(category || undefined);
+    res.json(entries);
+  });
+
+  app.get("/api/galaxy-kb/:id", async (req, res) => {
+    const entry = await storage.getGalaxyKbEntry(parseInt(req.params.id, 10));
+    if (!entry) return res.status(404).json({ message: "KB entry not found" });
+    res.json(entry);
+  });
+
+  app.post("/api/galaxy-kb/:id/verify", async (req, res) => {
+    const entry = await storage.verifyGalaxyKbEntry(parseInt(req.params.id, 10), req.body.verifiedBy || "user");
+    if (!entry) return res.status(404).json({ message: "KB entry not found" });
+    res.json(entry);
+  });
+
+  app.post("/api/galaxy-kb/:id/flag", async (req, res) => {
+    const entry = await storage.flagGalaxyKbEntry(parseInt(req.params.id, 10), req.body.reason || "Flagged");
+    if (!entry) return res.status(404).json({ message: "KB entry not found" });
+    res.json(entry);
+  });
+
+  app.patch("/api/galaxy-kb/:id", async (req, res) => {
+    const entry = await storage.updateGalaxyKbEntry(parseInt(req.params.id, 10), req.body);
+    if (!entry) return res.status(404).json({ message: "KB entry not found" });
+    res.json(entry);
+  });
+
+  app.delete("/api/galaxy-kb/:id", async (req, res) => {
+    await storage.deleteGalaxyKbEntry(parseInt(req.params.id, 10));
+    res.json({ ok: true });
   });
 
   return httpServer;

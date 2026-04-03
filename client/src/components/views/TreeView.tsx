@@ -95,6 +95,15 @@ type TreeNode = {
   url: string;
   category: string;
 } | {
+  type: "galaxyKb";
+  id: number;
+  title: string;
+  url: string;
+  verified: boolean;
+  flagged: boolean;
+  memoryCount: number;
+  summary: string | null;
+} | {
   type: "galaxyGuide";
   id: number;
   title: string;
@@ -462,23 +471,41 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
       }
     }
 
+    const galaxyKbEntries: any[] = (data as any).galaxyKb || [];
     const galaxyPages = (data.reader || []).filter((r: any) => r.domain === "galaxy.epic.com");
     const galaxyCats: Record<number, string> = (data as any).galaxyCategories || {};
-    if (galaxyPages.length > 0) {
-      nodes.push({ type: "section", label: "GALAXY (Epic KB)", key: "galaxy", count: galaxyPages.length });
+    const totalGalaxy = galaxyKbEntries.length || galaxyPages.length;
+    if (totalGalaxy > 0) {
+      nodes.push({ type: "section", label: "GALAXY KB", key: "galaxy", count: totalGalaxy });
       if (expanded.has("galaxy")) {
-        const catMap = new Map<string, any[]>();
-        for (const g of galaxyPages) {
-          const cat = galaxyCats[g.id] || "General";
-          if (!catMap.has(cat)) catMap.set(cat, []);
-          catMap.get(cat)!.push(g);
-        }
-        for (const [cat, items] of Array.from(catMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-          nodes.push({ type: "section", label: `  ${cat}`, key: `galaxy-${cat}`, count: items.length });
-          if (expanded.has(`galaxy-${cat}`)) {
-            for (const g of items) {
-              nodes.push({ type: "galaxyGuide", id: g.id, title: g.title, url: g.url });
+        if (galaxyKbEntries.length > 0) {
+          const catMap = new Map<string, any[]>();
+          for (const e of galaxyKbEntries) {
+            const cat = e.category || "General";
+            if (!catMap.has(cat)) catMap.set(cat, []);
+            catMap.get(cat)!.push(e);
+          }
+          for (const [cat, items] of Array.from(catMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+            nodes.push({ type: "section", label: `  ${cat}`, key: `galaxy-${cat}`, count: items.length });
+            if (expanded.has(`galaxy-${cat}`)) {
+              for (const e of items) {
+                nodes.push({
+                  type: "galaxyKb",
+                  id: e.id,
+                  title: e.title,
+                  url: e.url,
+                  verified: e.verified,
+                  flagged: e.flagged,
+                  memoryCount: e.memoryCount,
+                  summary: e.summary,
+                });
+              }
             }
+          }
+        } else {
+          for (const g of galaxyPages) {
+            const cat = galaxyCats[g.id] || "General";
+            nodes.push({ type: "galaxyGuide", id: g.id, title: g.title, url: g.url });
           }
         }
       }
@@ -604,6 +631,9 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
       onRunCommand(`epic replay ${node.key}`);
     }
     else if (node.type === "pulseLink") {
+      window.open(node.url, "_blank");
+    }
+    else if (node.type === "galaxyKb") {
       window.open(node.url, "_blank");
     }
     else if (node.type === "galaxyGuide") {
@@ -837,6 +867,13 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
           icon = "→";
           label = node.name;
           extra = "↗";
+        } else if (node.type === "galaxyKb") {
+          icon = node.verified ? "✓" : node.flagged ? "!" : "★";
+          label = node.title.slice(0, 50);
+          extra = `${node.memoryCount || 0}m`;
+          if (node.summary) {
+            label += ` -- ${node.summary.slice(0, 30)}`;
+          }
         } else if (node.type === "galaxyGuide") {
           icon = "★";
           label = node.title.slice(0, 55);

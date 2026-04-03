@@ -1,5 +1,6 @@
 import { storage } from "./storage";
 import { storeMemoryWithQdrant } from "./memory-consolidation";
+import type { GalaxyKbEntry } from "@shared/schema";
 
 const GALAXY_CONFIG_KEY = "galaxy_context_enabled";
 const GALAXY_QUEUE_KEY = "galaxy_context_queue";
@@ -349,6 +350,85 @@ function chunkText(text: string, maxChunk: number = 1500): string[] {
   return hardCapped;
 }
 
+async function generateKbSummary(title: string, text: string): Promise<string> {
+  try {
+    const { executeLLM } = await import("./llm-client");
+    const truncated = text.substring(0, 4000);
+    const result = await executeLLM(
+      [
+        { role: "system", content: "You are a concise technical writer. Summarize the following Epic Galaxy guide in 2-4 sentences. Focus on: what it covers, key configuration points, and practical relevance for Epic analysts." },
+        { role: "user", content: `Title: ${title}\n\n${truncated}` },
+      ],
+      "deepseek/deepseek-chat",
+      undefined,
+      {}
+    );
+    return result.content?.trim() || title;
+  } catch {
+    const firstPara = text.split(/\n\n/)[0]?.trim() || "";
+    return firstPara.substring(0, 300) || title;
+  }
+}
+
+export async function ingestToKb(
+  url: string,
+  title: string,
+  category: string,
+  fullText: string,
+  tags: string[],
+  searchTerm?: string
+): Promise<{ kbEntry: GalaxyKbEntry; memoriesCreated: number }> {
+  const existing = await storage.getGalaxyKbByUrl(url);
+  if (existing) {
+    const updated = await storage.updateGalaxyKbEntry(existing.id, {
+      title,
+      category,
+      fullText: fullText.substring(0, 50000),
+      tags,
+      searchTerm: searchTerm || existing.searchTerm || undefined,
+    });
+    return { kbEntry: updated || existing, memoriesCreated: 0 };
+  }
+
+  const summary = await generateKbSummary(title, fullText);
+
+  const kbEntry = await storage.createGalaxyKbEntry({
+    title,
+    url,
+    category,
+    summary,
+    fullText: fullText.substring(0, 50000),
+    tags,
+    searchTerm: searchTerm || undefined,
+  });
+
+  const chunks = chunkText(fullText);
+  let memoriesCreated = 0;
+  for (const chunk of chunks) {
+    if (chunk.length < 100) continue;
+
+    const memoryContent = `[Galaxy KB #${kbEntry.id}: ${title}] (Category: ${category})\n\n${chunk}`;
+    const subject = `epic:galaxy:${(searchTerm || title).toLowerCase().replace(/\s+/g, "-")}`;
+
+    await storeMemoryWithQdrant(
+      memoryContent,
+      "semantic",
+      "galaxy-kb",
+      ["galaxy", "epic", category.toLowerCase(), ...(searchTerm ? [searchTerm.toLowerCase()] : [])],
+      0.85,
+      subject,
+      kbEntry.id
+    );
+    memoriesCreated++;
+  }
+
+  if (memoriesCreated > 0) {
+    await storage.updateGalaxyKbEntry(kbEntry.id, { memoryCount: memoriesCreated });
+  }
+
+  return { kbEntry, memoriesCreated };
+}
+
 export async function scrapeGalaxyContext(term: string): Promise<{ memoriesCreated: number; guidesRead: number; error?: string }> {
   const stats = await getGalaxyContextStats();
   let memoriesCreated = 0;
@@ -387,24 +467,16 @@ export async function scrapeGalaxyContext(term: string): Promise<{ memoriesCreat
         });
       } catch {}
 
-      const chunks = chunkText(guide.text);
-      for (const chunk of chunks) {
-        if (chunk.length < 100) continue;
-
-        const memoryContent = `[Galaxy: ${guide.title}] (Category: ${guide.category})\n\n${chunk}`;
-        const subject = `epic:galaxy:${term.toLowerCase().replace(/\s+/g, "-")}`;
-
-        await storeMemoryWithQdrant(
-          memoryContent,
-          "semantic",
-          "galaxy-context",
-          ["galaxy", "epic", guide.category.toLowerCase(), term.toLowerCase()],
-          0.85,
-          subject
-        );
-        memoriesCreated++;
-        stats.memoriesCreated++;
-      }
+      const kbResult = await ingestToKb(
+        result.url,
+        guide.title,
+        guide.category,
+        guide.text,
+        ["galaxy", "epic", guide.category.toLowerCase(), term.toLowerCase()],
+        term
+      );
+      memoriesCreated += kbResult.memoriesCreated;
+      stats.memoriesCreated += kbResult.memoriesCreated;
     }
 
     await removeFromQueue(term);

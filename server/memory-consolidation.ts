@@ -39,7 +39,8 @@ export async function storeMemoryWithQdrant(
   programName: string | null,
   tags: string[],
   relevanceScore: number,
-  subject?: string | null
+  subject?: string | null,
+  sourceKbId?: number | null
 ): Promise<AgentMemory> {
   let qdrantId: string | null = null;
 
@@ -55,6 +56,7 @@ export async function storeMemoryWithQdrant(
     relevanceScore,
     subject: subject || undefined,
     qdrantId: undefined,
+    sourceKbId: sourceKbId || undefined,
   });
 
   if (await checkQdrantHealth()) {
