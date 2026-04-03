@@ -112,6 +112,17 @@ Unix-style command interface with chain parsing. Both humans and the agent can e
 - **Cockpit events**: CLI commands emit events to the cockpit activity stream (recipe save/run/approve, memory store/forget, scrape)
 - **API**: `POST /api/cli/run {command}`, `GET /api/cli/help`, `GET /api/cli/commands`, `GET /api/budget`, `GET /api/models`
 
+## Galaxy Context Scraper (server/galaxy-scraper.ts)
+
+- **Autonomous Galaxy browsing**: When enabled, proactively searches Epic Galaxy (galaxy.epic.com) for documentation on terms discovered during Epic agent runs
+- **Toggle**: `galaxy auto on` / `galaxy auto off` — OFF by default
+- **Human-like behavior**: Randomized 3-8s delays, natural referrer navigation (search page → article), 5-guide-per-session limit, 30-60s cooldowns, robots.txt compliance
+- **Shared rate limiting**: CLI `galaxy search/read` and autonomous scraper share a single global lock — cannot run concurrently
+- **Memory integration**: Extracted Galaxy content is chunked and stored as semantic memories in Qdrant with subject tags (`epic:galaxy:<term>`), making it available for future agent context retrieval
+- **Agent runtime hook**: After Epic-related programs run, terms are extracted from output and queued for Galaxy lookup (15-min tick cycle)
+- **CLI commands**: `galaxy context <term>` (manual scrape), `galaxy auto [on|off]` (toggle/status), `galaxy queue [terms,...]` (view/add queue)
+- **Vision goal**: Building knowledge base for future autonomous computer-use agent that responds to natural language commands ("show me last 3 lab results for MRN X")
+
 ## Token Budget & Model Router (server/model-router.ts)
 
 - **Dynamic model roster**: DeepSeek V3 (cheap default), Qwen 2.5 72B (cheap backup), DeepSeek R1 (standard reasoning), Claude 3.5 Sonnet (standard), Claude Sonnet 4 (premium). No free-tier models — all programs default to "cheap" tier (DeepSeek V3)
