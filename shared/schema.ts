@@ -580,7 +580,7 @@ export const agentMemories = pgTable("agent_memories", {
   subject: text("subject"),
   validUntil: timestamp("valid_until"),
   qdrantId: text("qdrant_id"),
-  sourceKbId: integer("source_kb_id"),
+  sourceKbId: integer("source_kb_id").references(() => galaxyKb.id),
 });
 
 export const insertAgentMemorySchema = z.object({
@@ -684,7 +684,7 @@ export type JudgeCost = typeof judgeCostTracking.$inferSelect;
 export const galaxyKb = pgTable("galaxy_kb", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   title: text("title").notNull(),
-  url: text("url").notNull(),
+  url: text("url").notNull().unique(),
   category: text("category").notNull().default("General"),
   summary: text("summary"),
   fullText: text("full_text"),
@@ -696,6 +696,7 @@ export const galaxyKb = pgTable("galaxy_kb", {
   flagReason: text("flag_reason"),
   userNotes: text("user_notes"),
   memoryCount: integer("memory_count").notNull().default(0),
+  agentAccessCount: integer("agent_access_count").notNull().default(0),
   searchTerm: text("search_term"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -715,6 +716,7 @@ export const insertGalaxyKbSchema = z.object({
   flagReason: z.string().nullable().optional(),
   userNotes: z.string().nullable().optional(),
   memoryCount: z.number().default(0),
+  agentAccessCount: z.number().default(0),
   searchTerm: z.string().nullable().optional(),
 });
 export type InsertGalaxyKb = z.infer<typeof insertGalaxyKbSchema>;

@@ -359,9 +359,9 @@ async function generateKbSummary(title: string, text: string): Promise<string> {
         { role: "system", content: "You are a concise technical writer. Summarize the following Epic Galaxy guide in 2-4 sentences. Focus on: what it covers, key configuration points, and practical relevance for Epic analysts." },
         { role: "user", content: `Title: ${title}\n\n${truncated}` },
       ],
-      "deepseek/deepseek-chat",
       undefined,
-      {}
+      undefined,
+      { costTier: "cheap" }
     );
     return result.content?.trim() || title;
   } catch {

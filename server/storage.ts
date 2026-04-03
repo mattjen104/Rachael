@@ -208,6 +208,7 @@ export interface IStorage {
   getLinkedMemories(kbId: number): Promise<AgentMemory[]>;
   verifyGalaxyKbEntry(id: number, verifiedBy: string): Promise<GalaxyKbEntry | undefined>;
   flagGalaxyKbEntry(id: number, reason: string): Promise<GalaxyKbEntry | undefined>;
+  incrementGalaxyKbAccess(id: number): Promise<void>;
   getGalaxyKbStats(): Promise<{ total: number; verified: number; flagged: number; categories: string[] }>;
 }
 
@@ -967,7 +968,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getLinkedMemories(kbId: number): Promise<AgentMemory[]> {
-    return db.select().from(agentMemories).where(eq(agentMemories.sourceKbId, kbId)).orderBy(desc(agentMemories.createdAt));
+    const memories = await db.select().from(agentMemories).where(eq(agentMemories.sourceKbId, kbId)).orderBy(desc(agentMemories.createdAt));
+    if (memories.length > 0) {
+      this.incrementGalaxyKbAccess(kbId).catch(() => {});
+    }
+    return memories;
   }
 
   async verifyGalaxyKbEntry(id: number, verifiedBy: string): Promise<GalaxyKbEntry | undefined> {
@@ -994,12 +999,17 @@ export class DatabaseStorage implements IStorage {
       updatedAt: new Date(),
     }).where(eq(galaxyKb.id, id)).returning();
     if (updated) {
-      const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await db.update(agentMemories).set({ validUntil: expiry }).where(
-        and(eq(agentMemories.sourceKbId, id), sql`${agentMemories.validUntil} IS NULL`)
+      await db.update(agentMemories).set({ validUntil: new Date() }).where(
+        eq(agentMemories.sourceKbId, id)
       );
     }
     return updated;
+  }
+
+  async incrementGalaxyKbAccess(id: number): Promise<void> {
+    await db.update(galaxyKb).set({
+      agentAccessCount: sql`${galaxyKb.agentAccessCount} + 1`,
+    }).where(eq(galaxyKb.id, id));
   }
 
   async getGalaxyKbStats(): Promise<{ total: number; verified: number; flagged: number; categories: string[] }> {

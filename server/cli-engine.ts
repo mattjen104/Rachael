@@ -5701,20 +5701,29 @@ ${fullHtml}`;
       if (!isNaN(idNum) && idNum > 0) {
         const entry = await storage.getGalaxyKbEntry(idNum);
         if (!entry) return fail(`[galaxy] KB entry #${idNum} not found.`);
+        const linkedMemories = await storage.getLinkedMemories(entry.id);
         const lines = [
           `=== GALAXY KB #${entry.id} ===`,
-          `  Title:     ${entry.title}`,
-          `  Category:  ${entry.category}`,
-          `  URL:       ${entry.url}`,
-          `  Status:    ${entry.verified ? "VERIFIED" : entry.flagged ? "FLAGGED" : "unverified"}`,
-          `  Memories:  ${entry.memoryCount}`,
-          `  Tags:      ${entry.tags.join(", ") || "(none)"}`,
-          `  Created:   ${new Date(entry.createdAt).toLocaleString()}`,
+          `  Title:       ${entry.title}`,
+          `  Category:    ${entry.category}`,
+          `  URL:         ${entry.url}`,
+          `  Status:      ${entry.verified ? "VERIFIED" : entry.flagged ? "FLAGGED" : "unverified"}`,
+          `  Memories:    ${entry.memoryCount}`,
+          `  Agent Access: ${entry.agentAccessCount}`,
+          `  Tags:        ${entry.tags.join(", ") || "(none)"}`,
+          `  Created:     ${new Date(entry.createdAt).toLocaleString()}`,
         ];
         if (entry.summary) lines.push("", `  Summary:`, `    ${entry.summary}`);
         if (entry.userNotes) lines.push("", `  Notes:`, `    ${entry.userNotes}`);
         if (entry.flagReason) lines.push("", `  Flag reason: ${entry.flagReason}`);
         if (entry.verifiedBy) lines.push(`  Verified by: ${entry.verifiedBy} at ${entry.verifiedAt ? new Date(entry.verifiedAt).toLocaleString() : "?"}`);
+        if (linkedMemories.length > 0) {
+          lines.push("", `  Linked Memories (${linkedMemories.length}):`);
+          for (const m of linkedMemories.slice(0, 5)) {
+            lines.push(`    #${m.id} [${m.memoryType}] rel:${m.relevanceScore} ${m.content.substring(0, 80)}`);
+          }
+          if (linkedMemories.length > 5) lines.push(`    ... +${linkedMemories.length - 5} more`);
+        }
         lines.push("", "  galaxy kb verify <id>  - Mark as verified");
         lines.push("  galaxy kb flag <id>    - Flag for review");
         lines.push("  galaxy kb note <id>    - Add a note");

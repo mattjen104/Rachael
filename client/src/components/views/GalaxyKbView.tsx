@@ -134,6 +134,7 @@ export default function GalaxyKbView({ selectedEntryId }: GalaxyKbViewProps) {
             {detail.verified && detail.verifiedBy && ` by ${detail.verifiedBy}`}
           </div>
           <div className="text-[var(--crt-dim)] text-sm mb-1">Memories: {detail.memoryCount}</div>
+          <div className="text-[var(--crt-dim)] text-sm mb-1">Agent Access: {detail.agentAccessCount || 0}</div>
           <div className="text-[var(--crt-dim)] text-sm mb-2">
             URL: <a href={detail.url} target="_blank" rel="noopener noreferrer" className="underline" data-testid="link-galaxy-url">{detail.url}</a>
           </div>
