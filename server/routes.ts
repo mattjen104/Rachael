@@ -1193,7 +1193,7 @@ export async function registerRoutes(
 
     let galaxyKbEntries: any[] = [];
     try {
-      galaxyKbEntries = await storage.getGalaxyKbEntries();
+      galaxyKbEntries = (await storage.getGalaxyKbEntries()).map(({ fullText, ...rest }) => rest);
     } catch {}
 
     res.json({
