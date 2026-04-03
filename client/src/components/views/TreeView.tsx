@@ -530,9 +530,10 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
       ? (mailInbox.isFetching ? "Loading inbox..." : "Enter: fetch")
       : "Not connected — check extension options";
 
-    const displayEmails = emails.length > 0 ? emails : persistedEmails.map((e, i) => ({
+    const rawDisplayEmails = emails.length > 0 ? emails : persistedEmails.map((e, i) => ({
       index: i, from: e.from || "", subject: e.subject || "", unread: e.unread, date: e.date || "",
     }));
+    const displayEmails = rawDisplayEmails.filter(e => e.unread);
     const mailLabel = mailInbox.isFetching ? "MAIL (loading...)" : `MAIL (Outlook)${emails.length === 0 && persistedEmails.length > 0 ? " [db]" : ""}`;
     nodes.push({ type: "section", label: mailLabel, key: "mail", count: displayEmails.length || (bridgeConnected ? -1 : 0) });
     if (expanded.has("mail")) {

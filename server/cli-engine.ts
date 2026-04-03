@@ -2478,10 +2478,13 @@ ${fullHtml}`;
       const emails = parseOutlookInbox(source, text, extracted);
       setMailCache({ emails, fetchedAt: Date.now() });
 
+      let newCount = 0;
+      let updatedCount = 0;
       for (const email of emails) {
         try {
           const msgId = `${email.from}-${email.date}-${email.subject}`.substring(0, 200);
           const isSnow = /servicenow|service-now|INC\d|CHG\d|REQ\d|RITM\d/i.test(email.subject);
+          const existing = await storage.getOutlookEmailByMessageId(msgId);
           await storage.upsertOutlookEmail({
             messageId: msgId,
             from: email.from,
@@ -2491,6 +2494,8 @@ ${fullHtml}`;
             unread: email.unread,
             isSnowNotification: isSnow,
           });
+          if (!existing) newCount++;
+          else if (existing.unread !== email.unread) updatedCount++;
         } catch {}
       }
       await storage.setAgentConfig("outlook_last_sync", new Date().toISOString(), "boot");
@@ -2501,7 +2506,8 @@ ${fullHtml}`;
       }
 
       const display = emails.slice(0, limit);
-      const lines = [`=== OUTLOOK INBOX === (${emails.length} messages)`, ""];
+      const syncInfo = newCount > 0 || updatedCount > 0 ? ` | ${newCount} new, ${updatedCount} updated` : "";
+      const lines = [`=== OUTLOOK INBOX === (${emails.length} messages${syncInfo})`, ""];
       display.forEach((e, i) => {
         const unread = e.unread ? "*" : " ";
         const from = e.from.padEnd(25).slice(0, 25);
@@ -2846,7 +2852,9 @@ ${fullHtml}`;
       }
     }
 
-    async function persistSnowResults(records: CachedSnowRecord[], label: string): Promise<void> {
+    async function persistSnowResults(records: CachedSnowRecord[], label: string): Promise<{ newCount: number; updatedCount: number }> {
+      let newCount = 0;
+      let updatedCount = 0;
       try {
         const summary = `SNOW ${label}: ${records.length} records scraped`;
         const rawOutput = JSON.stringify(records);
@@ -2858,6 +2866,7 @@ ${fullHtml}`;
         });
         for (const r of records) {
           try {
+            const existing = await storage.getSnowTicketByNumber(r.number);
             await storage.upsertSnowTicket({
               number: r.number,
               type: r.type,
@@ -2871,12 +2880,15 @@ ${fullHtml}`;
               slaBreached: r.slaBreached || false,
               url: r.url || null,
             });
+            if (!existing) newCount++;
+            else if (existing.state !== r.state || existing.priority !== r.priority) updatedCount++;
           } catch {}
         }
         await storage.setAgentConfig("snow_last_sync", new Date().toISOString(), "boot");
       } catch (e: any) {
         console.error(`[snow] Failed to persist results: ${e.message}`);
       }
+      return { newCount, updatedCount };
     }
 
     interface SnowRecordProjection {
@@ -6715,7 +6727,26 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           if (!epicUser || !epicPass) return "SKIPPED (credentials not configured)";
           if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
           const result = await executeCommand("epic", ["login"]);
-          return result.success ? "done (check Duo)" : `failed: ${result.output.slice(0, 80)}`;
+          if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
+
+          emitEvent("cli", "Waiting for Duo authentication (up to 60s)...", "info", { metadata: { command: "boot" } });
+          const DUO_WAIT_MS = 60000;
+          const DUO_POLL_MS = 5000;
+          const duoStart = Date.now();
+          while (Date.now() - duoStart < DUO_WAIT_MS) {
+            await new Promise(resolve => setTimeout(resolve, DUO_POLL_MS));
+            try {
+              const { smartFetch } = await import("./bridge-queue");
+              const check = await smartFetch("https://hyperspace.epic.com/", "dom", "boot-duo-check", { maxText: 500 }, 15000);
+              const pageText = check.text || "";
+              if (pageText.includes("Welcome") || pageText.includes("Patient") || pageText.includes("Schedule") || pageText.includes("Epic")) {
+                await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
+                return "done (Duo approved)";
+              }
+            } catch {}
+          }
+          await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
+          return "done (Duo timeout — may need manual approval)";
         },
       });
     }
