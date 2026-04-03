@@ -560,42 +560,62 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
     }
 
     const snowData = snowRecords.data?.records || [];
-    const displaySnow = snowData.length > 0 ? snowData : persistedTickets.map(t => ({
-      number: t.number, shortDescription: t.shortDescription || "", state: t.state,
-      priority: t.priority, type: t.type, slaBreached: t.slaBreached || false, url: "",
-    }));
-    const snowIncidents = displaySnow.filter(r => r.type === "incident");
-    const snowChanges = displaySnow.filter(r => r.type === "change");
-    const snowRequests = displaySnow.filter(r => r.type === "request");
+    const displaySnow = snowData.length > 0
+      ? snowData.map(r => ({ ...r, source: "personal" }))
+      : persistedTickets.map(t => ({
+          number: t.number, shortDescription: t.shortDescription || "", state: t.state,
+          priority: t.priority, type: t.type, slaBreached: t.slaBreached || false, url: "",
+          source: t.source || "personal",
+        }));
+    const snowPersonal = displaySnow.filter(r => r.source === "personal");
+    const snowTeam = displaySnow.filter(r => r.source !== "personal");
     const snowTotal = displaySnow.length;
+
+    const renderSnowGroup = (items: typeof displaySnow, keyPrefix: string, labelPrefix: string) => {
+      const incidents = items.filter(r => r.type === "incident");
+      const changes = items.filter(r => r.type === "change");
+      const requests = items.filter(r => r.type === "request");
+      if (incidents.length > 0) {
+        nodes.push({ type: "section", label: `${labelPrefix}Incidents`, key: `snow-${keyPrefix}-incidents`, count: incidents.length });
+        if (expanded.has(`snow-${keyPrefix}-incidents`)) {
+          for (const r of incidents.slice(0, 15)) {
+            nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
+          }
+        }
+      }
+      if (changes.length > 0) {
+        nodes.push({ type: "section", label: `${labelPrefix}Changes`, key: `snow-${keyPrefix}-changes`, count: changes.length });
+        if (expanded.has(`snow-${keyPrefix}-changes`)) {
+          for (const r of changes.slice(0, 15)) {
+            nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
+          }
+        }
+      }
+      if (requests.length > 0) {
+        nodes.push({ type: "section", label: `${labelPrefix}Requests`, key: `snow-${keyPrefix}-requests`, count: requests.length });
+        if (expanded.has(`snow-${keyPrefix}-requests`)) {
+          for (const r of requests.slice(0, 15)) {
+            nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
+          }
+        }
+      }
+    };
 
     const snowLabel = `SNOW (ServiceNow)${snowData.length === 0 && persistedTickets.length > 0 ? " [db]" : ""}`;
     nodes.push({ type: "section", label: snowLabel, key: "snow", count: snowTotal || (bridgeConnected ? -1 : 0) });
     if (expanded.has("snow")) {
       if (snowTotal > 0) {
-        if (snowIncidents.length > 0) {
-          nodes.push({ type: "section", label: "  Incidents", key: "snow-incidents", count: snowIncidents.length });
-          if (expanded.has("snow-incidents")) {
-            for (const r of snowIncidents.slice(0, 15)) {
-              nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
-            }
+        if (snowTeam.length > 0) {
+          nodes.push({ type: "section", label: "  My Tickets", key: "snow-personal", count: snowPersonal.length });
+          if (expanded.has("snow-personal")) {
+            renderSnowGroup(snowPersonal, "personal", "    ");
           }
-        }
-        if (snowChanges.length > 0) {
-          nodes.push({ type: "section", label: "  Changes", key: "snow-changes", count: snowChanges.length });
-          if (expanded.has("snow-changes")) {
-            for (const r of snowChanges.slice(0, 15)) {
-              nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
-            }
+          nodes.push({ type: "section", label: "  Team Queue", key: "snow-team", count: snowTeam.length });
+          if (expanded.has("snow-team")) {
+            renderSnowGroup(snowTeam, "team", "    ");
           }
-        }
-        if (snowRequests.length > 0) {
-          nodes.push({ type: "section", label: "  Requests", key: "snow-requests", count: snowRequests.length });
-          if (expanded.has("snow-requests")) {
-            for (const r of snowRequests.slice(0, 15)) {
-              nodes.push({ type: "snow-item", number: r.number, shortDescription: r.shortDescription, state: r.state, priority: r.priority, recordType: r.type, slaBreached: r.slaBreached, url: r.url });
-            }
-          }
+        } else {
+          renderSnowGroup(snowPersonal, "all", "  ");
         }
       } else {
         nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter or run :snow refresh" : "Bridge not connected", actionCmd: bridgeConnected ? "snow refresh" : "bridge-status" });

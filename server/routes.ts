@@ -1199,12 +1199,16 @@ export async function registerRoutes(
     let persistedEmails: any[] = [];
     try {
       persistedEmails = await storage.getOutlookEmails({ unreadOnly: true, limit: 50 });
-    } catch {}
+    } catch (e: unknown) {
+      console.warn(`[tree] Failed to load persisted emails: ${e instanceof Error ? e.message : e}`);
+    }
 
     let persistedTickets: any[] = [];
     try {
       persistedTickets = await storage.getSnowTickets({ limit: 100 });
-    } catch {}
+    } catch (e: unknown) {
+      console.warn(`[tree] Failed to load persisted tickets: ${e instanceof Error ? e.message : e}`);
+    }
 
     let bootStatus: Record<string, string> = {};
     try {
@@ -1216,7 +1220,9 @@ export async function registerRoutes(
       if (lastOutlook?.value) bootStatus.lastOutlook = lastOutlook.value;
       if (lastSnow?.value) bootStatus.lastSnow = lastSnow.value;
       if (lastBoot?.value) bootStatus.lastBoot = lastBoot.value;
-    } catch {}
+    } catch (e: unknown) {
+      console.warn(`[tree] Failed to load boot status: ${e instanceof Error ? e.message : e}`);
+    }
 
     res.json({
       tasks: allTasks,

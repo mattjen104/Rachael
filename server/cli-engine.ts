@@ -2496,7 +2496,10 @@ ${fullHtml}`;
           });
           if (!existing) newCount++;
           else if (existing.unread !== email.unread) updatedCount++;
-        } catch {}
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          emitEvent("cli", `[outlook] Failed to persist email "${email.subject?.slice(0, 40)}": ${msg}`, "warn");
+        }
       }
       await storage.setAgentConfig("outlook_last_sync", new Date().toISOString(), "boot");
 
@@ -2882,11 +2885,15 @@ ${fullHtml}`;
             });
             if (!existing) newCount++;
             else if (existing.state !== r.state || existing.priority !== r.priority) updatedCount++;
-          } catch {}
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn(`[snow] Failed to persist ticket ${r.number}: ${msg}`);
+          }
         }
         await storage.setAgentConfig("snow_last_sync", new Date().toISOString(), "boot");
-      } catch (e: any) {
-        console.error(`[snow] Failed to persist results: ${e.message}`);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[snow] Failed to persist results: ${msg}`);
       }
       return { newCount, updatedCount };
     }
@@ -6743,7 +6750,9 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
                 await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
                 return "done (Duo approved)";
               }
-            } catch {}
+            } catch (e: unknown) {
+              // Expected: bridge timeout or page not ready during Duo wait
+            }
           }
           await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
           return "done (Duo timeout — may need manual approval)";
@@ -6760,9 +6769,13 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           if (persisted.length > 0) return `offline — ${persisted.length} emails in DB (${unread} unread)`;
           return "SKIPPED (bridge not connected, no persisted data)";
         }
-        const result = await executeCommand("outlook", ["inbox", "--refresh"]);
+        const lastSync = await storage.getOutlookSyncTimestamp();
+        const isFirstSync = !lastSync;
+        const result = await executeCommand("outlook", ["inbox", isFirstSync ? "--refresh" : ""]);
         if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
         const match = result.output.match(/(\d+) messages/);
+        const deltaMatch = result.output.match(/(\d+) new, (\d+) updated/);
+        if (deltaMatch) return `done (${match?.[1] || "?"} total, ${deltaMatch[1]} new, ${deltaMatch[2]} updated)`;
         return match ? `done (${match[1]} emails)` : "done";
       },
     });
@@ -6775,10 +6788,17 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           if (persisted.length > 0) return `offline — ${persisted.length} tickets in DB`;
           return "SKIPPED (bridge not connected, no persisted data)";
         }
-        const result = await executeCommand("snow", ["refresh"]);
+        const lastSync = await storage.getSnowSyncTimestamp();
+        const isFirstSync = !lastSync;
+        if (isFirstSync) {
+          const result = await executeCommand("snow", ["refresh"]);
+          if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
+          const match = result.output.match(/Total:\s+(\d+)/);
+          return match ? `done (${match[1]} tickets)` : "done";
+        }
+        const result = await executeCommand("snow", ["incidents"]);
         if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
-        const match = result.output.match(/Total:\s+(\d+)/);
-        return match ? `done (${match[1]} tickets)` : "done";
+        return "done (incremental check)";
       },
     });
 
