@@ -4040,26 +4040,8 @@ ${fullHtml}`;
       }
 
       if (target === "all" || target === "text") {
-        const agentPort = process.env.PORT || 5000;
-        try {
-          const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: "login",
-              credentials: { username: epicUser, password: epicPass },
-            }),
-          });
-          const data = await resp.json() as any;
-          if (data.ok) {
-            results.push("  Text/PuTTY: Login command sent to desktop agent.");
-            results.push("              Agent will handle the double-login sequence.");
-          } else {
-            results.push("  Text/PuTTY: Desktop agent not responding. Run: epic setup");
-          }
-        } catch {
-          results.push("  Text/PuTTY: Desktop agent not reachable (skipped).");
-        }
+        results.push("  Text/PuTTY: Requires desktop agent (not available via bridge).");
+        results.push("              Use CWP/Hyperspace Web login above, then launch Text from portal.");
       }
 
       await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");

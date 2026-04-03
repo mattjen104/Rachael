@@ -259,6 +259,7 @@ export interface PersistedTicket {
   assignmentGroup: string;
   syncedAt: string;
   slaBreached?: boolean;
+  source?: string;
 }
 
 export interface TreeData {
