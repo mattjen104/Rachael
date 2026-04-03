@@ -13,6 +13,7 @@ import CockpitView from "@/components/views/CockpitView";
 import SnowView from "@/components/views/SnowView";
 import VoiceView from "@/components/views/VoiceView";
 import EvolutionPanel from "@/components/views/EvolutionPanel";
+import GalaxyKbView from "@/components/views/GalaxyKbView";
 import Minibuffer from "@/components/editor/Minibuffer";
 import InlineEditor from "@/components/editor/InlineEditor";
 import NotificationToast from "@/components/layout/NotificationToast";
@@ -223,6 +224,7 @@ export default function Workspace() {
       case "snow": return <SnowView />;
       case "voice": return <VoiceView />;
       case "evolution": return <EvolutionPanel />;
+      case "galaxy-kb": return <GalaxyKbView selectedEntryId={selectedItemId} />;
       default: return null;
     }
   };

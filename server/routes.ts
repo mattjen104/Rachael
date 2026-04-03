@@ -2580,32 +2580,64 @@ export async function registerRoutes(
     res.json(entries);
   });
 
+  app.get("/api/galaxy-kb/search", async (req, res) => {
+    const q = req.query.q as string;
+    if (!q) return res.status(400).json({ message: "q parameter required" });
+    const results = await storage.searchGalaxyKb(q);
+    res.json(results);
+  });
+
   app.get("/api/galaxy-kb/:id", async (req, res) => {
-    const entry = await storage.getGalaxyKbEntry(parseInt(req.params.id, 10));
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const entry = await storage.getGalaxyKbEntry(id);
     if (!entry) return res.status(404).json({ message: "KB entry not found" });
-    res.json(entry);
+    const linkedMemories = await storage.getLinkedMemories(id);
+    res.json({ ...entry, linkedMemories });
   });
 
   app.post("/api/galaxy-kb/:id/verify", async (req, res) => {
-    const entry = await storage.verifyGalaxyKbEntry(parseInt(req.params.id, 10), req.body.verifiedBy || "user");
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const entry = await storage.verifyGalaxyKbEntry(id, req.body.verifiedBy || "user");
     if (!entry) return res.status(404).json({ message: "KB entry not found" });
     res.json(entry);
   });
 
   app.post("/api/galaxy-kb/:id/flag", async (req, res) => {
-    const entry = await storage.flagGalaxyKbEntry(parseInt(req.params.id, 10), req.body.reason || "Flagged");
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const reason = req.body.reason;
+    if (!reason || typeof reason !== "string") return res.status(400).json({ message: "reason string required" });
+    const entry = await storage.flagGalaxyKbEntry(id, reason);
     if (!entry) return res.status(404).json({ message: "KB entry not found" });
     res.json(entry);
   });
 
+  app.post("/api/galaxy-kb/:id/note", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const noteText = req.body.note;
+    if (!noteText || typeof noteText !== "string") return res.status(400).json({ message: "note string required" });
+    const existing = await storage.getGalaxyKbEntry(id);
+    if (!existing) return res.status(404).json({ message: "KB entry not found" });
+    const combined = existing.userNotes ? `${existing.userNotes}\n---\n${noteText}` : noteText;
+    const entry = await storage.updateGalaxyKbEntry(id, { userNotes: combined });
+    res.json(entry);
+  });
+
   app.patch("/api/galaxy-kb/:id", async (req, res) => {
-    const entry = await storage.updateGalaxyKbEntry(parseInt(req.params.id, 10), req.body);
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const entry = await storage.updateGalaxyKbEntry(id, req.body);
     if (!entry) return res.status(404).json({ message: "KB entry not found" });
     res.json(entry);
   });
 
   app.delete("/api/galaxy-kb/:id", async (req, res) => {
-    await storage.deleteGalaxyKbEntry(parseInt(req.params.id, 10));
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    await storage.deleteGalaxyKbEntry(id);
     res.json({ ok: true });
   });
 

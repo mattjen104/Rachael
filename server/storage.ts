@@ -205,6 +205,7 @@ export interface IStorage {
   updateGalaxyKbEntry(id: number, data: Partial<InsertGalaxyKb>): Promise<GalaxyKbEntry | undefined>;
   deleteGalaxyKbEntry(id: number): Promise<void>;
   searchGalaxyKb(query: string, limit?: number): Promise<GalaxyKbEntry[]>;
+  getLinkedMemories(kbId: number): Promise<AgentMemory[]>;
   verifyGalaxyKbEntry(id: number, verifiedBy: string): Promise<GalaxyKbEntry | undefined>;
   flagGalaxyKbEntry(id: number, reason: string): Promise<GalaxyKbEntry | undefined>;
   getGalaxyKbStats(): Promise<{ total: number; verified: number; flagged: number; categories: string[] }>;
@@ -959,9 +960,14 @@ export class DatabaseStorage implements IStorage {
       or(
         ilike(galaxyKb.title, `%${query}%`),
         ilike(galaxyKb.summary, `%${query}%`),
-        ilike(galaxyKb.category, `%${query}%`)
+        ilike(galaxyKb.category, `%${query}%`),
+        ilike(galaxyKb.fullText, `%${query}%`)
       )
     ).orderBy(desc(galaxyKb.createdAt)).limit(limit);
+  }
+
+  async getLinkedMemories(kbId: number): Promise<AgentMemory[]> {
+    return db.select().from(agentMemories).where(eq(agentMemories.sourceKbId, kbId)).orderBy(desc(agentMemories.createdAt));
   }
 
   async verifyGalaxyKbEntry(id: number, verifiedBy: string): Promise<GalaxyKbEntry | undefined> {
@@ -987,6 +993,12 @@ export class DatabaseStorage implements IStorage {
       flagReason: reason,
       updatedAt: new Date(),
     }).where(eq(galaxyKb.id, id)).returning();
+    if (updated) {
+      const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await db.update(agentMemories).set({ validUntil: expiry }).where(
+        and(eq(agentMemories.sourceKbId, id), sql`${agentMemories.validUntil} IS NULL`)
+      );
+    }
     return updated;
   }
 

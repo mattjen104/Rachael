@@ -1,7 +1,7 @@
 import React from "react";
 import { useTvMode } from "@/hooks/use-tv-mode";
 
-export type ViewMode = "agenda" | "tree" | "programs" | "results" | "reader" | "transcripts" | "cockpit" | "snow" | "voice" | "evolution";
+export type ViewMode = "agenda" | "tree" | "programs" | "results" | "reader" | "transcripts" | "cockpit" | "snow" | "voice" | "evolution" | "galaxy-kb";
 
 interface SidebarProps {
   current: ViewMode;

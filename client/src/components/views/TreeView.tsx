@@ -634,7 +634,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
       window.open(node.url, "_blank");
     }
     else if (node.type === "galaxyKb") {
-      window.open(node.url, "_blank");
+      onNavigate?.("galaxy-kb", node.id);
     }
     else if (node.type === "galaxyGuide") {
       onNavigate?.("reader", node.id);
