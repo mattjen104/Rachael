@@ -5217,61 +5217,13 @@ ${fullHtml}`;
     ].join(nl));
   });
 
-  const galaxyState = {
-    lastFetchTime: 0,
-    readCount: 0,
-    readSessionStart: 0,
-    inFlight: false,
-  };
-
-  function galaxyRandomDelay(): number {
-    return 3000 + Math.floor(Math.random() * 5000);
-  }
-
-  function galaxyCooldownDelay(): number {
-    return 30000 + Math.floor(Math.random() * 30000);
-  }
-
   async function galaxyWaitAndRecord(isRead: boolean): Promise<string | null> {
-    if (galaxyState.inFlight) {
-      return "A Galaxy request is already in progress. Please wait for it to complete.";
-    }
-
-    const now = Date.now();
-
-    if (isRead) {
-      const SESSION_WINDOW = 10 * 60 * 1000;
-      if (now - galaxyState.readSessionStart > SESSION_WINDOW) {
-        galaxyState.readCount = 0;
-        galaxyState.readSessionStart = now;
-      }
-      if (galaxyState.readCount >= 5) {
-        const cooldown = galaxyCooldownDelay();
-        const sinceLast = now - galaxyState.lastFetchTime;
-        if (sinceLast < cooldown) {
-          const waitSec = Math.ceil((cooldown - sinceLast) / 1000);
-          return `Cooldown active (${galaxyState.readCount} guides fetched). Waiting ${waitSec}s before next fetch.`;
-        }
-        galaxyState.readCount = 0;
-        galaxyState.readSessionStart = now;
-      }
-    }
-
-    const sinceLast = now - galaxyState.lastFetchTime;
-    const minDelay = galaxyRandomDelay();
-    if (sinceLast < minDelay && galaxyState.lastFetchTime > 0) {
-      const waitMs = minDelay - sinceLast;
-      await new Promise(resolve => setTimeout(resolve, waitMs));
-    }
-
-    galaxyState.inFlight = true;
-    galaxyState.lastFetchTime = Date.now();
-    if (isRead) galaxyState.readCount++;
-    return null;
+    const { waitForGalaxyRateLimit } = await import("./galaxy-scraper");
+    return waitForGalaxyRateLimit(isRead);
   }
 
   function galaxyDone(): void {
-    galaxyState.inFlight = false;
+    import("./galaxy-scraper").then(m => m.galaxyRequestDone());
   }
 
   let galaxyRobotsParsed: { disallowed: string[] } | null = null;

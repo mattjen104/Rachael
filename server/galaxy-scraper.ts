@@ -29,7 +29,7 @@ interface GalaxySearchResult {
   snippet: string;
 }
 
-const scrapeState = {
+export const galaxyGlobalLock = {
   lastFetchTime: 0,
   readCount: 0,
   readSessionStart: 0,
@@ -44,44 +44,44 @@ async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForRateLimit(isRead: boolean): Promise<string | null> {
-  if (scrapeState.inFlight) {
-    return "Galaxy context scrape already in progress.";
+export async function waitForGalaxyRateLimit(isRead: boolean): Promise<string | null> {
+  if (galaxyGlobalLock.inFlight) {
+    return "Galaxy request already in progress.";
   }
 
   const now = Date.now();
 
   if (isRead) {
     const SESSION_WINDOW = 10 * 60 * 1000;
-    if (now - scrapeState.readSessionStart > SESSION_WINDOW) {
-      scrapeState.readCount = 0;
-      scrapeState.readSessionStart = now;
+    if (now - galaxyGlobalLock.readSessionStart > SESSION_WINDOW) {
+      galaxyGlobalLock.readCount = 0;
+      galaxyGlobalLock.readSessionStart = now;
     }
-    if (scrapeState.readCount >= 5) {
+    if (galaxyGlobalLock.readCount >= 5) {
       const cooldown = randomDelay(30000, 60000);
-      const sinceLast = now - scrapeState.lastFetchTime;
+      const sinceLast = now - galaxyGlobalLock.lastFetchTime;
       if (sinceLast < cooldown) {
-        return `Cooldown active (${scrapeState.readCount} guides fetched). Waiting.`;
+        return `Cooldown active (${galaxyGlobalLock.readCount} guides fetched). Waiting.`;
       }
-      scrapeState.readCount = 0;
-      scrapeState.readSessionStart = now;
+      galaxyGlobalLock.readCount = 0;
+      galaxyGlobalLock.readSessionStart = now;
     }
   }
 
-  const sinceLast = now - scrapeState.lastFetchTime;
+  const sinceLast = now - galaxyGlobalLock.lastFetchTime;
   const minWait = randomDelay(3000, 8000);
-  if (sinceLast < minWait && scrapeState.lastFetchTime > 0) {
+  if (sinceLast < minWait && galaxyGlobalLock.lastFetchTime > 0) {
     await sleep(minWait - sinceLast);
   }
 
-  scrapeState.inFlight = true;
-  scrapeState.lastFetchTime = Date.now();
-  if (isRead) scrapeState.readCount++;
+  galaxyGlobalLock.inFlight = true;
+  galaxyGlobalLock.lastFetchTime = Date.now();
+  if (isRead) galaxyGlobalLock.readCount++;
   return null;
 }
 
-function scrapeDone(): void {
-  scrapeState.inFlight = false;
+export function galaxyRequestDone(): void {
+  galaxyGlobalLock.inFlight = false;
 }
 
 async function galaxyBridgeFetch(url: string, submittedBy: string, options?: any): Promise<any> {
@@ -185,10 +185,9 @@ async function searchGalaxy(query: string): Promise<GalaxySearchResult[]> {
     return [];
   }
 
-  const rateMsg = await waitForRateLimit(false);
+  const rateMsg = await waitForGalaxyRateLimit(false);
   if (rateMsg) {
     console.log(`[galaxy-ctx] Rate limited: ${rateMsg}`);
-    scrapeDone();
     return [];
   }
 
@@ -228,7 +227,7 @@ async function searchGalaxy(query: string): Promise<GalaxySearchResult[]> {
 
     return results;
   } finally {
-    scrapeDone();
+    galaxyRequestDone();
   }
 }
 
@@ -238,10 +237,9 @@ async function readGalaxyGuide(url: string, fromSearch: boolean, searchQuery?: s
     return null;
   }
 
-  const rateMsg = await waitForRateLimit(true);
+  const rateMsg = await waitForGalaxyRateLimit(true);
   if (rateMsg) {
     console.log(`[galaxy-ctx] Rate limited: ${rateMsg}`);
-    scrapeDone();
     return null;
   }
 
@@ -307,7 +305,7 @@ async function readGalaxyGuide(url: string, fromSearch: boolean, searchQuery?: s
 
     return { title, category, text: extracted.substring(0, 50000) };
   } finally {
-    scrapeDone();
+    galaxyRequestDone();
   }
 }
 
@@ -327,7 +325,28 @@ function chunkText(text: string, maxChunk: number = 1500): string[] {
   if (current.trim().length > 50) {
     chunks.push(current.trim());
   }
-  return chunks;
+
+  const hardCapped: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= maxChunk * 2) {
+      hardCapped.push(chunk);
+    } else {
+      const sentences = chunk.split(/(?<=[.!?])\s+/);
+      let sub = "";
+      for (const sentence of sentences) {
+        if (sub.length + sentence.length > maxChunk && sub.length > 100) {
+          hardCapped.push(sub.trim());
+          sub = sentence;
+        } else {
+          sub += (sub ? " " : "") + sentence;
+        }
+      }
+      if (sub.trim().length > 50) {
+        hardCapped.push(sub.trim().substring(0, maxChunk * 2));
+      }
+    }
+  }
+  return hardCapped;
 }
 
 export async function scrapeGalaxyContext(term: string): Promise<{ memoriesCreated: number; guidesRead: number; error?: string }> {
