@@ -4007,8 +4007,8 @@ ${fullHtml}`;
             results.push("  CWP: Credentials filled. Waiting for Duo approval...");
             results.push("       (Approve the Duo push on your phone)");
           }
-        } catch (e: any) {
-          results.push(`  CWP: ERROR - ${e.message}`);
+        } catch (e: unknown) {
+          results.push(`  CWP: ERROR - ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -4034,8 +4034,8 @@ ${fullHtml}`;
             hswDone = true;
             results.push("  Hyperspace Web: Credentials filled. Waiting for Duo approval...");
           }
-        } catch (e: any) {
-          results.push(`  Hyperspace Web: ERROR - ${e.message}`);
+        } catch (e: unknown) {
+          results.push(`  Hyperspace Web: ERROR - ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -6778,9 +6778,16 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           const match = result.output.match(/Total:\s+(\d+)/);
           return match ? `done (${match[1]} tickets)` : "done";
         }
-        const result = await executeCommand("snow", ["incidents"]);
-        if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
-        return "done (incremental check)";
+        const types = ["incidents", "changes", "requests"];
+        const summaries: string[] = [];
+        for (const t of types) {
+          const result = await executeCommand("snow", [t]);
+          if (result.success) {
+            const match = result.output.match(/(\d+)\s+(incident|change|request)/i);
+            summaries.push(`${match?.[1] || "?"} ${t}`);
+          }
+        }
+        return `done (${summaries.join(", ")})`;
       },
     });
 
