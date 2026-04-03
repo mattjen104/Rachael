@@ -238,15 +238,51 @@ export function useToggleRuntime() {
   });
 }
 
+export interface PersistedEmail {
+  id: number;
+  messageId: string;
+  from: string;
+  subject: string;
+  date: string;
+  unread: boolean;
+  syncedAt: string;
+}
+
+export interface PersistedTicket {
+  id: number;
+  number: string;
+  type: string;
+  shortDescription: string;
+  state: string;
+  priority: string;
+  assignedTo: string;
+  assignmentGroup: string;
+  syncedAt: string;
+  slaBreached?: boolean;
+}
+
+export interface TreeData {
+  tasks: Task[];
+  programs: Program[];
+  skills: Skill[];
+  notes: Note[];
+  captures: Capture[];
+  reader: ReaderPage[];
+  persistedEmails?: PersistedEmail[];
+  persistedTickets?: PersistedTicket[];
+  bootStatus?: Record<string, string>;
+  citrixPortalApps?: Record<string, unknown>;
+  citrixPortals?: Array<{ name: string; url: string; appCount: number }>;
+  epicActivities?: Record<string, unknown>;
+  epicTrees?: Record<string, unknown>;
+  epicWorkflows?: unknown[];
+  pulseLinks?: unknown[];
+  galaxyKb?: unknown[];
+  galaxyCategories?: Record<number, string>;
+}
+
 export function useTreeData() {
-  return useQuery<{
-    tasks: Task[];
-    programs: Program[];
-    skills: Skill[];
-    notes: Note[];
-    captures: Capture[];
-    reader: ReaderPage[];
-  }>({ queryKey: ["/api/tree"] });
+  return useQuery<TreeData>({ queryKey: ["/api/tree"] });
 }
 
 export function useAgentConfigs() {

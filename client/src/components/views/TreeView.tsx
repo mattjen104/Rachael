@@ -523,15 +523,15 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
 
     const emails = mailInbox.data || [];
     const chats = teamsChats.data || [];
-    const persistedEmails = (data as any)?.persistedEmails || [];
-    const persistedTickets = (data as any)?.persistedTickets || [];
-    const bootStatus = (data as any)?.bootStatus || {};
+    const persistedEmails = data?.persistedEmails || [];
+    const persistedTickets = data?.persistedTickets || [];
+    const bootStatus = data?.bootStatus || {};
     const bridgeHint = bridgeConnected
       ? (mailInbox.isFetching ? "Loading inbox..." : "Enter: fetch")
       : "Not connected — check extension options";
 
-    const displayEmails = emails.length > 0 ? emails : persistedEmails.map((e: any, i: number) => ({
-      index: i, from: e.from || e.from_address || "", subject: e.subject || "", unread: e.unread, date: e.date || "",
+    const displayEmails = emails.length > 0 ? emails : persistedEmails.map((e, i) => ({
+      index: i, from: e.from || "", subject: e.subject || "", unread: e.unread, date: e.date || "",
     }));
     const mailLabel = mailInbox.isFetching ? "MAIL (loading...)" : `MAIL (Outlook)${emails.length === 0 && persistedEmails.length > 0 ? " [db]" : ""}`;
     nodes.push({ type: "section", label: mailLabel, key: "mail", count: displayEmails.length || (bridgeConnected ? -1 : 0) });
@@ -559,13 +559,13 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
     }
 
     const snowData = snowRecords.data?.records || [];
-    const displaySnow = snowData.length > 0 ? snowData : persistedTickets.map((t: any) => ({
-      number: t.number, shortDescription: t.shortDescription || t.short_description || "", state: t.state,
-      priority: t.priority, type: t.type, slaBreached: t.slaBreached || t.sla_breached || false, url: t.url,
+    const displaySnow = snowData.length > 0 ? snowData : persistedTickets.map(t => ({
+      number: t.number, shortDescription: t.shortDescription || "", state: t.state,
+      priority: t.priority, type: t.type, slaBreached: t.slaBreached || false, url: "",
     }));
-    const snowIncidents = displaySnow.filter((r: any) => r.type === "incident");
-    const snowChanges = displaySnow.filter((r: any) => r.type === "change");
-    const snowRequests = displaySnow.filter((r: any) => r.type === "request");
+    const snowIncidents = displaySnow.filter(r => r.type === "incident");
+    const snowChanges = displaySnow.filter(r => r.type === "change");
+    const snowRequests = displaySnow.filter(r => r.type === "request");
     const snowTotal = displaySnow.length;
 
     const snowLabel = `SNOW (ServiceNow)${snowData.length === 0 && persistedTickets.length > 0 ? " [db]" : ""}`;

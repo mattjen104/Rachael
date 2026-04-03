@@ -2879,10 +2879,22 @@ ${fullHtml}`;
       }
     }
 
-    function snowTicketsToRecords(tickets: any[]) {
-      return tickets.map((t: any) => ({
+    interface SnowRecordProjection {
+      number: string;
+      shortDescription: string;
+      state: string;
+      priority: string;
+      type: string;
+      assignedTo: string;
+      assignmentGroup: string;
+      url: string;
+      slaBreached: boolean;
+    }
+
+    function snowTicketsToRecords(tickets: Array<{ number: string; shortDescription: string | null; state: string | null; priority: string | null; type: string; assignedTo: string | null; assignmentGroup: string | null }>): SnowRecordProjection[] {
+      return tickets.map(t => ({
         number: t.number, shortDescription: t.shortDescription || "", state: t.state || "",
-        priority: t.priority || "", type: t.type as any, assignedTo: t.assignedTo || "",
+        priority: t.priority || "", type: t.type, assignedTo: t.assignedTo || "",
         assignmentGroup: t.assignmentGroup || "", url: "", slaBreached: false,
       }));
     }
@@ -2966,7 +2978,8 @@ ${fullHtml}`;
           lines.push(`Priority: ${infoSource.priority || ""}`);
           lines.push(`Assigned To: ${infoSource.assignedTo || ""}`);
           lines.push(`Group: ${infoSource.assignmentGroup || ""}`);
-          if ("updatedOn" in infoSource) lines.push(`Updated: ${(infoSource as any).updatedOn || ""}`);
+          const updatedOn = "updatedOn" in infoSource ? String((infoSource as Record<string, unknown>).updatedOn || "") : "";
+          if (updatedOn) lines.push(`Updated: ${updatedOn}`);
           lines.push("", `Open in browser: ${detailUrl}`);
           if (!isExtensionConnected()) lines.push("", "Bridge offline — showing cached data only.");
           else lines.push("", "Use: snow detail " + recordNumber + " --refresh to re-scrape from browser");
@@ -3009,7 +3022,8 @@ ${fullHtml}`;
         lines.push(`Priority: ${infoSource.priority || ""}`);
         lines.push(`Assigned To: ${infoSource.assignedTo || ""}`);
         lines.push(`Group: ${infoSource.assignmentGroup || ""}`);
-        if ("updatedOn" in infoSource) lines.push(`Updated: ${(infoSource as any).updatedOn || ""}`);
+        const updatedOn2 = "updatedOn" in infoSource ? String((infoSource as Record<string, unknown>).updatedOn || "") : "";
+        if (updatedOn2) lines.push(`Updated: ${updatedOn2}`);
         lines.push("");
       }
       lines.push("--- Page Content ---", "");
@@ -6709,7 +6723,12 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     steps.push({
       name: "Outlook Sync",
       run: async () => {
-        if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+        if (!isExtensionConnected()) {
+          const persisted = await storage.getOutlookEmails({ limit: 50 });
+          const unread = persisted.filter(e => e.unread).length;
+          if (persisted.length > 0) return `offline — ${persisted.length} emails in DB (${unread} unread)`;
+          return "SKIPPED (bridge not connected, no persisted data)";
+        }
         const result = await executeCommand("outlook", ["inbox", "--refresh"]);
         if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
         const match = result.output.match(/(\d+) messages/);
@@ -6720,7 +6739,11 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     steps.push({
       name: "ServiceNow Sync",
       run: async () => {
-        if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+        if (!isExtensionConnected()) {
+          const persisted = await storage.getSnowTickets({ limit: 200 });
+          if (persisted.length > 0) return `offline — ${persisted.length} tickets in DB`;
+          return "SKIPPED (bridge not connected, no persisted data)";
+        }
         const result = await executeCommand("snow", ["refresh"]);
         if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
         const match = result.output.match(/Total:\s+(\d+)/);
@@ -6732,7 +6755,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       name: "Citrix Keepalive",
       run: async () => {
         await storage.setAgentConfig("citrix_keepalive", "true", "citrix");
-        return "enabled";
+        startCitrixKeepalive();
+        return "enabled (10m interval active)";
       },
     });
 
