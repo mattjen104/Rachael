@@ -968,11 +968,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getLinkedMemories(kbId: number): Promise<AgentMemory[]> {
-    const memories = await db.select().from(agentMemories).where(eq(agentMemories.sourceKbId, kbId)).orderBy(desc(agentMemories.createdAt));
-    if (memories.length > 0) {
-      this.incrementGalaxyKbAccess(kbId).catch(() => {});
-    }
-    return memories;
+    return db.select().from(agentMemories).where(eq(agentMemories.sourceKbId, kbId)).orderBy(desc(agentMemories.createdAt));
   }
 
   async verifyGalaxyKbEntry(id: number, verifiedBy: string): Promise<GalaxyKbEntry | undefined> {
@@ -995,6 +991,9 @@ export class DatabaseStorage implements IStorage {
   async flagGalaxyKbEntry(id: number, reason: string): Promise<GalaxyKbEntry | undefined> {
     const [updated] = await db.update(galaxyKb).set({
       flagged: true,
+      verified: false,
+      verifiedAt: null,
+      verifiedBy: null,
       flagReason: reason,
       updatedAt: new Date(),
     }).where(eq(galaxyKb.id, id)).returning();

@@ -246,6 +246,9 @@ export async function getMemoryContextHybrid(
       lines.push(line);
       selected.push({ id: m.id, content: m.content });
       storage.updateMemoryAccess(m.id).catch(() => {});
+      if (m.sourceKbId) {
+        storage.incrementGalaxyKbAccess(m.sourceKbId).catch(() => {});
+      }
     }
 
     return { persistentContext: lines.join("\n"), memories: selected };
