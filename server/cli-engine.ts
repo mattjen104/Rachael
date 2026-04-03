@@ -6,6 +6,11 @@ import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./u
 import { executeLLM, type LLMConfig, type LLMMessage, type LLMResponse } from "./llm-client";
 import { synthesizeBriefing, htmlToSpokenScript } from "./voice-synth";
 import { findBestProduct, getStoreProfile, computeHealthScore } from "../skills/grocery-toolkit";
+import {
+  ask as askEngine, askCompare, resetConversation,
+  setLocalFallback, getPreprocessStatus,
+  setPreferredModel, getPreferredModel,
+} from "./ask-engine";
 
 export interface CommandResult {
   stdout: string;
@@ -171,7 +176,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse", "meals", "budget"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse", "meals", "budget", "ask"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -6879,6 +6884,213 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
     return ok(lines.join(nl));
   });
+
+  registerCommand("ask", "Ask a question with memory-aware context and smart model routing",
+    "ask <question> | ask --model <model> <q> | ask --cheap|--standard|--premium <q> | ask --compare <q> | ask --reset | ask --prefer <model> | ask local [on|off]",
+    async (args, _stdin) => {
+      const nl = String.fromCharCode(10);
+
+      if (args.length === 0) {
+        const status = await getPreprocessStatus();
+        const pref = getPreferredModel();
+        const lines = [
+          "=== ASK ===",
+          "",
+          "Pre-processing: DeepSeek (cheap LLM) handles classification, memory",
+          "filtering, KB verification, and context compression automatically.",
+          `Local fallback: ${status.localFallback ? "ON" : "OFF"} (used when no cloud API keys)`,
+          `Preferred model: ${pref || "(auto-route by complexity)"}`,
+          "",
+          "Usage:",
+          "  ask <question>                Ask with smart routing and memory context",
+          "  ask --model <id> <question>   Override model for this query",
+          "  ask --cheap <question>        Route to cheapest model",
+          "  ask --standard <question>     Route to standard-tier model",
+          "  ask --premium <question>      Route to premium-tier model",
+          "  ask --compare <question>      Compare cheap vs premium side by side",
+          "  ask --reset                   Clear conversation context",
+          "  ask --prefer <model>          Set default model preference",
+          "  ask status                    Show pre-processing pipeline stats",
+          "  ask local on|off              Toggle local model fallback",
+        ];
+        return ok(lines.join(nl));
+      }
+
+      if (args[0] === "status") {
+        const status = await getPreprocessStatus();
+        const lines = [
+          "=== ASK PRE-PROCESSING PIPELINE ===",
+          "",
+          "Primary: Cheap cloud LLM (DeepSeek or cheapest in roster)",
+          "  Handles: classification, memory filtering, KB verification,",
+          "           quality gating, context compression",
+          "",
+          `  Queries processed:   ${status.queriesProcessed}`,
+          `  Tokens saved:        ~${status.tokensSavedEstimate} (on main model)`,
+          `  Preprocess tokens:   ${status.preprocessTokensUsed}`,
+          `  Preprocess cost:     $${status.preprocessCost.toFixed(4)}`,
+          `  KB direct hits:      ${status.kbDirectHits}`,
+          `  Quality gate catches:${status.qualityGateCatches}`,
+          "",
+          `Fallback: Local Ollama (${status.localModelName})`,
+          `  Status:              ${status.localFallback ? "ENABLED" : "DISABLED"}`,
+          `  Model loaded:        ${status.localModelLoaded ? "yes" : "no"}`,
+          `  RAM usage:           ${status.ramUsage}`,
+          "",
+          "Pipeline order:",
+          "  1. Classify query (cheap LLM -> local fallback -> heuristics)",
+          "  2. Search KB for direct answer",
+          "  3. Verify KB match (cheap LLM)",
+          "  4. Quality-gate KB answer (cheap LLM) — catch bad answers",
+          "  5. Search + filter memories (cheap LLM prunes irrelevant)",
+          "  6. Compress context if routing to expensive model",
+          "  7. Route to appropriate model tier based on complexity",
+        ];
+        return ok(lines.join(nl));
+      }
+
+      if (args[0] === "local") {
+        if (args.length === 1) {
+          const status = await getPreprocessStatus();
+          const lines = [
+            "=== LOCAL MODEL FALLBACK ===",
+            "",
+            `  Status:           ${status.localFallback ? "ENABLED" : "DISABLED"}`,
+            `  Model:            ${status.localModelName}`,
+            `  Model loaded:     ${status.localModelLoaded ? "yes" : "no"}`,
+            `  RAM usage:        ${status.ramUsage}`,
+            "",
+            "The local model is a fallback for when no cloud API keys are available.",
+            "It handles basic query classification only. All other pre-processing",
+            "(memory filtering, KB verification, quality gating, context compression)",
+            "requires the cheap cloud LLM (DeepSeek) for reliable results.",
+            "",
+            "Toggle: ask local on | ask local off",
+          ];
+          return ok(lines.join(nl));
+        }
+
+        const toggle = args[1]?.toLowerCase();
+        if (toggle === "on") {
+          await setLocalFallback(true);
+          emitEvent("ask", "Local model fallback enabled", "action");
+          const status = await getPreprocessStatus();
+          return ok("Local model fallback: ON\nModel: " + status.localModelName);
+        }
+        if (toggle === "off") {
+          await setLocalFallback(false);
+          emitEvent("ask", "Local model fallback disabled", "action");
+          return ok("Local model fallback: OFF");
+        }
+        return fail(`[error] ask local: expected on|off, got "${toggle}"`);
+      }
+
+      if (args[0] === "--reset") {
+        resetConversation();
+        return ok("Conversation context cleared.");
+      }
+
+      if (args[0] === "--prefer") {
+        const modelRef = args.slice(1).join(" ");
+        if (!modelRef) return fail("[error] ask --prefer: provide a model name or id");
+        await setPreferredModel(modelRef);
+        const current = getPreferredModel();
+        if (current) {
+          emitEvent("ask", `Model preference set: ${current}`, "action");
+          return ok(`Default model preference set to: ${current}\nClear with: ask --prefer auto`);
+        } else {
+          emitEvent("ask", "Model preference cleared (auto-routing)", "action");
+          return ok("Model preference cleared. Using automatic routing.");
+        }
+      }
+
+      let modelOverride: string | undefined;
+      let tierOverride: "cheap" | "standard" | "premium" | undefined;
+      let compareMode = false;
+      let questionArgs = [...args];
+
+      if (args[0] === "--model" && args.length >= 3) {
+        modelOverride = args[1];
+        questionArgs = args.slice(2);
+      } else if (args[0] === "--cheap") {
+        tierOverride = "cheap";
+        questionArgs = args.slice(1);
+      } else if (args[0] === "--standard") {
+        tierOverride = "standard";
+        questionArgs = args.slice(1);
+      } else if (args[0] === "--premium") {
+        tierOverride = "premium";
+        questionArgs = args.slice(1);
+      } else if (args[0] === "--compare") {
+        compareMode = true;
+        questionArgs = args.slice(1);
+      }
+
+      const question = questionArgs.join(" ");
+      if (!question.trim()) {
+        return fail("[error] ask: provide a question");
+      }
+
+      if (compareMode) {
+        emitEvent("ask", `Compare mode: "${question.slice(0, 80)}"`, "action");
+        const result = await askCompare(question);
+        if (result.results.length === 0) {
+          return fail("[error] No models available for comparison");
+        }
+
+        const lines = ["=== MODEL COMPARISON ===", ""];
+        for (const r of result.results) {
+          const costStr = r.cost > 0 ? `$${r.cost.toFixed(4)}` : "N/A";
+          lines.push(`--- ${r.label} (${r.tier}) ---`);
+          lines.push(`  Model:    ${r.model}`);
+          lines.push(`  Tokens:   ${r.tokensUsed}`);
+          lines.push(`  Cost:     ${costStr}`);
+          lines.push(`  Time:     ${r.durationMs}ms`);
+          lines.push("");
+          const answerLines = r.answer.split("\n");
+          for (const al of answerLines) {
+            lines.push(`  ${al}`);
+          }
+          lines.push("");
+        }
+
+        const totalCost = result.results.reduce((s, r) => s + r.cost, 0);
+        lines.push(`Total cost: $${totalCost.toFixed(4)}`);
+        lines.push("");
+        lines.push("Set preference: ask --prefer <model-name>");
+
+        return ok(lines.join(nl));
+      }
+
+      emitEvent("ask", `Query: "${question.slice(0, 80)}"`, "action");
+      const result = await askEngine(question, {
+        model: modelOverride,
+        tier: tierOverride,
+      });
+
+      const lines: string[] = [];
+
+      if (result.fromKb) {
+        lines.push("[Source: Galaxy KB — verified by cheap LLM, 0 main-model tokens]");
+        lines.push("");
+      }
+
+      lines.push(result.answer);
+      lines.push("");
+      lines.push("---");
+      lines.push(`Model: ${result.model} | Tokens: ${result.tokensUsed} | Cost: $${result.cost.toFixed(4)}`);
+      lines.push(`Routing: ${result.routingReason}`);
+
+      if (result.compressed) {
+        lines.push(`Context compressed: ~${result.tokensSaved} tokens saved via cheap-model pre-processing`);
+      }
+
+      if (result.preprocessModel) {
+        lines.push(`Pre-processor: ${result.preprocessModel} ($${(result.preprocessCost || 0).toFixed(4)} total preprocess cost)`);
+      }
+
+      return ok(lines.join(nl));
+    });
 }
 
 registerBuiltinCommands();

@@ -53,6 +53,24 @@ All data lives in Postgres tables:
 - API: `POST /api/secrets/request` (create request), `GET /api/secrets/form/:id` (public form), `POST /api/secrets/submit` (public submit), `GET /api/secrets/:name` (auth required)
 - Response body logging suppressed for all `/api/secrets` routes
 
+## Ask Engine (server/ask-engine.ts)
+
+- **`ask <question>`** — Direct question answering with memory-aware context (hybrid Qdrant + Postgres search, Galaxy KB, conversation history)
+- **Smart routing** — Classifies query complexity (simple/moderate/complex) and routes to appropriate model tier (cheap/standard/premium)
+- **`ask --model <id>`** — Override model for a single query; `--cheap`, `--standard`, `--premium` tier shortcuts
+- **`ask --compare`** — Sends same prompt to cheap + premium models in parallel, shows side-by-side comparison with token/cost data
+- **`ask --prefer <model>`** — Set persistent model preference (saved to agent_config); `ask --prefer auto` clears
+- **`ask --reset`** — Clears conversation context (last 3 exchanges, 10-minute TTL)
+- **`ask status`** — Shows full pre-processing pipeline stats (queries, tokens saved, preprocess cost, KB hits, quality gate catches)
+- **Pre-processing pipeline** (DeepSeek / cheapest roster model — primary):
+  1. Query complexity classification (simple/moderate/complex) via cheap cloud LLM
+  2. KB direct-answer search with cheap LLM verification and quality gating
+  3. Memory relevance filtering — cheap LLM prunes 20+ candidates to 5-8
+  4. Context compression — compresses memory context before expensive model calls
+  - All pre-processing costs ~$0.0003/query; catches bad KB answers before user sees them
+- **Local model fallback** (`ask local on/off`) — Uses small Ollama model (qwen2.5:0.5b) for basic classification only when no cloud API keys available. OFF by default. Model auto-unloads after 5 min idle via Ollama `keep_alive`.
+- **Config keys** (agent_config, category "ask"): `ask_local_fallback`, `ask_preferred_model`
+
 ## Local Compute
 
 - **Local Compute** (`server/local-compute.ts`) — Shell execution for self-hosted instances

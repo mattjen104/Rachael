@@ -62,7 +62,7 @@ function resolveModel(
   return { provider, modelId };
 }
 
-async function callAnthropic(messages: LLMMessage[], modelId: string, signal?: AbortSignal): Promise<LLMResponse> {
+async function callAnthropic(messages: LLMMessage[], modelId: string, signal?: AbortSignal, maxTokens: number = 4096): Promise<LLMResponse> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
@@ -81,7 +81,7 @@ async function callAnthropic(messages: LLMMessage[], modelId: string, signal?: A
     },
     body: JSON.stringify({
       model: modelId,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       system: systemMsg || undefined,
       messages: chatMessages.length > 0 ? chatMessages : [{ role: "user", content: "Execute the program as instructed." }],
     }),
@@ -110,7 +110,8 @@ async function callOpenAICompat(
   apiKey: string,
   providerName: ProviderType,
   extraHeaders: Record<string, string> = {},
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  maxTokens: number = 4096
 ): Promise<LLMResponse> {
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -121,7 +122,7 @@ async function callOpenAICompat(
     },
     body: JSON.stringify({
       model: modelId,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       messages: (() => {
         const mapped = messages.map(m => ({ role: m.role, content: m.content }));
         if (providerName === "openrouter" && modelId.startsWith("google/")) {
@@ -159,16 +160,18 @@ export async function executeLLM(
   messages: LLMMessage[],
   modelRef: string | undefined,
   compiledConfig: LLMConfig | undefined,
-  routing: Record<string, string | undefined>
+  routing: Record<string, string | undefined>,
+  options?: { maxTokens?: number }
 ): Promise<LLMResponse> {
   const { provider, modelId } = resolveModel(modelRef, compiledConfig, routing);
+  const maxTokens = options?.maxTokens || 4096;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000);
 
   try {
     if (provider === "anthropic") {
-      return await callAnthropic(messages, modelId, controller.signal);
+      return await callAnthropic(messages, modelId, controller.signal, maxTokens);
     } else if (provider === "openrouter") {
       const apiKey = process.env.OPENROUTER_API_KEY;
       if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
@@ -184,7 +187,8 @@ export async function executeLLM(
             : "https://rachael.replit.app",
           "X-Title": "Rachael",
         },
-        controller.signal
+        controller.signal,
+        maxTokens
       );
     } else {
       const apiKey = process.env.OPENAI_API_KEY;
@@ -196,7 +200,8 @@ export async function executeLLM(
         apiKey,
         "openai",
         {},
-        controller.signal
+        controller.signal,
+        maxTokens
       );
     }
   } catch (err: any) {
