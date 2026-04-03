@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { storage } from "./storage";
-import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema, insertMealPlanSchema, insertShoppingListSchema, insertPantryItemSchema, insertKiddoFoodLogSchema, insertNightlyRecommendationSchema } from "@shared/schema";
+import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema, insertMealPlanSchema, insertShoppingListSchema, insertPantryItemSchema, insertKiddoFoodLogSchema, insertNightlyRecommendationSchema, type OutlookEmail, type SnowTicket } from "@shared/schema";
 import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
@@ -788,10 +788,10 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const cmd: Record<string, any> = { id, type, env: env || "SUP" };
+    const cmd: Record<string, unknown> = { id, type, env: env || "SUP" };
     if (target) cmd.target = target;
     if (path) cmd.path = path;
     if (client) cmd.client = client;
@@ -805,6 +805,7 @@ export async function registerRoutes(
     if (showAll) cmd.showAll = showAll;
     if (focus) cmd.focus = focus;
     if (_activity_label) cmd._activity_label = _activity_label;
+    if (type === "login" && credentials) cmd.credentials = credentials;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });
@@ -1196,14 +1197,14 @@ export async function registerRoutes(
       galaxyKbEntries = (await storage.getGalaxyKbEntries()).map(({ fullText, ...rest }) => rest);
     } catch {}
 
-    let persistedEmails: any[] = [];
+    let persistedEmails: OutlookEmail[] = [];
     try {
       persistedEmails = await storage.getOutlookEmails({ unreadOnly: true, limit: 50 });
     } catch (e: unknown) {
       console.warn(`[tree] Failed to load persisted emails: ${e instanceof Error ? e.message : e}`);
     }
 
-    let persistedTickets: any[] = [];
+    let persistedTickets: SnowTicket[] = [];
     try {
       persistedTickets = await storage.getSnowTickets({ limit: 100 });
     } catch (e: unknown) {

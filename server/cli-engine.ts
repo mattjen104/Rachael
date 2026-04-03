@@ -4040,8 +4040,57 @@ ${fullHtml}`;
       }
 
       if (target === "all" || target === "text") {
-        results.push("  Text/PuTTY: Requires desktop agent (not available via bridge).");
-        results.push("              Use CWP/Hyperspace Web login above, then launch Text from portal.");
+        const agentPort = process.env.PORT || 5000;
+        try {
+          const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/status`);
+          const statusData = statusResp.ok ? await statusResp.json() as { connected?: boolean } : { connected: false };
+          if (!statusData.connected) {
+            results.push("  Text/PuTTY: Desktop agent not connected (skipped).");
+            results.push("              Launch Text from CWP portal after Duo approval.");
+          } else {
+            const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "login",
+                credentials: { username: epicUser, password: epicPass },
+              }),
+            });
+            const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
+            if (data.ok && data.commandId) {
+              results.push("  Text/PuTTY: Login command queued for desktop agent.");
+              results.push("              Agent will handle double-login sequence.");
+              const pollStart = Date.now();
+              const POLL_TIMEOUT = 30000;
+              const POLL_INTERVAL = 3000;
+              let loginResult: string | null = null;
+              while (Date.now() - pollStart < POLL_TIMEOUT) {
+                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+                try {
+                  const resultResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
+                  if (resultResp.ok) {
+                    const resultData = await resultResp.json() as { result?: { status?: string; error?: string } };
+                    if (resultData.result) {
+                      loginResult = resultData.result.status === "ok" ? "SUCCESS" : `FAILED: ${resultData.result.error || "unknown"}`;
+                      break;
+                    }
+                  }
+                } catch {
+                  // Agent may still be processing
+                }
+              }
+              if (loginResult) {
+                results.push(`              Result: ${loginResult}`);
+              } else {
+                results.push("              (Still processing — check with: epic status)");
+              }
+            } else {
+              results.push("  Text/PuTTY: Failed to queue login command.");
+            }
+          }
+        } catch (e: unknown) {
+          results.push(`  Text/PuTTY: ${e instanceof Error ? e.message : "Desktop agent not reachable (skipped)."}`);
+        }
       }
 
       await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
