@@ -2398,6 +2398,29 @@ ${fullHtml}`;
         return ok(lines.join("\n"));
       }
 
+      if (!refresh) {
+        const lastSync = await storage.getOutlookSyncTimestamp();
+        if (lastSync) {
+          const ageMs = Date.now() - lastSync.getTime();
+          const STALE_THRESHOLD = 30 * 60 * 1000;
+          if (ageMs < STALE_THRESHOLD) {
+            const persisted = await storage.getOutlookEmails({ limit });
+            if (persisted.length > 0) {
+              const ageMin = Math.round(ageMs / 60000);
+              const lines = [`=== OUTLOOK INBOX === (from DB, synced ${ageMin}m ago, ${persisted.length} messages)`, ""];
+              persisted.forEach((e, i) => {
+                const unread = e.unread ? "*" : " ";
+                const from = (e.from || "").padEnd(25).slice(0, 25);
+                const date = (e.date || "").padEnd(12).slice(0, 12);
+                lines.push(`${unread}${String(i + 1).padStart(3)}  ${date}  ${from}  ${(e.subject || "").slice(0, 60)}`);
+              });
+              lines.push("", `Synced ${ageMin}m ago. Use: outlook --refresh to re-scrape`);
+              return ok(lines.join("\n"));
+            }
+          }
+        }
+      }
+
       emitEvent("cli", "Fetching Outlook inbox via bridge DOM extraction...", "info", { metadata: { command: "outlook" } });
       const result = await smartFetch("https://outlook.office.com/mail/inbox", "dom", "cli-outlook", {
         maxText: 60000,
@@ -2839,52 +2862,53 @@ ${fullHtml}`;
       }
     }
 
-    if (sub === "incidents" || sub === "inc") {
+    async function snowPersistedFirst(typeFilter: string, label: string, navPathName: string): Promise<CommandResult> {
       const cached = snowCache;
       if (cached && !refresh) {
-        const incidents = cached.records.filter(r => r.type === "incident");
-        if (incidents.length > 0) {
+        const filtered = cached.records.filter(r => r.type === typeFilter);
+        if (filtered.length > 0) {
           const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
-          return ok(formatSnowList("INCIDENTS", incidents, age));
+          return ok(formatSnowList(label, filtered, age));
         }
       }
-      const records = await scrapeSnowNavPath("list-my-incidents", "incident");
-      mergeSnowCache(records, "incident");
-      if (records.length > 0) await persistSnowResults(records, "incidents");
-      if (records.length === 0) return ok(`=== SNOW INCIDENTS ===${nl}${nl}No incidents found or could not parse. Try: snow refresh`);
-      return ok(formatSnowList("INCIDENTS", records));
+
+      if (!refresh) {
+        const lastSync = await storage.getSnowSyncTimestamp();
+        if (lastSync) {
+          const ageMs = Date.now() - lastSync.getTime();
+          const STALE_THRESHOLD = 30 * 60 * 1000;
+          if (ageMs < STALE_THRESHOLD) {
+            const persisted = await storage.getSnowTickets({ type: typeFilter, limit: 50 });
+            if (persisted.length > 0) {
+              const ageMin = Math.round(ageMs / 60000);
+              const asRecords = persisted.map(t => ({
+                number: t.number, shortDescription: t.shortDescription || "", state: t.state || "",
+                priority: t.priority || "", type: t.type as any, assignedTo: t.assignedTo || "",
+                assignmentGroup: t.assignmentGroup || "", url: "", slaBreached: false,
+              }));
+              return ok(formatSnowList(label + " [db]", asRecords) + `${nl}Synced ${ageMin}m ago. Use: snow ${navPathName} --refresh to re-scrape`);
+            }
+          }
+        }
+      }
+
+      const records = await scrapeSnowNavPath(navPathName === "incidents" ? "list-my-incidents" : navPathName === "changes" ? "list-my-changes" : "list-my-requests", typeFilter);
+      mergeSnowCache(records, typeFilter);
+      if (records.length > 0) await persistSnowResults(records, navPathName);
+      if (records.length === 0) return ok(`=== SNOW ${label} ===${nl}${nl}No ${typeFilter}s found or could not parse. Try: snow refresh`);
+      return ok(formatSnowList(label, records));
+    }
+
+    if (sub === "incidents" || sub === "inc") {
+      return snowPersistedFirst("incident", "INCIDENTS", "incidents");
     }
 
     if (sub === "changes" || sub === "chg") {
-      const cached = snowCache;
-      if (cached && !refresh) {
-        const changes = cached.records.filter(r => r.type === "change");
-        if (changes.length > 0) {
-          const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
-          return ok(formatSnowList("CHANGE REQUESTS", changes, age));
-        }
-      }
-      const records = await scrapeSnowNavPath("list-my-changes", "change");
-      mergeSnowCache(records, "change");
-      if (records.length > 0) await persistSnowResults(records, "changes");
-      if (records.length === 0) return ok(`=== SNOW CHANGES ===${nl}${nl}No change requests found or could not parse. Try: snow refresh`);
-      return ok(formatSnowList("CHANGE REQUESTS", records));
+      return snowPersistedFirst("change", "CHANGE REQUESTS", "changes");
     }
 
     if (sub === "requests" || sub === "req") {
-      const cached = snowCache;
-      if (cached && !refresh) {
-        const requests = cached.records.filter(r => r.type === "request");
-        if (requests.length > 0) {
-          const age = Math.round((Date.now() - cached.fetchedAt) / 1000);
-          return ok(formatSnowList("SERVICE REQUESTS", requests, age));
-        }
-      }
-      const records = await scrapeSnowNavPath("list-my-requests", "request");
-      mergeSnowCache(records, "request");
-      if (records.length > 0) await persistSnowResults(records, "requests");
-      if (records.length === 0) return ok(`=== SNOW REQUESTS ===${nl}${nl}No requests found or could not parse. Try: snow refresh`);
-      return ok(formatSnowList("SERVICE REQUESTS", records));
+      return snowPersistedFirst("request", "SERVICE REQUESTS", "requests");
     }
 
     if (sub === "detail") {
@@ -2892,6 +2916,7 @@ ${fullHtml}`;
       if (!recordNumber) return fail("[snow] Usage: snow detail INC0012345");
       const cached = snowCache;
       const cachedRecord = cached?.records.find(r => r.number.toLowerCase() === recordNumber.toLowerCase());
+      const dbTicket = await storage.getSnowTicketByNumber(recordNumber);
       let tableName = "incident";
       if (/^CHG/i.test(recordNumber)) tableName = "change_request";
       else if (/^REQ|^RITM/i.test(recordNumber)) tableName = "sc_req_item";

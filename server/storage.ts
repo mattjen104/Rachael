@@ -1042,11 +1042,9 @@ export class DatabaseStorage implements IStorage {
   async getOutlookEmails(opts?: { unreadOnly?: boolean; limit?: number }): Promise<OutlookEmail[]> {
     const conditions = [];
     if (opts?.unreadOnly) conditions.push(eq(outlookEmails.unread, true));
-    const q = conditions.length > 0
-      ? db.select().from(outlookEmails).where(and(...conditions)).orderBy(desc(outlookEmails.syncedAt))
-      : db.select().from(outlookEmails).orderBy(desc(outlookEmails.syncedAt));
-    if (opts?.limit) return (q as any).limit(opts.limit);
-    return q;
+    const baseQuery = db.select().from(outlookEmails).orderBy(desc(outlookEmails.syncedAt));
+    const filtered = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
+    return filtered.limit(opts?.limit ?? 200);
   }
 
   async getOutlookEmail(id: number): Promise<OutlookEmail | undefined> {
@@ -1104,11 +1102,9 @@ export class DatabaseStorage implements IStorage {
     const conditions = [];
     if (opts?.type) conditions.push(eq(snowTickets.type, opts.type));
     if (opts?.source) conditions.push(eq(snowTickets.source, opts.source));
-    const q = conditions.length > 0
-      ? db.select().from(snowTickets).where(and(...conditions)).orderBy(desc(snowTickets.syncedAt))
-      : db.select().from(snowTickets).orderBy(desc(snowTickets.syncedAt));
-    if (opts?.limit) return (q as any).limit(opts.limit);
-    return q;
+    const baseQuery = db.select().from(snowTickets).orderBy(desc(snowTickets.syncedAt));
+    const filtered = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
+    return filtered.limit(opts?.limit ?? 500);
   }
 
   async getSnowTicket(id: number): Promise<SnowTicket | undefined> {
