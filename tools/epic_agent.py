@@ -4502,18 +4502,24 @@ def _login_text_window(window, label, username, password):
     try:
         activate_window(window)
         time.sleep(0.5)
+        set_text_method("unicode")
+        set_keyboard_backend("keybd_event")
         print(f"  [login] {label}: terminal login — typing username")
-        sendinput_typewrite(username, interval=0.02)
-        time.sleep(0.2)
+        sendinput_typewrite(username, interval=0.03)
+        time.sleep(0.3)
         sendinput_press("enter")
         time.sleep(1.5)
         print(f"  [login] {label}: typing password")
-        sendinput_typewrite(password, interval=0.02)
-        time.sleep(0.2)
+        sendinput_typewrite(password, interval=0.03)
+        time.sleep(0.3)
         sendinput_press("enter")
         time.sleep(1.0)
+        set_text_method("pyautogui")
+        set_keyboard_backend("sendinput")
         return True, "credentials entered (terminal)"
     except Exception as e:
+        set_text_method("pyautogui")
+        set_keyboard_backend("sendinput")
         return False, str(e)[:60]
 
 
@@ -4553,6 +4559,9 @@ Return ONLY the JSON object."""
             reason = result.get("reason", "already logged in")
             return False, reason
 
+        set_text_method("unicode")
+        set_keyboard_backend("keybd_event")
+
         uf = result.get("username_field", {})
         pf = result.get("password_field", {})
         sb = result.get("submit_button", {})
@@ -4561,11 +4570,11 @@ Return ONLY the JSON object."""
             abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
             safe_click(abs_x, abs_y, pause_after=0.4, label="username field")
             time.sleep(0.3)
-            sendinput_typewrite(username, interval=0.02)
+            sendinput_typewrite(username, interval=0.03)
             time.sleep(0.3)
         else:
             print(f"  [login] {label}: no username field coords, trying Tab focus")
-            sendinput_typewrite(username, interval=0.02)
+            sendinput_typewrite(username, interval=0.03)
             time.sleep(0.3)
 
         if pf.get("x") and pf.get("y"):
@@ -4576,7 +4585,7 @@ Return ONLY the JSON object."""
             sendinput_press("tab")
             time.sleep(0.3)
 
-        sendinput_typewrite(password, interval=0.02)
+        sendinput_typewrite(password, interval=0.03)
         time.sleep(0.3)
 
         if sb.get("x") and sb.get("y"):
@@ -4586,9 +4595,13 @@ Return ONLY the JSON object."""
             sendinput_press("enter")
             time.sleep(1.5)
 
+        set_text_method("pyautogui")
+        set_keyboard_backend("sendinput")
         return True, "credentials entered (GUI)"
 
     except Exception as e:
+        set_text_method("pyautogui")
+        set_keyboard_backend("sendinput")
         return False, str(e)[:60]
 
 
