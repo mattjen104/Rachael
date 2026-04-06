@@ -4616,21 +4616,47 @@ def _save_proven_login_method(method_name):
     except Exception as e:
         print(f"  [login] Could not save login config: {e}")
 
+def _type_via_clipboard(text):
+    _clipboard_paste(text)
+
+def _type_via_scancode(text):
+    for ch in text:
+        _sendinput_scancode_char(ch)
+        time.sleep(0.03)
+
+def _type_via_unicode(text):
+    set_text_method("unicode")
+    sendinput_typewrite(text, interval=0.03)
+
+def _type_via_keybd_vk(text):
+    set_keyboard_backend("keybd_event")
+    set_text_method("vk")
+    sendinput_typewrite(text, interval=0.03)
+
+def _type_via_sendinput_vk(text):
+    set_keyboard_backend("sendinput")
+    set_text_method("vk")
+    sendinput_typewrite(text, interval=0.03)
+
+def _type_via_pyautogui(text):
+    pyautogui.typewrite(text, interval=0.04)
+
 def _build_type_methods(window):
     """Build ordered list of (name, type_fn) for adaptive text input.
     Each type_fn(text) sends text using a different input method."""
     hwnd = getattr(window, '_hWnd', None)
-
     methods = [
-        ("clipboard", lambda text: _clipboard_paste(text)),
-        ("scancode", lambda text: [(_sendinput_scancode_char(ch), time.sleep(0.03))[0] for ch in text]),
-        ("unicode", lambda text: [(set_text_method("unicode"), sendinput_typewrite(text, interval=0.03))]),
-        ("keybd_vk", lambda text: [(set_keyboard_backend("keybd_event"), set_text_method("vk"), sendinput_typewrite(text, interval=0.03))]),
-        ("sendinput_vk", lambda text: [(set_keyboard_backend("sendinput"), set_text_method("vk"), sendinput_typewrite(text, interval=0.03))]),
-        ("pyautogui", lambda text: pyautogui.typewrite(text, interval=0.04)),
+        ("clipboard", _type_via_clipboard),
+        ("scancode", _type_via_scancode),
+        ("unicode", _type_via_unicode),
+        ("keybd_vk", _type_via_keybd_vk),
+        ("sendinput_vk", _type_via_sendinput_vk),
+        ("pyautogui", _type_via_pyautogui),
     ]
     if hwnd:
-        methods.append(("postmessage", lambda text: _postmessage_type(hwnd, text)))
+        def _type_via_postmessage(text, _hwnd=hwnd):
+            _postmessage_type(_hwnd, text)
+        methods.append(("postmessage", _type_via_postmessage))
     return methods
 
 def _clear_field():
@@ -4732,9 +4758,10 @@ def _adaptive_type_text(window, text, field_description, proven_method=None, is_
     return False, None
 
 
-def _verify_login_result(window, method):
+def _verify_login_result(window, method, pw_method=None):
     """Take a post-login screenshot and check if login succeeded.
-    Only saves proven method if login is confirmed."""
+    Only saves proven method if login is confirmed successful.
+    Uses pw_method if it differs from username method (both worked)."""
     try:
         time.sleep(2.0)
         img = screenshot_window(window)
@@ -4752,16 +4779,19 @@ Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} o
                 vresult = json.loads(json_match.group())
                 state = vresult.get("state", "unknown")
                 if state == "logged_in":
-                    if method:
-                        _save_proven_login_method(method)
-                    return True, f"logged in (method: {method})"
+                    save_method = pw_method if pw_method else method
+                    if save_method:
+                        _save_proven_login_method(save_method)
+                    return True, f"logged in (method: {save_method})"
                 elif state == "error":
                     return False, f"login error: {vresult.get('detail', 'unknown')}"
+                elif state == "login_screen":
+                    return False, f"still on login screen after submit (method: {method})"
                 else:
-                    return True, f"credentials entered via {method} (post-verify: {state})"
+                    return False, f"login unconfirmed — unknown state (method: {method})"
     except Exception:
         pass
-    return True, f"credentials entered via {method}"
+    return False, f"login verification failed (method: {method})"
 
 
 def _login_text_window(window, label, username, password):
@@ -4792,7 +4822,7 @@ def _login_text_window(window, label, username, password):
         _keybd_event_key(0x0D, up=True)
         time.sleep(1.0)
 
-        return _verify_login_result(window, method)
+        return _verify_login_result(window, method, pw_method)
     except Exception as e:
         return False, str(e)[:60]
 
@@ -4874,7 +4904,7 @@ Return ONLY the JSON object."""
             _keybd_event_key(0x0D, up=True)
             time.sleep(2.0)
 
-        return _verify_login_result(window, method)
+        return _verify_login_result(window, method, pw_method)
 
     except Exception as e:
         return False, str(e)[:60]
