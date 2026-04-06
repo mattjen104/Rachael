@@ -1,0 +1,141 @@
+st/public/assets/index-Dv8dCQAx.css  100.07 kB │ gzip:  16.44 kB
+../dist/public/assets/index-Y1CVxEw_.js   585.74 kB │ gzip: 179.26 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 11.09s
+building server...
+
+  dist/index.cjs  1.7mb ⚠️
+
+⚡ Done in 646ms
+copied seed-org-files.json to dist/
+root@Phantom:/opt/rachael# cd /opt/rachael
+git pull
+npm install
+npm run build
+systemctl restart rachael
+remote: Enumerating objects: 166, done.
+remote: Counting objects: 100% (166/166), done.
+remote: Compressing objects: 100% (19/19), done.
+remote: Total 140 (delta 122), reused 139 (delta 121), pack-reused 0 (from 0)
+Receiving objects: 100% (140/140), 54.30 KiB | 3.02 MiB/s, done.
+Resolving deltas: 100% (122/122), completed with 23 local objects.
+From https://github.com/mattjen104/Rachael
+   24e00cf..7c66922  main       -> origin/main
+Updating 24e00cf..7c66922
+Fast-forward
+ chrome-extension/background.js               |   51 +++
+ client/src/components/layout/Sidebar.tsx     |    2 +-
+ client/src/components/views/GalaxyKbView.tsx |  252 ++++++++++++++
+ client/src/components/views/TreeView.tsx     |  153 ++++++---
+ client/src/hooks/use-org-data.ts             |   53 ++-
+ client/src/pages/Workspace.tsx               |    2 +
+ replit.md                                    |   49 ++-
+ server/ask-engine.ts                         |  824 +++++++++++++++++++++++++++++++++++++++++++++
+ server/bridge-queue.ts                       |   81 ++++-
+ server/cli-engine.ts                         | 1090 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++----
+ server/galaxy-scraper.ts                     |  108 +++++-
+ server/index.ts                              |    2 +-
+ server/llm-client.ts                         |   21 +-
+ server/memory-consolidation.ts               |    7 +-
+ server/routes.ts                             |  174 +++++++++-
+ server/storage.ts                            |  237 +++++++++++++
+ shared/schema.ts                             |  103 ++++++
+ 17 files changed, 3050 insertions(+), 159 deletions(-)
+ create mode 100644 client/src/components/views/GalaxyKbView.tsx
+ create mode 100644 server/ask-engine.ts
+
+up to date, audited 438 packages in 2s
+
+59 packages are looking for funding
+  run `npm fund` for details
+
+4 moderate severity vulnerabilities
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> rest-express@1.0.0 build
+> tsx script/build.ts
+
+building client...
+vite v7.3.1 building client environment for production...
+✓ 2183 modules transformed.
+rendering chunks (1)...[meta-images] no Replit deployment domain found, skipping meta tag updates
+../dist/public/index.html                   1.51 kB │ gzip:   0.62 kB
+../dist/public/assets/index-CTj2ER8p.css  100.61 kB │ gzip:  16.56 kB
+../dist/public/assets/index-B7_l8yBj.js   594.39 kB │ gzip: 181.41 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 9.89s
+building server...
+
+  dist/index.cjs  1.8mb ⚠️
+
+⚡ Done in 513ms
+copied seed-org-files.json to dist/
+root@Phantom:/opt/rachael# systemctl restart rachael
+root@Phantom:/opt/rachael# cd /opt/rachael
+source /opt/rachael/.env && export DATABASE_URL
+npx drizzle-kit push --force
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/opt/rachael/drizzle.config.ts'
+Using 'pg' driver for database querying
+[✓] Pulling schema from database...
++ galaxy_kb table will be created
++ kiddo_food_log table will be created
++ meal_plans table will be created
++ nightly_recommendations table will be created
++ outlook_emails table will be created
++ pantry_items table will be created
++ radar_engagement table will be created
++ radar_seen_items table will be created
++ shopping_lists table will be created
++ snow_tickets table will be created
++ transcripts table will be created
+--- all table conflicts resolved ---
+
+
++ created_at column will be created
+--- all columns conflicts in audit_log table resolved ---
+
+· You're about to add skills_name_unique unique constraint to the table, which contains 2 items. If this statement fails, you will receive an error from the database. Do you want to truncate skills table?
+
+· You're about to add agent_config_key_unique unique constraint to the table, which contains 10 items. If this statement fails, you will receive an error from the database. Do you want to truncate agent_config table?
+
+· You're about to add programs_name_unique unique constraint to the table, which contains 18 items. If this statement fails, you will receive an error from the database. Do you want to truncate programs table?
+
+· You're about to add site_profiles_name_unique unique constraint to the table, which contains 6 items. If this statement fails, you will receive an error from the database. Do you want to truncate site_profiles table?
+
+[✓] Changes applied
+root@Phantom:/opt/rachael# systemctl restart rachael
+root@Phantom:/opt/rachael# journalctl -u rachael --no-pager -n 20
+Apr 03 21:18:17 Phantom rachael[661925]: 9:18:17 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:18 Phantom rachael[661925]: 9:18:18 PM [express] GET /api/notifications 304 in 1ms :: {"notifications":[],"total":0}
+Apr 03 21:18:20 Phantom rachael[661925]: 9:18:20 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:21 Phantom rachael[661925]: 9:18:21 PM [express] GET /api/notifications 304 in 2ms :: {"notifications":[],"total":0}
+Apr 03 21:18:23 Phantom rachael[661925]: 9:18:23 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:24 Phantom rachael[661925]: 9:18:24 PM [express] GET /api/notifications 304 in 1ms :: {"notifications":[],"total":0}
+Apr 03 21:18:26 Phantom rachael[661925]: 9:18:26 PM [express] GET /api/runtime 304 in 2ms :: {"active":true,"lastTick":"2026-04-03T21:17:55.251Z","programs":[{"name":"budget-strategist","status":"idle","lastRun":"2026-04-03T18:00:09.188Z","nextRun":"2026-04-04T02:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"estate-car-finder","status":"idle","lastRun":"2026-04-02T22:00:12.489Z","nextRun":"2026-04-03T22:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"fed-rates","status":"idle","lastRun":"2026-04-03T06:00:29.087Z","nextRun":"2026-04-04T06:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"foreclosure-monitor","status":"idle","lastRun":"2026-04-03T08:00:28.998Z","nextRun":"2026-04-04T08:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"github-trending","status":"idle","lastRun":"2026-04-03T14:00:08.834Z","nextRun":"2026-04-03T22:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"hn-deep-digest","status":"idle","lastRun":"2026-04-02T23:00:28.515Z","nextRun":"2026-04-03T23:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"hn-pulse","status":"idle","lastRun":"2026-04-03T19:00:09.238Z","nextRun":"2026-04-04T07:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"mandela-berenstain","status":"idle","lastRun":"2026-04-02T22:00:12.555Z","nextRun":"2026-04-03T22:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"meeting-prep","status":"idle","lastRun":"2026-04-03T00:00:28.697Z","nextRun":"2026-04-04T00:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"nightly-meal-recommender","status":"idle","lastRun":"2026-04-03T21:00:07.648Z","nextRun":"2026-04-04T21:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"openrouter-model-scout","status":"idle","lastRun":"2026-04-03T18:00:09.198Z","nextRun":"2026-04-04T06:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"overnight-digest","status":"idle","lastRun":"2026-04-03T13:00:08.778Z","nextRun":"2026-04-04T13:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"price-watch","status":"idle","lastRun":"2026-04-03T07:00:29.080Z","nextRun":"2026-04-04T07:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"research-radar","status":"idle","lastRun":"2026-04-02T23:30:28.491Z","nextRun":"2026-04-03T23:30:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"sec-filings","status":"idle","lastRun":"2026-04-03T09:00:08.589Z","nextRun":"2026-04-04T09:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"snow-shift-brief","status":"idle","lastRun":"2026-04-03T13:30:08.796Z","nextRun":"2026-04-04T13:30:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"weekly-strategy","status":"idle","lastRun":"2026-04-03T02:00:28.779Z","nextRun":"2026-04-04T02:00:00.000Z","lastOutput":null,"error":null,"iteration":0}],"budget":{"budget":500000,"used":0,"remaining":500000,"percentUsed":0,"exhausted":false,"estimatedCostToday":0,"report":{"total":0,"totalCost":0,"byModel":{},"byProgram":{},"entries":0}}}
+Apr 03 21:18:26 Phantom rachael[661925]: 9:18:26 PM [express] GET /api/bridge/status 304 in 1ms
+Apr 03 21:18:26 Phantom rachael[661925]: 9:18:26 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:27 Phantom rachael[661925]: 9:18:27 PM [express] GET /api/notifications 304 in 4ms :: {"notifications":[],"total":0}
+Apr 03 21:18:29 Phantom rachael[661925]: 9:18:29 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:30 Phantom rachael[661925]: 9:18:30 PM [express] GET /api/notifications 304 in 1ms :: {"notifications":[],"total":0}
+Apr 03 21:18:32 Phantom rachael[661925]: 9:18:32 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:33 Phantom rachael[661925]: 9:18:33 PM [express] GET /api/notifications 304 in 3ms :: {"notifications":[],"total":0}
+Apr 03 21:18:36 Phantom rachael[661925]: 9:18:36 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:36 Phantom rachael[661925]: 9:18:36 PM [express] GET /api/runtime 304 in 3ms :: {"active":true,"lastTick":"2026-04-03T21:17:55.251Z","programs":[{"name":"budget-strategist","status":"idle","lastRun":"2026-04-03T18:00:09.188Z","nextRun":"2026-04-04T02:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"estate-car-finder","status":"idle","lastRun":"2026-04-02T22:00:12.489Z","nextRun":"2026-04-03T22:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"fed-rates","status":"idle","lastRun":"2026-04-03T06:00:29.087Z","nextRun":"2026-04-04T06:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"foreclosure-monitor","status":"idle","lastRun":"2026-04-03T08:00:28.998Z","nextRun":"2026-04-04T08:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"github-trending","status":"idle","lastRun":"2026-04-03T14:00:08.834Z","nextRun":"2026-04-03T22:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"hn-deep-digest","status":"idle","lastRun":"2026-04-02T23:00:28.515Z","nextRun":"2026-04-03T23:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"hn-pulse","status":"idle","lastRun":"2026-04-03T19:00:09.238Z","nextRun":"2026-04-04T07:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"mandela-berenstain","status":"idle","lastRun":"2026-04-02T22:00:12.555Z","nextRun":"2026-04-03T22:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"meeting-prep","status":"idle","lastRun":"2026-04-03T00:00:28.697Z","nextRun":"2026-04-04T00:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"nightly-meal-recommender","status":"idle","lastRun":"2026-04-03T21:00:07.648Z","nextRun":"2026-04-04T21:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"openrouter-model-scout","status":"idle","lastRun":"2026-04-03T18:00:09.198Z","nextRun":"2026-04-04T06:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"overnight-digest","status":"idle","lastRun":"2026-04-03T13:00:08.778Z","nextRun":"2026-04-04T13:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"price-watch","status":"idle","lastRun":"2026-04-03T07:00:29.080Z","nextRun":"2026-04-04T07:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"research-radar","status":"idle","lastRun":"2026-04-02T23:30:28.491Z","nextRun":"2026-04-03T23:30:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"sec-filings","status":"idle","lastRun":"2026-04-03T09:00:08.589Z","nextRun":"2026-04-04T09:00:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"snow-shift-brief","status":"idle","lastRun":"2026-04-03T13:30:08.796Z","nextRun":"2026-04-04T13:30:00.000Z","lastOutput":null,"error":null,"iteration":0},{"name":"weekly-strategy","status":"idle","lastRun":"2026-04-03T02:00:28.779Z","nextRun":"2026-04-04T02:00:00.000Z","lastOutput":null,"error":null,"iteration":0}],"budget":{"budget":500000,"used":0,"remaining":500000,"percentUsed":0,"exhausted":false,"estimatedCostToday":0,"report":{"total":0,"totalCost":0,"byModel":{},"byProgram":{},"entries":0}}}
+Apr 03 21:18:36 Phantom rachael[661925]: 9:18:36 PM [express] GET /api/bridge/status 304 in 1ms
+Apr 03 21:18:36 Phantom rachael[661925]: 9:18:36 PM [express] GET /api/notifications 304 in 1ms :: {"notifications":[],"total":0}
+Apr 03 21:18:39 Phantom rachael[661925]: 9:18:39 PM [express] GET /api/control 304 in 1ms :: {"mode":"agent","agentPaused":false,"pendingTakeoverPoints":[],"activityStream":[],"pausedExecutions":[]}
+Apr 03 21:18:39 Phantom rachael[661925]: 9:18:39 PM [express] GET /api/notifications 304 in 1ms :: {"notifications":[],"total":0}
+root@Phantom:/opt/rachael# 
