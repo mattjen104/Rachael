@@ -6839,7 +6839,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               const count = rData.data?.logged_in ?? 0;
               const details = rData.data?.details;
               if (count > 0) return "logged in";
-              const detail = details?.length ? details[0].substring(0, 80) : "no windows logged in";
+              const detail = details?.length ? details.join(" | ").substring(0, 120) : "no windows logged in";
               return `login failed: ${detail}`;
             }
             if (rData.status === "error") {
@@ -7079,8 +7079,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           lines.push(`  [!] ${step.name}: ABORTED`);
           continue;
         }
-        const icon = result.startsWith("SKIPPED") || result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error") ? "x" : "+";
-        if (result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error")) failed++;
+        const icon = result.startsWith("SKIPPED") || result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error") || result.startsWith("login failed") ? "x" : "+";
+        if (result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error") || result.startsWith("login failed")) failed++;
         lines.push(`  [${icon}] ${step.name}: ${result}`);
       } catch (e: any) {
         failed++;
