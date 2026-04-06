@@ -211,6 +211,90 @@ try:
         else:
             pyautogui.typewrite(text, interval=interval)
 
+    KEYEVENTF_SCANCODE = 0x0008
+
+    def _sendinput_scancode_char(ch):
+        """Send a character via scancode-only SendInput (hardware keyboard emulation).
+        Maps char -> VK -> scancode, then sends with wVk=0 and KEYEVENTF_SCANCODE.
+        This is the closest to a real physical keypress."""
+        vk = VK_MAP.get(ch.lower())
+        if vk is None:
+            _sendinput_unicode_char(ch)
+            return
+        scan = user32.MapVirtualKeyW(vk, 0)
+        needs_shift = ch.isupper() or ch in '!@#$%^&*()_+{}|:"<>?~'
+        if needs_shift:
+            shift_scan = user32.MapVirtualKeyW(0x10, 0)
+            ki_s = KEYBDINPUT(wVk=0, wScan=shift_scan, dwFlags=KEYEVENTF_SCANCODE, time=0,
+                              dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
+            inp_s = INPUT(type=INPUT_KEYBOARD)
+            inp_s._input.ki = ki_s
+            user32.SendInput(1, ctypes.byref(inp_s), ctypes.sizeof(INPUT))
+            time.sleep(0.01)
+        ki_down = KEYBDINPUT(wVk=0, wScan=scan, dwFlags=KEYEVENTF_SCANCODE, time=0,
+                             dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
+        ki_up = KEYBDINPUT(wVk=0, wScan=scan, dwFlags=KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, time=0,
+                           dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
+        inp_down = INPUT(type=INPUT_KEYBOARD)
+        inp_down._input.ki = ki_down
+        inp_up = INPUT(type=INPUT_KEYBOARD)
+        inp_up._input.ki = ki_up
+        user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
+        time.sleep(0.01)
+        user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
+        if needs_shift:
+            ki_su = KEYBDINPUT(wVk=0, wScan=shift_scan, dwFlags=KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, time=0,
+                               dwExtraInfo=ctypes.pointer(ctypes.c_ulong(0)))
+            inp_su = INPUT(type=INPUT_KEYBOARD)
+            inp_su._input.ki = ki_su
+            user32.SendInput(1, ctypes.byref(inp_su), ctypes.sizeof(INPUT))
+            time.sleep(0.01)
+
+    def _clipboard_paste(text):
+        """Copy text to clipboard and paste via Ctrl+V.
+        Uses Citrix's clipboard channel which is always enabled.
+        Clears clipboard immediately after paste for security."""
+        try:
+            kernel32 = ctypes.windll.kernel32
+            u32 = ctypes.windll.user32
+            CF_UNICODETEXT = 13
+            GMEM_MOVEABLE = 0x0002
+            u32.OpenClipboard(0)
+            u32.EmptyClipboard()
+            encoded = text.encode('utf-16-le') + b'\x00\x00'
+            h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
+            p = kernel32.GlobalLock(h)
+            ctypes.memmove(p, encoded, len(encoded))
+            kernel32.GlobalUnlock(h)
+            u32.SetClipboardData(CF_UNICODETEXT, h)
+            u32.CloseClipboard()
+            time.sleep(0.05)
+            _keybd_event_key(0x11, up=False)
+            time.sleep(0.03)
+            _keybd_event_key(0x56, up=False)
+            time.sleep(0.03)
+            _keybd_event_key(0x56, up=True)
+            time.sleep(0.03)
+            _keybd_event_key(0x11, up=True)
+            time.sleep(0.1)
+            u32.OpenClipboard(0)
+            u32.EmptyClipboard()
+            u32.CloseClipboard()
+        except Exception as e:
+            print(f"  [input] Clipboard paste failed: {e}")
+
+    WM_CHAR = 0x0102
+
+    def _postmessage_type(hwnd, text):
+        """Send characters via PostMessageW WM_CHAR directly to window handle.
+        Bypasses the input pipeline entirely."""
+        try:
+            for ch in text:
+                user32.PostMessageW(hwnd, WM_CHAR, ord(ch), 0)
+                time.sleep(0.02)
+        except Exception as e:
+            print(f"  [input] PostMessage type failed: {e}")
+
     HAS_SENDINPUT = True
     print(f"  [input] Low-level keyboard available (backend: {_active_backend})")
 except Exception as e:
@@ -226,6 +310,12 @@ except Exception as e:
         pyautogui.hotkey(*keys)
     def sendinput_typewrite(text, interval=0.03):
         pyautogui.typewrite(text, interval=interval)
+    def _sendinput_scancode_char(ch):
+        pass
+    def _clipboard_paste(text):
+        pass
+    def _postmessage_type(hwnd, text):
+        pass
 
 def _load_env_file():
     """Load key=value pairs from .env file next to this script."""
@@ -4497,37 +4587,196 @@ def execute_do(cmd):
     execute_view({"env": env, "id": command_id, "showAll": False})
 
 
-def _login_text_window(window, label, username, password):
-    """Login to a Text/terminal window: type username, enter, password, enter."""
+_LOGIN_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "login_input_method.json")
+
+def _load_proven_login_method():
+    """Load the proven login input method from persistent config."""
+    try:
+        if os.path.exists(_LOGIN_CONFIG_FILE):
+            with open(_LOGIN_CONFIG_FILE, "r") as f:
+                data = json.load(f)
+            method = data.get("proven_method")
+            if method:
+                print(f"  [login] Loaded proven input method: {method}")
+            return method
+    except Exception as e:
+        print(f"  [login] Could not load login config: {e}")
+    return None
+
+def _save_proven_login_method(method_name):
+    """Save a proven login input method to persistent config."""
+    try:
+        with open(_LOGIN_CONFIG_FILE, "w") as f:
+            json.dump({"proven_method": method_name, "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S")}, f)
+        print(f"  [login] Saved proven input method: {method_name}")
+    except Exception as e:
+        print(f"  [login] Could not save login config: {e}")
+
+def _build_type_methods(window):
+    """Build ordered list of (name, type_fn) for adaptive text input.
+    Each type_fn(text) sends text using a different input method."""
+    hwnd = getattr(window, '_hWnd', None)
+
+    methods = [
+        ("clipboard", lambda text: _clipboard_paste(text)),
+        ("scancode", lambda text: [(_sendinput_scancode_char(ch), time.sleep(0.03))[0] for ch in text]),
+        ("unicode", lambda text: [(set_text_method("unicode"), sendinput_typewrite(text, interval=0.03))]),
+        ("keybd_vk", lambda text: [(set_keyboard_backend("keybd_event"), set_text_method("vk"), sendinput_typewrite(text, interval=0.03))]),
+        ("sendinput_vk", lambda text: [(set_keyboard_backend("sendinput"), set_text_method("vk"), sendinput_typewrite(text, interval=0.03))]),
+        ("pyautogui", lambda text: pyautogui.typewrite(text, interval=0.04)),
+    ]
+    if hwnd:
+        methods.append(("postmessage", lambda text: _postmessage_type(hwnd, text)))
+    return methods
+
+def _clear_field():
+    """Select all text in a field and delete it (Ctrl+A, Delete)."""
+    _keybd_event_key(0x11, up=False)
+    time.sleep(0.02)
+    _keybd_event_key(0x41, up=False)
+    time.sleep(0.02)
+    _keybd_event_key(0x41, up=True)
+    time.sleep(0.02)
+    _keybd_event_key(0x11, up=True)
+    time.sleep(0.05)
+    _keybd_event_key(0x2E, up=False)
+    time.sleep(0.02)
+    _keybd_event_key(0x2E, up=True)
+    time.sleep(0.1)
+
+def _verify_field_has_text(window, field_description):
+    """Take a screenshot and ask vision if the field has text in it.
+    Returns True if text is detected in the field."""
+    try:
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+        prompt = f"""Look at this screenshot. Focus on the {field_description}.
+Does the field contain typed text (not placeholder/hint text)?
+Return ONLY a JSON object: {{"has_text": true}} or {{"has_text": false}}"""
+        response = ask_claude(b64, prompt)
+        if not response:
+            return None
+        json_match = re.search(r'\{[\s\S]*?\}', response)
+        if json_match:
+            result = json.loads(json_match.group())
+            return result.get("has_text", False)
+    except Exception as e:
+        print(f"  [login] Verify field error: {e}")
+    return None
+
+def _adaptive_type_text(window, text, field_description, proven_method=None):
+    """Try multiple input methods to type text into a field.
+    Verifies via vision after each attempt. Returns (success, method_name)."""
+    methods = _build_type_methods(window)
+
+    if proven_method:
+        proven = [(n, fn) for n, fn in methods if n == proven_method]
+        rest = [(n, fn) for n, fn in methods if n != proven_method]
+        methods = proven + rest
+
     prev_text = _text_method
     prev_backend = _active_backend
+
+    for name, type_fn in methods:
+        print(f"  [login] Trying input method '{name}' for {field_description}...")
+        try:
+            type_fn(text)
+        except Exception as e:
+            print(f"  [login] Method '{name}' threw exception: {e}")
+            set_text_method(prev_text)
+            set_keyboard_backend(prev_backend)
+            continue
+
+        set_text_method(prev_text)
+        set_keyboard_backend(prev_backend)
+        time.sleep(0.4)
+
+        has_text = _verify_field_has_text(window, field_description)
+        if has_text is True:
+            print(f"  [login] Method '{name}' WORKED for {field_description}")
+            return True, name
+        elif has_text is False:
+            print(f"  [login] Method '{name}' did NOT work for {field_description}, clearing and trying next...")
+            _clear_field()
+            time.sleep(0.2)
+        else:
+            print(f"  [login] Method '{name}' — vision verification inconclusive, assuming it worked")
+            return True, name
+
+    print(f"  [login] ALL input methods failed for {field_description}")
+    return False, None
+
+
+def _login_text_window(window, label, username, password):
+    """Login to a Text/terminal window using adaptive input methods."""
+    proven = _load_proven_login_method()
     try:
         activate_window(window)
         time.sleep(0.5)
-        set_text_method("unicode")
-        set_keyboard_backend("keybd_event")
+
         print(f"  [login] {label}: terminal login — typing username")
-        sendinput_typewrite(username, interval=0.03)
-        time.sleep(0.3)
-        sendinput_press("enter")
+        success, method = _adaptive_type_text(window, username, "username/login prompt", proven)
+        if not success:
+            return False, "all input methods failed for username"
+
+        _keybd_event_key(0x0D, up=False)
+        time.sleep(0.02)
+        _keybd_event_key(0x0D, up=True)
         time.sleep(1.5)
+
         print(f"  [login] {label}: typing password")
-        sendinput_typewrite(password, interval=0.03)
+        methods = _build_type_methods(window)
+        if method:
+            proven_list = [(n, fn) for n, fn in methods if n == method]
+            rest = [(n, fn) for n, fn in methods if n != method]
+            methods = proven_list + rest
+        try:
+            methods[0][1](password)
+        except Exception:
+            pass
         time.sleep(0.3)
-        sendinput_press("enter")
+
+        _keybd_event_key(0x0D, up=False)
+        time.sleep(0.02)
+        _keybd_event_key(0x0D, up=True)
         time.sleep(1.0)
-        return True, "credentials entered (terminal)"
+
+        if method:
+            _save_proven_login_method(method)
+
+        time.sleep(2.0)
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+        prompt = f"""Look at this screenshot. Is this showing:
+1. A login error or "invalid credentials" message
+2. A successfully logged-in application (patient list, menu, schedule, etc.)
+3. Still on the login/credential prompt
+
+Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} or {{"state": "login_screen"}}"""
+        try:
+            response = ask_claude(b64, prompt)
+            if response:
+                json_match = re.search(r'\{[\s\S]*?\}', response)
+                if json_match:
+                    vresult = json.loads(json_match.group())
+                    state = vresult.get("state", "unknown")
+                    if state == "logged_in":
+                        return True, f"logged in (method: {method})"
+                    elif state == "error":
+                        return False, f"login error: {vresult.get('detail', 'unknown')}"
+                    else:
+                        return True, f"credentials entered via {method} (verification: {state})"
+        except Exception:
+            pass
+
+        return True, f"credentials entered via {method}"
     except Exception as e:
         return False, str(e)[:60]
-    finally:
-        set_text_method(prev_text)
-        set_keyboard_backend(prev_backend)
 
 
 def _login_hyperspace_window(window, label, username, password):
-    """Login to a Hyperspace/Hyperdrive GUI window using vision to find fields."""
-    prev_text = _text_method
-    prev_backend = _active_backend
+    """Login to a Hyperspace/Hyperdrive GUI window using vision + adaptive input."""
+    proven = _load_proven_login_method()
     try:
         activate_window(window, maximize=True)
         time.sleep(1.0)
@@ -4562,49 +4811,83 @@ Return ONLY the JSON object."""
             reason = result.get("reason", "already logged in")
             return False, reason
 
-        set_text_method("unicode")
-        set_keyboard_backend("keybd_event")
-
         uf = result.get("username_field", {})
         pf = result.get("password_field", {})
         sb = result.get("submit_button", {})
 
         if uf.get("x") and uf.get("y"):
             abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
-            safe_click(abs_x, abs_y, pause_after=0.4, label="username field")
-            time.sleep(0.3)
-            sendinput_typewrite(username, interval=0.03)
+            safe_click(abs_x, abs_y, pause_after=0.5, label="username field")
             time.sleep(0.3)
         else:
-            print(f"  [login] {label}: no username field coords, trying Tab focus")
-            sendinput_typewrite(username, interval=0.03)
-            time.sleep(0.3)
+            print(f"  [login] {label}: no username field coords")
+
+        success, method = _adaptive_type_text(window, username, "username input field", proven)
+        if not success:
+            return False, "all input methods failed for username"
 
         if pf.get("x") and pf.get("y"):
             abs_x, abs_y = vision_to_screen(window, pf["x"], pf["y"])
-            safe_click(abs_x, abs_y, pause_after=0.4, label="password field")
+            safe_click(abs_x, abs_y, pause_after=0.5, label="password field")
             time.sleep(0.3)
         else:
-            sendinput_press("tab")
+            _keybd_event_key(0x09, up=False)
+            time.sleep(0.02)
+            _keybd_event_key(0x09, up=True)
             time.sleep(0.3)
 
-        sendinput_typewrite(password, interval=0.03)
+        methods = _build_type_methods(window)
+        if method:
+            proven_list = [(n, fn) for n, fn in methods if n == method]
+            rest = [(n, fn) for n, fn in methods if n != method]
+            methods = proven_list + rest
+        try:
+            methods[0][1](password)
+        except Exception:
+            pass
         time.sleep(0.3)
 
         if sb.get("x") and sb.get("y"):
             abs_x, abs_y = vision_to_screen(window, sb["x"], sb["y"])
-            safe_click(abs_x, abs_y, pause_after=1.5, label="login button")
+            safe_click(abs_x, abs_y, pause_after=2.0, label="login button")
         else:
-            sendinput_press("enter")
-            time.sleep(1.5)
+            _keybd_event_key(0x0D, up=False)
+            time.sleep(0.02)
+            _keybd_event_key(0x0D, up=True)
+            time.sleep(2.0)
 
-        return True, "credentials entered (GUI)"
+        if method:
+            _save_proven_login_method(method)
+
+        time.sleep(2.0)
+        try:
+            verify_img = screenshot_window(window)
+            verify_b64 = img_to_base64(verify_img)
+            vprompt = f"""Look at this screenshot. Is this showing:
+1. A login error or "invalid credentials" message
+2. A successfully logged-in application (patient list, menu, toolbar, schedule, etc.)
+3. Still on the login screen with username/password fields
+
+Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} or {{"state": "login_screen"}}"""
+            vresponse = ask_claude(verify_b64, vprompt)
+            if vresponse:
+                vjson = re.search(r'\{[\s\S]*?\}', vresponse)
+                if vjson:
+                    vresult = json.loads(vjson.group())
+                    state = vresult.get("state", "unknown")
+                    if state == "logged_in":
+                        return True, f"logged in (method: {method})"
+                    elif state == "error":
+                        return False, f"login error: {vresult.get('detail', 'unknown')}"
+                    else:
+                        return True, f"credentials entered via {method} (post-verify: {state})"
+        except Exception:
+            pass
+
+        return True, f"credentials entered via {method}"
 
     except Exception as e:
         return False, str(e)[:60]
-    finally:
-        set_text_method(prev_text)
-        set_keyboard_backend(prev_backend)
 
 
 def execute_login(cmd):
