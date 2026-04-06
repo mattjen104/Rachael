@@ -253,10 +253,10 @@ try:
     def _clipboard_paste(text):
         """Copy text to clipboard and paste via Ctrl+V.
         Uses Citrix's clipboard channel which is always enabled.
-        Clears clipboard immediately after paste for security."""
+        Clears clipboard in finally block for security."""
+        u32 = ctypes.windll.user32
         try:
             kernel32 = ctypes.windll.kernel32
-            u32 = ctypes.windll.user32
             CF_UNICODETEXT = 13
             GMEM_MOVEABLE = 0x0002
             u32.OpenClipboard(0)
@@ -277,11 +277,15 @@ try:
             time.sleep(0.03)
             _keybd_event_key(0x11, up=True)
             time.sleep(0.1)
-            u32.OpenClipboard(0)
-            u32.EmptyClipboard()
-            u32.CloseClipboard()
         except Exception as e:
             print(f"  [input] Clipboard paste failed: {e}")
+        finally:
+            try:
+                u32.OpenClipboard(0)
+                u32.EmptyClipboard()
+                u32.CloseClipboard()
+            except Exception:
+                pass
 
     WM_CHAR = 0x0102
 
@@ -4664,9 +4668,10 @@ Return ONLY a JSON object: {{"has_text": true}} or {{"has_text": false}}"""
         print(f"  [login] Verify field error: {e}")
     return None
 
-def _adaptive_type_text(window, text, field_description, proven_method=None):
+def _adaptive_type_text(window, text, field_description, proven_method=None, is_password=False):
     """Try multiple input methods to type text into a field.
-    Verifies via vision after each attempt. Returns (success, method_name)."""
+    Verifies via vision after each attempt. Returns (success, method_name).
+    For password fields, vision checks for dots/bullets/masked chars."""
     methods = _build_type_methods(window)
 
     if proven_method:
@@ -4676,6 +4681,7 @@ def _adaptive_type_text(window, text, field_description, proven_method=None):
 
     prev_text = _text_method
     prev_backend = _active_backend
+    inconclusive_method = None
 
     for name, type_fn in methods:
         print(f"  [login] Trying input method '{name}' for {field_description}...")
@@ -4691,7 +4697,11 @@ def _adaptive_type_text(window, text, field_description, proven_method=None):
         set_keyboard_backend(prev_backend)
         time.sleep(0.4)
 
-        has_text = _verify_field_has_text(window, field_description)
+        if is_password:
+            has_text = _verify_field_has_text(window, f"{field_description} (look for dots, bullets, or masked characters indicating typed password)")
+        else:
+            has_text = _verify_field_has_text(window, field_description)
+
         if has_text is True:
             print(f"  [login] Method '{name}' WORKED for {field_description}")
             return True, name
@@ -4700,11 +4710,58 @@ def _adaptive_type_text(window, text, field_description, proven_method=None):
             _clear_field()
             time.sleep(0.2)
         else:
-            print(f"  [login] Method '{name}' — vision verification inconclusive, assuming it worked")
-            return True, name
+            print(f"  [login] Method '{name}' — vision verification inconclusive, trying next method...")
+            if inconclusive_method is None:
+                inconclusive_method = name
+            _clear_field()
+            time.sleep(0.2)
+
+    if inconclusive_method:
+        print(f"  [login] No confirmed method — falling back to first inconclusive method '{inconclusive_method}'")
+        for name, type_fn in methods:
+            if name == inconclusive_method:
+                try:
+                    type_fn(text)
+                except Exception:
+                    pass
+                set_text_method(prev_text)
+                set_keyboard_backend(prev_backend)
+                return True, inconclusive_method
 
     print(f"  [login] ALL input methods failed for {field_description}")
     return False, None
+
+
+def _verify_login_result(window, method):
+    """Take a post-login screenshot and check if login succeeded.
+    Only saves proven method if login is confirmed."""
+    try:
+        time.sleep(2.0)
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+        prompt = f"""Look at this screenshot. Is this showing:
+1. A login error or "invalid credentials" message
+2. A successfully logged-in application (patient list, menu, toolbar, schedule, etc.)
+3. Still on the login/credential prompt
+
+Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} or {{"state": "login_screen"}}"""
+        response = ask_claude(b64, prompt)
+        if response:
+            json_match = re.search(r'\{[\s\S]*?\}', response)
+            if json_match:
+                vresult = json.loads(json_match.group())
+                state = vresult.get("state", "unknown")
+                if state == "logged_in":
+                    if method:
+                        _save_proven_login_method(method)
+                    return True, f"logged in (method: {method})"
+                elif state == "error":
+                    return False, f"login error: {vresult.get('detail', 'unknown')}"
+                else:
+                    return True, f"credentials entered via {method} (post-verify: {state})"
+    except Exception:
+        pass
+    return True, f"credentials entered via {method}"
 
 
 def _login_text_window(window, label, username, password):
@@ -4725,15 +4782,9 @@ def _login_text_window(window, label, username, password):
         time.sleep(1.5)
 
         print(f"  [login] {label}: typing password")
-        methods = _build_type_methods(window)
-        if method:
-            proven_list = [(n, fn) for n, fn in methods if n == method]
-            rest = [(n, fn) for n, fn in methods if n != method]
-            methods = proven_list + rest
-        try:
-            methods[0][1](password)
-        except Exception:
-            pass
+        pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True)
+        if not pw_success:
+            return False, "all input methods failed for password"
         time.sleep(0.3)
 
         _keybd_event_key(0x0D, up=False)
@@ -4741,35 +4792,7 @@ def _login_text_window(window, label, username, password):
         _keybd_event_key(0x0D, up=True)
         time.sleep(1.0)
 
-        if method:
-            _save_proven_login_method(method)
-
-        time.sleep(2.0)
-        img = screenshot_window(window)
-        b64 = img_to_base64(img)
-        prompt = f"""Look at this screenshot. Is this showing:
-1. A login error or "invalid credentials" message
-2. A successfully logged-in application (patient list, menu, schedule, etc.)
-3. Still on the login/credential prompt
-
-Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} or {{"state": "login_screen"}}"""
-        try:
-            response = ask_claude(b64, prompt)
-            if response:
-                json_match = re.search(r'\{[\s\S]*?\}', response)
-                if json_match:
-                    vresult = json.loads(json_match.group())
-                    state = vresult.get("state", "unknown")
-                    if state == "logged_in":
-                        return True, f"logged in (method: {method})"
-                    elif state == "error":
-                        return False, f"login error: {vresult.get('detail', 'unknown')}"
-                    else:
-                        return True, f"credentials entered via {method} (verification: {state})"
-        except Exception:
-            pass
-
-        return True, f"credentials entered via {method}"
+        return _verify_login_result(window, method)
     except Exception as e:
         return False, str(e)[:60]
 
@@ -4836,15 +4859,10 @@ Return ONLY the JSON object."""
             _keybd_event_key(0x09, up=True)
             time.sleep(0.3)
 
-        methods = _build_type_methods(window)
-        if method:
-            proven_list = [(n, fn) for n, fn in methods if n == method]
-            rest = [(n, fn) for n, fn in methods if n != method]
-            methods = proven_list + rest
-        try:
-            methods[0][1](password)
-        except Exception:
-            pass
+        print(f"  [login] {label}: typing password")
+        pw_success, pw_method = _adaptive_type_text(window, password, "password input field", method, is_password=True)
+        if not pw_success:
+            return False, "all input methods failed for password"
         time.sleep(0.3)
 
         if sb.get("x") and sb.get("y"):
@@ -4856,35 +4874,7 @@ Return ONLY the JSON object."""
             _keybd_event_key(0x0D, up=True)
             time.sleep(2.0)
 
-        if method:
-            _save_proven_login_method(method)
-
-        time.sleep(2.0)
-        try:
-            verify_img = screenshot_window(window)
-            verify_b64 = img_to_base64(verify_img)
-            vprompt = f"""Look at this screenshot. Is this showing:
-1. A login error or "invalid credentials" message
-2. A successfully logged-in application (patient list, menu, toolbar, schedule, etc.)
-3. Still on the login screen with username/password fields
-
-Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} or {{"state": "login_screen"}}"""
-            vresponse = ask_claude(verify_b64, vprompt)
-            if vresponse:
-                vjson = re.search(r'\{[\s\S]*?\}', vresponse)
-                if vjson:
-                    vresult = json.loads(vjson.group())
-                    state = vresult.get("state", "unknown")
-                    if state == "logged_in":
-                        return True, f"logged in (method: {method})"
-                    elif state == "error":
-                        return False, f"login error: {vresult.get('detail', 'unknown')}"
-                    else:
-                        return True, f"credentials entered via {method} (post-verify: {state})"
-        except Exception:
-            pass
-
-        return True, f"credentials entered via {method}"
+        return _verify_login_result(window, method)
 
     except Exception as e:
         return False, str(e)[:60]
