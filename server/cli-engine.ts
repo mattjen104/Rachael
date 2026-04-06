@@ -6792,187 +6792,212 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     }
 
     const skipLogin = args.includes("--skip-login") || args.includes("--skip");
+
+    if (args.includes("--stop") || args.includes("stop")) {
+      await storage.setAgentConfig("boot_abort", "true", "boot");
+      return ok("Boot abort signal sent. Running boot will stop after current step.");
+    }
+
+    await storage.setAgentConfig("boot_abort", "false", "boot");
+
     const steps: Array<{ name: string; run: () => Promise<string> }> = [];
+    const agentPort = process.env.PORT || 5000;
+
+    const checkAbort = async (): Promise<boolean> => {
+      const v = await storage.getAgentConfig("boot_abort");
+      return v?.value === "true";
+    };
+
+    const checkAgentConnected = async (): Promise<boolean> => {
+      try {
+        const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/status`);
+        const statusData = statusResp.ok ? await statusResp.json() as { connected?: boolean } : { connected: false };
+        return !!statusData.connected;
+      } catch {
+        return false;
+      }
+    };
+
+    const sendAgentLogin = async (env: string, client: string, username: string, password: string): Promise<string> => {
+      try {
+        const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+          body: JSON.stringify({ type: "login", env, client, credentials: { username, password } }),
+        });
+        const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
+        if (!data.ok || !data.commandId) return "login queue failed";
+
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < 90000) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          if (await checkAbort()) return "aborted";
+          try {
+            const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
+            const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { logged_in?: number } } : {};
+            if (rData.status === "complete") return rData.data?.logged_in ? "logged in" : "already logged in";
+            if (rData.status === "error") return "login failed";
+          } catch {}
+        }
+        return "login timeout";
+      } catch (e: any) {
+        return `login error: ${e.message?.substring(0, 40) || "unknown"}`;
+      }
+    };
+
+    const launchCitrixApp = async (appName: string, portalUrl: string): Promise<string> => {
+      const { submitJob, waitForResult } = await import("./bridge-queue");
+      try {
+        const jobId = submitJob("dom", portalUrl, "boot-workspace", {
+          maxText: 2000,
+          reuseTab: true,
+          spaWaitMs: 2000,
+          citrixApiLaunch: appName,
+          autoOpenDownload: true,
+          pollTimeoutMs: 15000,
+        });
+        const result = await waitForResult(jobId, 30000);
+        if (result.error) return `launch failed: ${result.error.substring(0, 50)}`;
+        return "ok";
+      } catch (e: any) {
+        return `launch error: ${e.message?.substring(0, 50) || "unknown"}`;
+      }
+    };
 
     if (!skipLogin) {
       steps.push({
-        name: "Epic Login",
+        name: "Epic Login (CWP)",
         run: async () => {
           const epicUser = await getSecret("epic_username");
           const epicPass = await getSecret("epic_password");
           if (!epicUser || !epicPass) return "SKIPPED (credentials not configured)";
           if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
-          const result = await executeChainRaw("epic login");
+          const result = await executeChainRaw("epic login cwp");
           if (result.exitCode !== 0) return `failed: ${result.stdout.slice(0, 80)}`;
+          await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
+          return "done (approve Duo on phone)";
+        },
+      });
 
-          emitEvent("cli", "Waiting for Duo authentication (up to 60s)...", "info", { metadata: { command: "boot" } });
-          const DUO_WAIT_MS = 60000;
-          const DUO_POLL_MS = 5000;
-          const duoStart = Date.now();
-          while (Date.now() - duoStart < DUO_WAIT_MS) {
-            await new Promise(resolve => setTimeout(resolve, DUO_POLL_MS));
+      steps.push({
+        name: "Duo Wait",
+        run: async () => {
+          emitEvent("cli", "Waiting 30s for Duo approval...", "info", { metadata: { command: "boot" } });
+          const WAIT_MS = 30000;
+          const POLL_MS = 5000;
+          const start = Date.now();
+          while (Date.now() - start < WAIT_MS) {
+            await new Promise(resolve => setTimeout(resolve, POLL_MS));
+            if (await checkAbort()) return "aborted";
             try {
               const { smartFetch } = await import("./bridge-queue");
-              const check = await smartFetch("https://hyperspace.epic.com/", "dom", "boot-duo-check", { maxText: 500 }, 15000);
-              const pageText = check.text || "";
-              if (pageText.includes("Welcome") || pageText.includes("Patient") || pageText.includes("Schedule") || pageText.includes("Epic")) {
-                await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
+              const check = await smartFetch("https://cwp.ucsd.edu", "dom", "boot-duo-check", {
+                maxText: 1000,
+                reuseTab: true,
+                spaWaitMs: 3000,
+              }, 15000);
+              const text = check.text || "";
+              if (text.includes("Citrix") || text.includes("StoreFront") || text.includes("Desktops") || text.includes("Apps")) {
                 return "done (Duo approved)";
               }
-            } catch (e: unknown) {
-              // Expected: bridge timeout or page not ready during Duo wait
-            }
+            } catch {}
           }
-          await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
-          return "done (Duo timeout — may need manual approval)";
+          return "done (30s elapsed — continue)";
         },
       });
     }
 
-    {
-      const wsConfigKey = "citrix_workspace_apps";
-      const DEFAULT_WS_APPS: Array<{ app: string; portal: string }> = [
-        { app: "SUP Hyperdrive", portal: "UCSD CWP" },
-        { app: "POC Hyperdrive", portal: "UCSD CWP" },
-        { app: "TST Hyperdrive", portal: "UCSD CWP" },
-        { app: "SUP Text Access", portal: "UCSD CWP" },
-        { app: "POC Text Access", portal: "UCSD CWP" },
-        { app: "TST Text Access", portal: "UCSD CWP" },
-      ];
+    const wsConfigKey = "citrix_workspace_apps";
+    const DEFAULT_WS_APPS: Array<{ app: string; portal: string }> = [
+      { app: "SUP Hyperdrive", portal: "UCSD CWP" },
+      { app: "SUP Text Access", portal: "UCSD CWP" },
+      { app: "POC Hyperdrive", portal: "UCSD CWP" },
+      { app: "POC Text Access", portal: "UCSD CWP" },
+      { app: "TST Hyperdrive", portal: "UCSD CWP" },
+      { app: "TST Text Access", portal: "UCSD CWP" },
+    ];
 
-      let wsApps: Array<{ app: string; portal: string }> = DEFAULT_WS_APPS;
-      try {
-        const wsCfg = await storage.getAgentConfig(wsConfigKey);
-        if (wsCfg?.value) {
-          const parsed = JSON.parse(wsCfg.value);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            if (typeof parsed[0] === "string") {
-              wsApps = parsed.map((a: string) => {
-                const atIdx = a.lastIndexOf("@");
-                if (atIdx > 0) return { app: a.substring(0, atIdx).trim(), portal: a.substring(atIdx + 1).trim() };
-                return { app: a, portal: "UCSD CWP" };
-              });
-            } else {
-              wsApps = parsed;
-            }
+    let wsApps: Array<{ app: string; portal: string }> = DEFAULT_WS_APPS;
+    try {
+      const wsCfg = await storage.getAgentConfig(wsConfigKey);
+      if (wsCfg?.value) {
+        const parsed = JSON.parse(wsCfg.value);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (typeof parsed[0] === "string") {
+            wsApps = parsed.map((a: string) => {
+              const atIdx = a.lastIndexOf("@");
+              if (atIdx > 0) return { app: a.substring(0, atIdx).trim(), portal: a.substring(atIdx + 1).trim() };
+              return { app: a, portal: "UCSD CWP" };
+            });
+          } else {
+            wsApps = parsed;
           }
         }
+      }
+    } catch {}
+
+    const portalsCfg = await storage.getAgentConfig("citrix_portals");
+    let portals: Array<{ name: string; url: string }> = [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu" }];
+    if (portalsCfg?.value) {
+      try {
+        const parsed = JSON.parse(portalsCfg.value);
+        if (Array.isArray(parsed) && parsed.length > 0) portals = parsed;
       } catch {}
+    }
 
-      const portalsCfg = await storage.getAgentConfig("citrix_portals");
-      let portals: Array<{ name: string; url: string }> = [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu" }];
-      if (portalsCfg?.value) {
-        try {
-          const parsed = JSON.parse(portalsCfg.value);
-          if (Array.isArray(parsed) && parsed.length > 0) portals = parsed;
-        } catch {}
-      }
+    const epicUser = !skipLogin ? await getSecret("epic_username") : null;
+    const epicPass = !skipLogin ? await getSecret("epic_password") : null;
 
-      const epicUser = !skipLogin ? await getSecret("epic_username") : null;
-      const epicPass = !skipLogin ? await getSecret("epic_password") : null;
-      const agentPort = process.env.PORT || 5000;
+    const parseAppEnvClient = (appName: string): { env: string; client: string } => {
+      const upper = appName.toUpperCase();
+      let env = "SUP";
+      if (upper.includes("POC")) env = "POC";
+      else if (upper.includes("TST")) env = "TST";
+      const client = (upper.includes("TEXT") || upper.includes("TERMINAL") || upper.includes("SESSION")) ? "text" : "hyperspace";
+      return { env, client };
+    };
 
-      const checkAgentConnected = async (): Promise<boolean> => {
-        try {
-          const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/status`);
-          const statusData = statusResp.ok ? await statusResp.json() as { connected?: boolean } : { connected: false };
-          return !!statusData.connected;
-        } catch {
-          return false;
-        }
-      };
+    const APP_OPEN_WAIT_MS = 12000;
 
-      const parseAppEnvClient = (appName: string): { env: string; client: string } => {
-        const upper = appName.toUpperCase();
-        let env = "SUP";
-        if (upper.includes("POC")) env = "POC";
-        else if (upper.includes("TST")) env = "TST";
-        const client = (upper.includes("TEXT") || upper.includes("TERMINAL") || upper.includes("SESSION")) ? "text" : "hyperspace";
-        return { env, client };
-      };
+    for (const entry of wsApps) {
+      const { env, client } = parseAppEnvClient(entry.app);
+      const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
+      const portalUrl = portal?.url || "https://cwp.ucsd.edu";
 
-      const APP_OPEN_WAIT_MS = 10000;
-      const LOGIN_POLL_TIMEOUT = 60000;
-      const LOGIN_POLL_INTERVAL = 5000;
+      steps.push({
+        name: entry.app,
+        run: async () => {
+          if (await checkAbort()) return "aborted";
+          if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
-      for (const entry of wsApps) {
-        const { env, client } = parseAppEnvClient(entry.app);
+          emitEvent("cli", `Launching ${entry.app}...`, "info", { metadata: { command: "boot" } });
+          const launchResult = await launchCitrixApp(entry.app, portalUrl);
+          if (launchResult !== "ok") return launchResult;
 
-        steps.push({
-          name: entry.app,
-          run: async () => {
-            if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+          if (!skipLogin && epicUser && epicPass) {
+            const isAgentUp = await checkAgentConnected();
+            if (!isAgentUp) return "launched (agent not connected)";
 
-            const { submitJob } = await import("./bridge-queue");
-            const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
-            const portalUrl = portal?.url || "https://cwp.ucsd.edu";
+            emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${entry.app} window...`, "info", { metadata: { command: "boot" } });
+            await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+            if (await checkAbort()) return "launched (aborted before login)";
 
-            try {
-              submitJob("dom", portalUrl, "boot-workspace", {
-                maxText: 2000,
-                reuseTab: true,
-                spaWaitMs: 2000,
-                citrixApiLaunch: entry.app,
-                autoOpenDownload: true,
-                pollTimeoutMs: 15000,
-              });
-            } catch (e: any) {
-              return `failed: ${e.message?.substring(0, 60) || "launch error"}`;
-            }
-
-            if (!skipLogin && epicUser && epicPass) {
-              const isAgentUp = await checkAgentConnected();
-              if (!isAgentUp) {
-                return "launched (desktop agent not connected — login skipped)";
-              }
-              emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${entry.app} to open...`, "info", { metadata: { command: "boot" } });
-              await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
-
-              try {
-                const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
-                  body: JSON.stringify({
-                    type: "login",
-                    env,
-                    client,
-                    credentials: { username: epicUser, password: epicPass },
-                  }),
-                });
-                const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
-                if (data.ok && data.commandId) {
-                  const pollStart = Date.now();
-                  while (Date.now() - pollStart < LOGIN_POLL_TIMEOUT) {
-                    await new Promise(resolve => setTimeout(resolve, LOGIN_POLL_INTERVAL));
-                    try {
-                      const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
-                      const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { logged_in?: number; details?: string[] } } : {};
-                      if (rData.status === "complete") {
-                        const count = rData.data?.logged_in || 0;
-                        await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
-                        return count > 0 ? "launched + logged in" : "launched (already logged in)";
-                      }
-                      if (rData.status === "error") {
-                        return "launched (login failed)";
-                      }
-                    } catch {}
-                  }
-                  return "launched (login sent, agent processing)";
-                }
-              } catch {}
-              return "launched (login attempt failed)";
-            }
-
+            emitEvent("cli", `Logging into ${entry.app}...`, "info", { metadata: { command: "boot" } });
+            const loginResult = await sendAgentLogin(env, client, epicUser, epicPass);
             await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
-            return "launched";
-          },
-        });
-      }
+            return `${loginResult}`;
+          }
+
+          await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
+          return "launched";
+        },
+      });
     }
 
     steps.push({
       name: "Outlook Sync",
       run: async () => {
+        if (await checkAbort()) return "aborted";
         if (!isExtensionConnected()) {
           const persisted = await storage.getOutlookEmails({ limit: 50 });
           const unread = persisted.filter(e => e.unread).length;
@@ -6993,6 +7018,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     steps.push({
       name: "ServiceNow Sync",
       run: async () => {
+        if (await checkAbort()) return "aborted";
         if (!isExtensionConnected()) {
           const persisted = await storage.getSnowTickets({ limit: 200 });
           if (persisted.length > 0) return `offline — ${persisted.length} tickets in DB`;
@@ -7024,18 +7050,28 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       run: async () => {
         await storage.setAgentConfig("citrix_keepalive", "true", "citrix");
         startCitrixKeepalive();
-        return "enabled (10m interval active)";
+        return "enabled (10m interval)";
       },
     });
 
     const lines = ["=== MORNING BOOT ===", ""];
     let failed = 0;
+    let aborted = false;
     for (const step of steps) {
+      if (aborted) {
+        lines.push(`  [~] ${step.name}: skipped (boot aborted)`);
+        continue;
+      }
       emitEvent("cli", `Boot: ${step.name}...`, "info", { metadata: { command: "boot" } });
       try {
         const result = await step.run();
-        const icon = result.startsWith("SKIPPED") || result.startsWith("failed") ? "x" : "+";
-        if (result.startsWith("failed")) failed++;
+        if (result === "aborted") {
+          aborted = true;
+          lines.push(`  [!] ${step.name}: ABORTED`);
+          continue;
+        }
+        const icon = result.startsWith("SKIPPED") || result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error") ? "x" : "+";
+        if (result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error")) failed++;
         lines.push(`  [${icon}] ${step.name}: ${result}`);
       } catch (e: any) {
         failed++;
@@ -7044,17 +7080,19 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     }
 
     await storage.setAgentConfig("boot_last_run", new Date().toISOString(), "boot");
+    await storage.setAgentConfig("boot_abort", "false", "boot");
 
     lines.push("");
-    if (failed > 0) {
+    if (aborted) {
+      lines.push("  Boot was aborted. Run 'boot' to restart.");
+    } else if (failed > 0) {
       lines.push(`  ${steps.length - failed}/${steps.length} steps completed. ${failed} failed.`);
     } else {
       lines.push(`  All ${steps.length} steps completed.`);
     }
     lines.push("");
-    lines.push("  boot --status    - Check system status");
-    lines.push("  outlook sync     - View persisted emails");
-    lines.push("  snow persisted   - View persisted tickets");
+    lines.push("  boot --status  Check system status");
+    lines.push("  boot --stop    Abort running boot");
 
     return ok(lines.join(nl));
   });

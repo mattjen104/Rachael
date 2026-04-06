@@ -4497,33 +4497,47 @@ def execute_do(cmd):
     execute_view({"env": env, "id": command_id, "showAll": False})
 
 
-def _login_single_window(window, label, client_type, username, password):
-    """Attempt login on a single window. Returns (success, message)."""
+def _login_text_window(window, label, username, password):
+    """Login to a Text/terminal window: type username, enter, password, enter."""
     try:
         activate_window(window)
         time.sleep(0.5)
+        print(f"  [login] {label}: terminal login — typing username")
+        sendinput_typewrite(username, interval=0.02)
+        time.sleep(0.2)
+        sendinput_press("enter")
+        time.sleep(1.5)
+        print(f"  [login] {label}: typing password")
+        sendinput_typewrite(password, interval=0.02)
+        time.sleep(0.2)
+        sendinput_press("enter")
+        time.sleep(1.0)
+        return True, "credentials entered (terminal)"
+    except Exception as e:
+        return False, str(e)[:60]
+
+
+def _login_hyperspace_window(window, label, username, password):
+    """Login to a Hyperspace/Hyperdrive GUI window using vision to find fields."""
+    try:
+        activate_window(window, maximize=True)
+        time.sleep(1.0)
 
         img = screenshot_window(window)
         b64 = img_to_base64(img)
 
-        prompt = f"""Look at this screenshot of an Epic {client_type} application window.
-Is there a login/authentication screen visible? Look for:
-- Username and password input fields
-- A login or sign-in button
-- "Enter your credentials" or similar text
-- An empty terminal prompt waiting for a username
+        prompt = f"""Look at this screenshot of an Epic Hyperspace/Hyperdrive application.
 
-If this is a login screen, return:
+Is there a login screen with username and password fields visible?
+
+If YES (login screen visible), find the input fields and login button. Return:
 {{"login_screen": true, "username_field": {{"x": <pixel_x>, "y": <pixel_y>}}, "password_field": {{"x": <pixel_x>, "y": <pixel_y>}}, "submit_button": {{"x": <pixel_x>, "y": <pixel_y>}}}}
 
-If the username field is a terminal/text prompt (no mouse-clickable field), return:
-{{"login_screen": true, "terminal_login": true}}
-
-If this is NOT a login screen (already logged in, or showing an application), return:
-{{"login_screen": false, "reason": "brief description of what's shown"}}
+If NO (already logged in, showing patient list, schedule, or application content), return:
+{{"login_screen": false, "reason": "brief description"}}
 
 {VISION_COORD_INSTRUCTION}
-Return ONLY the JSON object, no other text."""
+Return ONLY the JSON object."""
 
         response = ask_claude(b64, prompt)
         if not response:
@@ -4537,53 +4551,42 @@ Return ONLY the JSON object, no other text."""
 
         if not result.get("login_screen", False):
             reason = result.get("reason", "already logged in")
-            print(f"  [login] {label}: not a login screen ({reason})")
             return False, reason
 
-        if result.get("terminal_login", False):
-            print(f"  [login] {label}: terminal login detected, typing credentials")
-            activate_window(window)
+        uf = result.get("username_field", {})
+        pf = result.get("password_field", {})
+        sb = result.get("submit_button", {})
+
+        if uf.get("x") and uf.get("y"):
+            abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
+            safe_click(abs_x, abs_y, pause_after=0.4, label="username field")
             time.sleep(0.3)
             sendinput_typewrite(username, interval=0.02)
-            time.sleep(0.1)
-            sendinput_press("enter")
-            time.sleep(1.0)
-            sendinput_typewrite(password, interval=0.02)
-            time.sleep(0.1)
-            sendinput_press("enter")
-            time.sleep(1.0)
-            return True, "credentials entered (terminal)"
+            time.sleep(0.3)
         else:
-            uf = result.get("username_field", {})
-            pf = result.get("password_field", {})
-            sb = result.get("submit_button", {})
-
-            if uf.get("x") and uf.get("y"):
-                abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
-                safe_click(abs_x, abs_y, pause_after=0.3, label="username field")
-                time.sleep(0.2)
-                sendinput_typewrite(username, interval=0.02)
-                time.sleep(0.2)
-
-            if pf.get("x") and pf.get("y"):
-                abs_x, abs_y = vision_to_screen(window, pf["x"], pf["y"])
-                safe_click(abs_x, abs_y, pause_after=0.3, label="password field")
-                time.sleep(0.2)
-            else:
-                sendinput_press("tab")
-                time.sleep(0.2)
-
-            sendinput_typewrite(password, interval=0.02)
+            print(f"  [login] {label}: no username field coords, trying Tab focus")
+            sendinput_typewrite(username, interval=0.02)
             time.sleep(0.3)
 
-            if sb.get("x") and sb.get("y"):
-                abs_x, abs_y = vision_to_screen(window, sb["x"], sb["y"])
-                safe_click(abs_x, abs_y, pause_after=1.0, label="submit/login button")
-            else:
-                sendinput_press("enter")
-                time.sleep(1.0)
+        if pf.get("x") and pf.get("y"):
+            abs_x, abs_y = vision_to_screen(window, pf["x"], pf["y"])
+            safe_click(abs_x, abs_y, pause_after=0.4, label="password field")
+            time.sleep(0.3)
+        else:
+            sendinput_press("tab")
+            time.sleep(0.3)
 
-            return True, "credentials entered (GUI)"
+        sendinput_typewrite(password, interval=0.02)
+        time.sleep(0.3)
+
+        if sb.get("x") and sb.get("y"):
+            abs_x, abs_y = vision_to_screen(window, sb["x"], sb["y"])
+            safe_click(abs_x, abs_y, pause_after=1.5, label="login button")
+        else:
+            sendinput_press("enter")
+            time.sleep(1.5)
+
+        return True, "credentials entered (GUI)"
 
     except Exception as e:
         return False, str(e)[:60]
@@ -4615,18 +4618,24 @@ def execute_login(cmd):
     for env, client in envs_clients:
         window = find_window(env, client=client)
         if not window:
+            print(f"  [login] {env} {client}: no window found")
             continue
 
         label = f"{env} {client}"
         print(f"  [login] Checking {label}: {window.title}")
 
-        success, msg = _login_single_window(window, label, client, username, password)
+        if client == "text":
+            success, msg = _login_text_window(window, label, username, password)
+        else:
+            success, msg = _login_hyperspace_window(window, label, username, password)
+
         if success:
             logged_in += 1
             results.append(f"  [+] {label}: {msg}")
             print(f"  [login] {label}: {msg}")
         else:
             results.append(f"  [~] {label}: {msg}")
+            print(f"  [login] {label}: {msg}")
 
     post_result(command_id, "complete", data={"logged_in": logged_in, "details": results})
     print(f"  [login] Done: {logged_in} windows")
