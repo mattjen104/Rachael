@@ -4497,6 +4497,140 @@ def execute_do(cmd):
     execute_view({"env": env, "id": command_id, "showAll": False})
 
 
+def execute_login(cmd):
+    command_id = cmd.get("id", "unknown")
+    credentials = cmd.get("credentials", {})
+    username = credentials.get("username", "")
+    password = credentials.get("password", "")
+
+    if not username or not password:
+        post_result(command_id, "error", error="Missing username or password in credentials")
+        return
+
+    envs = ["SUP", "POC", "TST"]
+    clients = ["hyperspace", "text"]
+    results = []
+    logged_in = 0
+
+    for env in envs:
+        for client in clients:
+            window = find_window(env, client=client)
+            if not window:
+                continue
+
+            label = f"{env} {client}"
+            print(f"  [login] Checking {label}: {window.title}")
+
+            try:
+                activate_window(window)
+                time.sleep(0.5)
+
+                img = screenshot_window(window)
+                b64 = img_to_base64(img)
+
+                prompt = f"""Look at this screenshot of an Epic {client} application window.
+Is there a login/authentication screen visible? Look for:
+- Username and password input fields
+- A login or sign-in button
+- "Enter your credentials" or similar text
+- An empty terminal prompt waiting for a username
+
+If this is a login screen, return:
+{{"login_screen": true, "username_field": {{"x": <pixel_x>, "y": <pixel_y>}}, "password_field": {{"x": <pixel_x>, "y": <pixel_y>}}, "submit_button": {{"x": <pixel_x>, "y": <pixel_y>}}}}
+
+If the username field is a terminal/text prompt (no mouse-clickable field), return:
+{{"login_screen": true, "terminal_login": true}}
+
+If this is NOT a login screen (already logged in, or showing an application), return:
+{{"login_screen": false, "reason": "brief description of what's shown"}}
+
+{VISION_COORD_INSTRUCTION}
+Return ONLY the JSON object, no other text."""
+
+                response = ask_claude(b64, prompt)
+                if not response:
+                    results.append(f"  [-] {label}: vision failed")
+                    continue
+
+                json_match = re.search(r'\{[\s\S]*?\}', response)
+                if not json_match:
+                    results.append(f"  [-] {label}: could not parse vision response")
+                    continue
+
+                result = json.loads(json_match.group())
+
+                if not result.get("login_screen", False):
+                    reason = result.get("reason", "already logged in")
+                    results.append(f"  [~] {label}: {reason}")
+                    print(f"  [login] {label}: not a login screen ({reason})")
+                    continue
+
+                if result.get("terminal_login", False):
+                    print(f"  [login] {label}: terminal login detected, typing credentials")
+                    activate_window(window)
+                    time.sleep(0.3)
+                    sendinput_typewrite(username, interval=0.02)
+                    time.sleep(0.1)
+                    sendinput_press("enter")
+                    time.sleep(1.0)
+                    sendinput_typewrite(password, interval=0.02)
+                    time.sleep(0.1)
+                    sendinput_press("enter")
+                    time.sleep(1.0)
+
+                    final_img = screenshot_window(window)
+                    final_b64 = img_to_base64(final_img)
+                    results.append(f"  [+] {label}: credentials entered (terminal)")
+                    logged_in += 1
+                else:
+                    uf = result.get("username_field", {})
+                    pf = result.get("password_field", {})
+                    sb = result.get("submit_button", {})
+
+                    if uf.get("x") and uf.get("y"):
+                        abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
+                        safe_click(abs_x, abs_y, pause_after=0.3, label="username field")
+                        time.sleep(0.2)
+                        sendinput_typewrite(username, interval=0.02)
+                        time.sleep(0.2)
+
+                    if pf.get("x") and pf.get("y"):
+                        abs_x, abs_y = vision_to_screen(window, pf["x"], pf["y"])
+                        safe_click(abs_x, abs_y, pause_after=0.3, label="password field")
+                        time.sleep(0.2)
+                    else:
+                        sendinput_press("tab")
+                        time.sleep(0.2)
+
+                    sendinput_typewrite(password, interval=0.02)
+                    time.sleep(0.3)
+
+                    if sb.get("x") and sb.get("y"):
+                        abs_x, abs_y = vision_to_screen(window, sb["x"], sb["y"])
+                        safe_click(abs_x, abs_y, pause_after=1.0, label="submit/login button")
+                    else:
+                        sendinput_press("enter")
+                        time.sleep(1.0)
+
+                    final_img = screenshot_window(window)
+                    final_b64 = img_to_base64(final_img)
+                    results.append(f"  [+] {label}: credentials entered (GUI)")
+                    logged_in += 1
+
+                print(f"  [login] {label}: credentials filled")
+
+            except Exception as e:
+                results.append(f"  [-] {label}: {str(e)[:60]}")
+                print(f"  [login] {label} error: {e}")
+
+    summary = f"Login complete: {logged_in} windows authenticated"
+    if results:
+        summary += "\n" + "\n".join(results)
+
+    post_result(command_id, "complete", data={"logged_in": logged_in, "details": results})
+    print(f"  [login] Done: {logged_in} windows")
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -4542,6 +4676,8 @@ def execute_command(cmd):
             execute_batch(cmd)
         elif cmd_type == "shortcuts":
             execute_shortcuts(cmd)
+        elif cmd_type == "login":
+            execute_login(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except pyautogui.FailSafeException:
