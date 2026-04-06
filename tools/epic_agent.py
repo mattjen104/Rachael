@@ -4497,38 +4497,16 @@ def execute_do(cmd):
     execute_view({"env": env, "id": command_id, "showAll": False})
 
 
-def execute_login(cmd):
-    command_id = cmd.get("id", "unknown")
-    credentials = cmd.get("credentials", {})
-    username = credentials.get("username", "")
-    password = credentials.get("password", "")
+def _login_single_window(window, label, client_type, username, password):
+    """Attempt login on a single window. Returns (success, message)."""
+    try:
+        activate_window(window)
+        time.sleep(0.5)
 
-    if not username or not password:
-        post_result(command_id, "error", error="Missing username or password in credentials")
-        return
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
 
-    envs = ["SUP", "POC", "TST"]
-    clients = ["hyperspace", "text"]
-    results = []
-    logged_in = 0
-
-    for env in envs:
-        for client in clients:
-            window = find_window(env, client=client)
-            if not window:
-                continue
-
-            label = f"{env} {client}"
-            print(f"  [login] Checking {label}: {window.title}")
-
-            try:
-                activate_window(window)
-                time.sleep(0.5)
-
-                img = screenshot_window(window)
-                b64 = img_to_base64(img)
-
-                prompt = f"""Look at this screenshot of an Epic {client} application window.
+        prompt = f"""Look at this screenshot of an Epic {client_type} application window.
 Is there a login/authentication screen visible? Look for:
 - Username and password input fields
 - A login or sign-in button
@@ -4547,85 +4525,108 @@ If this is NOT a login screen (already logged in, or showing an application), re
 {VISION_COORD_INSTRUCTION}
 Return ONLY the JSON object, no other text."""
 
-                response = ask_claude(b64, prompt)
-                if not response:
-                    results.append(f"  [-] {label}: vision failed")
-                    continue
+        response = ask_claude(b64, prompt)
+        if not response:
+            return False, "vision failed"
 
-                json_match = re.search(r'\{[\s\S]*?\}', response)
-                if not json_match:
-                    results.append(f"  [-] {label}: could not parse vision response")
-                    continue
+        json_match = re.search(r'\{[\s\S]*?\}', response)
+        if not json_match:
+            return False, "could not parse vision response"
 
-                result = json.loads(json_match.group())
+        result = json.loads(json_match.group())
 
-                if not result.get("login_screen", False):
-                    reason = result.get("reason", "already logged in")
-                    results.append(f"  [~] {label}: {reason}")
-                    print(f"  [login] {label}: not a login screen ({reason})")
-                    continue
+        if not result.get("login_screen", False):
+            reason = result.get("reason", "already logged in")
+            print(f"  [login] {label}: not a login screen ({reason})")
+            return False, reason
 
-                if result.get("terminal_login", False):
-                    print(f"  [login] {label}: terminal login detected, typing credentials")
-                    activate_window(window)
-                    time.sleep(0.3)
-                    sendinput_typewrite(username, interval=0.02)
-                    time.sleep(0.1)
-                    sendinput_press("enter")
-                    time.sleep(1.0)
-                    sendinput_typewrite(password, interval=0.02)
-                    time.sleep(0.1)
-                    sendinput_press("enter")
-                    time.sleep(1.0)
+        if result.get("terminal_login", False):
+            print(f"  [login] {label}: terminal login detected, typing credentials")
+            activate_window(window)
+            time.sleep(0.3)
+            sendinput_typewrite(username, interval=0.02)
+            time.sleep(0.1)
+            sendinput_press("enter")
+            time.sleep(1.0)
+            sendinput_typewrite(password, interval=0.02)
+            time.sleep(0.1)
+            sendinput_press("enter")
+            time.sleep(1.0)
+            return True, "credentials entered (terminal)"
+        else:
+            uf = result.get("username_field", {})
+            pf = result.get("password_field", {})
+            sb = result.get("submit_button", {})
 
-                    final_img = screenshot_window(window)
-                    final_b64 = img_to_base64(final_img)
-                    results.append(f"  [+] {label}: credentials entered (terminal)")
-                    logged_in += 1
-                else:
-                    uf = result.get("username_field", {})
-                    pf = result.get("password_field", {})
-                    sb = result.get("submit_button", {})
+            if uf.get("x") and uf.get("y"):
+                abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
+                safe_click(abs_x, abs_y, pause_after=0.3, label="username field")
+                time.sleep(0.2)
+                sendinput_typewrite(username, interval=0.02)
+                time.sleep(0.2)
 
-                    if uf.get("x") and uf.get("y"):
-                        abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
-                        safe_click(abs_x, abs_y, pause_after=0.3, label="username field")
-                        time.sleep(0.2)
-                        sendinput_typewrite(username, interval=0.02)
-                        time.sleep(0.2)
+            if pf.get("x") and pf.get("y"):
+                abs_x, abs_y = vision_to_screen(window, pf["x"], pf["y"])
+                safe_click(abs_x, abs_y, pause_after=0.3, label="password field")
+                time.sleep(0.2)
+            else:
+                sendinput_press("tab")
+                time.sleep(0.2)
 
-                    if pf.get("x") and pf.get("y"):
-                        abs_x, abs_y = vision_to_screen(window, pf["x"], pf["y"])
-                        safe_click(abs_x, abs_y, pause_after=0.3, label="password field")
-                        time.sleep(0.2)
-                    else:
-                        sendinput_press("tab")
-                        time.sleep(0.2)
+            sendinput_typewrite(password, interval=0.02)
+            time.sleep(0.3)
 
-                    sendinput_typewrite(password, interval=0.02)
-                    time.sleep(0.3)
+            if sb.get("x") and sb.get("y"):
+                abs_x, abs_y = vision_to_screen(window, sb["x"], sb["y"])
+                safe_click(abs_x, abs_y, pause_after=1.0, label="submit/login button")
+            else:
+                sendinput_press("enter")
+                time.sleep(1.0)
 
-                    if sb.get("x") and sb.get("y"):
-                        abs_x, abs_y = vision_to_screen(window, sb["x"], sb["y"])
-                        safe_click(abs_x, abs_y, pause_after=1.0, label="submit/login button")
-                    else:
-                        sendinput_press("enter")
-                        time.sleep(1.0)
+            return True, "credentials entered (GUI)"
 
-                    final_img = screenshot_window(window)
-                    final_b64 = img_to_base64(final_img)
-                    results.append(f"  [+] {label}: credentials entered (GUI)")
-                    logged_in += 1
+    except Exception as e:
+        return False, str(e)[:60]
 
-                print(f"  [login] {label}: credentials filled")
 
-            except Exception as e:
-                results.append(f"  [-] {label}: {str(e)[:60]}")
-                print(f"  [login] {label} error: {e}")
+def execute_login(cmd):
+    command_id = cmd.get("id", "unknown")
+    credentials = cmd.get("credentials", {})
+    username = credentials.get("username", "")
+    password = credentials.get("password", "")
 
-    summary = f"Login complete: {logged_in} windows authenticated"
-    if results:
-        summary += "\n" + "\n".join(results)
+    if not username or not password:
+        post_result(command_id, "error", error="Missing username or password in credentials")
+        return
+
+    target_env = cmd.get("env", "").upper() if cmd.get("env") else ""
+    target_client = cmd.get("client", "")
+
+    if target_env and target_client:
+        envs_clients = [(target_env, target_client)]
+    elif target_env:
+        envs_clients = [(target_env, "hyperspace"), (target_env, "text")]
+    else:
+        envs_clients = [(e, c) for e in ["SUP", "POC", "TST"] for c in ["hyperspace", "text"]]
+
+    results = []
+    logged_in = 0
+
+    for env, client in envs_clients:
+        window = find_window(env, client=client)
+        if not window:
+            continue
+
+        label = f"{env} {client}"
+        print(f"  [login] Checking {label}: {window.title}")
+
+        success, msg = _login_single_window(window, label, client, username, password)
+        if success:
+            logged_in += 1
+            results.append(f"  [+] {label}: {msg}")
+            print(f"  [login] {label}: {msg}")
+        else:
+            results.append(f"  [~] {label}: {msg}")
 
     post_result(command_id, "complete", data={"logged_in": logged_in, "details": results})
     print(f"  [login] Done: {logged_in} windows")
