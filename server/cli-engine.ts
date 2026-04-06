@@ -6872,14 +6872,15 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       const epicPass = !skipLogin ? await getSecret("epic_password") : null;
       const agentPort = process.env.PORT || 5000;
 
-      let agentConnected = false;
-      if (!skipLogin && epicUser && epicPass) {
+      const checkAgentConnected = async (): Promise<boolean> => {
         try {
           const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/status`);
           const statusData = statusResp.ok ? await statusResp.json() as { connected?: boolean } : { connected: false };
-          agentConnected = !!statusData.connected;
-        } catch {}
-      }
+          return !!statusData.connected;
+        } catch {
+          return false;
+        }
+      };
 
       const parseAppEnvClient = (appName: string): { env: string; client: string } => {
         const upper = appName.toUpperCase();
@@ -6919,7 +6920,11 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               return `failed: ${e.message?.substring(0, 60) || "launch error"}`;
             }
 
-            if (!skipLogin && agentConnected && epicUser && epicPass) {
+            if (!skipLogin && epicUser && epicPass) {
+              const isAgentUp = await checkAgentConnected();
+              if (!isAgentUp) {
+                return "launched (desktop agent not connected — login skipped)";
+              }
               emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${entry.app} to open...`, "info", { metadata: { command: "boot" } });
               await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
 
