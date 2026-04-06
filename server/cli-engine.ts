@@ -6829,94 +6829,119 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       });
     }
 
-    if (!skipLogin) {
-      steps.push({
-        name: "Citrix Workspace",
-        run: async () => {
-          if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+    steps.push({
+      name: "Citrix Workspace",
+      run: async () => {
+        if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
-          const wsConfigKey = "citrix_workspace_apps";
-          const DEFAULT_WS_APPS: Array<{ app: string; portal: string }> = [
-            { app: "SUP Hyperdrive", portal: "UCSD CWP" },
-            { app: "POC Hyperdrive", portal: "UCSD CWP" },
-            { app: "TST Hyperdrive", portal: "UCSD CWP" },
-            { app: "SUP Text Access", portal: "UCSD CWP" },
-            { app: "POC Text Access", portal: "UCSD CWP" },
-            { app: "TST Text Access", portal: "UCSD CWP" },
-          ];
+        const wsConfigKey = "citrix_workspace_apps";
+        const DEFAULT_WS_APPS: Array<{ app: string; portal: string }> = [
+          { app: "SUP Hyperdrive", portal: "UCSD CWP" },
+          { app: "POC Hyperdrive", portal: "UCSD CWP" },
+          { app: "TST Hyperdrive", portal: "UCSD CWP" },
+          { app: "SUP Text Access", portal: "UCSD CWP" },
+          { app: "POC Text Access", portal: "UCSD CWP" },
+          { app: "TST Text Access", portal: "UCSD CWP" },
+        ];
 
-          let wsApps: Array<{ app: string; portal: string }> = DEFAULT_WS_APPS;
-          try {
-            const wsCfg = await storage.getAgentConfig(wsConfigKey);
-            if (wsCfg?.value) {
-              const parsed = JSON.parse(wsCfg.value);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                if (typeof parsed[0] === "string") {
-                  wsApps = parsed.map((a: string) => {
-                    const atIdx = a.lastIndexOf("@");
-                    if (atIdx > 0) return { app: a.substring(0, atIdx).trim(), portal: a.substring(atIdx + 1).trim() };
-                    return { app: a, portal: "UCSD CWP" };
-                  });
-                } else {
-                  wsApps = parsed;
-                }
-              }
-            }
-          } catch {}
-
-          if (wsApps.length === 0) return "SKIPPED (no workspace apps configured)";
-
-          const { submitJob, waitForResult } = await import("./bridge-queue");
-
-          const portalsCfg = await storage.getAgentConfig("citrix_portals");
-          let portals: Array<{ name: string; url: string }> = [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu" }];
-          if (portalsCfg?.value) {
-            try {
-              const parsed = JSON.parse(portalsCfg.value);
-              if (Array.isArray(parsed) && parsed.length > 0) portals = parsed;
-            } catch {}
-          }
-
-          const launched: string[] = [];
-          const failedApps: string[] = [];
-
-          for (const entry of wsApps) {
-            try {
-              const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
-              const portalUrl = portal?.url || "https://cwp.ucsd.edu";
-              const jobId = submitJob("dom", portalUrl, "boot-workspace", {
-                maxText: 2000,
-                reuseTab: true,
-                spaWaitMs: 2000,
-                citrixApiLaunch: entry.app,
-                autoOpenDownload: true,
-                pollTimeoutMs: 15000,
-              });
-              const result = await waitForResult(jobId, 30000);
-              if (result.error) {
-                failedApps.push(entry.app);
+        let wsApps: Array<{ app: string; portal: string }> = DEFAULT_WS_APPS;
+        try {
+          const wsCfg = await storage.getAgentConfig(wsConfigKey);
+          if (wsCfg?.value) {
+            const parsed = JSON.parse(wsCfg.value);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              if (typeof parsed[0] === "string") {
+                wsApps = parsed.map((a: string) => {
+                  const atIdx = a.lastIndexOf("@");
+                  if (atIdx > 0) return { app: a.substring(0, atIdx).trim(), portal: a.substring(atIdx + 1).trim() };
+                  return { app: a, portal: "UCSD CWP" };
+                });
               } else {
-                launched.push(entry.app);
+                wsApps = parsed;
               }
-            } catch (e: any) {
-              failedApps.push(entry.app);
             }
           }
+        } catch {}
 
-          if (launched.length > 0) {
-            await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
-          }
+        if (wsApps.length === 0) return "SKIPPED (no workspace apps configured)";
 
-          if (launched.length === 0 && failedApps.length > 0) {
-            return `failed: all ${failedApps.length} apps failed to launch`;
+        const { submitJob, waitForResult, smartFetch } = await import("./bridge-queue");
+
+        const portalsCfg = await storage.getAgentConfig("citrix_portals");
+        let portals: Array<{ name: string; url: string }> = [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu" }];
+        if (portalsCfg?.value) {
+          try {
+            const parsed = JSON.parse(portalsCfg.value);
+            if (Array.isArray(parsed) && parsed.length > 0) portals = parsed;
+          } catch {}
+        }
+
+        const appLines: string[] = [];
+        const launched: string[] = [];
+        const failedApps: string[] = [];
+
+        for (const entry of wsApps) {
+          try {
+            const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
+            const portalUrl = portal?.url || "https://cwp.ucsd.edu";
+            const jobId = submitJob("dom", portalUrl, "boot-workspace", {
+              maxText: 2000,
+              reuseTab: true,
+              spaWaitMs: 2000,
+              citrixApiLaunch: entry.app,
+              autoOpenDownload: true,
+              pollTimeoutMs: 15000,
+            });
+            const result = await waitForResult(jobId, 30000);
+            if (result.error) {
+              failedApps.push(entry.app);
+              appLines.push(`    [-] ${entry.app}: ${result.error.substring(0, 60)}`);
+            } else {
+              launched.push(entry.app);
+              appLines.push(`    [+] ${entry.app}: launched`);
+            }
+          } catch (e: any) {
+            failedApps.push(entry.app);
+            appLines.push(`    [-] ${entry.app}: ${e.message?.substring(0, 60) || "error"}`);
           }
-          const parts: string[] = [];
-          if (launched.length > 0) parts.push(`${launched.length} launched`);
-          if (failedApps.length > 0) parts.push(`${failedApps.length} failed: ${failedApps.join(", ")}`);
-          return parts.length > 0 ? `done (${parts.join("; ")})` : "done";
-        },
-      });
-    }
+        }
+
+        if (launched.length > 0) {
+          await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
+        }
+
+        const epicUser = await getSecret("epic_username");
+        const epicPass = await getSecret("epic_password");
+        const hyperdriveApps = launched.filter(a => a.toLowerCase().includes("hyperdrive") || a.toLowerCase().includes("hyperspace"));
+        if (epicUser && epicPass && hyperdriveApps.length > 0) {
+          emitEvent("cli", "Filling Epic credentials into launched Hyperspace environments...", "info", { metadata: { command: "boot" } });
+          await new Promise(resolve => setTimeout(resolve, 8000));
+          try {
+            await smartFetch("https://cwp.ucsd.edu", "dom", "boot-hs-cred-fill", {
+              reuseTab: true,
+              spaWaitMs: 3000,
+              fillFields: {
+                'input[name="username"], input[type="text"][id*="user"], #username, input[name="login"]': epicUser,
+                'input[name="password"], input[type="password"], #password': epicPass,
+              },
+              submitSelector: 'button[type="submit"], input[type="submit"], #loginButton, button[name="submit"]',
+              fillDelayMs: 300,
+              waitAfterSubmitMs: 5000,
+              maxText: 2000,
+            }, 30000);
+            appLines.push("    [+] Hyperspace credentials: filled");
+          } catch (e: any) {
+            appLines.push(`    [~] Hyperspace credentials: ${e.message?.substring(0, 50) || "fill attempt failed"}`);
+          }
+        }
+
+        if (launched.length === 0 && failedApps.length > 0) {
+          return `failed: all ${failedApps.length} apps failed to launch${nl}${appLines.join(nl)}`;
+        }
+        const summary = `done (${launched.length}/${wsApps.length} launched)`;
+        return `${summary}${nl}${appLines.join(nl)}`;
+      },
+    });
 
     steps.push({
       name: "Outlook Sync",
