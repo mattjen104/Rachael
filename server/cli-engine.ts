@@ -3246,7 +3246,7 @@ ${fullHtml}`;
       }
 
       const portals = await storage.getAgentConfig("citrix_portals");
-      let portalUrl = "https://workspace.uchealth.org";
+      let portalUrl = "https://cwp.ucsd.edu";
       if (portals?.value) {
         try {
           const parsed = JSON.parse(portals.value);
@@ -6729,10 +6729,39 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       const lastLogin = await storage.getAgentConfig("boot_last_login");
       const lastOutlook = await storage.getAgentConfig("outlook_last_sync");
       const lastSnow = await storage.getAgentConfig("snow_last_sync");
+      const lastWorkspace = await storage.getAgentConfig("boot_last_workspace");
       const keepalive = await storage.getAgentConfig("citrix_keepalive");
 
       const emailCount = (await storage.getOutlookEmails({ limit: 1 })).length > 0;
       const ticketCount = (await storage.getSnowTickets({ limit: 1 })).length > 0;
+
+      const wsConfigKey = "citrix_workspace_apps";
+      const DEFAULT_WS: Array<{ app: string; portal: string }> = [
+        { app: "SUP Hyperdrive", portal: "UCSD CWP" },
+        { app: "POC Hyperdrive", portal: "UCSD CWP" },
+        { app: "TST Hyperdrive", portal: "UCSD CWP" },
+        { app: "SUP Text Access", portal: "UCSD CWP" },
+        { app: "POC Text Access", portal: "UCSD CWP" },
+        { app: "TST Text Access", portal: "UCSD CWP" },
+      ];
+      let wsApps = DEFAULT_WS;
+      try {
+        const wsCfg = await storage.getAgentConfig(wsConfigKey);
+        if (wsCfg?.value) {
+          const parsed = JSON.parse(wsCfg.value);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            if (typeof parsed[0] === "string") {
+              wsApps = parsed.map((a: string) => {
+                const atIdx = a.lastIndexOf("@");
+                if (atIdx > 0) return { app: a.substring(0, atIdx).trim(), portal: a.substring(atIdx + 1).trim() };
+                return { app: a, portal: "UCSD CWP" };
+              });
+            } else {
+              wsApps = parsed;
+            }
+          }
+        }
+      } catch {}
 
       function ageStr(isoStr: string | undefined): string {
         if (!isoStr) return "never";
@@ -6748,9 +6777,13 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         `  Bridge:          ${bridgeConnected ? "CONNECTED" : "OFFLINE"}`,
         `  Epic Credentials: ${epicUser ? "configured" : "NOT SET"}`,
         `  Last Login:      ${ageStr(lastLogin?.value)}`,
+        `  Last Workspace:  ${ageStr(lastWorkspace?.value)}`,
         `  Last Outlook:    ${ageStr(lastOutlook?.value)} ${emailCount ? "(data persisted)" : "(no data)"}`,
         `  Last SNOW:       ${ageStr(lastSnow?.value)} ${ticketCount ? "(data persisted)" : "(no data)"}`,
         `  Citrix Keepalive: ${keepalive?.value === "true" ? "ON" : "OFF"}`,
+        "",
+        `  Workspace Apps (${wsApps.length}):`,
+        ...wsApps.map((e: { app: string; portal: string }) => `    - ${e.app}`),
         "",
         "  boot             - Run full startup",
         "  boot --skip-login - Skip login, just sync data",
@@ -6792,6 +6825,95 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           }
           await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
           return "done (Duo timeout — may need manual approval)";
+        },
+      });
+    }
+
+    if (!skipLogin) {
+      steps.push({
+        name: "Citrix Workspace",
+        run: async () => {
+          if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+
+          const wsConfigKey = "citrix_workspace_apps";
+          const DEFAULT_WS_APPS: Array<{ app: string; portal: string }> = [
+            { app: "SUP Hyperdrive", portal: "UCSD CWP" },
+            { app: "POC Hyperdrive", portal: "UCSD CWP" },
+            { app: "TST Hyperdrive", portal: "UCSD CWP" },
+            { app: "SUP Text Access", portal: "UCSD CWP" },
+            { app: "POC Text Access", portal: "UCSD CWP" },
+            { app: "TST Text Access", portal: "UCSD CWP" },
+          ];
+
+          let wsApps: Array<{ app: string; portal: string }> = DEFAULT_WS_APPS;
+          try {
+            const wsCfg = await storage.getAgentConfig(wsConfigKey);
+            if (wsCfg?.value) {
+              const parsed = JSON.parse(wsCfg.value);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                if (typeof parsed[0] === "string") {
+                  wsApps = parsed.map((a: string) => {
+                    const atIdx = a.lastIndexOf("@");
+                    if (atIdx > 0) return { app: a.substring(0, atIdx).trim(), portal: a.substring(atIdx + 1).trim() };
+                    return { app: a, portal: "UCSD CWP" };
+                  });
+                } else {
+                  wsApps = parsed;
+                }
+              }
+            }
+          } catch {}
+
+          if (wsApps.length === 0) return "SKIPPED (no workspace apps configured)";
+
+          const { submitJob, waitForResult } = await import("./bridge-queue");
+
+          const portalsCfg = await storage.getAgentConfig("citrix_portals");
+          let portals: Array<{ name: string; url: string }> = [{ name: "UCSD CWP", url: "https://cwp.ucsd.edu" }];
+          if (portalsCfg?.value) {
+            try {
+              const parsed = JSON.parse(portalsCfg.value);
+              if (Array.isArray(parsed) && parsed.length > 0) portals = parsed;
+            } catch {}
+          }
+
+          const launched: string[] = [];
+          const failedApps: string[] = [];
+
+          for (const entry of wsApps) {
+            try {
+              const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
+              const portalUrl = portal?.url || "https://cwp.ucsd.edu";
+              const jobId = submitJob("dom", portalUrl, "boot-workspace", {
+                maxText: 2000,
+                reuseTab: true,
+                spaWaitMs: 2000,
+                citrixApiLaunch: entry.app,
+                autoOpenDownload: true,
+                pollTimeoutMs: 15000,
+              });
+              const result = await waitForResult(jobId, 30000);
+              if (result.error) {
+                failedApps.push(entry.app);
+              } else {
+                launched.push(entry.app);
+              }
+            } catch (e: any) {
+              failedApps.push(entry.app);
+            }
+          }
+
+          if (launched.length > 0) {
+            await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
+          }
+
+          if (launched.length === 0 && failedApps.length > 0) {
+            return `failed: all ${failedApps.length} apps failed to launch`;
+          }
+          const parts: string[] = [];
+          if (launched.length > 0) parts.push(`${launched.length} launched`);
+          if (failedApps.length > 0) parts.push(`${failedApps.length} failed: ${failedApps.join(", ")}`);
+          return parts.length > 0 ? `done (${parts.join("; ")})` : "done";
         },
       });
     }
