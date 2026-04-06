@@ -6879,11 +6879,17 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         const appLines: string[] = [];
         const launched: string[] = [];
         const failedApps: string[] = [];
+        const LAUNCH_DELAY_MS = 3000;
 
-        for (const entry of wsApps) {
+        for (let i = 0; i < wsApps.length; i++) {
+          const entry = wsApps[i];
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, LAUNCH_DELAY_MS));
+          }
           try {
             const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
             const portalUrl = portal?.url || "https://cwp.ucsd.edu";
+            emitEvent("cli", `Launching ${entry.app}...`, "info", { metadata: { command: "boot" } });
             const jobId = submitJob("dom", portalUrl, "boot-workspace", {
               maxText: 2000,
               reuseTab: true,
@@ -6908,31 +6914,6 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
         if (launched.length > 0) {
           await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
-        }
-
-        const epicUser = !skipLogin ? await getSecret("epic_username") : null;
-        const epicPass = !skipLogin ? await getSecret("epic_password") : null;
-        const hyperdriveApps = launched.filter(a => a.toLowerCase().includes("hyperdrive") || a.toLowerCase().includes("hyperspace"));
-        if (!skipLogin && epicUser && epicPass && hyperdriveApps.length > 0) {
-          emitEvent("cli", "Filling Epic credentials into launched Hyperspace environments...", "info", { metadata: { command: "boot" } });
-          await new Promise(resolve => setTimeout(resolve, 8000));
-          try {
-            await smartFetch("https://cwp.ucsd.edu", "dom", "boot-hs-cred-fill", {
-              reuseTab: true,
-              spaWaitMs: 3000,
-              fillFields: {
-                'input[name="username"], input[type="text"][id*="user"], #username, input[name="login"]': epicUser,
-                'input[name="password"], input[type="password"], #password': epicPass,
-              },
-              submitSelector: 'button[type="submit"], input[type="submit"], #loginButton, button[name="submit"]',
-              fillDelayMs: 300,
-              waitAfterSubmitMs: 5000,
-              maxText: 2000,
-            }, 30000);
-            appLines.push("    [+] Hyperspace credentials: filled");
-          } catch (e: any) {
-            appLines.push(`    [~] Hyperspace credentials: ${e.message?.substring(0, 50) || "fill attempt failed"}`);
-          }
         }
 
         if (launched.length === 0 && failedApps.length > 0) {
