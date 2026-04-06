@@ -248,7 +248,7 @@ def _load_env_file():
 _load_env_file()
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-ORGCLOUD_URL = os.environ.get("ORGCLOUD_URL", "https://i-cloud-sync-manager.replit.app")
+ORGCLOUD_URL = os.environ.get("ORGCLOUD_URL", "http://146.190.33.157:5000")
 BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN", "")
 if not BRIDGE_TOKEN:
     print("ERROR: BRIDGE_TOKEN not set.")
