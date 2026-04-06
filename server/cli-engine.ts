@@ -6834,9 +6834,18 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           if (await checkAbort()) return "aborted";
           try {
             const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
-            const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { logged_in?: number } } : {};
-            if (rData.status === "complete") return rData.data?.logged_in ? "logged in" : "already logged in";
-            if (rData.status === "error") return "login failed";
+            const rData = rResp.ok ? await rResp.json() as { status?: string; error?: string; data?: { logged_in?: number; details?: string[] } } : {};
+            if (rData.status === "complete") {
+              const count = rData.data?.logged_in ?? 0;
+              const details = rData.data?.details;
+              if (count > 0) return "logged in";
+              const detail = details?.length ? details[0].substring(0, 80) : "no windows logged in";
+              return `login failed: ${detail}`;
+            }
+            if (rData.status === "error") {
+              const errMsg = rData.error || "unknown error";
+              return `login failed: ${errMsg.substring(0, 80)}`;
+            }
           } catch {}
         }
         return "login timeout";
