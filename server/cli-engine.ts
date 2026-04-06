@@ -6877,20 +6877,13 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         }
 
         const appLines: string[] = [];
-        const launched: string[] = [];
-        const failedApps: string[] = [];
-        const LAUNCH_DELAY_MS = 3000;
+        let queued = 0;
 
-        for (let i = 0; i < wsApps.length; i++) {
-          const entry = wsApps[i];
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, LAUNCH_DELAY_MS));
-          }
+        for (const entry of wsApps) {
           try {
             const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
             const portalUrl = portal?.url || "https://cwp.ucsd.edu";
-            emitEvent("cli", `Launching ${entry.app}...`, "info", { metadata: { command: "boot" } });
-            const jobId = submitJob("dom", portalUrl, "boot-workspace", {
+            submitJob("dom", portalUrl, "boot-workspace", {
               maxText: 2000,
               reuseTab: true,
               spaWaitMs: 2000,
@@ -6898,29 +6891,21 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               autoOpenDownload: true,
               pollTimeoutMs: 15000,
             });
-            const result = await waitForResult(jobId, 30000);
-            if (result.error) {
-              failedApps.push(entry.app);
-              appLines.push(`    [-] ${entry.app}: ${result.error.substring(0, 60)}`);
-            } else {
-              launched.push(entry.app);
-              appLines.push(`    [+] ${entry.app}: launched`);
-            }
+            queued++;
+            appLines.push(`    [+] ${entry.app}: queued`);
           } catch (e: any) {
-            failedApps.push(entry.app);
             appLines.push(`    [-] ${entry.app}: ${e.message?.substring(0, 60) || "error"}`);
           }
         }
 
-        if (launched.length > 0) {
+        if (queued > 0) {
           await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
         }
 
-        if (launched.length === 0 && failedApps.length > 0) {
-          return `failed: all ${failedApps.length} apps failed to launch${nl}${appLines.join(nl)}`;
+        if (queued === 0) {
+          return `failed: no apps could be queued${nl}${appLines.join(nl)}`;
         }
-        const summary = `done (${launched.length}/${wsApps.length} launched)`;
-        return `${summary}${nl}${appLines.join(nl)}`;
+        return `done (${queued} apps queued)${nl}${appLines.join(nl)}`;
       },
     });
 
