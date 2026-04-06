@@ -6910,10 +6910,10 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
         }
 
-        const epicUser = await getSecret("epic_username");
-        const epicPass = await getSecret("epic_password");
+        const epicUser = !skipLogin ? await getSecret("epic_username") : null;
+        const epicPass = !skipLogin ? await getSecret("epic_password") : null;
         const hyperdriveApps = launched.filter(a => a.toLowerCase().includes("hyperdrive") || a.toLowerCase().includes("hyperspace"));
-        if (epicUser && epicPass && hyperdriveApps.length > 0) {
+        if (!skipLogin && epicUser && epicPass && hyperdriveApps.length > 0) {
           emitEvent("cli", "Filling Epic credentials into launched Hyperspace environments...", "info", { metadata: { command: "boot" } });
           await new Promise(resolve => setTimeout(resolve, 8000));
           try {
