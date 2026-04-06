@@ -6909,6 +6909,64 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       },
     });
 
+    if (!skipLogin) {
+      steps.push({
+        name: "Desktop Login",
+        run: async () => {
+          const epicUser = await getSecret("epic_username");
+          const epicPass = await getSecret("epic_password");
+          if (!epicUser || !epicPass) return "SKIPPED (credentials not configured)";
+
+          const agentPort = process.env.PORT || 5000;
+          try {
+            const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/status`);
+            const statusData = statusResp.ok ? await statusResp.json() as { connected?: boolean } : { connected: false };
+            if (!statusData.connected) return "SKIPPED (desktop agent not connected)";
+          } catch {
+            return "SKIPPED (desktop agent not reachable)";
+          }
+
+          emitEvent("cli", "Waiting 15s for Citrix apps to fully open...", "info", { metadata: { command: "boot" } });
+          await new Promise(resolve => setTimeout(resolve, 15000));
+
+          try {
+            const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+              body: JSON.stringify({
+                type: "login",
+                credentials: { username: epicUser, password: epicPass },
+              }),
+            });
+            const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
+            if (data.ok && data.commandId) {
+              const pollStart = Date.now();
+              const POLL_TIMEOUT = 90000;
+              const POLL_INTERVAL = 5000;
+              while (Date.now() - pollStart < POLL_TIMEOUT) {
+                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+                try {
+                  const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
+                  const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { logged_in?: number; details?: string[] } } : {};
+                  if (rData.status === "complete") {
+                    const count = rData.data?.logged_in || 0;
+                    return `done (${count} windows authenticated)`;
+                  }
+                  if (rData.status === "error") {
+                    return `failed: agent error`;
+                  }
+                } catch {}
+              }
+              return "done (login command sent, agent processing)";
+            }
+            return "failed: could not queue login command";
+          } catch (e: any) {
+            return `failed: ${e.message?.substring(0, 60) || "error"}`;
+          }
+        },
+      });
+    }
+
     steps.push({
       name: "Outlook Sync",
       run: async () => {
