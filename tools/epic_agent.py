@@ -891,6 +891,39 @@ def ask_claude(screenshot_b64, prompt, max_retries=3, image_format="png"):
     return None
 
 
+def _extract_json_object(text):
+    """Extract the first complete JSON object from text, handling nested braces."""
+    start = text.find('{')
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 def _bridge_request(method, path, label, timeout=10, max_retries=2, **kwargs):
     base_delay = 0.5
     for attempt in range(max_retries + 1):
@@ -1312,11 +1345,10 @@ Coordinates should be relative to the image."""
         return
 
     try:
-        json_match = re.search(r'\{[\s\S]*?\}', response)
-        if not json_match:
+        result = _extract_json_object(response)
+        if not result:
             post_result(command_id, "error", error="Could not parse response")
             return
-        result = json.loads(json_match.group())
     except Exception:
         post_result(command_id, "error", error="Invalid JSON")
         return
@@ -1864,9 +1896,8 @@ def recording_capture_tick():
             )
             data = resp.json()
             text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            json_match = re.search(r'\{[^}]+\}', text)
-            if json_match:
-                parsed = json.loads(json_match.group())
+            parsed = _extract_json_object(text)
+            if parsed:
                 description = parsed.get("action", description)
                 screen_name = parsed.get("screen", "")
         except Exception as e:
@@ -1973,9 +2004,8 @@ def execute_replay(cmd):
                     )
                     data = resp.json()
                     text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    json_match = re.search(r'\{[^}]+\}', text)
-                    if json_match:
-                        parsed = json.loads(json_match.group())
+                    parsed = _extract_json_object(text)
+                    if parsed:
                         if parsed.get("action") == "already_there":
                             results.append({"step": i+1, "status": "already_there"})
                         elif parsed.get("action") == "failed":
@@ -4686,9 +4716,8 @@ Return ONLY a JSON object: {{"has_text": true}} or {{"has_text": false}}"""
         response = ask_claude(b64, prompt)
         if not response:
             return None
-        json_match = re.search(r'\{[\s\S]*?\}', response)
-        if json_match:
-            result = json.loads(json_match.group())
+        result = _extract_json_object(response)
+        if result:
             return result.get("has_text", False)
     except Exception as e:
         print(f"  [login] Verify field error: {e}")
@@ -4774,9 +4803,8 @@ def _verify_login_result(window, method, pw_method=None):
 Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} or {{"state": "login_screen"}}"""
         response = ask_claude(b64, prompt)
         if response:
-            json_match = re.search(r'\{[\s\S]*?\}', response)
-            if json_match:
-                vresult = json.loads(json_match.group())
+            vresult = _extract_json_object(response)
+            if vresult:
                 state = vresult.get("state", "unknown")
                 if state == "logged_in":
                     save_method = pw_method if pw_method else method
@@ -4854,11 +4882,9 @@ Return ONLY the JSON object."""
         if not response:
             return False, "vision failed"
 
-        json_match = re.search(r'\{[\s\S]*?\}', response)
-        if not json_match:
+        result = _extract_json_object(response)
+        if not result:
             return False, "could not parse vision response"
-
-        result = json.loads(json_match.group())
 
         if not result.get("login_screen", False):
             reason = result.get("reason", "already logged in")
