@@ -4499,6 +4499,8 @@ def execute_do(cmd):
 
 def _login_text_window(window, label, username, password):
     """Login to a Text/terminal window: type username, enter, password, enter."""
+    prev_text = _text_method
+    prev_backend = _active_backend
     try:
         activate_window(window)
         time.sleep(0.5)
@@ -4514,17 +4516,18 @@ def _login_text_window(window, label, username, password):
         time.sleep(0.3)
         sendinput_press("enter")
         time.sleep(1.0)
-        set_text_method("pyautogui")
-        set_keyboard_backend("sendinput")
         return True, "credentials entered (terminal)"
     except Exception as e:
-        set_text_method("pyautogui")
-        set_keyboard_backend("sendinput")
         return False, str(e)[:60]
+    finally:
+        set_text_method(prev_text)
+        set_keyboard_backend(prev_backend)
 
 
 def _login_hyperspace_window(window, label, username, password):
     """Login to a Hyperspace/Hyperdrive GUI window using vision to find fields."""
+    prev_text = _text_method
+    prev_backend = _active_backend
     try:
         activate_window(window, maximize=True)
         time.sleep(1.0)
@@ -4595,14 +4598,13 @@ Return ONLY the JSON object."""
             sendinput_press("enter")
             time.sleep(1.5)
 
-        set_text_method("pyautogui")
-        set_keyboard_backend("sendinput")
         return True, "credentials entered (GUI)"
 
     except Exception as e:
-        set_text_method("pyautogui")
-        set_keyboard_backend("sendinput")
         return False, str(e)[:60]
+    finally:
+        set_text_method(prev_text)
+        set_keyboard_backend(prev_backend)
 
 
 def execute_login(cmd):
