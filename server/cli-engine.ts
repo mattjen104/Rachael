@@ -6802,8 +6802,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           const epicPass = await getSecret("epic_password");
           if (!epicUser || !epicPass) return "SKIPPED (credentials not configured)";
           if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
-          const result = await executeCommand("epic", ["login"]);
-          if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
+          const result = await executeChainRaw("epic login");
+          if (result.exitCode !== 0) return `failed: ${result.stdout.slice(0, 80)}`;
 
           emitEvent("cli", "Waiting for Duo authentication (up to 60s)...", "info", { metadata: { command: "boot" } });
           const DUO_WAIT_MS = 60000;
@@ -6976,10 +6976,10 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         }
         const lastSync = await storage.getOutlookSyncTimestamp();
         const isFirstSync = !lastSync;
-        const result = await executeCommand("outlook", ["inbox", isFirstSync ? "--refresh" : ""]);
-        if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
-        const match = result.output.match(/(\d+) messages/);
-        const deltaMatch = result.output.match(/(\d+) new, (\d+) updated/);
+        const result = await executeChainRaw(`outlook inbox${isFirstSync ? " --refresh" : ""}`);
+        if (result.exitCode !== 0) return `failed: ${result.stdout.slice(0, 80)}`;
+        const match = result.stdout.match(/(\d+) messages/);
+        const deltaMatch = result.stdout.match(/(\d+) new, (\d+) updated/);
         if (deltaMatch) return `done (${match?.[1] || "?"} total, ${deltaMatch[1]} new, ${deltaMatch[2]} updated)`;
         return match ? `done (${match[1]} emails)` : "done";
       },
@@ -6996,17 +6996,17 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         const lastSync = await storage.getSnowSyncTimestamp();
         const isFirstSync = !lastSync;
         if (isFirstSync) {
-          const result = await executeCommand("snow", ["refresh"]);
-          if (!result.success) return `failed: ${result.output.slice(0, 80)}`;
-          const match = result.output.match(/Total:\s+(\d+)/);
+          const result = await executeChainRaw("snow refresh");
+          if (result.exitCode !== 0) return `failed: ${result.stdout.slice(0, 80)}`;
+          const match = result.stdout.match(/Total:\s+(\d+)/);
           return match ? `done (${match[1]} tickets)` : "done";
         }
         const types = ["incidents", "changes", "requests"];
         const summaries: string[] = [];
         for (const t of types) {
-          const result = await executeCommand("snow", [t]);
-          if (result.success) {
-            const match = result.output.match(/(\d+)\s+(incident|change|request)/i);
+          const result = await executeChainRaw(`snow ${t}`);
+          if (result.exitCode === 0) {
+            const match = result.stdout.match(/(\d+)\s+(incident|change|request)/i);
             summaries.push(`${match?.[1] || "?"} ${t}`);
           }
         }
