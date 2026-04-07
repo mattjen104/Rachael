@@ -6886,8 +6886,26 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           const epicPass = await getSecret("epic_password");
           if (!epicUser || !epicPass) return "SKIPPED (credentials not configured)";
           if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
-          const result = await executeChainRaw("epic login cwp");
-          if (result.exitCode !== 0) return `failed: ${result.stdout.slice(0, 80)}`;
+          const { submitJob, waitForResult } = await import("./bridge-queue");
+          try {
+            const jobId = submitJob("dom", "https://cwp.ucsd.edu", "boot-cwp-login", {
+              reuseTab: true,
+              spaWaitMs: 5000,
+              fillFields: {
+                'input[name="username"], input[type="text"][id*="user"], #username, input[name="login"]': epicUser,
+                'input[name="password"], input[type="password"], #password': epicPass,
+              },
+              submitSelector: 'button[type="submit"], input[type="submit"], #loginButton, button[name="submit"]',
+              fillDelayMs: 300,
+              waitAfterSubmitMs: 8000,
+              maxText: 5000,
+            });
+            const cwpResult = await waitForResult(jobId, 60000);
+            if (cwpResult.tabId) cwpTabId = cwpResult.tabId;
+            if (cwpResult.error) return `failed: ${cwpResult.error.substring(0, 80)}`;
+          } catch (e: any) {
+            return `failed: ${e.message?.substring(0, 60) || "unknown"}`;
+          }
           await storage.setAgentConfig("boot_last_login", new Date().toISOString(), "boot");
           return "done (approve Duo on phone)";
         },
@@ -6897,6 +6915,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         name: "Duo Wait",
         run: async () => {
           emitEvent("cli", "Waiting 30s for Duo approval...", "info", { metadata: { command: "boot" } });
+          const { submitJob, waitForResult } = await import("./bridge-queue");
           const WAIT_MS = 30000;
           const POLL_MS = 5000;
           const start = Date.now();
@@ -6904,12 +6923,15 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             await new Promise(resolve => setTimeout(resolve, POLL_MS));
             if (await checkAbort()) return "aborted";
             try {
-              const { smartFetch } = await import("./bridge-queue");
-              const check = await smartFetch("https://cwp.ucsd.edu", "dom", "boot-duo-check", {
+              const opts: Record<string, any> = {
                 maxText: 1000,
                 reuseTab: true,
                 spaWaitMs: 3000,
-              }, 15000);
+              };
+              if (cwpTabId) opts.reuseTabId = cwpTabId;
+              const jobId = submitJob("dom", "https://cwp.ucsd.edu", "boot-duo-check", opts);
+              const check = await waitForResult(jobId, 15000);
+              if (check.tabId) cwpTabId = check.tabId;
               const text = check.text || "";
               if (text.includes("Citrix") || text.includes("StoreFront") || text.includes("Desktops") || text.includes("Apps")) {
                 return "done (Duo approved)";

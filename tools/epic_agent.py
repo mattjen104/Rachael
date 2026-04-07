@@ -4855,80 +4855,82 @@ def _login_text_window(window, label, username, password):
         return False, str(e)[:60]
 
 
+def _send_alt_o():
+    _keybd_event_key(0x12, up=False)
+    time.sleep(0.02)
+    _keybd_event_key(0x4F, up=False)
+    time.sleep(0.02)
+    _keybd_event_key(0x4F, up=True)
+    time.sleep(0.02)
+    _keybd_event_key(0x12, up=True)
+
+
+def _adaptive_type_text_no_verify(window, text, field_description, proven_method=None):
+    methods = _build_type_methods(window)
+
+    if proven_method:
+        proven = [(n, fn) for n, fn in methods if n == proven_method]
+        rest = [(n, fn) for n, fn in methods if n != proven_method]
+        methods = proven + rest
+
+    prev_text = _text_method
+    prev_backend = _active_backend
+
+    for name, type_fn in methods:
+        print(f"  [login] Trying input method '{name}' for {field_description}...")
+        try:
+            type_fn(text)
+        except Exception as e:
+            print(f"  [login] Method '{name}' threw exception: {e}")
+            set_text_method(prev_text)
+            set_keyboard_backend(prev_backend)
+            continue
+
+        set_text_method(prev_text)
+        set_keyboard_backend(prev_backend)
+        time.sleep(0.3)
+        print(f"  [login] Method '{name}' used for {field_description} (no vision verify)")
+        return True, name
+
+    print(f"  [login] ALL input methods failed for {field_description}")
+    return False, None
+
+
 def _login_hyperspace_window(window, label, username, password):
-    """Login to a Hyperspace/Hyperdrive GUI window using vision + adaptive input."""
+    """Login to a Hyperspace/Hyperdrive GUI window using keyboard-only flow.
+    Username field is already focused when window launches maximized from Citrix.
+    Alt+O submits login, selects department, and confirms (3 presses)."""
     proven = _load_proven_login_method()
     try:
-        activate_window(window, maximize=True)
+        activate_window(window)
         time.sleep(1.0)
 
-        img = screenshot_window(window)
-        b64 = img_to_base64(img)
-
-        prompt = f"""Look at this screenshot of an Epic Hyperspace/Hyperdrive application.
-
-Is there a login screen with username and password fields visible?
-
-If YES (login screen visible), find the input fields and login button. Return:
-{{"login_screen": true, "username_field": {{"x": <pixel_x>, "y": <pixel_y>}}, "password_field": {{"x": <pixel_x>, "y": <pixel_y>}}, "submit_button": {{"x": <pixel_x>, "y": <pixel_y>}}}}
-
-If NO (already logged in, showing patient list, schedule, or application content), return:
-{{"login_screen": false, "reason": "brief description"}}
-
-{VISION_COORD_INSTRUCTION}
-Return ONLY the JSON object."""
-
-        response = ask_claude(b64, prompt)
-        if not response:
-            return False, "vision failed"
-
-        result = _extract_json_object(response)
-        if not result:
-            return False, "could not parse vision response"
-
-        if not result.get("login_screen", False):
-            reason = result.get("reason", "already logged in")
-            return False, reason
-
-        uf = result.get("username_field", {})
-        pf = result.get("password_field", {})
-        sb = result.get("submit_button", {})
-
-        if uf.get("x") and uf.get("y"):
-            abs_x, abs_y = vision_to_screen(window, uf["x"], uf["y"])
-            safe_click(abs_x, abs_y, pause_after=0.5, label="username field")
-            time.sleep(0.3)
-        else:
-            print(f"  [login] {label}: no username field coords")
-
-        success, method = _adaptive_type_text(window, username, "username input field", proven)
+        print(f"  [login] {label}: typing username (keyboard-only)")
+        success, method = _adaptive_type_text_no_verify(window, username, "username field", proven)
         if not success:
             return False, "all input methods failed for username"
 
-        if pf.get("x") and pf.get("y"):
-            abs_x, abs_y = vision_to_screen(window, pf["x"], pf["y"])
-            safe_click(abs_x, abs_y, pause_after=0.5, label="password field")
-            time.sleep(0.3)
-        else:
-            _keybd_event_key(0x09, up=False)
-            time.sleep(0.02)
-            _keybd_event_key(0x09, up=True)
-            time.sleep(0.3)
+        _keybd_event_key(0x09, up=False)
+        time.sleep(0.02)
+        _keybd_event_key(0x09, up=True)
+        time.sleep(0.3)
 
         print(f"  [login] {label}: typing password")
-        pw_success, pw_method = _adaptive_type_text(window, password, "password input field", method, is_password=True)
+        pw_success, pw_method = _adaptive_type_text_no_verify(window, password, "password field", method)
         if not pw_success:
             return False, "all input methods failed for password"
         time.sleep(0.3)
 
-        if sb.get("x") and sb.get("y"):
-            abs_x, abs_y = vision_to_screen(window, sb["x"], sb["y"])
-            safe_click(abs_x, abs_y, pause_after=2.0, label="login button")
-        else:
-            _keybd_event_key(0x0D, up=False)
-            time.sleep(0.02)
-            _keybd_event_key(0x0D, up=True)
-            time.sleep(2.0)
+        print(f"  [login] {label}: sending Alt+O (login)")
+        _send_alt_o()
+        time.sleep(3.0)
+
+        print(f"  [login] {label}: sending Alt+O (department)")
+        _send_alt_o()
+        time.sleep(3.0)
+
+        print(f"  [login] {label}: sending Alt+O (confirm)")
+        _send_alt_o()
 
         return _verify_login_result(window, method, pw_method)
 
@@ -4962,7 +4964,15 @@ def execute_login(cmd):
     for env, client in envs_clients:
         window = find_window(env, client=client)
         if not window:
-            print(f"  [login] {env} {client}: no window found")
+            for attempt in range(1, 6):
+                print(f"  [login] {env} {client}: no window found, retry {attempt}/5 in 3s...")
+                time.sleep(3)
+                window = find_window(env, client=client)
+                if window:
+                    break
+        if not window:
+            print(f"  [login] {env} {client}: no window found after retries")
+            results.append(f"  [~] {env} {client}: no window found after retries")
             continue
 
         label = f"{env} {client}"
