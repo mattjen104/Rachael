@@ -6986,42 +6986,79 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     }
 
     let loginEverFailed = false;
+    const isLoginSuccess = (r: string) => r === "logged in";
 
     for (const [env, group] of envGroups) {
-      const appsInOrder = [
-        ...(group.hyperdrive ? [{ entry: group.hyperdrive, client: "hyperspace" }] : []),
-        ...(group.text ? [{ entry: group.text, client: "text" }] : []),
-      ];
+      let envHyperdriveOk = false;
 
-      for (const { entry, client } of appsInOrder) {
+      if (group.hyperdrive) {
         steps.push({
-          name: entry.app,
+          name: group.hyperdrive.app,
           run: async () => {
             if (await checkAbort()) return "aborted";
             if (loginEverFailed) return "skipped (prior login failed)";
             if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
-            emitEvent("cli", `Launching ${entry.app}...`, "info", { metadata: { command: "boot" } });
-            const launchResult = await launchCitrixApp(entry.app, group.portal);
-            if (launchResult !== "ok") return launchResult;
+            emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
+            const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
+            if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
             if (!skipLogin && epicUser && epicPass) {
               const isAgentUp = await checkAgentConnected();
               if (!isAgentUp) return "launched (agent not connected)";
 
-              emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${entry.app} window...`, "info", { metadata: { command: "boot" } });
+              emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
               await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
               if (await checkAbort()) return "launched (aborted before login)";
 
-              emitEvent("cli", `Logging into ${entry.app}...`, "info", { metadata: { command: "boot" } });
-              const loginResult = await sendAgentLogin(env, client, epicUser, epicPass);
+              emitEvent("cli", `Logging into ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
+              const loginResult = await sendAgentLogin(env, "hyperspace", epicUser, epicPass);
               await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
 
-              if (loginResult.startsWith("login failed")) {
-                loginEverFailed = true;
-                return `${loginResult}`;
+              if (isLoginSuccess(loginResult)) {
+                envHyperdriveOk = true;
+                return loginResult;
               }
-              return `${loginResult}`;
+              loginEverFailed = true;
+              return loginResult;
+            }
+
+            await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
+            envHyperdriveOk = true;
+            return "launched";
+          },
+        });
+      }
+
+      if (group.text) {
+        steps.push({
+          name: group.text.app,
+          run: async () => {
+            if (await checkAbort()) return "aborted";
+            if (loginEverFailed) return "skipped (prior login failed)";
+            if (group.hyperdrive && !envHyperdriveOk) return `skipped (${env} Hyperdrive login not confirmed)`;
+            if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+
+            emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
+            const launchResult = await launchCitrixApp(group.text!.app, group.portal);
+            if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
+
+            if (!skipLogin && epicUser && epicPass) {
+              const isAgentUp = await checkAgentConnected();
+              if (!isAgentUp) return "launched (agent not connected)";
+
+              emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
+              await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+              if (await checkAbort()) return "launched (aborted before login)";
+
+              emitEvent("cli", `Logging into ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
+              const loginResult = await sendAgentLogin(env, "text", epicUser, epicPass);
+              await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
+
+              if (!isLoginSuccess(loginResult)) {
+                loginEverFailed = true;
+              }
+              return loginResult;
             }
 
             await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
