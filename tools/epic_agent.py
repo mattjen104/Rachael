@@ -4678,12 +4678,12 @@ def _build_type_methods(window):
     Each type_fn(text) sends text using a different input method."""
     hwnd = getattr(window, '_hWnd', None)
     methods = [
-        ("clipboard", _type_via_clipboard),
-        ("scancode", _type_via_scancode),
-        ("unicode", _type_via_unicode),
-        ("keybd_vk", _type_via_keybd_vk),
         ("sendinput_vk", _type_via_sendinput_vk),
+        ("keybd_vk", _type_via_keybd_vk),
         ("pyautogui", _type_via_pyautogui),
+        ("unicode", _type_via_unicode),
+        ("scancode", _type_via_scancode),
+        ("clipboard", _type_via_clipboard),
     ]
     if hwnd:
         def _type_via_postmessage(text, _hwnd=hwnd):
@@ -4907,17 +4907,18 @@ def _login_hyperspace_window(window, label, username, password):
         activate_window(window)
         time.sleep(1.0)
 
-        print(f"  [login] {label}: typing username (keyboard-only, window: {window.title})")
-        success, method = _adaptive_type_text_no_verify(window, username, "username field", proven)
+        print(f"  [login] {label}: typing username (vision-verified, window: {window.title})")
+        success, method = _adaptive_type_text(window, username, "username field", proven)
         if not success:
             return False, "all input methods failed for username"
+        print(f"  [login] {label}: username confirmed via vision, method: {method}")
 
         _keybd_event_key(0x09, up=False)
         time.sleep(0.02)
         _keybd_event_key(0x09, up=True)
         time.sleep(0.3)
 
-        print(f"  [login] {label}: typing password")
+        print(f"  [login] {label}: typing password (using proven method: {method})")
         pw_success, pw_method = _adaptive_type_text_no_verify(window, password, "password field", method)
         if not pw_success:
             return False, "all input methods failed for password"

@@ -1,0 +1,44 @@
+
+>> Command: login (id: epic-1775589350751-gfx1sh)
+  [login] Checking SUP hyperspace: Hyperspace – SUP Environment - \\Remote
+  [login] SUP hyperspace: typing username (keyboard-only, window: Hyperspace – SUP Environment - \\Remote)
+  [login] Trying input method 'clipboard' for username field...
+  [input] Clipboard paste failed: exception: access violation writing 0x0000000000000000
+  [login] Method 'clipboard' threw exception: exception: access violation writing 0x0000000000000000
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Trying input method 'scancode' for username field...
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'scancode' used for username field (no vision verify)
+  [login] SUP hyperspace: typing password
+  [login] Trying input method 'scancode' for password field...
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'scancode' used for password field (no vision verify)
+  [login] SUP hyperspace: sending Alt+O (login submit)
+  [login] SUP hyperspace: sending Alt+O (department continue)
+  [login] SUP hyperspace: sending Alt+O (message continue)
+  [login] SUP hyperspace: still on login screen after submit (method: scancode)
+  [login] Done: 0 windows
+
+>> Command: login (id: epic-1775589499426-t76k5a)
+  [login] Checking SUP hyperspace: Hyperspace – SUP Environment - \\Remote
+  [login] SUP hyperspace: typing username (keyboard-only, window: Hyperspace – SUP Environment - \\Remote)
+  [login] Trying input method 'clipboard' for username field...
+  [input] Clipboard paste failed: exception: access violation writing 0x0000000000000000
+  [login] Method 'clipboard' threw exception: exception: access violation writing 0x0000000000000000
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Trying input method 'scancode' for username field...
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'scancode' used for username field (no vision verify)
+  [login] SUP hyperspace: typing password
+  [login] Trying input method 'scancode' for password field...
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'scancode' used for password field (no vision verify)
+  [login] SUP hyperspace: sending Alt+O (login submit)
+  [login] SUP hyperspace: sending Alt+O (department continue)
+  [login] SUP hyperspace: sending Alt+O (message continue)
