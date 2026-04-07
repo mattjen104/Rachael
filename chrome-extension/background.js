@@ -296,21 +296,51 @@ async function executeJob(job) {
     const postClickWaitMs = options?.postClickWaitMs || 3000;
     const postClickSelector = options?.postClickSelector || null;
     const reuseTab = options?.reuseTab || false;
+    const reuseTabId = options?.reuseTabId || null;
 
     let tab = null;
     let tabReused = false;
 
-    if (reuseTab) {
-      const hostname = new URL(url).hostname;
-      tab = await findExistingTab(hostname);
+    if (reuseTabId) {
+      try {
+        tab = await chrome.tabs.get(reuseTabId);
+        if (tab) {
+          tabReused = true;
+          await chrome.tabs.update(tab.id, { url, active: true });
+          console.log(`[bridge] reused tab by ID ${tab.id} for ${url}`);
+          await new Promise((resolve, reject) => {
+            function listener(tabId, info) {
+              if (tabId === tab.id && info.status === "complete") {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(timer);
+                setTimeout(resolve, spaWaitMs);
+              }
+            }
+            const timer = setTimeout(() => {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }, 15000);
+            chrome.tabs.onUpdated.addListener(listener);
+          });
+        }
+      } catch {
+        tab = null;
+        console.log(`[bridge] reuseTabId ${reuseTabId} not found, opening new tab`);
+      }
     }
 
-    if (tab) {
-      tabReused = true;
-      await chrome.tabs.update(tab.id, { active: true });
-      console.log(`[bridge] reused existing tab ${tab.id} for ${url}`);
-      await new Promise((r) => setTimeout(r, 2000));
-    } else {
+    if (!tab && reuseTab) {
+      const hostname = new URL(url).hostname;
+      tab = await findExistingTab(hostname);
+      if (tab) {
+        tabReused = true;
+        await chrome.tabs.update(tab.id, { active: true });
+        console.log(`[bridge] reused existing tab ${tab.id} for ${url}`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+
+    if (!tab) {
       tab = await chrome.tabs.create({ url, active: true });
     }
 
@@ -1162,6 +1192,7 @@ async function executeJob(job) {
         debug: data.debug || {},
         clickDebug: lastClickDebug || undefined,
         title: data.title || "",
+        tabId: tab.id,
       };
     } catch (execErr) {
       return {
@@ -1170,9 +1201,10 @@ async function executeJob(job) {
         text: "",
         extracted: {},
         error: "Script execution failed: " + (execErr.message || String(execErr)),
+        tabId: tab?.id,
       };
     } finally {
-      const keepOpen = options?.autoOpenDownload || options?.reuseTab;
+      const keepOpen = options?.autoOpenDownload || options?.reuseTab || options?.reuseTabId;
       if (!keepOpen) {
         try { await chrome.tabs.remove(tab.id); } catch {}
       }

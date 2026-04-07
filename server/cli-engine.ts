@@ -6854,18 +6854,23 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       }
     };
 
+    let cwpTabId: number | null = null;
+
     const launchCitrixApp = async (appName: string, portalUrl: string): Promise<string> => {
       const { submitJob, waitForResult } = await import("./bridge-queue");
       try {
-        const jobId = submitJob("dom", portalUrl, "boot-workspace", {
+        const opts: Record<string, any> = {
           maxText: 2000,
           reuseTab: true,
           spaWaitMs: 2000,
           citrixApiLaunch: appName,
           autoOpenDownload: true,
           pollTimeoutMs: 15000,
-        });
+        };
+        if (cwpTabId) opts.reuseTabId = cwpTabId;
+        const jobId = submitJob("dom", portalUrl, "boot-workspace", opts);
         const result = await waitForResult(jobId, 30000);
+        if (result.tabId) cwpTabId = result.tabId;
         if (result.error) return `launch failed: ${result.error.substring(0, 50)}`;
         return "ok";
       } catch (e: any) {
@@ -6968,39 +6973,62 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
     const APP_OPEN_WAIT_MS = 12000;
 
+    const envGroups = new Map<string, { hyperdrive: typeof wsApps[0] | null; text: typeof wsApps[0] | null; portal: string }>();
     for (const entry of wsApps) {
       const { env, client } = parseAppEnvClient(entry.app);
       const portal = portals.find(p => p.name.toLowerCase() === entry.portal.toLowerCase());
       const portalUrl = portal?.url || "https://cwp.ucsd.edu";
+      if (!envGroups.has(env)) envGroups.set(env, { hyperdrive: null, text: null, portal: portalUrl });
+      const group = envGroups.get(env)!;
+      group.portal = portalUrl;
+      if (client === "text") group.text = entry;
+      else group.hyperdrive = entry;
+    }
 
-      steps.push({
-        name: entry.app,
-        run: async () => {
-          if (await checkAbort()) return "aborted";
-          if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+    let loginEverFailed = false;
 
-          emitEvent("cli", `Launching ${entry.app}...`, "info", { metadata: { command: "boot" } });
-          const launchResult = await launchCitrixApp(entry.app, portalUrl);
-          if (launchResult !== "ok") return launchResult;
+    for (const [env, group] of envGroups) {
+      const appsInOrder = [
+        ...(group.hyperdrive ? [{ entry: group.hyperdrive, client: "hyperspace" }] : []),
+        ...(group.text ? [{ entry: group.text, client: "text" }] : []),
+      ];
 
-          if (!skipLogin && epicUser && epicPass) {
-            const isAgentUp = await checkAgentConnected();
-            if (!isAgentUp) return "launched (agent not connected)";
+      for (const { entry, client } of appsInOrder) {
+        steps.push({
+          name: entry.app,
+          run: async () => {
+            if (await checkAbort()) return "aborted";
+            if (loginEverFailed) return "skipped (prior login failed)";
+            if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
-            emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${entry.app} window...`, "info", { metadata: { command: "boot" } });
-            await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
-            if (await checkAbort()) return "launched (aborted before login)";
+            emitEvent("cli", `Launching ${entry.app}...`, "info", { metadata: { command: "boot" } });
+            const launchResult = await launchCitrixApp(entry.app, group.portal);
+            if (launchResult !== "ok") return launchResult;
 
-            emitEvent("cli", `Logging into ${entry.app}...`, "info", { metadata: { command: "boot" } });
-            const loginResult = await sendAgentLogin(env, client, epicUser, epicPass);
+            if (!skipLogin && epicUser && epicPass) {
+              const isAgentUp = await checkAgentConnected();
+              if (!isAgentUp) return "launched (agent not connected)";
+
+              emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${entry.app} window...`, "info", { metadata: { command: "boot" } });
+              await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+              if (await checkAbort()) return "launched (aborted before login)";
+
+              emitEvent("cli", `Logging into ${entry.app}...`, "info", { metadata: { command: "boot" } });
+              const loginResult = await sendAgentLogin(env, client, epicUser, epicPass);
+              await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
+
+              if (loginResult.startsWith("login failed")) {
+                loginEverFailed = true;
+                return `${loginResult}`;
+              }
+              return `${loginResult}`;
+            }
+
             await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
-            return `${loginResult}`;
-          }
-
-          await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
-          return "launched";
-        },
-      });
+            return "launched";
+          },
+        });
+      }
     }
 
     steps.push({
@@ -7079,8 +7107,10 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           lines.push(`  [!] ${step.name}: ABORTED`);
           continue;
         }
-        const icon = result.startsWith("SKIPPED") || result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error") || result.startsWith("login failed") ? "x" : "+";
-        if (result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error") || result.startsWith("login failed")) failed++;
+        const isFailure = result.startsWith("failed") || result.startsWith("launch failed") || result.startsWith("launch error") || result.startsWith("login failed");
+        const isSkip = result.startsWith("SKIPPED") || result.startsWith("skipped");
+        const icon = isFailure || isSkip ? "x" : "+";
+        if (isFailure) failed++;
         lines.push(`  [${icon}] ${step.name}: ${result}`);
       } catch (e: any) {
         failed++;
