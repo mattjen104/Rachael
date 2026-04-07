@@ -306,26 +306,26 @@ async function executeJob(job) {
         tab = await chrome.tabs.get(reuseTabId);
         if (tab) {
           tabReused = true;
-          await chrome.tabs.update(tab.id, { url, active: true });
-          console.log(`[bridge] reused tab by ID ${tab.id} for ${url}`);
-          await new Promise((resolve, reject) => {
-            function listener(tabId, info) {
-              if (tabId === tab.id && info.status === "complete") {
+          await chrome.tabs.update(tab.id, { url: url, active: true });
+          console.log("[bridge] reused tab by ID " + tab.id + " for " + url);
+          await new Promise(function(resolve) {
+            function listener(tId, info) {
+              if (tId === tab.id && info.status === "complete") {
                 chrome.tabs.onUpdated.removeListener(listener);
                 clearTimeout(timer);
                 setTimeout(resolve, spaWaitMs);
               }
             }
-            const timer = setTimeout(() => {
+            var timer = setTimeout(function() {
               chrome.tabs.onUpdated.removeListener(listener);
               resolve();
             }, 15000);
             chrome.tabs.onUpdated.addListener(listener);
           });
         }
-      } catch {
+      } catch (e) {
         tab = null;
-        console.log(`[bridge] reuseTabId ${reuseTabId} not found, opening new tab`);
+        console.log("[bridge] reuseTabId " + reuseTabId + " not found, opening new tab");
       }
     }
 
