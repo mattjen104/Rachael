@@ -6856,6 +6856,30 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
     let cwpTabId: number | null = null;
 
+    const checkAgentWindowExists = async (env: string, client: string): Promise<boolean> => {
+      try {
+        const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+          body: JSON.stringify({ type: "check_windows", env, client }),
+        });
+        const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
+        if (!data.ok || !data.commandId) return false;
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < 10000) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          try {
+            const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
+            const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { found?: boolean; title?: string } } : {};
+            if (rData.status === "complete") {
+              return rData.data?.found === true;
+            }
+          } catch {}
+        }
+        return false;
+      } catch { return false; }
+    };
+
     const launchCitrixApp = async (appName: string, portalUrl: string): Promise<string> => {
       const { submitJob, waitForResult } = await import("./bridge-queue");
       try {
@@ -7021,16 +7045,28 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (loginEverFailed) return "skipped (prior login failed)";
             if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
-            emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
-            const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
-            if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
+            const agentUp = await checkAgentConnected();
+            let windowAlreadyExists = false;
+            if (agentUp) {
+              windowAlreadyExists = await checkAgentWindowExists(env, "hyperspace");
+              if (windowAlreadyExists) {
+                emitEvent("cli", `${group.hyperdrive!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
+              }
+            }
+
+            if (!windowAlreadyExists) {
+              emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
+              const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
+              if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
+            }
 
             if (!skipLogin && epicUser && epicPass) {
-              const isAgentUp = await checkAgentConnected();
-              if (!isAgentUp) return "launched (agent not connected)";
+              if (!agentUp) return "launched (agent not connected)";
 
-              emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
-              await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+              if (!windowAlreadyExists) {
+                emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
+                await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+              }
               if (await checkAbort()) return "launched (aborted before login)";
 
               emitEvent("cli", `Logging into ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
@@ -7061,16 +7097,28 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (group.hyperdrive && !envHyperdriveOk) return `skipped (${env} Hyperdrive login not confirmed)`;
             if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
-            emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
-            const launchResult = await launchCitrixApp(group.text!.app, group.portal);
-            if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
+            const agentUp = await checkAgentConnected();
+            let textWindowExists = false;
+            if (agentUp) {
+              textWindowExists = await checkAgentWindowExists(env, "text");
+              if (textWindowExists) {
+                emitEvent("cli", `${group.text!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
+              }
+            }
+
+            if (!textWindowExists) {
+              emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
+              const launchResult = await launchCitrixApp(group.text!.app, group.portal);
+              if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
+            }
 
             if (!skipLogin && epicUser && epicPass) {
-              const isAgentUp = await checkAgentConnected();
-              if (!isAgentUp) return "launched (agent not connected)";
+              if (!agentUp) return "launched (agent not connected)";
 
-              emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
-              await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+              if (!textWindowExists) {
+                emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
+                await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+              }
               if (await checkAbort()) return "launched (aborted before login)";
 
               emitEvent("cli", `Logging into ${group.text!.app}...`, "info", { metadata: { command: "boot" } });

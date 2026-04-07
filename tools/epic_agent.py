@@ -4648,6 +4648,15 @@ def _save_proven_login_method(method_name):
     except Exception as e:
         print(f"  [login] Could not save login config: {e}")
 
+def _invalidate_proven_login_method():
+    """Delete the proven method file when login fails — forces re-discovery next time."""
+    try:
+        if os.path.exists(_LOGIN_CONFIG_FILE):
+            os.remove(_LOGIN_CONFIG_FILE)
+            print(f"  [login] Invalidated proven method (login failed, will re-discover next time)")
+    except Exception as e:
+        print(f"  [login] Could not delete login config: {e}")
+
 def _type_via_clipboard(text):
     _clipboard_paste(text)
 
@@ -4814,13 +4823,17 @@ Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} o
                         _save_proven_login_method(save_method)
                     return True, f"logged in (method: {save_method})"
                 elif state == "error":
+                    _invalidate_proven_login_method()
                     return False, f"login error: {vresult.get('detail', 'unknown')}"
                 elif state == "login_screen":
+                    _invalidate_proven_login_method()
                     return False, f"still on login screen after submit (method: {method})"
                 else:
+                    _invalidate_proven_login_method()
                     return False, f"login unconfirmed — unknown state (method: {method})"
     except Exception:
         pass
+    _invalidate_proven_login_method()
     return False, f"login verification failed (method: {method})"
 
 
@@ -5005,6 +5018,18 @@ def execute_login(cmd):
     print(f"  [login] Done: {logged_in} windows")
 
 
+def execute_check_windows(cmd):
+    """Check if windows exist for given env/client without logging in."""
+    command_id = cmd.get("id", "unknown")
+    target_env = cmd.get("env", "").upper() if cmd.get("env") else ""
+    target_client = cmd.get("client", "hyperspace")
+    window = find_window(target_env, client=target_client)
+    found = window is not None
+    title = window.title if window else None
+    print(f"  [check] {target_env} {target_client}: {'found' if found else 'not found'}" + (f" ({title})" if title else ""))
+    post_result(command_id, "complete", data={"found": found, "title": title})
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -5050,6 +5075,8 @@ def execute_command(cmd):
             execute_batch(cmd)
         elif cmd_type == "shortcuts":
             execute_shortcuts(cmd)
+        elif cmd_type == "check_windows":
+            execute_check_windows(cmd)
         elif cmd_type == "login":
             execute_login(cmd)
         else:
