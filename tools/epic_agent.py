@@ -201,9 +201,16 @@ try:
             for ch in text:
                 vk = VK_MAP.get(ch.lower())
                 if vk is not None:
+                    needs_shift = ch.isupper()
+                    if needs_shift:
+                        _key_fn(0x10, up=False)
+                        time.sleep(0.01)
                     _key_fn(vk, up=False)
                     time.sleep(0.015)
                     _key_fn(vk, up=True)
+                    if needs_shift:
+                        time.sleep(0.01)
+                        _key_fn(0x10, up=True)
                     time.sleep(interval)
                 else:
                     _sendinput_unicode_char(ch)
@@ -4680,7 +4687,12 @@ def _type_via_sendinput_vk(text):
     sendinput_typewrite(text, interval=0.03)
 
 def _type_via_pyautogui(text):
-    pyautogui.typewrite(text, interval=0.04)
+    for ch in text:
+        if ch.isupper():
+            pyautogui.hotkey('shift', ch.lower())
+        else:
+            pyautogui.press(ch)
+        time.sleep(0.04)
 
 def _build_type_methods(window):
     """Build ordered list of (name, type_fn) for adaptive text input.
