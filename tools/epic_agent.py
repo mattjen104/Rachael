@@ -279,6 +279,7 @@ try:
             time.sleep(0.1)
         except Exception as e:
             print(f"  [input] Clipboard paste failed: {e}")
+            raise
         finally:
             try:
                 u32.OpenClipboard(0)
@@ -298,6 +299,7 @@ try:
                 time.sleep(0.02)
         except Exception as e:
             print(f"  [input] PostMessage type failed: {e}")
+            raise
 
     HAS_SENDINPUT = True
     print(f"  [input] Low-level keyboard available (backend: {_active_backend})")
