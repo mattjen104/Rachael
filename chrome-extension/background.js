@@ -838,6 +838,7 @@ async function executeJob(job) {
           extracted: {},
           clickDebug: lastClickDebug || undefined,
           title: data.title || "",
+          tabId: tab.id,
         };
       }
 
