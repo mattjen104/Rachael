@@ -4921,15 +4921,21 @@ def _login_hyperspace_window(window, label, username, password):
             return False, "all input methods failed for password"
         time.sleep(0.3)
 
-        print(f"  [login] {label}: sending Alt+O (login)")
+        activate_window(window)
+        time.sleep(0.2)
+        print(f"  [login] {label}: sending Alt+O (login submit)")
+        _send_alt_o()
+        time.sleep(5.0)
+
+        activate_window(window)
+        time.sleep(0.2)
+        print(f"  [login] {label}: sending Alt+O (department continue)")
         _send_alt_o()
         time.sleep(3.0)
 
-        print(f"  [login] {label}: sending Alt+O (department)")
-        _send_alt_o()
-        time.sleep(3.0)
-
-        print(f"  [login] {label}: sending Alt+O (confirm)")
+        activate_window(window)
+        time.sleep(0.2)
+        print(f"  [login] {label}: sending Alt+O (message continue)")
         _send_alt_o()
         time.sleep(3.0)
 
