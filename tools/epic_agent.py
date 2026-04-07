@@ -4905,6 +4905,19 @@ def _login_hyperspace_window(window, label, username, password):
         activate_window(window)
         time.sleep(1.0)
 
+        title = (window.title or "").upper()
+        login_indicators = ["LOGIN", "LOG ON", "LOGON", "SIGN IN", "CREDENTIAL", "PASSWORD", "AUTHENTICATE"]
+        already_logged_indicators = ["PATIENT", "SCHEDULE", "CHART", "INBOX", "MENU"]
+        if any(kw in title for kw in already_logged_indicators):
+            print(f"  [login] {label}: window title suggests already logged in: {window.title}")
+            return True, "already logged in (title check)"
+        if not any(kw in title for kw in login_indicators):
+            env_in_title = label.split()[0].upper() in title
+            has_app_name = "HYPERSPACE" in title or "HYPERDRIVE" in title or "EPIC" in title
+            if not (env_in_title and has_app_name):
+                print(f"  [login] {label}: window title does not look like login screen: {window.title}")
+                return False, f"unexpected window title: {window.title[:60]}"
+
         print(f"  [login] {label}: typing username (keyboard-only)")
         success, method = _adaptive_type_text_no_verify(window, username, "username field", proven)
         if not success:

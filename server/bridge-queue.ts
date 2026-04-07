@@ -55,6 +55,7 @@ export interface BridgeResult {
   title?: string;
   clickDebug?: any;
   debug?: any;
+  tabId?: number;
 }
 
 const pendingJobs: BridgeJob[] = [];
