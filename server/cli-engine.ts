@@ -6898,11 +6898,18 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         const debug = result.clickDebug || {};
         if (debug.error) {
           const availApps = debug.availableApps ? ` Available: ${debug.availableApps.slice(0, 10).join(", ")}` : "";
-          emitEvent("cli", `[citrix] ${appName}: ${debug.error}${availApps}`, "warn", { metadata: { command: "boot" } });
+          const stepsStr = Array.isArray(debug.steps) ? debug.steps.join(" → ") : "";
+          const matched = debug.matchedApp ? ` Matched: ${debug.matchedApp}` : "";
+          const method = debug.method ? ` Method: ${debug.method}` : "";
+          emitEvent("cli", `[citrix] ${appName}: ${debug.error}${matched}${method}${availApps}`, "warn", { metadata: { command: "boot" } });
+          if (stepsStr) {
+            emitEvent("cli", `[citrix] Debug steps: ${stepsStr.substring(0, 200)}`, "info", { metadata: { command: "boot" } });
+          }
           return `launch failed: ${debug.error.substring(0, 80)}${availApps ? " — check app name" : ""}`;
         }
         if (debug.matchedApp) {
-          emitEvent("cli", `[citrix] Matched: ${debug.matchedApp} (${debug.method || "api"})`, "info", { metadata: { command: "boot" } });
+          const fuzzy = Array.isArray(debug.steps) && debug.steps.includes("fuzzy-match") ? " (fuzzy match)" : "";
+          emitEvent("cli", `[citrix] Matched: ${debug.matchedApp} (${debug.method || "api"})${fuzzy}`, "info", { metadata: { command: "boot" } });
         }
         if (result.error) return `launch failed: ${result.error.substring(0, 50)}`;
         return "ok";
@@ -7083,19 +7090,22 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
-            }
 
-            if (!skipLogin && epicUser && epicPass) {
-              if (!agentUp) return "launched (agent not connected)";
-
-              if (!windowAlreadyExists) {
+              if (agentUp) {
                 emitEvent("cli", `Waiting for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
                 const detected = await waitForAgentWindow(env, "hyperspace", 30000);
                 if (!detected) {
                   await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
                 }
+              } else {
+                await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
               }
-              if (await checkAbort()) return "launched (aborted before login)";
+            }
+
+            if (await checkAbort()) return "launched (aborted before login)";
+
+            if (!skipLogin && epicUser && epicPass) {
+              if (!agentUp) return "launched (agent not connected)";
 
               emitEvent("cli", `Logging into ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
               const loginResult = await sendAgentLogin(env, "hyperspace", epicUser, epicPass);
@@ -7138,19 +7148,22 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.text!.app, group.portal);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
-            }
 
-            if (!skipLogin && epicUser && epicPass) {
-              if (!agentUp) return "launched (agent not connected)";
-
-              if (!textWindowExists) {
+              if (agentUp) {
                 emitEvent("cli", `Waiting for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
                 const detected = await waitForAgentWindow(env, "text", 30000);
                 if (!detected) {
                   await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
                 }
+              } else {
+                await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
               }
-              if (await checkAbort()) return "launched (aborted before login)";
+            }
+
+            if (await checkAbort()) return "launched (aborted before login)";
+
+            if (!skipLogin && epicUser && epicPass) {
+              if (!agentUp) return "launched (agent not connected)";
 
               emitEvent("cli", `Logging into ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
               const loginResult = await sendAgentLogin(env, "text", epicUser, epicPass);
