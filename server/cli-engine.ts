@@ -6915,8 +6915,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         if (dlResult) {
           emitEvent("cli", `[citrix] Download: ${dlResult}`, "info", { metadata: { command: "boot" } });
         }
-        if (dlResult.startsWith("timeout") || dlResult === "blob-triggered") {
-          emitEvent("cli", `[citrix] ICA download did not complete for ${appName}`, "warn", { metadata: { command: "boot" } });
+        if (dlResult.startsWith("timeout")) {
+          emitEvent("cli", `[citrix] ICA download timed out for ${appName}`, "warn", { metadata: { command: "boot" } });
           return `launch failed: ICA download timeout for ${appName}`;
         }
         if (result.error) return `launch failed: ${result.error.substring(0, 50)}`;
