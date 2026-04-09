@@ -682,13 +682,24 @@ async function executeJob(job) {
               }
 
               const lower = appName.toLowerCase();
-              const match = resources.find(r => {
+              let match = resources.find(r => {
                 const name = (r.name || r.Name || r.title || "").toLowerCase();
                 return name === lower || name.includes(lower);
               });
 
               if (!match) {
-                const names = resources.slice(0, 20).map(r => r.name || r.Name || r.title || "?");
+                const words = lower.split(/\s+/).filter(w => w.length > 1);
+                if (words.length >= 2) {
+                  match = resources.find(r => {
+                    const name = (r.name || r.Name || r.title || "").toLowerCase();
+                    return words.every(w => name.includes(w));
+                  });
+                  if (match) debug.steps.push("fuzzy-match");
+                }
+              }
+
+              if (!match) {
+                const names = resources.slice(0, 30).map(r => r.name || r.Name || r.title || "?");
                 debug.error = "App not found in resource list";
                 debug.availableApps = names;
                 return debug;

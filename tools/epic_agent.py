@@ -677,8 +677,14 @@ def find_text_window(env_upper):
     for w in gw.getAllWindows():
         title = w.title or ""
         t = title.upper()
-        if env_upper in t and ("EXCEED" in t or "PUTTY" in t or "TERATERM" in t):
+        if env_upper in t and ("EXCEED" in t or "PUTTY" in t or "TERATERM" in t or "REFLECTION" in t or "ATTACHMATE" in t):
             return w
+    for w in gw.getAllWindows():
+        title = w.title or ""
+        t = title.upper()
+        if env_upper in t and w.width > 400 and w.height > 300:
+            if "HYPERSPACE" not in t and "EPIC" not in t and "HYPERDRIVE" not in t and "CHROME" not in t and "EXPLORER" not in t:
+                return w
     return None
 
 
@@ -4849,35 +4855,89 @@ Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} o
     return False, f"login verification failed (method: {method})"
 
 
+def _check_text_login_screen(window):
+    """Use vision to check if a Text window is showing a login/credential prompt."""
+    try:
+        img = screenshot_window(window)
+        b64 = img_to_base64(img)
+        prompt = """Look at this screenshot of a terminal/text window. Is this showing:
+1. A login prompt asking for username or credentials (e.g. "Login:", "Username:", "User ID:", or a blinking cursor at a login field)
+2. A password prompt (e.g. "Password:", masked input field)
+3. A successfully logged-in application (menu, command prompt, patient list, etc.)
+4. Something else (error message, blank screen, etc.)
+
+Reply with exactly one of: LOGIN_PROMPT, PASSWORD_PROMPT, LOGGED_IN, OTHER
+Then on the next line, a brief description of what you see."""
+        resp = call_vision_api(b64, prompt)
+        if resp:
+            first_line = resp.strip().split("\n")[0].strip().upper()
+            print(f"  [login] Text screen check: {first_line}")
+            return first_line, resp
+    except Exception as e:
+        print(f"  [login] Text screen check error: {e}")
+    return "UNKNOWN", ""
+
+
 def _login_text_window(window, label, username, password):
-    """Login to a Text/terminal window using adaptive input methods."""
+    """Login to a Text/terminal window using adaptive input methods.
+    Handles up to 2 sequential login prompts (system login then Epic login)."""
     proven = _load_proven_login_method()
     try:
         activate_window(window)
         time.sleep(0.5)
 
-        print(f"  [login] {label}: terminal login — typing username")
-        success, method = _adaptive_type_text(window, username, "username/login prompt", proven)
-        if not success:
-            return False, "all input methods failed for username"
+        for login_round in range(1, 3):
+            round_label = f"login {login_round}/2" if login_round == 1 else "second login"
+            print(f"  [login] {label}: {round_label} — typing username")
+            success, method = _adaptive_type_text(window, username, "username/login prompt", proven)
+            if not success:
+                return False, f"all input methods failed for username ({round_label})"
 
-        _keybd_event_key(0x0D, up=False)
-        time.sleep(0.02)
-        _keybd_event_key(0x0D, up=True)
-        time.sleep(1.5)
+            _keybd_event_key(0x0D, up=False)
+            time.sleep(0.02)
+            _keybd_event_key(0x0D, up=True)
+            time.sleep(1.5)
 
-        print(f"  [login] {label}: typing password")
-        pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True)
-        if not pw_success:
-            return False, "all input methods failed for password"
-        time.sleep(0.3)
+            print(f"  [login] {label}: {round_label} — typing password")
+            pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True)
+            if not pw_success:
+                return False, f"all input methods failed for password ({round_label})"
+            time.sleep(0.3)
 
-        _keybd_event_key(0x0D, up=False)
-        time.sleep(0.02)
-        _keybd_event_key(0x0D, up=True)
-        time.sleep(1.0)
+            _keybd_event_key(0x0D, up=False)
+            time.sleep(0.02)
+            _keybd_event_key(0x0D, up=True)
+            time.sleep(2.0)
 
-        return _verify_login_result(window, method, pw_method)
+            activate_window(window)
+            time.sleep(0.5)
+            screen_state, desc = _check_text_login_screen(window)
+
+            if screen_state in ("LOGGED_IN", "OTHER"):
+                if login_round == 1:
+                    print(f"  [login] {label}: first login succeeded, checking for second prompt...")
+                    time.sleep(1.0)
+                    screen_state2, _ = _check_text_login_screen(window)
+                    if screen_state2 in ("LOGIN_PROMPT", "PASSWORD_PROMPT"):
+                        print(f"  [login] {label}: second login prompt detected, repeating credentials")
+                        proven = method
+                        continue
+                print(f"  [login] {label}: login complete after {login_round} round(s)")
+                _save_proven_login_method(method)
+                return True, f"logged in (text, {login_round} round(s), method: {method})"
+            elif screen_state in ("LOGIN_PROMPT", "PASSWORD_PROMPT"):
+                if login_round == 1:
+                    print(f"  [login] {label}: still on login prompt after first round, retrying")
+                    proven = method
+                    continue
+                else:
+                    _invalidate_proven_login_method()
+                    return False, f"still on login screen after {login_round} rounds"
+            else:
+                return _verify_login_result(window, method, pw_method)
+
+        _invalidate_proven_login_method()
+        return False, "login failed after 2 rounds"
     except Exception as e:
         return False, str(e)[:60]
 
@@ -5038,7 +5098,11 @@ def execute_check_windows(cmd):
     window = find_window(target_env, client=target_client)
     found = window is not None
     title = window.title if window else None
-    print(f"  [check] {target_env} {target_client}: {'found' if found else 'not found'}" + (f" ({title})" if title else ""))
+    if not found:
+        all_titles = [w.title for w in gw.getAllWindows() if w.title and target_env in (w.title or "").upper()]
+        print(f"  [check] {target_env} {target_client}: not found. Windows with '{target_env}': {all_titles[:10]}")
+    else:
+        print(f"  [check] {target_env} {target_client}: found ({title})")
     post_result(command_id, "complete", data={"found": found, "title": title})
 
 

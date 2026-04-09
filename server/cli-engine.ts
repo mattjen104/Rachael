@@ -6895,11 +6895,36 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         const jobId = submitJob("dom", portalUrl, "boot-workspace", opts);
         const result = await waitForResult(jobId, 30000);
         if (result.tabId) cwpTabId = result.tabId;
+        const debug = result.clickDebug || {};
+        if (debug.error) {
+          const availApps = debug.availableApps ? ` Available: ${debug.availableApps.slice(0, 10).join(", ")}` : "";
+          emitEvent("cli", `[citrix] ${appName}: ${debug.error}${availApps}`, "warn", { metadata: { command: "boot" } });
+          return `launch failed: ${debug.error.substring(0, 80)}${availApps ? " — check app name" : ""}`;
+        }
+        if (debug.matchedApp) {
+          emitEvent("cli", `[citrix] Matched: ${debug.matchedApp} (${debug.method || "api"})`, "info", { metadata: { command: "boot" } });
+        }
         if (result.error) return `launch failed: ${result.error.substring(0, 50)}`;
         return "ok";
       } catch (e: any) {
         return `launch error: ${e.message?.substring(0, 50) || "unknown"}`;
       }
+    };
+
+    const waitForAgentWindow = async (env: string, client: string, timeoutMs: number = 30000): Promise<boolean> => {
+      const POLL_INTERVAL = 3000;
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+        if (await checkAbort()) return false;
+        const found = await checkAgentWindowExists(env, client);
+        if (found) {
+          emitEvent("cli", `${env} ${client} window detected`, "info", { metadata: { command: "boot" } });
+          return true;
+        }
+      }
+      emitEvent("cli", `${env} ${client} window not detected after ${timeoutMs / 1000}s`, "warn", { metadata: { command: "boot" } });
+      return false;
     };
 
     if (!skipLogin) {
@@ -7064,8 +7089,11 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (!agentUp) return "launched (agent not connected)";
 
               if (!windowAlreadyExists) {
-                emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
-                await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+                emitEvent("cli", `Waiting for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
+                const detected = await waitForAgentWindow(env, "hyperspace", 30000);
+                if (!detected) {
+                  await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+                }
               }
               if (await checkAbort()) return "launched (aborted before login)";
 
@@ -7116,8 +7144,11 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (!agentUp) return "launched (agent not connected)";
 
               if (!textWindowExists) {
-                emitEvent("cli", `Waiting ${APP_OPEN_WAIT_MS / 1000}s for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
-                await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+                emitEvent("cli", `Waiting for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
+                const detected = await waitForAgentWindow(env, "text", 30000);
+                if (!detected) {
+                  await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
+                }
               }
               if (await checkAbort()) return "launched (aborted before login)";
 
