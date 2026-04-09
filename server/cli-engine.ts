@@ -6911,6 +6911,14 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           const fuzzy = Array.isArray(debug.steps) && debug.steps.includes("fuzzy-match") ? " (fuzzy match)" : "";
           emitEvent("cli", `[citrix] Matched: ${debug.matchedApp} (${debug.method || "api"})${fuzzy}`, "info", { metadata: { command: "boot" } });
         }
+        const dlResult = debug.dlResult || "";
+        if (dlResult) {
+          emitEvent("cli", `[citrix] Download: ${dlResult}`, "info", { metadata: { command: "boot" } });
+        }
+        if (dlResult.startsWith("timeout") || dlResult === "blob-triggered") {
+          emitEvent("cli", `[citrix] ICA download did not complete for ${appName}`, "warn", { metadata: { command: "boot" } });
+          return `launch failed: ICA download timeout for ${appName}`;
+        }
         if (result.error) return `launch failed: ${result.error.substring(0, 50)}`;
         return "ok";
       } catch (e: any) {

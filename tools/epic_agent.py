@@ -4865,8 +4865,13 @@ Then on the next line, a brief description of what you see."""
         resp = call_vision_api(b64, prompt)
         if resp:
             first_line = resp.strip().split("\n")[0].strip().upper()
-            print(f"  [login] Text screen check: {first_line}")
-            return first_line, resp
+            normalized = first_line
+            for tag in ("LOGIN_PROMPT", "PASSWORD_PROMPT", "LOGGED_IN", "OTHER"):
+                if tag in first_line:
+                    normalized = tag
+                    break
+            print(f"  [login] Text screen check: {normalized}")
+            return normalized, resp
     except Exception as e:
         print(f"  [login] Text screen check error: {e}")
     return "UNKNOWN", ""
