@@ -4897,7 +4897,7 @@ def _login_text_window(window, label, username, password):
                 return True, "already logged in"
             elif pre_state in ("UNKNOWN", "OTHER") and login_round > 1:
                 print(f"  [login] {label}: {round_label} — screen state {pre_state}, falling through to verification")
-                return _verify_login_result(window, label, proven or "sendinput_vk")
+                return _verify_login_result(window, proven or "sendinput_vk")
             elif pre_state == "PASSWORD_PROMPT":
                 print(f"  [login] {label}: {round_label} — password-only prompt detected, typing password")
                 pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", proven, is_password=True)
