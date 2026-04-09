@@ -4862,7 +4862,7 @@ def _check_text_login_screen(window):
 
 Reply with exactly one of: LOGIN_PROMPT, PASSWORD_PROMPT, LOGGED_IN, OTHER
 Then on the next line, a brief description of what you see."""
-        resp = call_vision_api(b64, prompt)
+        resp = ask_claude(b64, prompt)
         if resp:
             first_line = resp.strip().split("\n")[0].strip().upper()
             normalized = first_line
@@ -4897,7 +4897,7 @@ def _login_text_window(window, label, username, password):
                 pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", proven, is_password=True)
                 if not pw_success:
                     return False, f"all input methods failed for password ({round_label})"
-                method = proven or pw_method
+                method = pw_method
             else:
                 print(f"  [login] {label}: {round_label} — typing username")
                 success, method = _adaptive_type_text(window, username, "username/login prompt", proven)
