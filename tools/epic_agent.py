@@ -679,12 +679,6 @@ def find_text_window(env_upper):
         t = title.upper()
         if env_upper in t and ("EXCEED" in t or "PUTTY" in t or "TERATERM" in t or "REFLECTION" in t or "ATTACHMATE" in t):
             return w
-    for w in gw.getAllWindows():
-        title = w.title or ""
-        t = title.upper()
-        if env_upper in t and w.width > 400 and w.height > 300:
-            if "HYPERSPACE" not in t and "EPIC" not in t and "HYPERDRIVE" not in t and "CHROME" not in t and "EXPLORER" not in t:
-                return w
     return None
 
 
@@ -4888,22 +4882,34 @@ def _login_text_window(window, label, username, password):
 
         for login_round in range(1, 3):
             round_label = f"login {login_round}/2" if login_round == 1 else "second login"
-            print(f"  [login] {label}: {round_label} — typing username")
-            success, method = _adaptive_type_text(window, username, "username/login prompt", proven)
-            if not success:
-                return False, f"all input methods failed for username ({round_label})"
 
-            _keybd_event_key(0x0D, up=False)
-            time.sleep(0.02)
-            _keybd_event_key(0x0D, up=True)
-            time.sleep(1.5)
-
-            print(f"  [login] {label}: {round_label} — typing password")
-            pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True)
-            if not pw_success:
-                return False, f"all input methods failed for password ({round_label})"
+            activate_window(window)
             time.sleep(0.3)
+            pre_state, _ = _check_text_login_screen(window) if login_round > 1 else ("LOGIN_PROMPT", "")
 
+            if pre_state == "PASSWORD_PROMPT":
+                print(f"  [login] {label}: {round_label} — password-only prompt detected, typing password")
+                pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", proven, is_password=True)
+                if not pw_success:
+                    return False, f"all input methods failed for password ({round_label})"
+                method = proven or pw_method
+            else:
+                print(f"  [login] {label}: {round_label} — typing username")
+                success, method = _adaptive_type_text(window, username, "username/login prompt", proven)
+                if not success:
+                    return False, f"all input methods failed for username ({round_label})"
+
+                _keybd_event_key(0x0D, up=False)
+                time.sleep(0.02)
+                _keybd_event_key(0x0D, up=True)
+                time.sleep(1.5)
+
+                print(f"  [login] {label}: {round_label} — typing password")
+                pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True)
+                if not pw_success:
+                    return False, f"all input methods failed for password ({round_label})"
+
+            time.sleep(0.3)
             _keybd_event_key(0x0D, up=False)
             time.sleep(0.02)
             _keybd_event_key(0x0D, up=True)
@@ -4913,7 +4919,7 @@ def _login_text_window(window, label, username, password):
             time.sleep(0.5)
             screen_state, desc = _check_text_login_screen(window)
 
-            if screen_state in ("LOGGED_IN", "OTHER"):
+            if screen_state == "LOGGED_IN":
                 if login_round == 1:
                     print(f"  [login] {label}: first login succeeded, checking for second prompt...")
                     time.sleep(1.0)
