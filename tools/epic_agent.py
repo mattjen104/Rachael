@@ -4890,15 +4890,21 @@ def _login_text_window(window, label, username, password):
 
             activate_window(window)
             time.sleep(0.3)
-            pre_state, _ = _check_text_login_screen(window) if login_round > 1 else ("LOGIN_PROMPT", "")
+            pre_state, _ = _check_text_login_screen(window)
 
-            if pre_state == "PASSWORD_PROMPT":
+            if pre_state == "LOGGED_IN":
+                print(f"  [login] {label}: {round_label} — already logged in")
+                return True, "already logged in"
+            elif pre_state in ("UNKNOWN", "OTHER") and login_round > 1:
+                print(f"  [login] {label}: {round_label} — screen state {pre_state}, falling through to verification")
+                return _verify_login_result(window, label, proven or "sendinput_vk")
+            elif pre_state == "PASSWORD_PROMPT":
                 print(f"  [login] {label}: {round_label} — password-only prompt detected, typing password")
                 pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", proven, is_password=True)
                 if not pw_success:
                     return False, f"all input methods failed for password ({round_label})"
                 method = pw_method
-            else:
+            elif pre_state in ("LOGIN_PROMPT", "UNKNOWN", "OTHER"):
                 print(f"  [login] {label}: {round_label} — typing username")
                 success, method = _adaptive_type_text(window, username, "username/login prompt", proven)
                 if not success:
