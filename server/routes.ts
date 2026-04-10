@@ -850,6 +850,31 @@ export async function registerRoutes(
     res.send(buf);
   });
 
+  let uiaTreeCache: { data: any; storedAt: number } | null = null;
+
+  app.post("/api/epic/uia-tree", (req, res) => {
+    const auth = req.headers.authorization;
+    const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+    if (!isLocal && (!auth || !validateBridgeToken(auth.replace("Bearer ", "")))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    uiaTreeCache = { data: req.body, storedAt: Date.now() };
+    res.json({ ok: true });
+  });
+
+  app.get("/api/epic/uia-tree", (req, res) => {
+    const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+    if (!isLocal) {
+      const auth = req.headers.authorization;
+      if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+    if (!uiaTreeCache) return res.json({ cached: false });
+    const ageMs = Date.now() - uiaTreeCache.storedAt;
+    res.json({ cached: true, ageMs, data: uiaTreeCache.data });
+  });
+
   app.get("/api/epic/scan-script", async (_req, res) => {
     const fs = await import("fs");
     const path = await import("path");

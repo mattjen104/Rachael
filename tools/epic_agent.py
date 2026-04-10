@@ -1774,6 +1774,273 @@ def execute_navigate_path(cmd):
     print(f"  [path-nav] Complete: {len(steps)} steps ({nav_mode}, {api_calls} API calls, drift={confidence})")
 
 
+def execute_uia_tree(cmd):
+    """Live UIA tree scan — list all windows or detail a specific window's control tree."""
+    command_id = cmd.get("id", "unknown")
+    target = cmd.get("target", "")
+    try:
+        max_depth = min(max(1, int(cmd.get("depth", 4))), 8)
+    except (TypeError, ValueError):
+        max_depth = 4
+
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        post_result(command_id, "error", error="pywinauto not installed")
+        return
+
+    desktop = Desktop(backend="uia")
+
+    if not target:
+        print("  [uia-tree] Listing all windows...")
+        windows = []
+        for w in desktop.windows():
+            try:
+                info = w.element_info
+                title = info.name or ""
+                if not title.strip():
+                    continue
+                hwnd = int(info.handle) if info.handle else 0
+                pid = getattr(info, "process_id", 0) or 0
+                class_name = getattr(info, "class_name", "") or ""
+                proc_name = ""
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    h = ctypes.windll.kernel32.OpenProcess(0x0410, False, pid)
+                    if h:
+                        buf = ctypes.create_unicode_buffer(260)
+                        size = wintypes.DWORD(260)
+                        if ctypes.windll.kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                            proc_name = os.path.basename(buf.value)
+                        ctypes.windll.kernel32.CloseHandle(h)
+                except Exception:
+                    pass
+                rect_raw = getattr(info, "rectangle", None)
+                rect = None
+                if rect_raw:
+                    try:
+                        rect = {"left": rect_raw.left, "top": rect_raw.top,
+                                "width": rect_raw.width(), "height": rect_raw.height()}
+                    except Exception:
+                        pass
+                windows.append({
+                    "title": title,
+                    "hwnd": hwnd,
+                    "processName": proc_name,
+                    "className": class_name,
+                    "rect": rect,
+                })
+            except Exception:
+                continue
+        print(f"  [uia-tree] Found {len(windows)} windows")
+        post_result(command_id, "complete", data={"mode": "list", "windows": windows})
+        _post_uia_cache({"mode": "list", "windows": windows, "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        return
+
+    print(f"  [uia-tree] Scanning window matching '{target}' (depth={max_depth})...")
+    target_upper = target.upper()
+    target_window = None
+    for w in desktop.windows():
+        try:
+            title = w.element_info.name or ""
+            if target_upper in title.upper():
+                target_window = w
+                break
+        except Exception:
+            continue
+
+    if not target_window:
+        post_result(command_id, "error", error=f"No window matching '{target}'")
+        return
+
+    window_title = target_window.element_info.name or "Unknown"
+    window_hwnd = int(target_window.element_info.handle) if target_window.element_info.handle else 0
+    print(f"  [uia-tree] Found: {window_title}")
+
+    UIA_PATTERNS = [
+        ("InvokePattern", "LegacyIAccessiblePattern"),
+        ("ValuePattern", None),
+        ("ExpandCollapsePattern", None),
+        ("SelectionItemPattern", None),
+        ("TogglePattern", None),
+        ("ScrollPattern", None),
+        ("TextPattern", None),
+        ("RangeValuePattern", None),
+    ]
+
+    total_scanned = [0]
+
+    def scan_element(element, depth, parent_path):
+        if depth > max_depth:
+            return []
+        try:
+            children = element.children()
+        except Exception:
+            return []
+
+        nodes = []
+        for child in children:
+            if total_scanned[0] > 5000:
+                break
+            try:
+                info = child.element_info
+                ctrl_type = info.control_type or ""
+                name = info.name or ""
+                auto_id = getattr(info, "automation_id", "") or ""
+                class_name = getattr(info, "class_name", "") or ""
+                is_enabled = True
+                is_visible = True
+                try:
+                    is_enabled = child.is_enabled()
+                except Exception:
+                    pass
+                try:
+                    is_visible = child.is_visible()
+                except Exception:
+                    pass
+
+                if not is_visible:
+                    continue
+
+                path_part = f"{ctrl_type}:{name}" if name else ctrl_type
+                element_path = f"{parent_path}/{path_part}" if parent_path else path_part
+
+                patterns = []
+                try:
+                    iface = child.iface_invoke
+                    if iface:
+                        patterns.append({"name": "InvokePattern", "tag": "clickable"})
+                except Exception:
+                    pass
+                try:
+                    iface = child.iface_value
+                    if iface:
+                        val = ""
+                        try:
+                            val = iface.CurrentValue or ""
+                        except Exception:
+                            pass
+                        patterns.append({"name": "ValuePattern", "tag": "editable", "value": val[:200]})
+                except Exception:
+                    pass
+                try:
+                    iface = child.iface_expand_collapse
+                    if iface:
+                        state = "unknown"
+                        try:
+                            st = iface.CurrentExpandCollapseState
+                            state = "expanded" if st == 1 else "collapsed" if st == 0 else "partial"
+                        except Exception:
+                            pass
+                        patterns.append({"name": "ExpandCollapsePattern", "tag": "expandable", "state": state})
+                except Exception:
+                    pass
+                try:
+                    iface = child.iface_selection_item
+                    if iface:
+                        selected = False
+                        try:
+                            selected = bool(iface.CurrentIsSelected)
+                        except Exception:
+                            pass
+                        patterns.append({"name": "SelectionItemPattern", "tag": "selectable", "isSelected": selected})
+                except Exception:
+                    pass
+                try:
+                    iface = child.iface_toggle
+                    if iface:
+                        toggle_state = "unknown"
+                        try:
+                            ts = iface.CurrentToggleState
+                            toggle_state = "on" if ts == 1 else "off" if ts == 0 else "indeterminate"
+                        except Exception:
+                            pass
+                        patterns.append({"name": "TogglePattern", "tag": "toggleable", "state": toggle_state})
+                except Exception:
+                    pass
+                try:
+                    iface = child.iface_scroll
+                    if iface:
+                        patterns.append({"name": "ScrollPattern", "tag": "scrollable"})
+                except Exception:
+                    pass
+                try:
+                    iface = child.iface_text
+                    if iface:
+                        patterns.append({"name": "TextPattern", "tag": "readable"})
+                except Exception:
+                    pass
+                try:
+                    iface = child.iface_range_value
+                    if iface:
+                        patterns.append({"name": "RangeValuePattern", "tag": "adjustable"})
+                except Exception:
+                    pass
+
+                rect = None
+                try:
+                    r = info.rectangle
+                    if r:
+                        rect = {"left": r.left, "top": r.top, "width": r.width(), "height": r.height()}
+                except Exception:
+                    pass
+
+                total_scanned[0] += 1
+                sub_children = scan_element(child, depth + 1, element_path)
+
+                node = {
+                    "controlType": ctrl_type,
+                    "name": name,
+                    "automationId": auto_id,
+                    "className": class_name,
+                    "isEnabled": is_enabled,
+                    "depth": depth,
+                    "path": element_path,
+                    "patterns": patterns,
+                    "children": sub_children,
+                }
+                if rect:
+                    node["rect"] = rect
+                nodes.append(node)
+            except Exception:
+                continue
+        return nodes
+
+    tree = scan_element(target_window, 0, "")
+    print(f"  [uia-tree] Scan complete: {total_scanned[0]} elements")
+
+    result_data = {
+        "mode": "detail",
+        "window": {
+            "title": window_title,
+            "hwnd": window_hwnd,
+            "tree": tree,
+        },
+    }
+    post_result(command_id, "complete", data=result_data)
+    _post_uia_cache({
+        **result_data,
+        "scannedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "target": target,
+    })
+
+
+def _post_uia_cache(data):
+    """Post UIA tree scan result to server cache."""
+    try:
+        _bridge_request(
+            "post", "/api/epic/uia-tree", "uia-cache", timeout=10,
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=data,
+        )
+    except Exception:
+        pass
+
+
 def execute_tree_scan(cmd):
     """Trigger a pywinauto tree scan and upload results."""
     env = cmd.get("env", "SUP")
@@ -5547,6 +5814,8 @@ def execute_command(cmd):
             execute_scan(cmd)
         elif cmd_type == "tree-scan":
             execute_tree_scan(cmd)
+        elif cmd_type == "uia_tree":
+            execute_uia_tree(cmd)
         elif cmd_type == "click":
             execute_click(cmd)
         elif cmd_type == "masterfile":

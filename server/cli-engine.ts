@@ -3781,7 +3781,99 @@ ${fullHtml}`;
     return ok(lines.join(nl));
   });
 
-  registerCommand("epic", "Epic Hyperspace activity tools", "epic [view|do|screen|fields|menu|search|go|activities|navigate|screenshot|click|status|setup] <env> [target]", async (args) => {
+  function formatUiaWindowList(windows: any[], cacheAgeS: number): string {
+    const nl = String.fromCharCode(10);
+    const cacheNote = cacheAgeS > 0 ? ` (cached ${cacheAgeS}s ago)` : "";
+    const lines: string[] = [`OPEN WINDOWS${cacheNote}`, "\u2500".repeat(60)];
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      const proc = w.processName ? ` [${w.processName}]` : "";
+      const size = w.rect ? `${w.rect.width}x${w.rect.height}` : "";
+      const idx = String(i + 1).padStart(3);
+      const title = (w.title || "").slice(0, 50);
+      lines.push(`${idx}  ${title}${proc}  ${size}`);
+    }
+    lines.push("", `${windows.length} window${windows.length !== 1 ? "s" : ""} found. Use: epic uia <title> to inspect a window`);
+    return lines.join(nl);
+  }
+
+  function formatUiaDetailTree(window: any, cacheAgeS: number): string {
+    const nl = String.fromCharCode(10);
+    const cacheNote = cacheAgeS > 0 ? ` (cached ${cacheAgeS}s ago)` : "";
+    const lines: string[] = [`${window.title || "Window"} (hwnd: ${window.hwnd || "?"})${cacheNote}`];
+
+    function formatPatterns(patterns: any[]): string {
+      if (!patterns || patterns.length === 0) return "";
+      const tags: string[] = [];
+      for (const p of patterns) {
+        if (p.tag === "clickable") tags.push("clickable");
+        else if (p.tag === "editable") {
+          const val = p.value !== undefined && p.value !== "" ? ` value="${p.value.slice(0, 30)}"` : "";
+          tags.push(`editable${val}`);
+        }
+        else if (p.tag === "expandable") {
+          const icon = p.state === "expanded" ? " \u25BE" : p.state === "collapsed" ? " \u25B8" : "";
+          tags.push(`expandable${icon}`);
+        }
+        else if (p.tag === "selectable") {
+          tags.push(p.isSelected ? "selected" : "selectable");
+        }
+        else if (p.tag === "toggleable") {
+          tags.push(`toggleable:${p.state || "?"}`);
+        }
+        else if (p.tag === "scrollable") tags.push("scrollable");
+        else if (p.tag === "readable") tags.push("readable");
+        else if (p.tag === "adjustable") tags.push("adjustable");
+        else tags.push(p.tag || p.name);
+      }
+      return tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+    }
+
+    function walkTree(children: any[], prefix: string, isLast: boolean[]) {
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const last = i === children.length - 1;
+        let connector = "";
+        for (let d = 0; d < isLast.length; d++) {
+          connector += isLast[d] ? "   " : "\u2502  ";
+        }
+        connector += last ? "\u2514\u2500 " : "\u251C\u2500 ";
+
+        const ctLabel = child.controlType || "?";
+        const nameLabel = child.name ? ` "${child.name}"` : "";
+        const enabledLabel = child.isEnabled === false ? " (disabled)" : "";
+        const patternLabel = formatPatterns(child.patterns);
+        const hasName = !!child.name;
+        const hasPatterns = child.patterns && child.patterns.length > 0;
+
+        if (!hasName && !hasPatterns && (!child.children || child.children.length === 0)) {
+          continue;
+        }
+
+        lines.push(`${connector}${ctLabel}${nameLabel}${enabledLabel}${patternLabel}`);
+
+        if (child.children && child.children.length > 0) {
+          walkTree(child.children, prefix, [...isLast, last]);
+        }
+      }
+    }
+
+    const tree = window.tree || [];
+    walkTree(tree, "", []);
+
+    let totalElements = 0;
+    function countNodes(nodes: any[]) {
+      for (const n of nodes) {
+        totalElements++;
+        if (n.children) countNodes(n.children);
+      }
+    }
+    countNodes(tree);
+    lines.push("", `${totalElements} element${totalElements !== 1 ? "s" : ""} in tree`);
+    return lines.join(nl);
+  }
+
+  registerCommand("epic", "Epic Hyperspace activity tools", "epic [view|do|screen|fields|menu|search|go|activities|navigate|screenshot|click|status|setup|uia] <env> [target]", async (args) => {
     const nl = String.fromCharCode(10);
     const EPIC_ENVS = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
 
@@ -4201,6 +4293,71 @@ ${fullHtml}`;
         lines.push("");
       }
       return ok(lines.join(nl2));
+    }
+
+    if (args[0] === "uia") {
+      const depthArgIdx = args.indexOf("--depth");
+      const rawDepth = depthArgIdx >= 0 ? parseInt(args[depthArgIdx + 1] || "4", 10) : 4;
+      const depthVal = Number.isFinite(rawDepth) ? Math.max(1, Math.min(rawDepth, 8)) : 4;
+      const skipIndices = new Set(depthArgIdx >= 0 ? [depthArgIdx, depthArgIdx + 1] : []);
+      const targetArgs = args.slice(1).filter((a, i) => !skipIndices.has(i));
+      const target = targetArgs.join(" ");
+
+      const cacheResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/uia-tree`);
+      const cacheData = await cacheResp.json() as any;
+      const cacheAgeS = cacheData.cached ? Math.round(cacheData.ageMs / 1000) : -1;
+      const cacheFresh = cacheAgeS >= 0 && cacheAgeS < 60;
+
+      if (cacheFresh && cacheData.data) {
+        const cd = cacheData.data;
+        if (!target && cd.mode === "list") {
+          return ok(formatUiaWindowList(cd.windows, cacheAgeS));
+        }
+        if (target && cd.mode === "detail" && cd.target?.toLowerCase() === target.toLowerCase()) {
+          return ok(formatUiaDetailTree(cd.window, cacheAgeS));
+        }
+      }
+
+      try {
+        const sendBody: Record<string, unknown> = { type: "uia_tree" };
+        if (target) sendBody.target = target;
+        sendBody.depth = Math.min(depthVal, 8);
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sendBody),
+        });
+        const sendData = await resp.json() as any;
+        if (!sendData.ok) return fail("[epic] Failed to send uia_tree command — desktop agent may not be connected");
+        const cmdId = sendData.commandId;
+
+        const maxWait = 15000;
+        const pollInterval = 500;
+        let elapsed = 0;
+        while (elapsed < maxWait) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          elapsed += pollInterval;
+          const pollResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const result = await pollResp.json() as any;
+          if (result.status === "pending") continue;
+          if (result.status === "error") {
+            return fail(`[epic] UIA scan failed: ${result.error || "unknown error"}`);
+          }
+          if (result.status === "complete" && result.data) {
+            const d = result.data;
+            if (d.mode === "list") {
+              return ok(formatUiaWindowList(d.windows, 0));
+            }
+            if (d.mode === "detail") {
+              return ok(formatUiaDetailTree(d.window, 0));
+            }
+            return ok(JSON.stringify(d, null, 2));
+          }
+        }
+        return fail(`[epic] UIA scan timed out after ${maxWait / 1000}s. Command ID: ${cmdId}`);
+      } catch (e: any) {
+        return fail(`[epic] ${e.message}`);
+      }
     }
 
     if (args[0] === "menu-crawl") {
@@ -5323,6 +5480,11 @@ ${fullHtml}`;
       "  epic record save <name>   - Save recorded workflow",
       "  epic workflows            - List saved workflows",
       "  epic replay <name>        - Replay a saved workflow",
+      "",
+      "  UIA TREE (Live Accessibility)",
+      "  epic uia                  - List all open windows on desktop",
+      "  epic uia <title>          - Show control tree of matching window",
+      "  epic uia <title> --depth 6 - Deeper scan (default 4, max 8)",
       "",
       "  SYSTEM",
       "  epic status               - Desktop agent status",
