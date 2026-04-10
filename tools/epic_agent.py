@@ -5120,18 +5120,19 @@ def _adaptive_type_text_no_verify(window, text, field_description, proven_method
 
 def _is_window_past_login_uia(window):
     """Check if a window is past the login screen using the UIA accessibility tree.
-    Returns True if no visible Edit controls found (= already logged in).
-    Returns False if Edit controls exist (= login screen with input fields).
+    Returns: 'LOGGED_IN', 'LOGIN_SCREEN', or 'UNKNOWN'.
+    Uses tri-state logic: only returns LOGGED_IN with positive evidence (app controls).
+    Returns UNKNOWN when uncertain — caller should proceed with normal flow.
     Fast: <100ms. No vision/LLM calls."""
     try:
         from pywinauto import Desktop
     except ImportError:
-        return False
+        return "UNKNOWN"
     try:
         desktop = Desktop(backend="uia")
         hwnd = getattr(window, '_hWnd', None)
         if not hwnd:
-            return False
+            return "UNKNOWN"
         target = None
         for w in desktop.windows():
             try:
@@ -5141,36 +5142,41 @@ def _is_window_past_login_uia(window):
             except Exception:
                 continue
         if not target:
-            return False
-        edits = target.descendants(control_type="Edit")
-        for edit in edits:
-            try:
-                if edit.is_enabled() and edit.is_visible():
-                    name = (edit.element_info.name or "").lower()
-                    if any(kw in name for kw in ("user", "login", "password", "id", "credential")):
-                        print(f"  [uia] Found login Edit control: '{edit.element_info.name}' — login screen detected")
-                        return False
-            except Exception:
-                continue
+            return "UNKNOWN"
+        children = target.descendants(depth=3)
+        has_login_edits = False
         visible_edits = 0
-        for edit in edits:
+        has_app_controls = False
+        app_control_types = frozenset(["MenuBar", "ToolBar", "StatusBar", "TabControl", "DataGrid", "TreeView"])
+        for child in children:
             try:
-                if edit.is_enabled() and edit.is_visible():
+                ct = child.element_info.control_type or ""
+                if ct == "Edit" and child.is_enabled() and child.is_visible():
                     visible_edits += 1
+                    name = (child.element_info.name or "").lower()
+                    if any(kw in name for kw in ("user", "login", "password", "credential")):
+                        has_login_edits = True
+                if ct in app_control_types:
+                    has_app_controls = True
             except Exception:
                 continue
-        if visible_edits == 0:
-            print(f"  [uia] No Edit controls found — window is past login screen")
-            return True
-        elif visible_edits <= 2:
-            print(f"  [uia] Found {visible_edits} Edit control(s) but no login keywords — likely login screen")
-            return False
-        else:
-            print(f"  [uia] Found {visible_edits} Edit controls (no login keywords) — window appears past login")
-            return True
+        if has_login_edits:
+            print(f"  [uia] Found login Edit control(s) — login screen detected")
+            return "LOGIN_SCREEN"
+        if has_app_controls and visible_edits == 0:
+            print(f"  [uia] App controls found (menus/toolbars), no Edit fields — already logged in")
+            return "LOGGED_IN"
+        if has_app_controls and visible_edits > 0:
+            print(f"  [uia] App controls found with {visible_edits} Edit(s) (search/filter bars) — already logged in")
+            return "LOGGED_IN"
+        if not has_app_controls and visible_edits > 0:
+            print(f"  [uia] {visible_edits} Edit(s) but no app controls — uncertain, treating as login screen")
+            return "LOGIN_SCREEN"
+        print(f"  [uia] No Edit controls and no app controls — uncertain state")
+        return "UNKNOWN"
     except Exception as e:
         print(f"  [uia] _is_window_past_login_uia failed: {e}")
-    return False
+    return "UNKNOWN"
 
 
 def _login_hyperspace_window(window, label, username, password):
@@ -5183,9 +5189,12 @@ def _login_hyperspace_window(window, label, username, password):
         activate_window(window)
         time.sleep(0.15)
 
-        if _is_window_past_login_uia(window):
-            print(f"  [login] {label}: already logged in (no login Edit controls found via UIA)")
+        uia_state = _is_window_past_login_uia(window)
+        if uia_state == "LOGGED_IN":
+            print(f"  [login] {label}: already logged in (app controls detected via UIA, no login fields)")
             return True, "already logged in"
+        elif uia_state == "LOGIN_SCREEN":
+            print(f"  [login] {label}: login screen detected via UIA, proceeding with credentials")
 
         if _uia_focus_input_field(window):
             time.sleep(0.1)
