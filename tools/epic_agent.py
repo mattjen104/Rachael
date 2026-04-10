@@ -4976,20 +4976,23 @@ def _check_text_screen_fast(window):
     return _check_text_login_screen(window)
 
 
-def _login_text_window(window, label, username, password):
+def _login_text_window(window, label, username, password, already_open=False):
     """Login to a Text/terminal window using adaptive input methods.
     Handles up to 2 sequential login prompts (system login then Epic login).
     Uses UIA accessibility tree for fast screen classification (<100ms).
-    Checks for already-logged-in state before attempting any keystrokes."""
+    When already_open=True, checks for already-logged-in state before any keystrokes.
+    When already_open=False (freshly launched), skips round-1 check for speed."""
     proven = _load_proven_login_method()
     try:
         activate_window(window)
         time.sleep(0.15)
 
-        pre_state, pre_desc = _check_text_screen_fast(window)
-        if pre_state == "LOGGED_IN":
-            print(f"  [login] {label}: already logged in (detected via UIA: {pre_desc})")
-            return True, "already logged in"
+        if already_open:
+            pre_state, pre_desc = _check_text_login_screen_uia(window)
+            if pre_state == "LOGGED_IN":
+                print(f"  [login] {label}: already logged in (detected via UIA: {pre_desc})")
+                return True, "already logged in"
+            print(f"  [login] {label}: pre-existing window, UIA state: {pre_state}")
 
         if _uia_focus_input_field(window):
             time.sleep(0.1)
@@ -5000,9 +5003,14 @@ def _login_text_window(window, label, username, password):
             activate_window(window)
             time.sleep(0.1)
 
-            if login_round == 1:
+            if login_round == 1 and not already_open:
                 pre_state = "LOGIN_PROMPT"
-                print(f"  [login] {label}: {round_label} — assuming LOGIN_PROMPT (skip screen check for speed)")
+                print(f"  [login] {label}: {round_label} — assuming LOGIN_PROMPT (freshly launched, skip check)")
+            elif login_round == 1 and already_open:
+                pre_state, _ = _check_text_login_screen_uia(window)
+                print(f"  [login] {label}: {round_label} — pre-existing window, UIA state: {pre_state}")
+                if pre_state == "UNKNOWN":
+                    pre_state = "LOGIN_PROMPT"
             else:
                 pre_state, _ = _check_text_screen_fast(window)
 
@@ -5143,37 +5151,38 @@ def _is_window_past_login_uia(window):
                 continue
         if not target:
             return "UNKNOWN"
-        children = target.descendants(depth=3)
-        has_login_edits = False
-        visible_edits = 0
-        has_app_controls = False
-        app_control_types = frozenset(["MenuBar", "ToolBar", "StatusBar", "TabControl", "DataGrid", "TreeView"])
-        for child in children:
+        edits = target.descendants(control_type="Edit")
+        visible_edits = []
+        for edit in edits:
             try:
-                ct = child.element_info.control_type or ""
-                if ct == "Edit" and child.is_enabled() and child.is_visible():
-                    visible_edits += 1
-                    name = (child.element_info.name or "").lower()
+                if edit.is_enabled() and edit.is_visible():
+                    name = (edit.element_info.name or "").lower()
+                    visible_edits.append(name)
                     if any(kw in name for kw in ("user", "login", "password", "credential")):
-                        has_login_edits = True
-                if ct in app_control_types:
-                    has_app_controls = True
+                        print(f"  [uia] Found login Edit control: '{edit.element_info.name}' — login screen")
+                        return "LOGIN_SCREEN"
             except Exception:
                 continue
-        if has_login_edits:
-            print(f"  [uia] Found login Edit control(s) — login screen detected")
-            return "LOGIN_SCREEN"
-        if has_app_controls and visible_edits == 0:
-            print(f"  [uia] App controls found (menus/toolbars), no Edit fields — already logged in")
+        if len(visible_edits) == 0:
+            print(f"  [uia] No visible Edit controls found — window is past login screen")
             return "LOGGED_IN"
-        if has_app_controls and visible_edits > 0:
-            print(f"  [uia] App controls found with {visible_edits} Edit(s) (search/filter bars) — already logged in")
-            return "LOGGED_IN"
-        if not has_app_controls and visible_edits > 0:
-            print(f"  [uia] {visible_edits} Edit(s) but no app controls — uncertain, treating as login screen")
+        if len(visible_edits) <= 2:
+            app_control_types = frozenset(["MenuBar", "ToolBar", "StatusBar", "TabControl", "DataGrid", "TreeView"])
+            has_app_controls = False
+            for child in target.descendants(depth=2):
+                try:
+                    if (child.element_info.control_type or "") in app_control_types:
+                        has_app_controls = True
+                        break
+                except Exception:
+                    continue
+            if has_app_controls:
+                print(f"  [uia] {len(visible_edits)} Edit(s) with app controls — already logged in (search/filter bars)")
+                return "LOGGED_IN"
+            print(f"  [uia] {len(visible_edits)} Edit(s) without app controls — likely login screen")
             return "LOGIN_SCREEN"
-        print(f"  [uia] No Edit controls and no app controls — uncertain state")
-        return "UNKNOWN"
+        print(f"  [uia] {len(visible_edits)} Edit controls — past login screen")
+        return "LOGGED_IN"
     except Exception as e:
         print(f"  [uia] _is_window_past_login_uia failed: {e}")
     return "UNKNOWN"
@@ -5482,10 +5491,11 @@ def execute_login(cmd):
             continue
 
         label = f"{env} {client}"
-        print(f"  [login] Checking {label}: {window.title}")
+        already_open = not bool(target_hwnd)
+        print(f"  [login] Checking {label}: {window.title} (already_open={already_open})")
 
         if client == "text":
-            success, msg = _login_text_window(window, label, username, password)
+            success, msg = _login_text_window(window, label, username, password, already_open=already_open)
         else:
             success, msg = _login_hyperspace_window(window, label, username, password)
 
