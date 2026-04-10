@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import { manualTrigger, getRuntimeState, runMemoryConsolidation, getRuntimeBudgetStatus } from "./agent-runtime";
 import { getModelRoster, getModelQuality, type BudgetStatus } from "./model-router";
 import { emitEvent } from "./event-bus";
+import type { BridgeJob } from "./bridge-queue";
 import { bestEffortExtract, executeNavigationPath, matchProfileToUrl } from "./universal-scraper";
 import { executeLLM, type LLMConfig, type LLMMessage, type LLMResponse } from "./llm-client";
 import { synthesizeBriefing, htmlToSpokenScript } from "./voice-synth";
@@ -2095,8 +2096,8 @@ ${fullHtml}`;
       return fail("[cwp] Chrome extension bridge not connected. CWP requires your real browser session.\nRun: bridge-status");
     }
     const showRaw = args.includes("--raw");
-    const opts: any = { maxText: 30000, reuseTab: true };
-    if (sharedCwpTabId) opts.reuseTabId = sharedCwpTabId;
+    const opts: BridgeJob["options"] = { maxText: 30000, reuseTab: true };
+    if (sharedCwpTabId) opts!.reuseTabId = sharedCwpTabId;
     const jobId = submitJob("dom", "https://cwp.ucsd.edu", "cli-cwp", opts);
     const result = await waitForResult(jobId, 60000);
     if (result.tabId) { sharedCwpTabId = result.tabId; }
@@ -3238,13 +3239,9 @@ ${fullHtml}`;
   let citrixKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
   const CITRIX_KEEPALIVE_INTERVAL = 10 * 60 * 1000;
   let sharedCwpTabId: number | null = null;
-  let citrixKeepalivePaused = false;
 
   async function doCitrixPing(): Promise<void> {
     try {
-      if (citrixKeepalivePaused) {
-        return;
-      }
       const cfg = await storage.getAgentConfig("citrix_keepalive");
       if (cfg?.value !== "true") { stopCitrixKeepalive(); return; }
 
@@ -3263,8 +3260,8 @@ ${fullHtml}`;
         } catch {}
       }
 
-      const opts: Record<string, any> = { maxText: 1000, reuseTab: true };
-      if (sharedCwpTabId) opts.reuseTabId = sharedCwpTabId;
+      const opts: BridgeJob["options"] = { maxText: 1000, reuseTab: true };
+      if (sharedCwpTabId) opts!.reuseTabId = sharedCwpTabId;
       const jobId = submitJob("dom", portalUrl, "citrix-keepalive", opts);
       const result = await waitForResult(jobId, 30000);
       if (result.tabId) sharedCwpTabId = result.tabId;
@@ -3291,13 +3288,6 @@ ${fullHtml}`;
     }
   }
 
-  function pauseCitrixKeepalive(): void {
-    citrixKeepalivePaused = true;
-  }
-
-  function resumeCitrixKeepalive(): void {
-    citrixKeepalivePaused = false;
-  }
 
   (async () => {
     try {
@@ -3672,7 +3662,7 @@ ${fullHtml}`;
     const save = args.includes("--save");
     emitEvent("cli", "Scraping Citrix workspace portal via bridge...", "info", { metadata: { command: "citrix" } });
 
-    const citrixOpts: any = {
+    const citrixOpts: BridgeJob["options"] = {
       maxText: 60000,
       reuseTab: true,
       selectors: {
@@ -3681,7 +3671,7 @@ ${fullHtml}`;
         headings: 'h1, h2, h3, h4, [class*="title"], [class*="Title"], [class*="name"], [class*="Name"]',
       },
     };
-    if (sharedCwpTabId) citrixOpts.reuseTabId = sharedCwpTabId;
+    if (sharedCwpTabId) citrixOpts!.reuseTabId = sharedCwpTabId;
     const citrixJobId = submitJob("dom", "https://cwp.ucsd.edu", "cli-citrix", citrixOpts);
     const result = await waitForResult(citrixJobId, 60000);
     if (result.tabId) { sharedCwpTabId = result.tabId; }
@@ -7350,7 +7340,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       },
     });
 
-    pauseCitrixKeepalive();
+    const keepaliveWasRunning = citrixKeepaliveTimer !== null;
+    if (keepaliveWasRunning) stopCitrixKeepalive();
     const lines = ["=== MORNING BOOT ===", ""];
     let failed = 0;
     let aborted = false;
@@ -7378,7 +7369,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       }
     }
 
-    resumeCitrixKeepalive();
+    if (keepaliveWasRunning) startCitrixKeepalive();
     await storage.setAgentConfig("boot_last_run", new Date().toISOString(), "boot");
     await storage.setAgentConfig("boot_abort", "false", "boot");
 

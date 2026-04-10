@@ -27,6 +27,7 @@ export interface BridgeJob {
     postClickWaitMs?: number;
     postClickSelector?: string;
     reuseTab?: boolean;
+    reuseTabId?: number;
     autoOpenDownload?: boolean;
     pollTimeoutMs?: number;
     fillFields?: Record<string, string>;
