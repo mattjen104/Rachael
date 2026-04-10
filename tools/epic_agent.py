@@ -4979,11 +4979,17 @@ def _check_text_screen_fast(window):
 def _login_text_window(window, label, username, password):
     """Login to a Text/terminal window using adaptive input methods.
     Handles up to 2 sequential login prompts (system login then Epic login).
-    Uses UIA accessibility tree for fast screen classification (<100ms)."""
+    Uses UIA accessibility tree for fast screen classification (<100ms).
+    Checks for already-logged-in state before attempting any keystrokes."""
     proven = _load_proven_login_method()
     try:
         activate_window(window)
         time.sleep(0.15)
+
+        pre_state, pre_desc = _check_text_screen_fast(window)
+        if pre_state == "LOGGED_IN":
+            print(f"  [login] {label}: already logged in (detected via UIA: {pre_desc})")
+            return True, "already logged in"
 
         if _uia_focus_input_field(window):
             time.sleep(0.1)
@@ -5112,14 +5118,74 @@ def _adaptive_type_text_no_verify(window, text, field_description, proven_method
     return False, None
 
 
+def _is_window_past_login_uia(window):
+    """Check if a window is past the login screen using the UIA accessibility tree.
+    Returns True if no visible Edit controls found (= already logged in).
+    Returns False if Edit controls exist (= login screen with input fields).
+    Fast: <100ms. No vision/LLM calls."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return False
+    try:
+        desktop = Desktop(backend="uia")
+        hwnd = getattr(window, '_hWnd', None)
+        if not hwnd:
+            return False
+        target = None
+        for w in desktop.windows():
+            try:
+                if w.element_info.handle == hwnd:
+                    target = w
+                    break
+            except Exception:
+                continue
+        if not target:
+            return False
+        edits = target.descendants(control_type="Edit")
+        for edit in edits:
+            try:
+                if edit.is_enabled() and edit.is_visible():
+                    name = (edit.element_info.name or "").lower()
+                    if any(kw in name for kw in ("user", "login", "password", "id", "credential")):
+                        print(f"  [uia] Found login Edit control: '{edit.element_info.name}' — login screen detected")
+                        return False
+            except Exception:
+                continue
+        visible_edits = 0
+        for edit in edits:
+            try:
+                if edit.is_enabled() and edit.is_visible():
+                    visible_edits += 1
+            except Exception:
+                continue
+        if visible_edits == 0:
+            print(f"  [uia] No Edit controls found — window is past login screen")
+            return True
+        elif visible_edits <= 2:
+            print(f"  [uia] Found {visible_edits} Edit control(s) but no login keywords — likely login screen")
+            return False
+        else:
+            print(f"  [uia] Found {visible_edits} Edit controls (no login keywords) — window appears past login")
+            return True
+    except Exception as e:
+        print(f"  [uia] _is_window_past_login_uia failed: {e}")
+    return False
+
+
 def _login_hyperspace_window(window, label, username, password):
     """Login to a Hyperspace/Hyperdrive GUI window using keyboard-only flow.
     Username field is already focused when window launches maximized from Citrix.
-    Alt+O submits login, selects department, and confirms (3 presses)."""
+    Alt+O submits login, selects department, and confirms (3 presses).
+    Checks UIA accessibility tree first — skips login if already logged in."""
     proven = _load_proven_login_method()
     try:
         activate_window(window)
         time.sleep(0.15)
+
+        if _is_window_past_login_uia(window):
+            print(f"  [login] {label}: already logged in (no login Edit controls found via UIA)")
+            return True, "already logged in"
 
         if _uia_focus_input_field(window):
             time.sleep(0.1)
