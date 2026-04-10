@@ -4904,6 +4904,285 @@ def execute_do(cmd):
     execute_view({"env": env, "id": command_id, "showAll": False})
 
 
+def _find_window_by_title(title_substring):
+    """Find a window by title substring (case-insensitive). Returns (window, title) or (None, None)."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return None, None
+    desktop = Desktop(backend="uia")
+    term = title_substring.lower()
+    for w in desktop.windows():
+        try:
+            title = w.element_info.name or ""
+            if term in title.lower():
+                return w, title
+        except Exception:
+            continue
+    return None, None
+
+
+def execute_nav_view(cmd):
+    """Read the live UIA accessibility tree for ANY window by title substring."""
+    window_title_arg = cmd.get("window", "")
+    command_id = cmd.get("id", "unknown")
+    show_all = cmd.get("showAll", False)
+    search_term = cmd.get("search", "")
+    max_depth = 8
+
+    if not window_title_arg:
+        print(f"  [nav_view] Listing all windows")
+        try:
+            from pywinauto import Desktop
+        except ImportError:
+            post_result(command_id, "error", error="pywinauto not installed")
+            return
+        desktop = Desktop(backend="uia")
+        windows = []
+        for w in desktop.windows():
+            try:
+                info = w.element_info
+                title = info.name or ""
+                if not title.strip():
+                    continue
+                rect = None
+                try:
+                    r = info.rectangle
+                    if r:
+                        rect = {"left": r.left, "top": r.top, "right": r.right, "bottom": r.bottom,
+                                "width": r.width(), "height": r.height()}
+                except Exception:
+                    pass
+                pid = getattr(info, "process_id", None)
+                windows.append({"title": title, "processId": pid, "rect": rect})
+            except Exception:
+                continue
+        post_result(command_id, "complete", data={
+            "mode": "list",
+            "windows": windows,
+            "windowCount": len(windows),
+        })
+        _post_uia_cache({"mode": "list", "windows": windows})
+        print(f"  [nav_view] Found {len(windows)} windows")
+        return
+
+    print(f"  [nav_view] Scanning window: {window_title_arg}")
+    target_window, actual_title = _find_window_by_title(window_title_arg)
+    if not target_window:
+        post_result(command_id, "error", error=f"No window matching '{window_title_arg}'")
+        return
+
+    print(f"  [nav_view] Window: {actual_title}")
+    try:
+        target_window.set_focus()
+        time.sleep(0.3)
+    except Exception:
+        pass
+
+    global _walk_deadline, _walk_node_count
+    _walk_deadline = time.time() + _WALK_TIME_LIMIT
+    _walk_node_count = 0
+    elements = _walk_uia_tree(target_window, 0, max_depth, show_all, "")
+    walked_nodes = _walk_node_count
+    timed_out = time.time() > _walk_deadline
+    print(f"  [nav_view] Walk: {walked_nodes} nodes, {len(elements)} elements" + (" (timed out)" if timed_out else ""))
+
+    if search_term:
+        search_lower = search_term.lower()
+        elements = [e for e in elements if search_lower in (e.get("name", "")).lower()
+                    or search_lower in (e.get("controlType", "")).lower()
+                    or search_lower in (e.get("automationId", "")).lower()]
+        print(f"  [nav_view] Search '{search_term}': {len(elements)} matches")
+
+    interactive_elements = [e for e in elements if not e.get("static", False)]
+    hint_keys = _generate_hint_keys(len(interactive_elements))
+    hint_map = {}
+    for i, elem in enumerate(interactive_elements):
+        key = hint_keys[i] if i < len(hint_keys) else f"z{i}"
+        elem["hint"] = key
+        hint_map[key] = {
+            "name": elem["name"],
+            "controlType": elem["controlType"],
+            "automationId": elem["automationId"],
+            "rect": elem["rect"],
+            "value": elem.get("value", ""),
+        }
+    for elem in elements:
+        if elem.get("static"):
+            elem["hint"] = ""
+
+    cache_key = f"NAV:{actual_title}"
+    _vimium_element_maps[cache_key] = hint_map
+
+    post_result(command_id, "complete", data={
+        "mode": "detail",
+        "window": actual_title,
+        "elements": elements,
+        "hintMap": hint_map,
+        "elementCount": len(elements),
+        "interactiveCount": len(interactive_elements),
+        "searchTerm": search_term,
+    })
+
+    _post_uia_cache({
+        "mode": "detail",
+        "target": window_title_arg,
+        "window": {
+            "title": actual_title,
+            "elements": elements,
+            "hintMap": hint_map,
+        },
+    })
+    print(f"  [nav_view] {len(interactive_elements)} interactive, {len(elements)} total")
+
+
+def execute_nav_do(cmd):
+    """Interact with an element by hint key in ANY window, then auto re-scan."""
+    window_title_arg = cmd.get("window", "")
+    command_id = cmd.get("id", "unknown")
+    hint = cmd.get("hint", "").lower().strip()
+    value = cmd.get("value", "")
+
+    if not hint:
+        post_result(command_id, "error", error="Missing hint key")
+        return
+    if not window_title_arg:
+        post_result(command_id, "error", error="Missing window title")
+        return
+
+    cache_key = None
+    hint_map = None
+    for k, v in _vimium_element_maps.items():
+        if k.startswith("NAV:") and window_title_arg.lower() in k.lower():
+            cache_key = k
+            hint_map = v
+            break
+    if not hint_map:
+        post_result(command_id, "error", error=f"No element map for '{window_title_arg}'. Run nav_view first.")
+        return
+
+    elem_info = hint_map.get(hint)
+    if not elem_info:
+        available = ", ".join(sorted(hint_map.keys())[:20])
+        post_result(command_id, "error", error=f"Unknown hint '{hint}'. Available: {available}")
+        return
+
+    ctrl_type = elem_info.get("controlType", "")
+    name = elem_info.get("name", "")
+    rect = elem_info.get("rect")
+    print(f"  [nav_do] {hint} -> {ctrl_type} '{name}'" + (f" = '{value}'" if value else ""))
+
+    target_window, actual_title = _find_window_by_title(window_title_arg)
+    if not target_window:
+        post_result(command_id, "error", error=f"No window matching '{window_title_arg}'")
+        return
+
+    try:
+        target_window.set_focus()
+        time.sleep(0.2)
+    except Exception:
+        pass
+
+    auto_id = elem_info.get("automationId", "")
+    uia_element = None
+    if auto_id:
+        try:
+            found = target_window.child_window(auto_id=auto_id, control_type=ctrl_type)
+            if found.exists():
+                uia_element = found
+        except Exception:
+            pass
+    if not uia_element and name:
+        try:
+            found = target_window.child_window(title=name, control_type=ctrl_type)
+            if found.exists():
+                uia_element = found
+        except Exception:
+            pass
+
+    action_taken = "none"
+    try:
+        if uia_element:
+            if ctrl_type in ("Edit", "ComboBox", "Spinner") and value:
+                try:
+                    uia_element.set_edit_text(value)
+                    action_taken = f"typed '{value}'"
+                except Exception:
+                    uia_element.click_input()
+                    time.sleep(0.2)
+                    pyautogui.hotkey("ctrl", "a")
+                    time.sleep(0.05)
+                    pyautogui.typewrite(value, interval=0.03)
+                    action_taken = f"typed '{value}' (fallback)"
+            elif ctrl_type in ("CheckBox", "RadioButton"):
+                try:
+                    uia_element.toggle()
+                    action_taken = "toggled"
+                except Exception:
+                    uia_element.click_input()
+                    action_taken = "clicked (toggle fallback)"
+            elif ctrl_type in ("ListItem", "TreeItem"):
+                try:
+                    uia_element.select()
+                    action_taken = "selected"
+                except Exception:
+                    uia_element.click_input()
+                    action_taken = "clicked (select fallback)"
+            else:
+                uia_element.click_input()
+                action_taken = "clicked"
+        elif rect:
+            cx, cy = rect["cx"], rect["cy"]
+            print(f"  [nav_do] Fallback to coordinate click ({cx}, {cy})")
+            safe_click(cx, cy, pause_after=0.5, label=f"nav-{hint}")
+            if ctrl_type in ("Edit", "ComboBox") and value:
+                time.sleep(0.2)
+                pyautogui.hotkey("ctrl", "a")
+                time.sleep(0.05)
+                pyautogui.typewrite(value, interval=0.03)
+                action_taken = f"clicked+typed '{value}'"
+            else:
+                action_taken = "clicked (coordinates)"
+        else:
+            post_result(command_id, "error", error=f"Cannot interact with '{name}': no UIA element or coordinates")
+            return
+    except Exception as e:
+        print(f"  [nav_do] Interaction error: {e}")
+        if rect:
+            cx, cy = rect["cx"], rect["cy"]
+            safe_click(cx, cy, pause_after=0.5, label=f"nav-fallback-{hint}")
+            if ctrl_type in ("Edit", "ComboBox") and value:
+                time.sleep(0.2)
+                pyautogui.typewrite(value, interval=0.03)
+            action_taken = f"clicked (error fallback at {cx},{cy})"
+        else:
+            post_result(command_id, "error", error=f"Interaction failed: {e}")
+            return
+
+    print(f"  [nav_do] Action: {action_taken}")
+    time.sleep(0.5)
+
+    print(f"  [nav_do] Auto re-scanning...")
+    execute_nav_view({"window": window_title_arg, "id": command_id, "showAll": False})
+
+
+def _post_uia_cache(data):
+    """Post UIA scan data to the server cache."""
+    try:
+        resp = requests.post(
+            f"{ORGCLOUD_URL}/api/epic/uia-tree",
+            json=data,
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            print(f"  [cache] UIA tree cached")
+        else:
+            print(f"  [cache] Cache post failed: {resp.status_code}")
+    except Exception as e:
+        print(f"  [cache] Cache post error: {e}")
+
+
 _LOGIN_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "login_input_method.json")
 
 def _load_proven_login_method():
@@ -5828,6 +6107,10 @@ def execute_command(cmd):
             execute_view(cmd)
         elif cmd_type == "do":
             execute_do(cmd)
+        elif cmd_type == "nav_view":
+            execute_nav_view(cmd)
+        elif cmd_type == "nav_do":
+            execute_nav_do(cmd)
         elif cmd_type == "patient":
             execute_patient(cmd)
         elif cmd_type == "read_screen":

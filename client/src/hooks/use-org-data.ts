@@ -280,6 +280,28 @@ export interface TreeData {
   pulseLinks?: unknown[];
   galaxyKb?: unknown[];
   galaxyCategories?: Record<number, string>;
+  desktopWindows?: {
+    mode: string;
+    ageMs?: number;
+    windows?: Array<{ title: string; processId?: number; rect?: { width: number; height: number } }>;
+    window?: {
+      title: string;
+      elements?: Array<{
+        name: string;
+        controlType: string;
+        hint?: string;
+        value?: string;
+        checked?: boolean | null;
+        enabled?: boolean;
+        depth?: number;
+        parent?: string;
+        static?: boolean;
+        automationId?: string;
+      }>;
+      hintMap?: Record<string, { name: string; controlType: string; automationId?: string; value?: string }>;
+    };
+    target?: string;
+  } | null;
 }
 
 export function useTreeData() {

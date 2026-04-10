@@ -788,7 +788,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, unknown> = { id, type, env: env || "SUP" };
@@ -806,6 +806,8 @@ export async function registerRoutes(
     if (focus) cmd.focus = focus;
     if (_activity_label) cmd._activity_label = _activity_label;
     if (type === "login" && credentials) cmd.credentials = credentials;
+    if (windowArg) cmd.window = windowArg;
+    if (search) cmd.search = search;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });
@@ -1250,6 +1252,14 @@ export async function registerRoutes(
       console.warn(`[tree] Failed to load boot status: ${e instanceof Error ? e.message : e}`);
     }
 
+    let desktopWindows: any = null;
+    if (uiaTreeCache) {
+      const ageMs = Date.now() - uiaTreeCache.storedAt;
+      if (ageMs < 120000) {
+        desktopWindows = { ...uiaTreeCache.data, ageMs };
+      }
+    }
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -1269,6 +1279,7 @@ export async function registerRoutes(
       persistedEmails,
       persistedTickets,
       bootStatus,
+      desktopWindows,
     });
   });
 

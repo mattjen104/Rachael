@@ -114,6 +114,22 @@ type TreeNode = {
   key: string;
   env: string;
   stepCount: number;
+} | {
+  type: "uiaElement";
+  hint: string;
+  name: string;
+  controlType: string;
+  value: string;
+  checked: boolean | null;
+  enabled: boolean;
+  windowTitle: string;
+  parent: string;
+  isStatic: boolean;
+} | {
+  type: "desktopWindow";
+  title: string;
+  processId?: number;
+  size?: string;
 };
 
 export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeViewProps) {
