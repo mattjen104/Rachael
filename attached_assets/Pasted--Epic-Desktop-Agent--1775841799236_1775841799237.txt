@@ -1,0 +1,476 @@
+================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+Detected Hyperspace windows:
+  SUP: Hyperspace – SUP Environment - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+
+>> Command: check_windows (id: epic-1775841171612-5sofor)
+  [check] SUP hyperspace: found (Hyperspace – SUP Environment - \\Remote)
+
+>> Command: login (id: epic-1775841172627-dpynlb)
+  [login] Checking SUP hyperspace: Hyperspace – SUP Environment - \\Remote
+  [login] Loaded proven input method: keybd_vk
+  [login] SUP hyperspace: UIA field focus unavailable, using default focus
+  [login] SUP hyperspace: typing username (vision-verified, window: Hyperspace – SUP Environment - \\Remote)
+  [login] Trying input method 'keybd_vk' for username field...
+  [input] Keyboard backend: keybd_event
+  [input] Text input method: vk
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'keybd_vk' WORKED for username field
+  [login] SUP hyperspace: username confirmed via vision, method: keybd_vk
+  [login] SUP hyperspace: typing password (using proven method: keybd_vk)
+  [login] Trying input method 'keybd_vk' for password field...
+  [input] Keyboard backend: keybd_event
+  [input] Text input method: vk
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'keybd_vk' used for password field (no vision verify)
+  [login] SUP hyperspace: sending Alt+O (login submit)
+  [poll] Screen change poll error: No module named 'numpy', falling back to sleep
+  [login] SUP hyperspace: sending Alt+O (department continue)
+  [poll] Screen change poll error: No module named 'numpy', falling back to sleep
+  [login] SUP hyperspace: sending Alt+O (message continue)
+  [poll] Screen change poll error: No module named 'numpy', falling back to sleep
+  [login] Saved proven input method: keybd_vk
+  [login] SUP hyperspace: logged in (method: keybd_vk)
+  [login] Done: 1 windows
+
+>> Command: check_windows (id: epic-1775841197702-drchb1)
+  [check] SUP text: not found. Windows with 'SUP': ['Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote']
+
+>> Command: snapshot_windows (id: epic-1775841199724-2rgx98)
+  [snapshot] Captured 30 windows
+
+>> Command: check_windows (id: epic-1775841230296-4w2o1a)
+  [check] SUP text: not found. Windows with 'SUP': ['Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote']
+
+>> Command: check_windows (id: epic-1775841234310-3hfddf)
+  [check] SUP text: found (SUP - \\Remote)
+
+>> Command: detect_new_window (id: epic-1775841237339-s3d9cd)
+  [detect] New window: 'SUP - \\Remote' (hwnd=11474312, class=other)
+
+>> Command: login (id: epic-1775841240367-r8idv4)
+  [login] Checking SUP text: SUP - \\Remote
+  [login] Loaded proven input method: keybd_vk
+  [login] Text screen check: LOGIN_PROMPT
+  [login] SUP text: login 1/2 — typing username
+  [login] Trying input method 'keybd_vk' for username/login prompt...
+  [input] Keyboard backend: keybd_event
+  [input] Text input method: vk
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'keybd_vk' WORKED for username/login prompt
+  [poll] Screen change poll error: No module named 'numpy', falling back to sleep
+  [login] SUP text: login 1/2 — typing password
+  [login] Trying input method 'keybd_vk' for password prompt...
+  [input] Keyboard backend: keybd_event
+  [input] Text input method: vk
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'keybd_vk' did NOT work for password prompt, clearing and trying next...
+  [login] Trying input method 'sendinput_vk' for password prompt...
+  [input] Keyboard backend: sendinput
+  [input] Text input method: vk
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'sendinput_vk' did NOT work for password prompt, clearing and trying next...
+  [login] Trying input method 'pyautogui' for password prompt...
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'pyautogui' did NOT work for password prompt, clearing and trying next...
+  [login] Trying input method 'unicode' for password prompt...
+  [input] Text input method: unicode
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'unicode' did NOT work for password prompt, clearing and trying next...
+  [login] Trying input method 'scancode' for password prompt...
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'scancode' did NOT work for password prompt, clearing and trying next...
+  [login] Trying input method 'clipboard' for password prompt...
+  [input] Clipboard paste failed: exception: access violation writing 0x0000000000000000
+  [login] Method 'clipboard' threw exception: exception: access violation writing 0x0000000000000000
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Trying input method 'postmessage' for password prompt...
+  [input] Text input method: pyautogui
+  [input] Keyboard backend: sendinput
+  [login] Method 'postmessage' did NOT work for password prompt, clearing and trying next...
+  [login] ALL input methods failed for password prompt
+  [login] SUP text: all input methods failed for password (login 1/2)
+  [login] Done: 0 windows
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
