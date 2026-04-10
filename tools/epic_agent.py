@@ -5493,6 +5493,11 @@ def execute_login(cmd):
         label = f"{env} {client}"
         already_open = not bool(target_hwnd)
         print(f"  [login] Checking {label}: {window.title} (already_open={already_open}, hwnd={'set' if target_hwnd else 'none'})")
+        # NOTE: already_open derivation — boot flow in cli-engine.ts only passes hwnd for
+        # NEWLY detected windows (via pollForNewWindow after Citrix launch). Pre-existing
+        # windows (found by checkAgentWindowExists before launch) get hwnd=null/omitted.
+        # So: target_hwnd=None => pre-existing window (already_open=True)
+        #     target_hwnd=<number> => freshly launched from Citrix (already_open=False)
 
         if client == "text":
             success, msg = _login_text_window(window, label, username, password, already_open=already_open)
