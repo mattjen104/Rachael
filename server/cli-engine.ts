@@ -177,7 +177,7 @@ async function executeOneCommand(rawCommand: string, stdin: string): Promise<Com
 
   const needsArgs = !["help", "programs", "results", "tasks", "notes", "captures",
     "search", "skills", "runtime", "profiles", "proposals", "agenda", "recipe", "config",
-    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "pulse", "meals", "budget", "ask", "boot"].includes(cmdName);
+    "standup", "memory", "bridge", "bridge-status", "bridge-token", "cwp", "outlook", "teams", "citrix", "snow", "epic", "nav", "pulse", "meals", "budget", "ask", "boot"].includes(cmdName);
   if (args.length === 0 && !stdin && needsArgs) {
     return fail(`[error] ${cmdName}: usage: ${registered.usage}`);
   }
@@ -3872,6 +3872,197 @@ ${fullHtml}`;
     lines.push("", `${totalElements} element${totalElements !== 1 ? "s" : ""} in tree`);
     return lines.join(nl);
   }
+
+  registerCommand("nav", "Navigate any desktop window via UIA tree", "nav [<window>] [<hint>] [<value>] [/<search>]", async (args) => {
+    const nl = String.fromCharCode(10);
+
+    if (args.length === 0) {
+      try {
+        const sendBody = { type: "nav_view" };
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sendBody),
+        });
+        const sendData = await resp.json() as any;
+        if (!sendData.ok) return fail("[nav] Failed to send command — desktop agent may not be connected");
+        const cmdId = sendData.commandId;
+
+        const maxWait = 15000;
+        const pollInterval = 500;
+        let elapsed = 0;
+        while (elapsed < maxWait) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          elapsed += pollInterval;
+          const pollResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const result = await pollResp.json() as any;
+          if (result.status === "pending") continue;
+          if (result.status === "error") return fail(`[nav] ${result.error || "unknown error"}`);
+          if (result.status === "complete" && result.data) {
+            const windows = result.data.windows || [];
+            const lines: string[] = [`OPEN WINDOWS`, "\u2500".repeat(60)];
+            for (let i = 0; i < windows.length; i++) {
+              const w = windows[i];
+              const idx = String(i + 1).padStart(3);
+              const title = (w.title || "").slice(0, 55);
+              lines.push(`${idx}  ${title}`);
+            }
+            lines.push("", `${windows.length} window(s). Use: nav <title> to scan a window`);
+            queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
+            return ok(lines.join(nl));
+          }
+        }
+        return fail(`[nav] Timed out after ${maxWait / 1000}s`);
+      } catch (e: any) {
+        return fail(`[nav] ${e.message}`);
+      }
+    }
+
+    let searchTerm = "";
+    const positionalArgs: string[] = [];
+    for (const a of args) {
+      if (a.startsWith("/")) {
+        searchTerm = a.slice(1);
+      } else {
+        positionalArgs.push(a);
+      }
+    }
+
+    const hasHintArg = positionalArgs.length >= 2 && /^[a-z]{1,3}$/.test(positionalArgs[positionalArgs.length - 1])
+      && (positionalArgs.length === 2 || (positionalArgs.length >= 3 && !/^[a-z]{1,3}$/.test(positionalArgs[positionalArgs.length - 2])));
+
+    let windowArg: string;
+    let hintArg = "";
+    let valueArg = "";
+
+    if (positionalArgs.length >= 3 && /^[a-z]{1,3}$/.test(positionalArgs[positionalArgs.length - 2])) {
+      valueArg = positionalArgs[positionalArgs.length - 1];
+      hintArg = positionalArgs[positionalArgs.length - 2];
+      windowArg = positionalArgs.slice(0, -2).join(" ");
+    } else if (hasHintArg) {
+      hintArg = positionalArgs[positionalArgs.length - 1];
+      windowArg = positionalArgs.slice(0, -1).join(" ");
+    } else {
+      windowArg = positionalArgs.join(" ");
+    }
+
+    if (hintArg) {
+      try {
+        const sendBody: Record<string, unknown> = { type: "nav_do", window: windowArg, hint: hintArg };
+        if (valueArg) sendBody.value = valueArg;
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sendBody),
+        });
+        const sendData = await resp.json() as any;
+        if (!sendData.ok) return fail("[nav] Failed to send command");
+        const cmdId = sendData.commandId;
+
+        const maxWait = 30000;
+        const pollInterval = 500;
+        let elapsed = 0;
+        let result: any = null;
+        while (elapsed < maxWait) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          elapsed += pollInterval;
+          const pollResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const pollData = await pollResp.json() as any;
+          if (pollData.status && pollData.status !== "pending") { result = pollData; break; }
+        }
+        if (!result) return fail("[nav] Action timed out (30s)");
+        if (result.status === "error") return fail(`[nav] ${result.error || "Action failed"}`);
+        const d = result.data || {};
+        const elements = d.elements || [];
+        const lines: string[] = [];
+        lines.push(`=== NAV DO: ${windowArg} [${hintArg}]${valueArg ? ` = "${valueArg}"` : ""} ===`);
+        lines.push(`Window: ${d.window || windowArg}`);
+        lines.push("");
+        if (elements.length) {
+          lines.push(...renderElementLines(elements));
+        }
+        lines.push(`Next: nav ${windowArg} <hint> [value]`);
+        queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
+        return ok(lines.join(nl));
+      } catch (e: any) {
+        return fail(`[nav] ${e.message}`);
+      }
+    }
+
+    try {
+      const sendBody: Record<string, unknown> = { type: "nav_view", window: windowArg };
+      if (searchTerm) sendBody.search = searchTerm;
+      const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sendBody),
+      });
+      const sendData = await resp.json() as any;
+      if (!sendData.ok) return fail("[nav] Failed to send command — desktop agent may not be connected");
+      const cmdId = sendData.commandId;
+
+      const maxWait = 25000;
+      const pollInterval = 500;
+      let elapsed = 0;
+      while (elapsed < maxWait) {
+        await new Promise(r => setTimeout(r, pollInterval));
+        elapsed += pollInterval;
+        const pollResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+        const result = await pollResp.json() as any;
+        if (result.status === "pending") continue;
+        if (result.status === "error") return fail(`[nav] ${result.error || "scan failed"}`);
+        if (result.status === "complete" && result.data) {
+          const d = result.data;
+          const elements = d.elements || [];
+          const lines: string[] = [];
+          lines.push(`=== NAV: ${d.window || windowArg} ===`);
+          lines.push(`${d.interactiveCount || 0} interactive, ${d.elementCount || 0} total elements`);
+          if (searchTerm) lines.push(`Search: "${searchTerm}"`);
+          lines.push("");
+          if (elements.length) {
+            lines.push(...renderElementLines(elements));
+          }
+          lines.push(`Act: nav ${windowArg} <hint> [value]`);
+          lines.push(`Refresh: nav ${windowArg}`);
+          queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
+          return ok(lines.join(nl));
+        }
+      }
+      return fail(`[nav] Scan timed out after ${maxWait / 1000}s`);
+    } catch (e: any) {
+      return fail(`[nav] ${e.message}`);
+    }
+
+    function renderElementLines(elements: any[]): string[] {
+      const lines: string[] = [];
+      const groups = new Map<string, any[]>();
+      for (const el of elements) {
+        const group = el.parent || "Window";
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group)!.push(el);
+      }
+      for (const [group, items] of groups) {
+        lines.push(`--- ${group} ---`);
+        for (const el of items) {
+          const hintLabel = el.hint ? `[${el.hint}]` : "    ";
+          const ct = (el.controlType || "").padEnd(12);
+          const name = el.name || "";
+          const enabled = el.enabled === false ? " (disabled)" : "";
+          let suffix = "";
+          if (el.value) suffix = ` = "${el.value}"`;
+          if (el.checked === true) suffix = " [x]";
+          if (el.checked === false) suffix = " [ ]";
+          if (el.static) {
+            lines.push(`     ${ct} ${name}${suffix}`);
+          } else {
+            lines.push(`  ${hintLabel.padEnd(5)} ${ct} ${name}${enabled}${suffix}`);
+          }
+        }
+        lines.push("");
+      }
+      return lines;
+    }
+  });
 
   registerCommand("epic", "Epic Hyperspace activity tools", "epic [view|do|screen|fields|menu|search|go|activities|navigate|screenshot|click|status|setup|uia] <env> [target]", async (args) => {
     const nl = String.fromCharCode(10);

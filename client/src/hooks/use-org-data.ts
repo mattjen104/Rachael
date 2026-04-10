@@ -281,11 +281,14 @@ export interface TreeData {
   galaxyKb?: unknown[];
   galaxyCategories?: Record<number, string>;
   desktopWindows?: {
-    mode: string;
-    ageMs?: number;
-    windows?: Array<{ title: string; processId?: number; rect?: { width: number; height: number } }>;
-    window?: {
-      title: string;
+    empty?: boolean;
+    windowList?: {
+      windows: Array<{ title: string; processId?: number; rect?: { width: number; height: number } }>;
+      ageMs: number;
+    } | null;
+    scannedWindows?: Record<string, {
+      title?: string;
+      ageMs?: number;
       elements?: Array<{
         name: string;
         controlType: string;
@@ -299,8 +302,7 @@ export interface TreeData {
         automationId?: string;
       }>;
       hintMap?: Record<string, { name: string; controlType: string; automationId?: string; value?: string }>;
-    };
-    target?: string;
+    }>;
   } | null;
 }
 

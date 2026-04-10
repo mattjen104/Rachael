@@ -125,11 +125,6 @@ type TreeNode = {
   windowTitle: string;
   parent: string;
   isStatic: boolean;
-} | {
-  type: "desktopWindow";
-  title: string;
-  processId?: number;
-  size?: string;
 };
 
 export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeViewProps) {
@@ -149,6 +144,11 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
   const [epicRecording, setEpicRecording] = useState<{ active: boolean; env: string; stepCount: number }>({ active: false, env: "SUP", stepCount: 0 });
   const [recReview, setRecReview] = useState<{ show: boolean; steps: Array<{ step: number; description: string; screen: string; timeDelta: number; excluded?: boolean }>; name: string } | null>(null);
   const [refilePanel, setRefilePanel] = useState<{ captureId: number; content: string; type: "task" | "note"; title: string; tags: string; priority: string; scheduledDate: string; deadlineDate: string; parentId: string } | null>(null);
+  const [desktopFilter, setDesktopFilter] = useState("");
+  const [desktopFilterActive, setDesktopFilterActive] = useState(false);
+  const [navActionPending, setNavActionPending] = useState<string | null>(null);
+  const [navInlineInput, setNavInlineInput] = useState<{ hint: string; windowTitle: string } | null>(null);
+  const desktopFilterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const checkRecStatus = async () => {
@@ -307,6 +307,95 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
         }
       } else {
         nodes.push({ type: "bridge-info", label: bridgeConnected ? "Press Enter to scrape CWP" : "Bridge not connected", actionCmd: bridgeConnected ? "citrix --save" : "bridge-status" });
+      }
+    }
+
+    const dw = (data as any).desktopWindows;
+    const dwWindowList = dw?.windowList?.windows || [];
+    const dwScanned = dw?.scannedWindows || {};
+    const dwScannedKeys = Object.keys(dwScanned);
+    const dwTotalCount = dwWindowList.length || dwScannedKeys.length;
+
+    if (dwTotalCount > 0 || !dw?.empty) {
+      nodes.push({ type: "section", label: "DESKTOP", key: "desktop", count: dwTotalCount });
+      if (expanded.has("desktop")) {
+        if (desktopFilterActive && desktopFilter) {
+          const filterLower = desktopFilter.toLowerCase();
+          for (const [winTitle, winData] of Object.entries(dwScanned) as [string, any][]) {
+            const elements = (winData.elements || []).filter((e: any) =>
+              (e.name || "").toLowerCase().includes(filterLower) ||
+              (e.controlType || "").toLowerCase().includes(filterLower)
+            );
+            if (elements.length === 0) continue;
+            nodes.push({ type: "section", label: `  ${winTitle.slice(0, 50)} (${elements.length} matches)`, key: `desktop-search-${winTitle}`, count: elements.length });
+            if (expanded.has(`desktop-search-${winTitle}`)) {
+              for (const el of elements) {
+                nodes.push({
+                  type: "uiaElement",
+                  hint: el.hint || "",
+                  name: el.name || `(${el.controlType})`,
+                  controlType: el.controlType || "",
+                  value: el.value || "",
+                  checked: el.checked ?? null,
+                  enabled: el.enabled !== false,
+                  windowTitle: winTitle,
+                  parent: el.parent || "",
+                  isStatic: !!el.static,
+                });
+              }
+            }
+          }
+        } else {
+          const windowTitles = dwWindowList.length > 0
+            ? dwWindowList.map((w: any) => w.title)
+            : dwScannedKeys;
+
+          for (const title of windowTitles) {
+            const scanned = dwScanned[title];
+            const hasDetail = !!scanned;
+            const winKey = `desktop-win-${title}`;
+            const elCount = hasDetail ? (scanned.elements || []).length : 0;
+
+            nodes.push({ type: "section", label: `  ${title.slice(0, 55)}`, key: winKey, count: hasDetail ? elCount : -1 });
+            if (expanded.has(winKey)) {
+              if (hasDetail && scanned.elements) {
+                const elements = scanned.elements;
+                const groups = new Map<string, typeof elements>();
+                for (const el of elements) {
+                  const group = el.parent || "Window";
+                  if (!groups.has(group)) groups.set(group, []);
+                  groups.get(group)!.push(el);
+                }
+                for (const [group, items] of groups) {
+                  const groupKey = `${winKey}-g-${group}`;
+                  nodes.push({ type: "section", label: `    ${group}`, key: groupKey, count: items.length });
+                  if (expanded.has(groupKey)) {
+                    for (const el of items) {
+                      nodes.push({
+                        type: "uiaElement",
+                        hint: el.hint || "",
+                        name: el.name || `(${el.controlType})`,
+                        controlType: el.controlType || "",
+                        value: el.value || "",
+                        checked: el.checked ?? null,
+                        enabled: el.enabled !== false,
+                        windowTitle: title,
+                        parent: group,
+                        isStatic: !!el.static,
+                      });
+                    }
+                  }
+                }
+                const ageS = scanned.ageMs ? Math.round(scanned.ageMs / 1000) : 0;
+                if (ageS > 0) {
+                  nodes.push({ type: "bridge-info", label: `scanned ${ageS}s ago  |  r:refresh  /:search`, actionCmd: "" });
+                }
+              } else {
+                nodes.push({ type: "bridge-info", label: "Press Enter to scan this window", actionCmd: `nav ${title}` });
+              }
+            }
+          }
+        }
       }
     }
 
@@ -687,6 +776,20 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
     else if (node.type === "galaxyGuide") {
       onNavigate?.("reader", node.id);
     }
+    else if (node.type === "uiaElement" && !node.isStatic) {
+      if (node.controlType === "Edit" || node.controlType === "ComboBox" || node.controlType === "Spinner") {
+        setNavInlineInput({ hint: node.hint, windowTitle: node.windowTitle });
+      } else if (node.hint) {
+        setNavActionPending(node.hint);
+        (async () => {
+          try {
+            await apiRequest("POST", "/api/epic/agent/send", { type: "nav_do", window: node.windowTitle, hint: node.hint });
+            queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
+          } catch {}
+          setTimeout(() => setNavActionPending(null), 3000);
+        })();
+      }
+    }
   }, [toggleTask, onNavigate, onRunCommand, launchCitrixApp]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -735,6 +838,33 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
         const rNode = nodes[selectedIdx];
         if (rNode?.type === "capture") {
           setRefilePanel({ captureId: rNode.id, content: rNode.content, type: "task", title: rNode.content, tags: "", priority: "", scheduledDate: "", deadlineDate: "", parentId: "" });
+        } else if (rNode?.type === "section" && rNode.key.startsWith("desktop-win-")) {
+          const winTitle = rNode.key.replace("desktop-win-", "");
+          (async () => {
+            try {
+              await apiRequest("POST", "/api/epic/agent/send", { type: "nav_view", window: winTitle });
+              setTimeout(() => queryClient.invalidateQueries({ queryKey: ["/api/tree"] }), 2000);
+            } catch {}
+          })();
+        } else if (rNode?.type === "uiaElement") {
+          (async () => {
+            try {
+              await apiRequest("POST", "/api/epic/agent/send", { type: "nav_view", window: rNode.windowTitle });
+              setTimeout(() => queryClient.invalidateQueries({ queryKey: ["/api/tree"] }), 2000);
+            } catch {}
+          })();
+        }
+        break;
+      }
+      case "/": {
+        const slashNode = nodes[selectedIdx];
+        const isInDesktop = slashNode?.type === "section" && (slashNode.key === "desktop" || slashNode.key.startsWith("desktop-"))
+          || slashNode?.type === "uiaElement";
+        if (isInDesktop) {
+          e.preventDefault();
+          setDesktopFilterActive(true);
+          setDesktopFilter("");
+          setTimeout(() => desktopFilterRef.current?.focus(), 50);
         }
         break;
       }
@@ -944,6 +1074,28 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
           icon = node.slaBreached ? "!" : "·";
           label = `${node.number.padEnd(15)} ${node.shortDescription.slice(0, 40)}`;
           extra = `${node.state}${node.priority ? ` ${node.priority}` : ""}`;
+        } else if (node.type === "uiaElement") {
+          const isPending = navActionPending === node.hint;
+          if (node.isStatic) {
+            icon = " ";
+            label = `${node.controlType.padEnd(12)} ${node.name}`;
+          } else {
+            icon = isPending ? "~" : (node.hint ? `[${node.hint}]` : "·");
+            const ctLabel = node.controlType.padEnd(12);
+            label = `${ctLabel} ${node.name}`;
+            if (node.value) extra = `= "${node.value.slice(0, 20)}"`;
+            else if (node.checked === true) extra = "[x]";
+            else if (node.checked === false) extra = "[ ]";
+            else if (!node.enabled) extra = "(disabled)";
+            else {
+              const tags: string[] = [];
+              if (["Button", "MenuItem", "Hyperlink", "SplitButton"].includes(node.controlType)) tags.push("clickable");
+              if (["Edit", "ComboBox", "Spinner"].includes(node.controlType)) tags.push("editable");
+              if (["CheckBox", "RadioButton"].includes(node.controlType)) tags.push("toggleable");
+              if (["ListItem", "TreeItem", "TabItem"].includes(node.controlType)) tags.push("selectable");
+              if (tags.length > 0) extra = `[${tags.join(",")}]`;
+            }
+          }
         }
 
         return (
@@ -964,6 +1116,54 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
           </div>
         );
       })}
+      {desktopFilterActive && (
+        <div className="border-t border-border bg-background px-2 py-1 flex items-center gap-1" data-testid="desktop-filter">
+          <span className="text-xs text-muted-foreground">/</span>
+          <input
+            ref={desktopFilterRef}
+            type="text"
+            data-testid="desktop-filter-input"
+            className="flex-1 bg-transparent border-none outline-none text-xs font-mono"
+            placeholder="filter elements..."
+            value={desktopFilter}
+            onChange={(e) => setDesktopFilter(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setDesktopFilterActive(false);
+                setDesktopFilter("");
+              }
+            }}
+            autoFocus
+          />
+          <span className="text-[10px] text-muted-foreground cursor-pointer" onClick={() => { setDesktopFilterActive(false); setDesktopFilter(""); }}>ESC</span>
+        </div>
+      )}
+      {navInlineInput && (
+        <div className="border-t border-border bg-background px-2 py-1" data-testid="nav-inline-input">
+          <div className="text-[10px] text-muted-foreground mb-1">Type value for [{navInlineInput.hint}]:</div>
+          <input
+            type="text"
+            data-testid="nav-inline-value"
+            className="w-full bg-transparent border border-border px-1 py-0.5 text-xs font-mono"
+            placeholder="Enter value..."
+            onKeyDown={async (e) => {
+              if (e.key === "Enter") {
+                const val = (e.target as HTMLInputElement).value;
+                if (val) {
+                  try {
+                    await apiRequest("POST", "/api/epic/agent/send", { type: "nav_do", window: navInlineInput.windowTitle, hint: navInlineInput.hint, value: val });
+                    queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
+                  } catch {}
+                }
+                setNavInlineInput(null);
+              } else if (e.key === "Escape") {
+                setNavInlineInput(null);
+              }
+            }}
+            autoFocus
+          />
+        </div>
+      )}
       {refilePanel && (
         <div className="border-t border-border bg-background p-2" data-testid="refile-panel">
           <div className="text-xs font-bold mb-1 text-primary">REFILE CAPTURE</div>

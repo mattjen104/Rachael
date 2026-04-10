@@ -853,6 +853,42 @@ export async function registerRoutes(
   });
 
   let uiaTreeCache: { data: any; storedAt: number } | null = null;
+  const uiaWindowCache: Map<string, { data: any; storedAt: number }> = new Map();
+  let uiaWindowListCache: { windows: any[]; storedAt: number } | null = null;
+
+  (async () => {
+    try {
+      const cfg = await storage.getAgentConfig("uia_desktop_cache");
+      if (cfg?.value) {
+        const parsed = JSON.parse(cfg.value);
+        if (parsed.windowList) {
+          uiaWindowListCache = { windows: parsed.windowList, storedAt: parsed.windowListAt || Date.now() };
+        }
+        if (parsed.windows) {
+          for (const [key, entry] of Object.entries(parsed.windows as Record<string, any>)) {
+            uiaWindowCache.set(key, { data: entry.data, storedAt: entry.storedAt || Date.now() });
+          }
+        }
+      }
+    } catch {}
+  })();
+
+  async function persistUiaCache() {
+    try {
+      const windows: Record<string, any> = {};
+      for (const [key, entry] of uiaWindowCache.entries()) {
+        windows[key] = { data: entry.data, storedAt: entry.storedAt };
+      }
+      const payload = {
+        windowList: uiaWindowListCache?.windows || [],
+        windowListAt: uiaWindowListCache?.storedAt || 0,
+        windows,
+      };
+      await storage.setAgentConfig("uia_desktop_cache", JSON.stringify(payload));
+    } catch (e) {
+      console.warn(`[uia-cache] persist failed: ${e}`);
+    }
+  }
 
   app.post("/api/epic/uia-tree", (req, res) => {
     const auth = req.headers.authorization;
@@ -860,7 +896,18 @@ export async function registerRoutes(
     if (!isLocal && (!auth || !validateBridgeToken(auth.replace("Bearer ", "")))) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    uiaTreeCache = { data: req.body, storedAt: Date.now() };
+    const body = req.body;
+    uiaTreeCache = { data: body, storedAt: Date.now() };
+
+    if (body.mode === "list" && body.windows) {
+      uiaWindowListCache = { windows: body.windows, storedAt: Date.now() };
+    } else if (body.mode === "detail" && body.window) {
+      const title = body.window?.title || body.target || "";
+      if (title) {
+        uiaWindowCache.set(title, { data: body.window, storedAt: Date.now() });
+      }
+    }
+    persistUiaCache();
     res.json({ ok: true });
   });
 
@@ -1252,12 +1299,21 @@ export async function registerRoutes(
       console.warn(`[tree] Failed to load boot status: ${e instanceof Error ? e.message : e}`);
     }
 
-    let desktopWindows: any = null;
-    if (uiaTreeCache) {
-      const ageMs = Date.now() - uiaTreeCache.storedAt;
-      if (ageMs < 120000) {
-        desktopWindows = { ...uiaTreeCache.data, ageMs };
-      }
+    const desktopWindows: any = {
+      windowList: uiaWindowListCache ? {
+        windows: uiaWindowListCache.windows,
+        ageMs: Date.now() - uiaWindowListCache.storedAt,
+      } : null,
+      scannedWindows: {} as Record<string, any>,
+    };
+    for (const [title, entry] of uiaWindowCache.entries()) {
+      desktopWindows.scannedWindows[title] = {
+        ...entry.data,
+        ageMs: Date.now() - entry.storedAt,
+      };
+    }
+    if (!desktopWindows.windowList && Object.keys(desktopWindows.scannedWindows).length === 0) {
+      desktopWindows.empty = true;
     }
 
     res.json({
