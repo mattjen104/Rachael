@@ -7191,7 +7191,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
               if (agentUp) {
                 emitEvent("cli", `Waiting for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
-                const newWin = await pollForNewWindow(env, 30000);
+                const newWin = await pollForNewWindow(env, 45000);
                 if (newWin.hwnd) {
                   detectedHwnd = newWin.hwnd;
                 } else {
