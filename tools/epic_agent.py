@@ -4779,19 +4779,21 @@ def _adaptive_type_text(window, text, field_description, proven_method=None, is_
     prev_backend = _active_backend
 
     if skip_verify and methods:
-        name, type_fn = methods[0]
-        print(f"  [login] Using method '{name}' for {field_description} (blind/no-verify mode)")
-        try:
-            type_fn(text)
-        except Exception as e:
-            print(f"  [login] Method '{name}' threw exception: {e}")
+        for name, type_fn in methods:
+            print(f"  [login] Using method '{name}' for {field_description} (blind/no-verify mode)")
+            try:
+                type_fn(text)
+            except Exception as e:
+                print(f"  [login] Method '{name}' threw exception in blind mode: {e}")
+                set_text_method(prev_text)
+                set_keyboard_backend(prev_backend)
+                continue
             set_text_method(prev_text)
             set_keyboard_backend(prev_backend)
-            return False, None
-        set_text_method(prev_text)
-        set_keyboard_backend(prev_backend)
-        time.sleep(0.3)
-        return True, name
+            time.sleep(0.3)
+            return True, name
+        print(f"  [login] ALL input methods threw exceptions for {field_description} (blind mode)")
+        return False, None
 
     inconclusive_method = None
 
@@ -5147,7 +5149,7 @@ def _uia_focus_input_field(window, field_type="edit"):
     return False
 
 
-def _compare_images_pil(img1, img2, sample_size=40):
+def _compare_images_pil(img1, img2, sample_size=80):
     """Compare two PIL images by sampling pixels. Returns diff ratio 0.0-1.0."""
     s1 = img1.resize((sample_size, sample_size)).convert("RGB")
     s2 = img2.resize((sample_size, sample_size)).convert("RGB")
