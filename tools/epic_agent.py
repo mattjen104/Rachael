@@ -4763,10 +4763,11 @@ Return ONLY a JSON object: {{"has_text": true}} or {{"has_text": false}}"""
         print(f"  [login] Verify field error: {e}")
     return None
 
-def _adaptive_type_text(window, text, field_description, proven_method=None, is_password=False):
+def _adaptive_type_text(window, text, field_description, proven_method=None, is_password=False, skip_verify=False):
     """Try multiple input methods to type text into a field.
     Verifies via vision after each attempt. Returns (success, method_name).
-    For password fields, vision checks for dots/bullets/masked chars."""
+    For password fields, vision checks for dots/bullets/masked chars.
+    When skip_verify=True, use proven/first method without vision check (for blind password fields)."""
     methods = _build_type_methods(window)
 
     if proven_method:
@@ -4776,6 +4777,22 @@ def _adaptive_type_text(window, text, field_description, proven_method=None, is_
 
     prev_text = _text_method
     prev_backend = _active_backend
+
+    if skip_verify and methods:
+        name, type_fn = methods[0]
+        print(f"  [login] Using method '{name}' for {field_description} (blind/no-verify mode)")
+        try:
+            type_fn(text)
+        except Exception as e:
+            print(f"  [login] Method '{name}' threw exception: {e}")
+            set_text_method(prev_text)
+            set_keyboard_backend(prev_backend)
+            return False, None
+        set_text_method(prev_text)
+        set_keyboard_backend(prev_backend)
+        time.sleep(0.3)
+        return True, name
+
     inconclusive_method = None
 
     for name, type_fn in methods:
@@ -4919,8 +4936,8 @@ def _login_text_window(window, label, username, password):
                 print(f"  [login] {label}: {round_label} — screen state {pre_state}, falling through to verification")
                 return _verify_login_result(window, proven or "sendinput_vk")
             elif pre_state == "PASSWORD_PROMPT":
-                print(f"  [login] {label}: {round_label} — password-only prompt detected, typing password")
-                pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", proven, is_password=True)
+                print(f"  [login] {label}: {round_label} — password-only prompt detected, typing password (blind)")
+                pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", proven, is_password=True, skip_verify=True)
                 if not pw_success:
                     return False, f"all input methods failed for password ({round_label})"
                 method = pw_method
@@ -4935,8 +4952,12 @@ def _login_text_window(window, label, username, password):
                 _keybd_event_key(0x0D, up=True)
                 _wait_for_screen_change(window, timeout=5.0, poll_interval=0.3)
 
-                print(f"  [login] {label}: {round_label} — typing password")
-                pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True)
+                activate_window(window)
+                time.sleep(0.3)
+                _uia_focus_input_field(window)
+
+                print(f"  [login] {label}: {round_label} — typing password (blind)")
+                pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True, skip_verify=True)
                 if not pw_success:
                     return False, f"all input methods failed for password ({round_label})"
 
@@ -5126,19 +5147,30 @@ def _uia_focus_input_field(window, field_type="edit"):
     return False
 
 
+def _compare_images_pil(img1, img2, sample_size=40):
+    """Compare two PIL images by sampling pixels. Returns diff ratio 0.0-1.0."""
+    s1 = img1.resize((sample_size, sample_size)).convert("RGB")
+    s2 = img2.resize((sample_size, sample_size)).convert("RGB")
+    p1 = list(s1.getdata())
+    p2 = list(s2.getdata())
+    total_diff = 0
+    for (r1, g1, b1), (r2, g2, b2) in zip(p1, p2):
+        total_diff += abs(r1 - r2) + abs(g1 - g2) + abs(b1 - b2)
+    max_diff = len(p1) * 3 * 255
+    return total_diff / max_diff if max_diff > 0 else 0.0
+
+
 def _wait_for_screen_change(window, timeout=8.0, poll_interval=0.5, threshold=0.02):
     """Poll until the window screenshot changes significantly or timeout.
     Returns True if a change was detected, False on timeout."""
     try:
-        import numpy as np
-        baseline = ImageGrab.grab(bbox=(window.left, window.top, window.left + window.width, window.top + window.height), include_layered_windows=True)
-        baseline_arr = np.array(baseline.resize((320, 200)))
+        bbox = (window.left, window.top, window.left + window.width, window.top + window.height)
+        baseline = ImageGrab.grab(bbox=bbox, include_layered_windows=True)
         start = time.time()
         while time.time() - start < timeout:
             time.sleep(poll_interval)
-            current = ImageGrab.grab(bbox=(window.left, window.top, window.left + window.width, window.top + window.height), include_layered_windows=True)
-            current_arr = np.array(current.resize((320, 200)))
-            diff = np.mean(np.abs(current_arr.astype(float) - baseline_arr.astype(float))) / 255.0
+            current = ImageGrab.grab(bbox=bbox, include_layered_windows=True)
+            diff = _compare_images_pil(baseline, current)
             if diff > threshold:
                 print(f"  [poll] Screen change detected ({diff:.3f} > {threshold}) after {time.time() - start:.1f}s")
                 return True
