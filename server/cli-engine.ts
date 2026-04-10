@@ -7245,7 +7245,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
               if (agentUp) {
                 emitEvent("cli", `Waiting for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
-                const detected = await waitForAgentWindow(env, "text", 30000);
+                const detected = await waitForAgentWindow(env, "text", 45000);
                 if (!detected) {
                   await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
                 }

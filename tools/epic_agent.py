@@ -5153,12 +5153,12 @@ def _compare_images_pil(img1, img2, sample_size=80):
     """Compare two PIL images by sampling pixels. Returns diff ratio 0.0-1.0."""
     s1 = img1.resize((sample_size, sample_size)).convert("RGB")
     s2 = img2.resize((sample_size, sample_size)).convert("RGB")
-    p1 = list(s1.getdata())
-    p2 = list(s2.getdata())
+    b1 = s1.tobytes()
+    b2 = s2.tobytes()
     total_diff = 0
-    for (r1, g1, b1), (r2, g2, b2) in zip(p1, p2):
-        total_diff += abs(r1 - r2) + abs(g1 - g2) + abs(b1 - b2)
-    max_diff = len(p1) * 3 * 255
+    for v1, v2 in zip(b1, b2):
+        total_diff += abs(v1 - v2)
+    max_diff = len(b1) * 255
     return total_diff / max_diff if max_diff > 0 else 0.0
 
 
@@ -5324,10 +5324,14 @@ def execute_login(cmd):
         if not window:
             window = find_window(env, client=client)
         if not window:
-            for attempt in range(1, 6):
-                print(f"  [login] {env} {client}: no window found, retry {attempt}/5 in 3s...")
+            max_retries = 10 if client == "text" else 5
+            for attempt in range(1, max_retries + 1):
+                print(f"  [login] {env} {client}: no window found, retry {attempt}/{max_retries} in 3s...")
                 time.sleep(3)
-                window = find_window(env, client=client)
+                if target_hwnd:
+                    window = find_window_by_hwnd(target_hwnd)
+                if not window:
+                    window = find_window(env, client=client)
                 if window:
                     break
         if not window:
