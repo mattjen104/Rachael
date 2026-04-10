@@ -2095,7 +2095,7 @@ ${fullHtml}`;
       return fail("[cwp] Chrome extension bridge not connected. CWP requires your real browser session.\nRun: bridge-status");
     }
     const showRaw = args.includes("--raw");
-    const result = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-cwp", { maxText: 30000 }, 60000);
+    const result = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-cwp", { maxText: 30000, reuseTab: true }, 60000);
     if (result.error) return fail(`[cwp] ${result.error}`);
 
     const text = result.text || "";
@@ -3233,13 +3233,18 @@ ${fullHtml}`;
 
   let citrixKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
   const CITRIX_KEEPALIVE_INTERVAL = 10 * 60 * 1000;
+  let sharedCwpTabId: number | null = null;
+  let citrixKeepalivePaused = false;
 
   async function doCitrixPing(): Promise<void> {
     try {
+      if (citrixKeepalivePaused) {
+        return;
+      }
       const cfg = await storage.getAgentConfig("citrix_keepalive");
       if (cfg?.value !== "true") { stopCitrixKeepalive(); return; }
 
-      const { isExtensionConnected, smartFetch } = await import("./bridge-queue");
+      const { isExtensionConnected, submitJob, waitForResult } = await import("./bridge-queue");
       if (!isExtensionConnected()) {
         emitEvent("citrix", "Keepalive skipped — bridge not connected", "warn");
         return;
@@ -3254,7 +3259,11 @@ ${fullHtml}`;
         } catch {}
       }
 
-      const result = await smartFetch(portalUrl, "dom", "citrix-keepalive", { maxText: 1000 }, 30000);
+      const opts: Record<string, any> = { maxText: 1000, reuseTab: true };
+      if (sharedCwpTabId) opts.reuseTabId = sharedCwpTabId;
+      const jobId = submitJob("dom", portalUrl, "citrix-keepalive", opts);
+      const result = await waitForResult(jobId, 30000);
+      if (result.tabId) sharedCwpTabId = result.tabId;
       const status = result.error ? `error: ${result.error}` : "OK";
       await storage.setAgentConfig("citrix_last_ping", new Date().toISOString(), "citrix");
       emitEvent("citrix", `Keepalive ping: ${status}`, result.error ? "warn" : "info");
@@ -3276,6 +3285,14 @@ ${fullHtml}`;
       citrixKeepaliveTimer = null;
       emitEvent("citrix", "Keepalive timer stopped", "info");
     }
+  }
+
+  function pauseCitrixKeepalive(): void {
+    citrixKeepalivePaused = true;
+  }
+
+  function resumeCitrixKeepalive(): void {
+    citrixKeepalivePaused = false;
   }
 
   (async () => {
@@ -3653,6 +3670,7 @@ ${fullHtml}`;
 
     const result = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix", {
       maxText: 60000,
+      reuseTab: true,
       selectors: {
         apps: '[class*="app"] a, [class*="App"] a, [data-testid*="app"] a, .storeapp-icon a, .store-app a, a[href*="launch"], a[href*="app"], [class*="resource"] a, [role="listitem"] a, .citrix-resource a, button[class*="app"], [class*="appCard"] a, [class*="tile"] a, a[class*="launch"], [class*="StoreApp"] a',
         allLinks: 'a[href]',
@@ -6818,12 +6836,14 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       }
     };
 
-    const sendAgentLogin = async (env: string, client: string, username: string, password: string): Promise<string> => {
+    const sendAgentLogin = async (env: string, client: string, username: string, password: string, hwnd?: number | null): Promise<string> => {
       try {
+        const payload: Record<string, any> = { type: "login", env, client, credentials: { username, password } };
+        if (hwnd) payload.hwnd = hwnd;
         const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
-          body: JSON.stringify({ type: "login", env, client, credentials: { username, password } }),
+          body: JSON.stringify(payload),
         });
         const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
         if (!data.ok || !data.commandId) return "login queue failed";
@@ -6854,7 +6874,63 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       }
     };
 
-    let cwpTabId: number | null = null;
+    let cwpTabId: number | null = sharedCwpTabId;
+
+    const sendAgentSnapshot = async (): Promise<boolean> => {
+      try {
+        const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+          body: JSON.stringify({ type: "snapshot_windows" }),
+        });
+        const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
+        if (!data.ok || !data.commandId) return false;
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < 10000) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          try {
+            const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
+            const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { count?: number } } : {};
+            if (rData.status === "complete") {
+              emitEvent("cli", `Window snapshot: ${rData.data?.count ?? 0} windows recorded`, "info", { metadata: { command: "boot" } });
+              return true;
+            }
+          } catch {}
+        }
+        return false;
+      } catch { return false; }
+    };
+
+    const sendAgentDetectNew = async (env: string): Promise<{ hwnd: number | null; classification: string; title: string }> => {
+      try {
+        const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+          body: JSON.stringify({ type: "detect_new_window", env }),
+        });
+        const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
+        if (!data.ok || !data.commandId) return { hwnd: null, classification: "unknown", title: "" };
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < 15000) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          try {
+            const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
+            const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { best?: { hwnd?: number; classification?: string; title?: string }; newWindows?: any[] } } : {};
+            if (rData.status === "complete") {
+              const best = rData.data?.best;
+              const newCount = rData.data?.newWindows?.length ?? 0;
+              if (best?.hwnd) {
+                emitEvent("cli", `New window detected: '${best.title}' (${best.classification}, hwnd=${best.hwnd})`, "info", { metadata: { command: "boot" } });
+                return { hwnd: best.hwnd, classification: best.classification || "unknown", title: best.title || "" };
+              }
+              emitEvent("cli", `No matching new window found (${newCount} new windows total)`, "warn", { metadata: { command: "boot" } });
+              return { hwnd: null, classification: "unknown", title: "" };
+            }
+          } catch {}
+        }
+        return { hwnd: null, classification: "unknown", title: "" };
+      } catch { return { hwnd: null, classification: "unknown", title: "" }; }
+    };
 
     const checkAgentWindowExists = async (env: string, client: string): Promise<boolean> => {
       try {
@@ -6894,7 +6970,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         if (cwpTabId) opts.reuseTabId = cwpTabId;
         const jobId = submitJob("dom", portalUrl, "boot-workspace", opts);
         const result = await waitForResult(jobId, 30000);
-        if (result.tabId) cwpTabId = result.tabId;
+        if (result.tabId) { cwpTabId = result.tabId; sharedCwpTabId = result.tabId; }
         const debug = result.clickDebug || {};
         if (debug.error) {
           const availApps = debug.availableApps ? ` Available: ${debug.availableApps.slice(0, 10).join(", ")}` : "";
@@ -6965,7 +7041,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               maxText: 5000,
             });
             const cwpResult = await waitForResult(jobId, 60000);
-            if (cwpResult.tabId) cwpTabId = cwpResult.tabId;
+            if (cwpResult.tabId) { cwpTabId = cwpResult.tabId; sharedCwpTabId = cwpResult.tabId; }
             if (cwpResult.error) return `failed: ${cwpResult.error.substring(0, 80)}`;
           } catch (e: any) {
             return `failed: ${e.message?.substring(0, 60) || "unknown"}`;
@@ -6995,7 +7071,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (cwpTabId) opts.reuseTabId = cwpTabId;
               const jobId = submitJob("dom", "https://cwp.ucsd.edu", "boot-duo-check", opts);
               const check = await waitForResult(jobId, 15000);
-              if (check.tabId) cwpTabId = check.tabId;
+              if (check.tabId) { cwpTabId = check.tabId; sharedCwpTabId = check.tabId; }
               const text = check.text || "";
               if (text.includes("Citrix") || text.includes("StoreFront") || text.includes("Desktops") || text.includes("Apps")) {
                 return "done (Duo approved)";
@@ -7094,7 +7170,10 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               }
             }
 
+            let detectedHwnd: number | null = null;
             if (!windowAlreadyExists) {
+              if (agentUp) await sendAgentSnapshot();
+
               emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
@@ -7105,6 +7184,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
                 if (!detected) {
                   await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
                 }
+                const newWin = await sendAgentDetectNew(env);
+                if (newWin.hwnd) detectedHwnd = newWin.hwnd;
               } else {
                 await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
               }
@@ -7116,7 +7197,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (!agentUp) return "launched (agent not connected)";
 
               emitEvent("cli", `Logging into ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
-              const loginResult = await sendAgentLogin(env, "hyperspace", epicUser, epicPass);
+              const loginResult = await sendAgentLogin(env, "hyperspace", epicUser, epicPass, detectedHwnd);
               await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
 
               if (isLoginSuccess(loginResult)) {
@@ -7152,7 +7233,10 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               }
             }
 
+            let textDetectedHwnd: number | null = null;
             if (!textWindowExists) {
+              if (agentUp) await sendAgentSnapshot();
+
               emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.text!.app, group.portal);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
@@ -7163,6 +7247,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
                 if (!detected) {
                   await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
                 }
+                const newWin = await sendAgentDetectNew(env);
+                if (newWin.hwnd) textDetectedHwnd = newWin.hwnd;
               } else {
                 await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
               }
@@ -7174,7 +7260,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (!agentUp) return "launched (agent not connected)";
 
               emitEvent("cli", `Logging into ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
-              const loginResult = await sendAgentLogin(env, "text", epicUser, epicPass);
+              const loginResult = await sendAgentLogin(env, "text", epicUser, epicPass, textDetectedHwnd);
               await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
 
               if (!isLoginSuccess(loginResult)) {
@@ -7250,6 +7336,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       },
     });
 
+    pauseCitrixKeepalive();
     const lines = ["=== MORNING BOOT ===", ""];
     let failed = 0;
     let aborted = false;
@@ -7277,6 +7364,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       }
     }
 
+    resumeCitrixKeepalive();
     await storage.setAgentConfig("boot_last_run", new Date().toISOString(), "boot");
     await storage.setAgentConfig("boot_abort", "false", "boot");
 

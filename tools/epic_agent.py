@@ -640,6 +640,16 @@ recording_state = {
 }
 
 
+_window_snapshot = {}
+
+
+def find_window_by_hwnd(hwnd):
+    for w in gw.getAllWindows():
+        if getattr(w, '_hWnd', None) == hwnd:
+            return w
+    return None
+
+
 def find_window(env, client=None):
     """Find a window for the given env, optionally filtered by client type."""
     env_upper = env.upper()
@@ -4822,7 +4832,7 @@ def _verify_login_result(window, method, pw_method=None):
     Only saves proven method if login is confirmed successful.
     Uses pw_method if it differs from username method (both worked)."""
     try:
-        time.sleep(2.0)
+        time.sleep(0.5)
         img = screenshot_window(window)
         b64 = img_to_base64(img)
         prompt = f"""Look at this screenshot. Is this showing:
@@ -4890,7 +4900,10 @@ def _login_text_window(window, label, username, password):
     proven = _load_proven_login_method()
     try:
         activate_window(window)
-        time.sleep(0.5)
+        time.sleep(0.3)
+
+        if _uia_focus_input_field(window):
+            time.sleep(0.2)
 
         for login_round in range(1, 3):
             round_label = f"login {login_round}/2" if login_round == 1 else "second login"
@@ -4920,7 +4933,7 @@ def _login_text_window(window, label, username, password):
                 _keybd_event_key(0x0D, up=False)
                 time.sleep(0.02)
                 _keybd_event_key(0x0D, up=True)
-                time.sleep(1.5)
+                _wait_for_screen_change(window, timeout=5.0, poll_interval=0.3)
 
                 print(f"  [login] {label}: {round_label} — typing password")
                 pw_success, pw_method = _adaptive_type_text(window, password, "password prompt", method, is_password=True)
@@ -4931,16 +4944,16 @@ def _login_text_window(window, label, username, password):
             _keybd_event_key(0x0D, up=False)
             time.sleep(0.02)
             _keybd_event_key(0x0D, up=True)
-            time.sleep(2.0)
+            _wait_for_screen_change(window, timeout=5.0, poll_interval=0.3)
 
             activate_window(window)
-            time.sleep(0.5)
+            time.sleep(0.3)
             screen_state, desc = _check_text_login_screen(window)
 
             if screen_state == "LOGGED_IN":
                 if login_round == 1:
                     print(f"  [login] {label}: first login succeeded, checking for second prompt...")
-                    time.sleep(1.0)
+                    time.sleep(0.5)
                     screen_state2, _ = _check_text_login_screen(window)
                     if screen_state2 in ("LOGIN_PROMPT", "PASSWORD_PROMPT"):
                         print(f"  [login] {label}: second login prompt detected, repeating credentials")
@@ -5014,7 +5027,13 @@ def _login_hyperspace_window(window, label, username, password):
     proven = _load_proven_login_method()
     try:
         activate_window(window)
-        time.sleep(1.0)
+        time.sleep(0.5)
+
+        if _uia_focus_input_field(window):
+            time.sleep(0.2)
+        else:
+            print(f"  [login] {label}: UIA field focus unavailable, using default focus")
+            time.sleep(0.5)
 
         print(f"  [login] {label}: typing username (vision-verified, window: {window.title})")
         success, method = _adaptive_type_text(window, username, "username field", proven)
@@ -5037,24 +5056,202 @@ def _login_hyperspace_window(window, label, username, password):
         time.sleep(0.2)
         print(f"  [login] {label}: sending Alt+O (login submit)")
         _send_alt_o()
-        time.sleep(5.0)
+        _wait_for_screen_change(window, timeout=8.0)
+        time.sleep(0.5)
 
         activate_window(window)
         time.sleep(0.2)
         print(f"  [login] {label}: sending Alt+O (department continue)")
         _send_alt_o()
-        time.sleep(3.0)
+        _wait_for_screen_change(window, timeout=5.0)
+        time.sleep(0.3)
 
         activate_window(window)
         time.sleep(0.2)
         print(f"  [login] {label}: sending Alt+O (message continue)")
         _send_alt_o()
-        time.sleep(3.0)
+        _wait_for_screen_change(window, timeout=5.0)
+        time.sleep(0.3)
 
         return _verify_login_result(window, method, pw_method)
 
     except Exception as e:
         return False, str(e)[:60]
+
+
+def _uia_focus_input_field(window, field_type="edit"):
+    """Use pywinauto UIA to find and focus an input field in the window.
+    Returns True if a field was found and focused, False otherwise."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return False
+    try:
+        desktop = Desktop(backend="uia")
+        hwnd = getattr(window, '_hWnd', None)
+        if not hwnd:
+            return False
+        target = None
+        for w in desktop.windows():
+            try:
+                if w.element_info.handle == hwnd:
+                    target = w
+                    break
+            except Exception:
+                continue
+        if not target:
+            return False
+        edits = target.descendants(control_type="Edit")
+        for edit in edits:
+            try:
+                if edit.is_enabled() and edit.is_visible():
+                    edit.set_focus()
+                    print(f"  [uia] Focused Edit control: '{edit.element_info.name or 'unnamed'}'")
+                    return True
+            except Exception:
+                continue
+        panes = target.descendants(control_type="Pane")
+        for pane in panes:
+            try:
+                if pane.is_enabled() and pane.is_visible():
+                    rect = pane.rectangle()
+                    if rect.width() > 50 and rect.height() > 20:
+                        pane.set_focus()
+                        print(f"  [uia] Focused Pane: '{pane.element_info.name or 'unnamed'}'")
+                        return True
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"  [uia] Field focus failed: {e}")
+    return False
+
+
+def _wait_for_screen_change(window, timeout=8.0, poll_interval=0.5, threshold=0.02):
+    """Poll until the window screenshot changes significantly or timeout.
+    Returns True if a change was detected, False on timeout."""
+    try:
+        import numpy as np
+        baseline = ImageGrab.grab(bbox=(window.left, window.top, window.left + window.width, window.top + window.height), include_layered_windows=True)
+        baseline_arr = np.array(baseline.resize((320, 200)))
+        start = time.time()
+        while time.time() - start < timeout:
+            time.sleep(poll_interval)
+            current = ImageGrab.grab(bbox=(window.left, window.top, window.left + window.width, window.top + window.height), include_layered_windows=True)
+            current_arr = np.array(current.resize((320, 200)))
+            diff = np.mean(np.abs(current_arr.astype(float) - baseline_arr.astype(float))) / 255.0
+            if diff > threshold:
+                print(f"  [poll] Screen change detected ({diff:.3f} > {threshold}) after {time.time() - start:.1f}s")
+                return True
+        print(f"  [poll] No screen change after {timeout}s timeout")
+        return False
+    except Exception as e:
+        print(f"  [poll] Screen change poll error: {e}, falling back to sleep")
+        time.sleep(timeout * 0.5)
+        return False
+
+
+def _classify_window_uia(hwnd):
+    """Read a shallow accessibility tree of a window by hwnd and classify it."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return "unknown"
+    try:
+        desktop = Desktop(backend="uia")
+        target = None
+        for w in desktop.windows():
+            try:
+                if w.element_info.handle == hwnd:
+                    target = w
+                    break
+            except Exception:
+                continue
+        if not target:
+            return "unknown"
+        title = (target.element_info.name or "").upper()
+        if "HYPERSPACE" in title or "EPIC" in title or "HYPERDRIVE" in title:
+            return "hyperspace"
+        texts = []
+        try:
+            for child in target.descendants(depth=3):
+                try:
+                    name = child.element_info.name or ""
+                    ctrl_type = child.element_info.control_type or ""
+                    if name:
+                        texts.append(name.lower())
+                    if ctrl_type == "Edit":
+                        texts.append("[edit_control]")
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        combined = " ".join(texts)
+        if "login" in combined or "password" in combined or "user" in combined or "[edit_control]" in combined:
+            return "text_login"
+        if any(kw in combined for kw in ["patient", "schedule", "menu", "command", "epic"]):
+            return "logged_in"
+        return "other"
+    except Exception as e:
+        print(f"  [uia] Classification error: {e}")
+        return "unknown"
+
+
+def execute_snapshot_windows(cmd):
+    """Snapshot all current window handles and titles."""
+    global _window_snapshot
+    command_id = cmd.get("id", "unknown")
+    _window_snapshot = {}
+    for w in gw.getAllWindows():
+        hwnd = getattr(w, '_hWnd', None)
+        title = w.title or ""
+        if hwnd and title.strip():
+            _window_snapshot[hwnd] = title
+    count = len(_window_snapshot)
+    print(f"  [snapshot] Captured {count} windows")
+    post_result(command_id, "complete", data={"count": count})
+
+
+def execute_detect_new_window(cmd):
+    """Detect new windows that appeared after the last snapshot.
+    Classifies each via shallow UIA tree inspection."""
+    global _window_snapshot
+    command_id = cmd.get("id", "unknown")
+    env_hint = cmd.get("env", "").upper()
+    new_windows = []
+    for w in gw.getAllWindows():
+        hwnd = getattr(w, '_hWnd', None)
+        title = w.title or ""
+        if hwnd and title.strip() and hwnd not in _window_snapshot:
+            if w.width > 50 and w.height > 50:
+                classification = _classify_window_uia(hwnd)
+                new_windows.append({
+                    "hwnd": hwnd,
+                    "title": title,
+                    "classification": classification,
+                    "width": w.width,
+                    "height": w.height,
+                })
+                print(f"  [detect] New window: '{title}' (hwnd={hwnd}, class={classification})")
+    if not new_windows:
+        all_current = [(getattr(w, '_hWnd', None), w.title) for w in gw.getAllWindows() if w.title and w.title.strip()]
+        print(f"  [detect] No new windows found. Current: {len(all_current)}, Snapshot: {len(_window_snapshot)}")
+    best = None
+    if env_hint and new_windows:
+        for nw in new_windows:
+            if env_hint in nw["title"].upper():
+                best = nw
+                break
+    if not best and new_windows:
+        for nw in new_windows:
+            if nw["classification"] in ("hyperspace", "text_login"):
+                best = nw
+                break
+    if not best and new_windows:
+        best = new_windows[0]
+    post_result(command_id, "complete", data={
+        "newWindows": new_windows,
+        "best": best,
+    })
 
 
 def execute_login(cmd):
@@ -5069,6 +5266,7 @@ def execute_login(cmd):
 
     target_env = cmd.get("env", "").upper() if cmd.get("env") else ""
     target_client = cmd.get("client", "")
+    target_hwnd = cmd.get("hwnd")
 
     if target_env and target_client:
         envs_clients = [(target_env, target_client)]
@@ -5081,7 +5279,15 @@ def execute_login(cmd):
     logged_in = 0
 
     for env, client in envs_clients:
-        window = find_window(env, client=client)
+        window = None
+        if target_hwnd:
+            window = find_window_by_hwnd(target_hwnd)
+            if window:
+                print(f"  [login] {env} {client}: found window by hwnd={target_hwnd} ('{window.title}')")
+            else:
+                print(f"  [login] {env} {client}: hwnd={target_hwnd} not found, falling back to title search")
+        if not window:
+            window = find_window(env, client=client)
         if not window:
             for attempt in range(1, 6):
                 print(f"  [login] {env} {client}: no window found, retry {attempt}/5 in 3s...")
@@ -5177,6 +5383,10 @@ def execute_command(cmd):
             execute_shortcuts(cmd)
         elif cmd_type == "check_windows":
             execute_check_windows(cmd)
+        elif cmd_type == "snapshot_windows":
+            execute_snapshot_windows(cmd)
+        elif cmd_type == "detect_new_window":
+            execute_detect_new_window(cmd)
         elif cmd_type == "login":
             execute_login(cmd)
         else:
