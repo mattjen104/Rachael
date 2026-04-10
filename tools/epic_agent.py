@@ -4993,7 +4993,12 @@ def _login_text_window(window, label, username, password):
 
             activate_window(window)
             time.sleep(0.1)
-            pre_state, _ = _check_text_screen_fast(window)
+
+            if login_round == 1:
+                pre_state = "LOGIN_PROMPT"
+                print(f"  [login] {label}: {round_label} — assuming LOGIN_PROMPT (skip screen check for speed)")
+            else:
+                pre_state, _ = _check_text_screen_fast(window)
 
             if pre_state == "LOGGED_IN":
                 print(f"  [login] {label}: {round_label} — already logged in")
