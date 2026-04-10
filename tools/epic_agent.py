@@ -4979,11 +4979,17 @@ def _check_text_screen_fast(window):
 def _login_text_window(window, label, username, password):
     """Login to a Text/terminal window using adaptive input methods.
     Handles up to 2 sequential login prompts (system login then Epic login).
-    Uses UIA accessibility tree for fast screen classification (<100ms)."""
+    Uses UIA accessibility tree for fast screen classification (<100ms).
+    Checks for already-logged-in state before attempting any keystrokes."""
     proven = _load_proven_login_method()
     try:
         activate_window(window)
         time.sleep(0.15)
+
+        pre_state, pre_desc = _check_text_screen_fast(window)
+        if pre_state == "LOGGED_IN":
+            print(f"  [login] {label}: already logged in (detected via UIA: {pre_desc})")
+            return True, "already logged in"
 
         if _uia_focus_input_field(window):
             time.sleep(0.1)
@@ -5112,14 +5118,83 @@ def _adaptive_type_text_no_verify(window, text, field_description, proven_method
     return False, None
 
 
+def _is_window_past_login_uia(window):
+    """Check if a window is past the login screen using the UIA accessibility tree.
+    Returns: 'LOGGED_IN', 'LOGIN_SCREEN', or 'UNKNOWN'.
+    Uses tri-state logic: only returns LOGGED_IN with positive evidence (app controls).
+    Returns UNKNOWN when uncertain — caller should proceed with normal flow.
+    Fast: <100ms. No vision/LLM calls."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return "UNKNOWN"
+    try:
+        desktop = Desktop(backend="uia")
+        hwnd = getattr(window, '_hWnd', None)
+        if not hwnd:
+            return "UNKNOWN"
+        target = None
+        for w in desktop.windows():
+            try:
+                if w.element_info.handle == hwnd:
+                    target = w
+                    break
+            except Exception:
+                continue
+        if not target:
+            return "UNKNOWN"
+        children = target.descendants(depth=3)
+        has_login_edits = False
+        visible_edits = 0
+        has_app_controls = False
+        app_control_types = frozenset(["MenuBar", "ToolBar", "StatusBar", "TabControl", "DataGrid", "TreeView"])
+        for child in children:
+            try:
+                ct = child.element_info.control_type or ""
+                if ct == "Edit" and child.is_enabled() and child.is_visible():
+                    visible_edits += 1
+                    name = (child.element_info.name or "").lower()
+                    if any(kw in name for kw in ("user", "login", "password", "credential")):
+                        has_login_edits = True
+                if ct in app_control_types:
+                    has_app_controls = True
+            except Exception:
+                continue
+        if has_login_edits:
+            print(f"  [uia] Found login Edit control(s) — login screen detected")
+            return "LOGIN_SCREEN"
+        if has_app_controls and visible_edits == 0:
+            print(f"  [uia] App controls found (menus/toolbars), no Edit fields — already logged in")
+            return "LOGGED_IN"
+        if has_app_controls and visible_edits > 0:
+            print(f"  [uia] App controls found with {visible_edits} Edit(s) (search/filter bars) — already logged in")
+            return "LOGGED_IN"
+        if not has_app_controls and visible_edits > 0:
+            print(f"  [uia] {visible_edits} Edit(s) but no app controls — uncertain, treating as login screen")
+            return "LOGIN_SCREEN"
+        print(f"  [uia] No Edit controls and no app controls — uncertain state")
+        return "UNKNOWN"
+    except Exception as e:
+        print(f"  [uia] _is_window_past_login_uia failed: {e}")
+    return "UNKNOWN"
+
+
 def _login_hyperspace_window(window, label, username, password):
     """Login to a Hyperspace/Hyperdrive GUI window using keyboard-only flow.
     Username field is already focused when window launches maximized from Citrix.
-    Alt+O submits login, selects department, and confirms (3 presses)."""
+    Alt+O submits login, selects department, and confirms (3 presses).
+    Checks UIA accessibility tree first — skips login if already logged in."""
     proven = _load_proven_login_method()
     try:
         activate_window(window)
         time.sleep(0.15)
+
+        uia_state = _is_window_past_login_uia(window)
+        if uia_state == "LOGGED_IN":
+            print(f"  [login] {label}: already logged in (app controls detected via UIA, no login fields)")
+            return True, "already logged in"
+        elif uia_state == "LOGIN_SCREEN":
+            print(f"  [login] {label}: login screen detected via UIA, proceeding with credentials")
 
         if _uia_focus_input_field(window):
             time.sleep(0.1)
