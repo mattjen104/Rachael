@@ -7013,22 +7013,6 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       }
     };
 
-    const waitForAgentWindow = async (env: string, client: string, timeoutMs: number = 30000): Promise<boolean> => {
-      const POLL_INTERVAL = 3000;
-      const start = Date.now();
-      while (Date.now() - start < timeoutMs) {
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
-        if (await checkAbort()) return false;
-        const found = await checkAgentWindowExists(env, client);
-        if (found) {
-          emitEvent("cli", `${env} ${client} window detected`, "info", { metadata: { command: "boot" } });
-          return true;
-        }
-      }
-      emitEvent("cli", `${env} ${client} window not detected after ${timeoutMs / 1000}s`, "warn", { metadata: { command: "boot" } });
-      return false;
-    };
-
     if (!skipLogin) {
       steps.push({
         name: "Epic Login (CWP)",
@@ -7183,13 +7167,14 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
             let detectedHwnd: number | null = null;
             if (!windowAlreadyExists) {
-              if (agentUp) await sendAgentSnapshot();
+              let snapshotOk = false;
+              if (agentUp) snapshotOk = await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
-              if (agentUp) {
+              if (agentUp && snapshotOk) {
                 emitEvent("cli", `Waiting for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
                 const newWin = await pollForNewWindow(env, 45000);
                 if (newWin.hwnd) {
@@ -7246,13 +7231,14 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
             let textDetectedHwnd: number | null = null;
             if (!textWindowExists) {
-              if (agentUp) await sendAgentSnapshot();
+              let textSnapshotOk = false;
+              if (agentUp) textSnapshotOk = await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.text!.app, group.portal);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
-              if (agentUp) {
+              if (agentUp && textSnapshotOk) {
                 emitEvent("cli", `Waiting for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
                 const newWin = await pollForNewWindow(env, 45000);
                 if (newWin.hwnd) {
