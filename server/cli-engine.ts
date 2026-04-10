@@ -6930,6 +6930,19 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       } catch { return { hwnd: null, classification: "unknown", title: "" }; }
     };
 
+    const pollForNewWindow = async (env: string, timeoutMs: number = 45000): Promise<{ hwnd: number | null; classification: string; title: string }> => {
+      const POLL_INTERVAL = 3000;
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+        if (await checkAbort()) return { hwnd: null, classification: "unknown", title: "" };
+        const result = await sendAgentDetectNew(env);
+        if (result.hwnd) return result;
+      }
+      emitEvent("cli", `No new ${env} window detected after ${timeoutMs / 1000}s`, "warn", { metadata: { command: "boot" } });
+      return { hwnd: null, classification: "unknown", title: "" };
+    };
+
     const checkAgentWindowExists = async (env: string, client: string): Promise<boolean> => {
       try {
         const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
@@ -7169,9 +7182,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             }
 
             let detectedHwnd: number | null = null;
-            let snapshotOk = false;
             if (!windowAlreadyExists) {
-              if (agentUp) snapshotOk = await sendAgentSnapshot();
+              if (agentUp) await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
@@ -7179,13 +7191,11 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
               if (agentUp) {
                 emitEvent("cli", `Waiting for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
-                const detected = await waitForAgentWindow(env, "hyperspace", 30000);
-                if (!detected) {
+                const newWin = await pollForNewWindow(env, 30000);
+                if (newWin.hwnd) {
+                  detectedHwnd = newWin.hwnd;
+                } else {
                   await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
-                }
-                if (snapshotOk) {
-                  const newWin = await sendAgentDetectNew(env);
-                  if (newWin.hwnd) detectedHwnd = newWin.hwnd;
                 }
               } else {
                 await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
@@ -7235,9 +7245,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             }
 
             let textDetectedHwnd: number | null = null;
-            let textSnapshotOk = false;
             if (!textWindowExists) {
-              if (agentUp) textSnapshotOk = await sendAgentSnapshot();
+              if (agentUp) await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
               const launchResult = await launchCitrixApp(group.text!.app, group.portal);
@@ -7245,13 +7254,11 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
               if (agentUp) {
                 emitEvent("cli", `Waiting for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
-                const detected = await waitForAgentWindow(env, "text", 45000);
-                if (!detected) {
+                const newWin = await pollForNewWindow(env, 45000);
+                if (newWin.hwnd) {
+                  textDetectedHwnd = newWin.hwnd;
+                } else {
                   await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));
-                }
-                if (textSnapshotOk) {
-                  const newWin = await sendAgentDetectNew(env);
-                  if (newWin.hwnd) textDetectedHwnd = newWin.hwnd;
                 }
               } else {
                 await new Promise(resolve => setTimeout(resolve, APP_OPEN_WAIT_MS));

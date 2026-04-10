@@ -4919,16 +4919,16 @@ def _login_text_window(window, label, username, password):
     proven = _load_proven_login_method()
     try:
         activate_window(window)
-        time.sleep(0.3)
+        time.sleep(0.15)
 
         if _uia_focus_input_field(window):
-            time.sleep(0.2)
+            time.sleep(0.1)
 
         for login_round in range(1, 3):
             round_label = f"login {login_round}/2" if login_round == 1 else "second login"
 
             activate_window(window)
-            time.sleep(0.3)
+            time.sleep(0.15)
             pre_state, _ = _check_text_login_screen(window)
 
             if pre_state == "LOGGED_IN":
@@ -4952,10 +4952,10 @@ def _login_text_window(window, label, username, password):
                 _keybd_event_key(0x0D, up=False)
                 time.sleep(0.02)
                 _keybd_event_key(0x0D, up=True)
-                _wait_for_screen_change(window, timeout=5.0, poll_interval=0.3)
+                _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
 
                 activate_window(window)
-                time.sleep(0.3)
+                time.sleep(0.15)
                 _uia_focus_input_field(window)
 
                 print(f"  [login] {label}: {round_label} — typing password (blind)")
@@ -4963,14 +4963,14 @@ def _login_text_window(window, label, username, password):
                 if not pw_success:
                     return False, f"all input methods failed for password ({round_label})"
 
-            time.sleep(0.3)
+            time.sleep(0.1)
             _keybd_event_key(0x0D, up=False)
             time.sleep(0.02)
             _keybd_event_key(0x0D, up=True)
-            _wait_for_screen_change(window, timeout=5.0, poll_interval=0.3)
+            _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
 
             activate_window(window)
-            time.sleep(0.3)
+            time.sleep(0.15)
             screen_state, desc = _check_text_login_screen(window)
 
             if screen_state == "LOGGED_IN":
@@ -5050,13 +5050,13 @@ def _login_hyperspace_window(window, label, username, password):
     proven = _load_proven_login_method()
     try:
         activate_window(window)
-        time.sleep(0.5)
+        time.sleep(0.15)
 
         if _uia_focus_input_field(window):
-            time.sleep(0.2)
+            time.sleep(0.1)
         else:
             print(f"  [login] {label}: UIA field focus unavailable, using default focus")
-            time.sleep(0.5)
+            time.sleep(0.15)
 
         print(f"  [login] {label}: typing username (vision-verified, window: {window.title})")
         success, method = _adaptive_type_text(window, username, "username field", proven)
@@ -5067,34 +5067,31 @@ def _login_hyperspace_window(window, label, username, password):
         _keybd_event_key(0x09, up=False)
         time.sleep(0.02)
         _keybd_event_key(0x09, up=True)
-        time.sleep(0.3)
+        time.sleep(0.1)
 
         print(f"  [login] {label}: typing password (using proven method: {method})")
         pw_success, pw_method = _adaptive_type_text_no_verify(window, password, "password field", method)
         if not pw_success:
             return False, "all input methods failed for password"
-        time.sleep(0.3)
+        time.sleep(0.1)
 
         activate_window(window)
-        time.sleep(0.2)
+        time.sleep(0.1)
         print(f"  [login] {label}: sending Alt+O (login submit)")
         _send_alt_o()
-        _wait_for_screen_change(window, timeout=8.0)
-        time.sleep(0.5)
+        _wait_for_screen_change(window, timeout=5.0, poll_interval=0.3)
 
         activate_window(window)
-        time.sleep(0.2)
+        time.sleep(0.1)
         print(f"  [login] {label}: sending Alt+O (department continue)")
         _send_alt_o()
-        _wait_for_screen_change(window, timeout=5.0)
-        time.sleep(0.3)
+        _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
 
         activate_window(window)
-        time.sleep(0.2)
+        time.sleep(0.1)
         print(f"  [login] {label}: sending Alt+O (message continue)")
         _send_alt_o()
-        _wait_for_screen_change(window, timeout=5.0)
-        time.sleep(0.3)
+        _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
 
         return _verify_login_result(window, method, pw_method)
 
