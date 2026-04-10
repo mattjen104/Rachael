@@ -5492,7 +5492,7 @@ def execute_login(cmd):
 
         label = f"{env} {client}"
         already_open = not bool(target_hwnd)
-        print(f"  [login] Checking {label}: {window.title} (already_open={already_open})")
+        print(f"  [login] Checking {label}: {window.title} (already_open={already_open}, hwnd={'set' if target_hwnd else 'none'})")
 
         if client == "text":
             success, msg = _login_text_window(window, label, username, password, already_open=already_open)
