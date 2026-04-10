@@ -1858,17 +1858,6 @@ def execute_uia_tree(cmd):
     window_hwnd = int(target_window.element_info.handle) if target_window.element_info.handle else 0
     print(f"  [uia-tree] Found: {window_title}")
 
-    UIA_PATTERNS = [
-        ("InvokePattern", "LegacyIAccessiblePattern"),
-        ("ValuePattern", None),
-        ("ExpandCollapsePattern", None),
-        ("SelectionItemPattern", None),
-        ("TogglePattern", None),
-        ("ScrollPattern", None),
-        ("TextPattern", None),
-        ("RangeValuePattern", None),
-    ]
-
     total_scanned = [0]
 
     def scan_element(element, depth, parent_path):
@@ -1995,6 +1984,7 @@ def execute_uia_tree(cmd):
                     "automationId": auto_id,
                     "className": class_name,
                     "isEnabled": is_enabled,
+                    "isVisible": is_visible,
                     "depth": depth,
                     "path": element_path,
                     "patterns": patterns,
