@@ -4296,12 +4296,18 @@ ${fullHtml}`;
     }
 
     if (args[0] === "uia") {
-      const depthArgIdx = args.indexOf("--depth");
-      const rawDepth = depthArgIdx >= 0 ? parseInt(args[depthArgIdx + 1] || "4", 10) : 4;
-      const depthVal = Number.isFinite(rawDepth) ? Math.max(1, Math.min(rawDepth, 8)) : 4;
-      const skipIndices = new Set(depthArgIdx >= 0 ? [depthArgIdx, depthArgIdx + 1] : []);
-      const targetArgs = args.slice(1).filter((a, i) => !skipIndices.has(i));
-      const target = targetArgs.join(" ");
+      let depthVal = 4;
+      const positionalArgs: string[] = [];
+      for (let ai = 1; ai < args.length; ai++) {
+        if (args[ai] === "--depth" && ai + 1 < args.length) {
+          const raw = parseInt(args[ai + 1], 10);
+          depthVal = Number.isFinite(raw) ? Math.max(1, Math.min(raw, 8)) : 4;
+          ai++;
+        } else {
+          positionalArgs.push(args[ai]);
+        }
+      }
+      const target = positionalArgs.join(" ");
 
       const cacheResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/uia-tree`);
       const cacheData = await cacheResp.json() as any;
