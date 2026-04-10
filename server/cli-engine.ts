@@ -6909,8 +6909,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
         if (!data.ok || !data.commandId) return { hwnd: null, classification: "unknown", title: "" };
         const pollStart = Date.now();
-        while (Date.now() - pollStart < 15000) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        while (Date.now() - pollStart < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 500));
           try {
             const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
             const rData = rResp.ok ? await rResp.json() as { status?: string; data?: { best?: { hwnd?: number; classification?: string; title?: string }; newWindows?: any[] } } : {};
@@ -6931,7 +6931,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     };
 
     const pollForNewWindow = async (env: string, timeoutMs: number = 45000): Promise<{ hwnd: number | null; classification: string; title: string }> => {
-      const POLL_INTERVAL = 3000;
+      const POLL_INTERVAL = 1500;
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));

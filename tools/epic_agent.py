@@ -4885,8 +4885,62 @@ Return ONLY: {{"state": "error", "detail": "..."}} or {{"state": "logged_in"}} o
     return False, f"login verification failed (method: {method})"
 
 
+def _check_text_login_screen_uia(window):
+    """Use the accessibility tree to check Text window login state (<100ms vs 2-5s for LLM)."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return "UNKNOWN", "pywinauto not available"
+    try:
+        desktop = Desktop(backend="uia")
+        hwnd = getattr(window, '_hWnd', None)
+        if not hwnd:
+            return "UNKNOWN", "no hwnd"
+        target = None
+        for w in desktop.windows():
+            try:
+                if w.element_info.handle == hwnd:
+                    target = w
+                    break
+            except Exception:
+                continue
+        if not target:
+            return "UNKNOWN", "window not found in UIA"
+        texts = []
+        has_edit = False
+        try:
+            for child in target.descendants(depth=3):
+                try:
+                    name = (child.element_info.name or "").strip()
+                    ctrl_type = child.element_info.control_type or ""
+                    if ctrl_type == "Edit":
+                        has_edit = True
+                    if name:
+                        texts.append(name.lower())
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        combined = " ".join(texts)
+        if has_edit or "login" in combined or "user" in combined or "password" in combined:
+            if "password" in combined and "login" not in combined and "user" not in combined:
+                result = "PASSWORD_PROMPT"
+            else:
+                result = "LOGIN_PROMPT"
+        elif any(kw in combined for kw in ["patient", "schedule", "menu", "command", "epic", "welcome"]):
+            result = "LOGGED_IN"
+        else:
+            result = "UNKNOWN"
+        print(f"  [login] Text screen check (UIA): {result} (edit={has_edit}, texts={len(texts)})")
+        return result, combined[:200]
+    except Exception as e:
+        print(f"  [login] UIA screen check error: {e}")
+    return "UNKNOWN", ""
+
+
 def _check_text_login_screen(window):
-    """Use vision to check if a Text window is showing a login/credential prompt."""
+    """Use vision to check if a Text window is showing a login/credential prompt.
+    Slow fallback (~2-5s) — prefer _check_text_login_screen_uia."""
     try:
         img = screenshot_window(window)
         b64 = img_to_base64(img)
@@ -4906,16 +4960,26 @@ Then on the next line, a brief description of what you see."""
                 if tag in first_line:
                     normalized = tag
                     break
-            print(f"  [login] Text screen check: {normalized}")
+            print(f"  [login] Text screen check (vision): {normalized}")
             return normalized, resp
     except Exception as e:
         print(f"  [login] Text screen check error: {e}")
     return "UNKNOWN", ""
 
 
+def _check_text_screen_fast(window):
+    """Try UIA first (<100ms), fall back to LLM vision only if UIA returns UNKNOWN."""
+    state, desc = _check_text_login_screen_uia(window)
+    if state != "UNKNOWN":
+        return state, desc
+    print(f"  [login] UIA inconclusive, falling back to vision check")
+    return _check_text_login_screen(window)
+
+
 def _login_text_window(window, label, username, password):
     """Login to a Text/terminal window using adaptive input methods.
-    Handles up to 2 sequential login prompts (system login then Epic login)."""
+    Handles up to 2 sequential login prompts (system login then Epic login).
+    Uses UIA accessibility tree for fast screen classification (<100ms)."""
     proven = _load_proven_login_method()
     try:
         activate_window(window)
@@ -4928,8 +4992,8 @@ def _login_text_window(window, label, username, password):
             round_label = f"login {login_round}/2" if login_round == 1 else "second login"
 
             activate_window(window)
-            time.sleep(0.15)
-            pre_state, _ = _check_text_login_screen(window)
+            time.sleep(0.1)
+            pre_state, _ = _check_text_screen_fast(window)
 
             if pre_state == "LOGGED_IN":
                 print(f"  [login] {label}: {round_label} — already logged in")
@@ -4955,7 +5019,7 @@ def _login_text_window(window, label, username, password):
                 _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
 
                 activate_window(window)
-                time.sleep(0.15)
+                time.sleep(0.1)
                 _uia_focus_input_field(window)
 
                 print(f"  [login] {label}: {round_label} — typing password (blind)")
@@ -4970,14 +5034,14 @@ def _login_text_window(window, label, username, password):
             _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
 
             activate_window(window)
-            time.sleep(0.15)
-            screen_state, desc = _check_text_login_screen(window)
+            time.sleep(0.1)
+            screen_state, desc = _check_text_screen_fast(window)
 
             if screen_state == "LOGGED_IN":
                 if login_round == 1:
                     print(f"  [login] {label}: first login succeeded, checking for second prompt...")
-                    time.sleep(0.5)
-                    screen_state2, _ = _check_text_login_screen(window)
+                    time.sleep(0.3)
+                    screen_state2, _ = _check_text_screen_fast(window)
                     if screen_state2 in ("LOGIN_PROMPT", "PASSWORD_PROMPT"):
                         print(f"  [login] {label}: second login prompt detected, repeating credentials")
                         proven = method
@@ -5322,9 +5386,10 @@ def execute_login(cmd):
             window = find_window(env, client=client)
         if not window:
             max_retries = 10 if client == "text" else 5
+            retry_delay = 1.5 if client == "text" else 3
             for attempt in range(1, max_retries + 1):
-                print(f"  [login] {env} {client}: no window found, retry {attempt}/{max_retries} in 3s...")
-                time.sleep(3)
+                print(f"  [login] {env} {client}: no window found, retry {attempt}/{max_retries} in {retry_delay}s...")
+                time.sleep(retry_delay)
                 if target_hwnd:
                     window = find_window_by_hwnd(target_hwnd)
                 if not window:
