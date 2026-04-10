@@ -5283,13 +5283,8 @@ def execute_login(cmd):
         if target_hwnd:
             candidate = find_window_by_hwnd(target_hwnd)
             if candidate:
-                title_lower = (candidate.title or "").lower()
-                env_lower = env.lower()
-                if env_lower in title_lower or title_lower in env_lower:
-                    window = candidate
-                    print(f"  [login] {env} {client}: found window by hwnd={target_hwnd} ('{candidate.title}')")
-                else:
-                    print(f"  [login] {env} {client}: hwnd={target_hwnd} title '{candidate.title}' doesn't match env '{env}', falling back")
+                window = candidate
+                print(f"  [login] {env} {client}: using hwnd={target_hwnd} directly ('{candidate.title}')")
             else:
                 print(f"  [login] {env} {client}: hwnd={target_hwnd} not found, falling back to title search")
         if not window:

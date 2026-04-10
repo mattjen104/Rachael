@@ -2090,12 +2090,16 @@ ${fullHtml}`;
   });
 
   registerCommand("cwp", "Browse UCSD Citrix Workspace (cwp.ucsd.edu) via bridge", "cwp [--list] [--raw]", async (args) => {
-    const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+    const { submitJob, waitForResult, isExtensionConnected } = await import("./bridge-queue");
     if (!isExtensionConnected()) {
       return fail("[cwp] Chrome extension bridge not connected. CWP requires your real browser session.\nRun: bridge-status");
     }
     const showRaw = args.includes("--raw");
-    const result = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-cwp", { maxText: 30000, reuseTab: true }, 60000);
+    const opts: any = { maxText: 30000, reuseTab: true };
+    if (sharedCwpTabId) opts.reuseTabId = sharedCwpTabId;
+    const jobId = submitJob("dom", "https://cwp.ucsd.edu", "cli-cwp", opts);
+    const result = await waitForResult(jobId, 60000);
+    if (result.tabId) { sharedCwpTabId = result.tabId; }
     if (result.error) return fail(`[cwp] ${result.error}`);
 
     const text = result.text || "";
@@ -3661,14 +3665,14 @@ ${fullHtml}`;
       return ok(`Cleaned ${toDelete.length} junk/category items from APPS`);
     }
 
-    const { smartFetch, isExtensionConnected } = await import("./bridge-queue");
+    const { submitJob, waitForResult, isExtensionConnected } = await import("./bridge-queue");
     if (!isExtensionConnected()) {
       return fail("[citrix] Chrome extension bridge not connected. Citrix requires your real browser session.");
     }
     const save = args.includes("--save");
     emitEvent("cli", "Scraping Citrix workspace portal via bridge...", "info", { metadata: { command: "citrix" } });
 
-    const result = await smartFetch("https://cwp.ucsd.edu", "dom", "cli-citrix", {
+    const citrixOpts: any = {
       maxText: 60000,
       reuseTab: true,
       selectors: {
@@ -3676,7 +3680,11 @@ ${fullHtml}`;
         allLinks: 'a[href]',
         headings: 'h1, h2, h3, h4, [class*="title"], [class*="Title"], [class*="name"], [class*="Name"]',
       },
-    }, 60000);
+    };
+    if (sharedCwpTabId) citrixOpts.reuseTabId = sharedCwpTabId;
+    const citrixJobId = submitJob("dom", "https://cwp.ucsd.edu", "cli-citrix", citrixOpts);
+    const result = await waitForResult(citrixJobId, 60000);
+    if (result.tabId) { sharedCwpTabId = result.tabId; }
 
     if (result.error) return fail(`[citrix] ${result.error}`);
     const text = result.text || "";
