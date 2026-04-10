@@ -669,6 +669,7 @@ def find_hyperspace_window(env_upper):
 
 
 def find_text_window(env_upper):
+    HYPERSPACE_KEYWORDS = ("HYPERSPACE", "EPIC", "HYPERDRIVE")
     for w in gw.getAllWindows():
         title = w.title or ""
         t = title.upper()
@@ -679,6 +680,12 @@ def find_text_window(env_upper):
         t = title.upper()
         if env_upper in t and ("EXCEED" in t or "PUTTY" in t or "TERATERM" in t or "REFLECTION" in t or "ATTACHMATE" in t):
             return w
+    for w in gw.getAllWindows():
+        title = w.title or ""
+        t = title.upper().strip()
+        if t == env_upper or (env_upper in t and not any(kw in t for kw in HYPERSPACE_KEYWORDS) and w.width > 100 and w.height > 100):
+            if "COMPONENT DETAILS" not in t:
+                return w
     return None
 
 
