@@ -411,37 +411,50 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
     const recordedSessions: any[] = (data as any).recordedSessions || [];
     const transitionGraph: any = (data as any).transitionGraph || {};
     const sessionWindowTrees: Record<string, any> = (data as any).sessionWindowTrees || {};
+    const captureState: Record<string, any> | null = (data as any).captureState || null;
     const graphEdges = Object.values(transitionGraph) as any[];
     const windowTreeKeys = Object.keys(sessionWindowTrees);
 
-    if (recordedSessions.length > 0 || graphEdges.length > 0 || windowTreeKeys.length > 0) {
-      const totalItems = recordedSessions.length + windowTreeKeys.length;
-      nodes.push({ type: "section", label: "SESSIONS", key: "sessions", count: totalItems });
+    const hasCaptureActive = captureState && Object.keys(captureState).length > 0;
+    if (recordedSessions.length > 0 || graphEdges.length > 0 || windowTreeKeys.length > 0 || hasCaptureActive) {
+      const totalNodes = windowTreeKeys.reduce((sum, wk) => sum + Object.keys(sessionWindowTrees[wk]?.nodes || {}).length, 0);
+      const totalEdges = windowTreeKeys.reduce((sum, wk) => sum + (sessionWindowTrees[wk]?.edges || []).length, 0);
+      const captureLabel = hasCaptureActive ? " [RECORDING]" : "";
+      nodes.push({ type: "section", label: `NAVIGATION MAP${captureLabel}`, key: "sessions", count: totalNodes });
       if (expanded.has("sessions")) {
+        if (hasCaptureActive) {
+          const capKeys = Object.keys(captureState!);
+          for (const ck of capKeys) {
+            const cs = captureState![ck];
+            const elapsed = cs.elapsed_s ? `${Math.floor(cs.elapsed_s / 60)}m${cs.elapsed_s % 60}s` : "";
+            nodes.push({ type: "bridge-info", label: `  * ${(cs.window || ck).slice(0, 30)} ${elapsed} ${cs.nodes || 0}n/${cs.edges || 0}e/${cs.transitions || 0}t`, actionCmd: "" });
+          }
+        }
+
         for (const wk of windowTreeKeys) {
           const wTree = sessionWindowTrees[wk];
           const wTitle = (wTree.windowTitle || wk).slice(0, 40);
           const wNodes = Object.values(wTree.nodes || {}) as any[];
           const wEdges = (wTree.edges || []) as any[];
           const wPatterns = (wTree.patterns || []) as any[];
-          const wSessions = (wTree.mergedSessions || []).length;
+          const isCapturing = captureState && captureState[wk];
+          const capTag = isCapturing ? " *" : "";
           const wKey = `sessions-win-${wk}`;
 
-          nodes.push({ type: "section", label: `  ${wTitle}`, key: wKey, count: wNodes.length });
+          nodes.push({ type: "section", label: `  ${wTitle}${capTag}`, key: wKey, count: wNodes.length });
           if (expanded.has(wKey)) {
-            nodes.push({ type: "bridge-info", label: `    ${wSessions} sessions, ${wNodes.length} screens, ${wEdges.length} edges`, actionCmd: "" });
+            nodes.push({ type: "bridge-info", label: `    ${wNodes.length} destinations, ${wEdges.length} edges`, actionCmd: "" });
 
             if (wPatterns.length > 0) {
               const patKey = `${wKey}-patterns`;
-              nodes.push({ type: "section", label: `    Automation Candidates`, key: patKey, count: wPatterns.length });
+              nodes.push({ type: "section", label: `    Repeating Paths`, key: patKey, count: wPatterns.length });
               if (expanded.has(patKey)) {
                 for (const p of wPatterns.slice(0, 15)) {
                   if (p.type === "edge") {
-                    const conf = Math.round((p.confidence || 0) * 100);
                     const ms = p.avgTransitionMs ? ` ~${p.avgTransitionMs}ms` : "";
                     const fromL = (p.fromTitle || p.from || "?").slice(0, 20);
                     const toL = (p.toTitle || p.to || "?").slice(0, 20);
-                    nodes.push({ type: "bridge-info", label: `      ${fromL} -> ${toL}  ${p.frequency}x/${p.sessionsTotal} (${conf}%${ms})`, actionCmd: "" });
+                    nodes.push({ type: "bridge-info", label: `      ${fromL} -> ${toL}  ${p.frequency}x${ms}`, actionCmd: "" });
                   } else if (p.type === "sequence") {
                     nodes.push({ type: "bridge-info", label: `      seq: ${(p.steps || []).join(" -> ")}  ${p.frequency}x`, actionCmd: "" });
                   }
@@ -451,31 +464,31 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
 
             const sortedWNodes = [...wNodes].sort((a: any, b: any) => (b.visitCount || 0) - (a.visitCount || 0));
             const screenKey = `${wKey}-screens`;
-            nodes.push({ type: "section", label: `    Discovered Screens`, key: screenKey, count: wNodes.length });
+            nodes.push({ type: "section", label: `    Destinations`, key: screenKey, count: wNodes.length });
             if (expanded.has(screenKey)) {
               for (const node of sortedWNodes.slice(0, 30)) {
                 const displayTitle = (node.titles || []).length > 0 ? node.titles[0].slice(0, 35) : node.fingerprint?.slice(0, 12) || "?";
                 const visits = node.visitCount || 0;
-                const sessCount = (node.sessions || []).length;
                 const nodeKey = `${wKey}-fp-${node.fingerprint || displayTitle}`;
                 nodes.push({ type: "section", label: `      ${displayTitle}`, key: nodeKey, count: visits });
                 if (expanded.has(nodeKey)) {
-                  nodes.push({ type: "bridge-info", label: `        fp:${(node.fingerprint || "?").slice(0, 16)}  ${visits} visits  ${sessCount} sessions`, actionCmd: "" });
+                  nodes.push({ type: "bridge-info", label: `        fp:${(node.fingerprint || "?").slice(0, 16)}  ${visits} visits`, actionCmd: "" });
                   if ((node.titles || []).length > 1) {
                     nodes.push({ type: "bridge-info", label: `        titles: ${node.titles.slice(0, 3).join(", ")}`, actionCmd: "" });
                   }
                   const outEdges = wEdges.filter((e: any) => e.from === node.fingerprint);
                   const inEdges = wEdges.filter((e: any) => e.to === node.fingerprint);
-                  for (const e of outEdges.slice(0, 5)) {
+                  for (const e of outEdges.slice(0, 8)) {
                     const toLabel = e.toTitle?.slice(0, 25) || e.to?.slice(0, 12) || "?";
                     const ms = e.avgTransitionMs ? ` ~${e.avgTransitionMs}ms` : "";
                     const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
                     const crops = (e.labelCrops || []).length > 0 ? " +crop" : "";
                     nodes.push({ type: "bridge-info", label: `        -> ${toLabel}  (${e.count}x${ms}${keys}${crops})`, actionCmd: "" });
                   }
-                  for (const e of inEdges.slice(0, 5)) {
+                  for (const e of inEdges.slice(0, 8)) {
                     const fromLabel = e.fromTitle?.slice(0, 25) || e.from?.slice(0, 12) || "?";
-                    nodes.push({ type: "bridge-info", label: `        <- ${fromLabel}  (${e.count}x)`, actionCmd: "" });
+                    const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
+                    nodes.push({ type: "bridge-info", label: `        <- ${fromLabel}  (${e.count}x${keys})`, actionCmd: "" });
                   }
                 }
               }
@@ -485,7 +498,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
 
         if (graphEdges.length > 0) {
           const sortedEdges = [...graphEdges].sort((a: any, b: any) => (b.count || 0) - (a.count || 0));
-          nodes.push({ type: "section", label: "  Navigation Paths", key: "sessions-graph", count: sortedEdges.length });
+          nodes.push({ type: "section", label: "  All Transitions", key: "sessions-graph", count: sortedEdges.length });
           if (expanded.has("sessions-graph")) {
             for (const edge of sortedEdges.slice(0, 30)) {
               const fromShort = (edge.from || "?").slice(0, 25);
@@ -495,28 +508,30 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
           }
         }
 
-        nodes.push({ type: "section", label: "  Recordings", key: "sessions-list", count: recordedSessions.length });
-        if (expanded.has("sessions-list")) {
-          for (const sess of recordedSessions.slice(0, 20)) {
-            const dur = sess.duration_s ? `${Math.floor(sess.duration_s / 60)}m${sess.duration_s % 60}s` : "";
-            const winShort = (sess.window_title || "").slice(0, 30);
-            const sessKey = `session-${sess.session_id}`;
-            nodes.push({
-              type: "section",
-              label: `    ${winShort}  ${dur}  ${sess.event_count || 0}ev`,
-              key: sessKey,
-              count: sess.transition_count || 0,
-            });
-            if (expanded.has(sessKey)) {
-              nodes.push({ type: "bridge-info", label: `      ID: ${sess.session_id}`, actionCmd: `epic record-session analyze ${sess.session_id}` });
-              nodes.push({ type: "bridge-info", label: `      ${sess.screenshot_count || 0} screenshots, ${sess.click_count || 0} clicks, ${sess.key_count || 0} keys`, actionCmd: "" });
-              if (sess.transition_count > 0) {
-                nodes.push({ type: "bridge-info", label: `      ${sess.transition_count} screen transitions detected`, actionCmd: "" });
+        if (recordedSessions.length > 0) {
+          nodes.push({ type: "section", label: "  Recordings", key: "sessions-list", count: recordedSessions.length });
+          if (expanded.has("sessions-list")) {
+            for (const sess of recordedSessions.slice(0, 20)) {
+              const dur = sess.duration_s ? `${Math.floor(sess.duration_s / 60)}m${sess.duration_s % 60}s` : "";
+              const winShort = (sess.window_title || "").slice(0, 30);
+              const sessKey = `session-${sess.session_id}`;
+              nodes.push({
+                type: "section",
+                label: `    ${winShort}  ${dur}  ${sess.event_count || 0}ev`,
+                key: sessKey,
+                count: sess.transition_count || 0,
+              });
+              if (expanded.has(sessKey)) {
+                nodes.push({ type: "bridge-info", label: `      ID: ${sess.session_id}`, actionCmd: `epic record-session analyze ${sess.session_id}` });
+                nodes.push({ type: "bridge-info", label: `      ${sess.screenshot_count || 0} screenshots, ${sess.click_count || 0} clicks, ${sess.key_count || 0} keys`, actionCmd: "" });
+                if (sess.transition_count > 0) {
+                  nodes.push({ type: "bridge-info", label: `      ${sess.transition_count} screen transitions detected`, actionCmd: "" });
+                }
               }
             }
-          }
-          if (recordedSessions.length > 20) {
-            nodes.push({ type: "bridge-info", label: `    ... and ${recordedSessions.length - 20} more`, actionCmd: "" });
+            if (recordedSessions.length > 20) {
+              nodes.push({ type: "bridge-info", label: `    ... and ${recordedSessions.length - 20} more`, actionCmd: "" });
+            }
           }
         }
       }

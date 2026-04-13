@@ -680,6 +680,282 @@ _SESSION_CROP_SIZE = 150
 _SESSION_HASH_SIZE = 8
 _SESSION_DIR_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
+# ── Always-on capture state ──
+_ALWAYS_ON_STREAM_INTERVAL = 10.0
+_ALWAYS_ON_CAPTURES = {}
+_always_on_lock = threading.Lock()
+
+
+def _always_on_window_key(title):
+    import re
+    return re.sub(r'[^a-zA-Z0-9_ -]', '', title)[:60].strip().replace(' ', '_').lower()
+
+
+def _always_on_get_capture(window_title):
+    key = _always_on_window_key(window_title)
+    with _always_on_lock:
+        return _ALWAYS_ON_CAPTURES.get(key)
+
+
+def _always_on_start_capture(window_title):
+    key = _always_on_window_key(window_title)
+    with _always_on_lock:
+        if key in _ALWAYS_ON_CAPTURES and _ALWAYS_ON_CAPTURES[key]["active"]:
+            return _ALWAYS_ON_CAPTURES[key]
+
+    session_id = f"aon_{int(time.time())}_{random.randint(1000, 9999)}"
+    os.makedirs(_SESSION_DIR_BASE, exist_ok=True)
+    session_dir = os.path.join(_SESSION_DIR_BASE, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+
+    stop_event = threading.Event()
+
+    cap = {
+        "active": True,
+        "window_title": window_title,
+        "window_key": key,
+        "session_id": session_id,
+        "session_dir": session_dir,
+        "start_time": time.time(),
+        "stop_event": stop_event,
+        "last_fingerprint": None,
+        "last_img": None,
+        "last_title": "",
+        "fingerprints": {},
+        "pending_transitions": [],
+        "pending_fingerprints": {},
+        "pending_lock": threading.Lock(),
+        "node_count": 0,
+        "edge_count": 0,
+        "transition_count": 0,
+        "screenshot_seq": 0,
+    }
+
+    ss_thread = threading.Thread(
+        target=_always_on_screenshot_loop,
+        args=(cap,),
+        daemon=True, name=f"aon-ss-{key}"
+    )
+    title_thread = threading.Thread(
+        target=_always_on_title_loop,
+        args=(cap,),
+        daemon=True, name=f"aon-title-{key}"
+    )
+    flush_thread = threading.Thread(
+        target=_always_on_flush_loop,
+        args=(cap,),
+        daemon=True, name=f"aon-flush-{key}"
+    )
+    ss_thread.start()
+    title_thread.start()
+    flush_thread.start()
+    cap["threads"] = [ss_thread, title_thread, flush_thread]
+
+    with _always_on_lock:
+        _ALWAYS_ON_CAPTURES[key] = cap
+
+    print(f"  [always-on] Started capture: {window_title} (key={key}, sid={session_id})")
+    return cap
+
+
+def _always_on_screenshot_loop(cap):
+    stop_event = cap["stop_event"]
+    while not stop_event.is_set():
+        try:
+            img, win = _session_grab_window(cap["window_title"])
+            if img is None:
+                stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
+                continue
+
+            if cap["last_img"] is not None:
+                diff = _session_pixel_diff(cap["last_img"], img)
+                if diff < _SESSION_PIXEL_DIFF_THRESHOLD:
+                    stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
+                    continue
+
+            fp_region = _session_fingerprint_region(img)
+            fp = _session_phash(fp_region)
+            if fp == "0":
+                stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
+                continue
+
+            cap["screenshot_seq"] += 1
+            _session_save_screenshot(cap["session_dir"], img.copy(), cap["screenshot_seq"])
+
+            current_title = (win.title if win else None) or cap["window_title"]
+            prev_fp = cap["last_fingerprint"]
+            prev_title = cap.get("_last_win_title") or cap["window_title"]
+
+            with cap["pending_lock"]:
+                if fp not in cap["pending_fingerprints"]:
+                    cap["pending_fingerprints"][fp] = {"count": 0, "titles": []}
+                cap["pending_fingerprints"][fp]["count"] += 1
+                if current_title and current_title not in cap["pending_fingerprints"][fp]["titles"]:
+                    cap["pending_fingerprints"][fp]["titles"].append(current_title)
+
+                cap["fingerprints"][fp] = cap["fingerprints"].get(fp, 0) + 1
+
+                if prev_fp and prev_fp != fp:
+                    cap["pending_transitions"].append({
+                        "from_fp": prev_fp,
+                        "to_fp": fp,
+                        "from_title": prev_title,
+                        "to_title": current_title,
+                        "timestamp": time.time(),
+                        "transition_ms": 0,
+                    })
+                    cap["transition_count"] += 1
+
+            cap["last_fingerprint"] = fp
+            cap["last_img"] = img
+            cap["_last_win_title"] = current_title
+            cap["node_count"] = len(cap["fingerprints"])
+
+        except Exception as e:
+            print(f"  [always-on] screenshot error ({cap['window_key']}): {e}")
+
+        stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
+
+
+def _always_on_title_loop(cap):
+    stop_event = cap["stop_event"]
+    last_title = [""]
+    while not stop_event.is_set():
+        try:
+            current_title = ""
+            try:
+                import ctypes
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                    current_title = buf.value
+            except Exception:
+                try:
+                    fw = gw.getActiveWindow()
+                    current_title = fw.title if fw else ""
+                except Exception:
+                    pass
+
+            if current_title and current_title != last_title[0]:
+                cap["last_title"] = current_title
+                last_title[0] = current_title
+        except Exception:
+            pass
+        stop_event.wait(0.5)
+
+
+def _always_on_flush_loop(cap):
+    stop_event = cap["stop_event"]
+    while not stop_event.is_set():
+        stop_event.wait(_ALWAYS_ON_STREAM_INTERVAL)
+        if stop_event.is_set():
+            break
+        _always_on_flush(cap)
+
+
+def _always_on_flush(cap):
+    with cap["pending_lock"]:
+        transitions = list(cap["pending_transitions"])
+        fingerprints = dict(cap["pending_fingerprints"])
+        cap["pending_transitions"] = []
+        cap["pending_fingerprints"] = {}
+
+    if not transitions and not fingerprints:
+        return
+
+    payload = {
+        "windowKey": cap["window_key"],
+        "windowTitle": cap["window_title"],
+        "sessionId": cap["session_id"],
+        "transitions": transitions,
+        "fingerprints": fingerprints,
+    }
+
+    try:
+        resp = _bridge_request(
+            "post", "/api/sessions/stream", "stream-flush", timeout=15,
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        if resp and resp.status_code == 200:
+            rdata = resp.json()
+            cap["node_count"] = rdata.get("treeNodes", cap["node_count"])
+            cap["edge_count"] = rdata.get("treeEdges", cap["edge_count"])
+        elif resp:
+            print(f"  [always-on] stream flush HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"  [always-on] stream flush error: {e}")
+
+
+def _always_on_stop_capture(window_key):
+    with _always_on_lock:
+        cap = _ALWAYS_ON_CAPTURES.get(window_key)
+        if not cap or not cap["active"]:
+            return None
+
+    cap["active"] = False
+    stop_event = cap.get("stop_event")
+    if stop_event:
+        stop_event.set()
+
+    for thread in cap.get("threads", []):
+        try:
+            thread.join(timeout=3)
+        except Exception:
+            pass
+
+    _always_on_flush(cap)
+
+    with _always_on_lock:
+        if window_key in _ALWAYS_ON_CAPTURES:
+            del _ALWAYS_ON_CAPTURES[window_key]
+
+    print(f"  [always-on] Stopped capture: {cap['window_title']} ({cap['transition_count']} transitions)")
+    return cap
+
+
+def _always_on_get_capture_state():
+    with _always_on_lock:
+        result = {}
+        for key, cap in _ALWAYS_ON_CAPTURES.items():
+            if cap["active"]:
+                result[key] = {
+                    "window": cap["window_title"],
+                    "sessionId": cap["session_id"],
+                    "elapsed_s": int(time.time() - cap["start_time"]),
+                    "nodes": cap["node_count"],
+                    "edges": cap["edge_count"],
+                    "transitions": cap["transition_count"],
+                    "screenshots": cap["screenshot_seq"],
+                }
+        return result
+
+
+def _always_on_heartbeat_tick(windows_found):
+    for win_title in windows_found:
+        key = _always_on_window_key(win_title)
+        with _always_on_lock:
+            if key in _ALWAYS_ON_CAPTURES and _ALWAYS_ON_CAPTURES[key]["active"]:
+                continue
+        if _session_rec["active"]:
+            continue
+        try:
+            _always_on_start_capture(win_title)
+        except Exception as e:
+            print(f"  [always-on] Failed to start capture for {win_title}: {e}")
+
+    with _always_on_lock:
+        active_keys = list(_ALWAYS_ON_CAPTURES.keys())
+    found_keys = set(_always_on_window_key(w) for w in windows_found)
+    for key in active_keys:
+        if key not in found_keys:
+            _always_on_stop_capture(key)
+
 _session_rec = {
     "active": False,
     "window_title": "",
@@ -1884,13 +2160,18 @@ def poll_commands():
 
 
 def send_heartbeat(windows_found):
+    capture_state = _always_on_get_capture_state()
     resp = _bridge_request(
         "post", "/api/epic/agent/heartbeat", "heartbeat", timeout=5,
         headers={
             "Authorization": f"Bearer {BRIDGE_TOKEN}",
             "Content-Type": "application/json",
         },
-        json={"windows": windows_found, "timestamp": time.time()},
+        json={
+            "windows": windows_found,
+            "timestamp": time.time(),
+            "capture": capture_state if capture_state else None,
+        },
     )
     if resp and resp.status_code != 200:
         print(f"  [heartbeat] HTTP {resp.status_code}: {resp.text[:200]}")
@@ -7743,7 +8024,12 @@ def main():
             now = time.time()
             if now - last_heartbeat > heartbeat_interval:
                 windows = list_windows()
+                window_titles = list(windows.values()) if windows else []
                 send_heartbeat(list(windows.keys()))
+                try:
+                    _always_on_heartbeat_tick(window_titles)
+                except Exception as e:
+                    print(f"  [always-on] tick error: {e}")
                 last_heartbeat = now
 
             commands = poll_commands()
