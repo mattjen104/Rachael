@@ -1307,7 +1307,6 @@ export async function registerRoutes(
           if (!tree.nodes[fromFp]) {
             tree.nodes[fromFp] = { fingerprint: fromFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
           }
-          tree.nodes[fromFp].visitCount++;
           if (!tree.nodes[toFp]) {
             tree.nodes[toFp] = { fingerprint: toFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
           }
