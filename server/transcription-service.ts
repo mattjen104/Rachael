@@ -11,6 +11,7 @@ interface AudioSession {
   platform: string;
   recordingType: string;
   startedAt: number;
+  wavFormat?: { channels: number; sampleRate: number; sampleWidth: number };
 }
 
 const activeSessions = new Map<string, AudioSession>();
@@ -63,6 +64,42 @@ export async function startRecordingSession(sourceUrl: string, tabTitle: string,
   return { sessionId, transcriptId: transcript.id };
 }
 
+function parseWavHeader(buf: Buffer): { dataOffset: number; channels: number; sampleRate: number; sampleWidth: number } | null {
+  if (buf.length < 44) return null;
+  if (buf.toString("ascii", 0, 4) !== "RIFF") return null;
+  if (buf.toString("ascii", 8, 12) !== "WAVE") return null;
+  const channels = buf.readUInt16LE(22);
+  const sampleRate = buf.readUInt32LE(24);
+  const bitsPerSample = buf.readUInt16LE(34);
+  const sampleWidth = bitsPerSample / 8;
+  let offset = 12;
+  while (offset + 8 < buf.length) {
+    const id = buf.toString("ascii", offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    if (id === "data") { return { dataOffset: offset + 8, channels, sampleRate, sampleWidth }; }
+    offset += 8 + size;
+  }
+  return null;
+}
+
+function buildWavHeader(dataLength: number, channels: number, sampleRate: number, sampleWidth: number): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataLength, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * sampleWidth, 28);
+  header.writeUInt16LE(channels * sampleWidth, 32);
+  header.writeUInt16LE(sampleWidth * 8, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataLength, 40);
+  return header;
+}
+
 export async function addAudioChunk(sessionId: string, chunk: Buffer): Promise<void> {
   const session = activeSessions.get(sessionId);
   if (!session) throw new Error("Recording session not found");
@@ -77,7 +114,15 @@ export async function addAudioChunk(sessionId: string, chunk: Buffer): Promise<v
     throw new Error("Recording session exceeds maximum duration (4 hours)");
   }
 
-  session.chunks.push(chunk);
+  const wav = parseWavHeader(chunk);
+  if (wav) {
+    if (!session.wavFormat) {
+      session.wavFormat = { channels: wav.channels, sampleRate: wav.sampleRate, sampleWidth: wav.sampleWidth };
+    }
+    session.chunks.push(chunk.slice(wav.dataOffset));
+  } else {
+    session.chunks.push(chunk);
+  }
 }
 
 export async function stopRecordingSession(sessionId: string): Promise<{ transcriptId: number }> {
@@ -95,7 +140,14 @@ export async function stopRecordingSession(sessionId: string): Promise<{ transcr
     metadata: { sessionId, transcriptId: session.transcriptId },
   });
 
-  const audioBuffer = Buffer.concat(session.chunks);
+  let audioBuffer: Buffer;
+  if (session.wavFormat) {
+    const pcm = Buffer.concat(session.chunks);
+    const { channels, sampleRate, sampleWidth } = session.wavFormat;
+    audioBuffer = Buffer.concat([buildWavHeader(pcm.length, channels, sampleRate, sampleWidth), pcm]);
+  } else {
+    audioBuffer = Buffer.concat(session.chunks);
+  }
   activeSessions.delete(sessionId);
 
   transcribeAudio(session.transcriptId, audioBuffer, session.platform, session.tabTitle, durationSeconds).catch(err => {
@@ -126,8 +178,11 @@ async function transcribeAudio(
 
   try {
     const formData = new FormData();
-    const blob = new Blob([audioBuffer], { type: "audio/webm" });
-    formData.append("file", blob, "recording.webm");
+    const isWav = audioBuffer.length >= 4 && audioBuffer.slice(0, 4).toString("ascii") === "RIFF";
+    const mimeType = isWav ? "audio/wav" : "audio/webm";
+    const filename = isWav ? "recording.wav" : "recording.webm";
+    const blob = new Blob([audioBuffer], { type: mimeType });
+    formData.append("file", blob, filename);
     formData.append("model", "whisper-1");
     formData.append("response_format", "verbose_json");
     formData.append("timestamp_granularities[]", "segment");

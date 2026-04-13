@@ -4061,6 +4061,106 @@ ${fullHtml}`;
     }
   });
 
+  registerCommand("record", "Record system audio via desktop agent and transcribe", "record start [title] | record stop | record status", async (args) => {
+    const nl = String.fromCharCode(10);
+    const sub = (args[0] || "").toLowerCase();
+
+    async function sendAudioCmd(type: string, extra: Record<string, unknown> = {}): Promise<{ ok: boolean; commandId?: string; error?: string }> {
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type, ...extra }),
+        });
+        return await resp.json() as any;
+      } catch (e: any) {
+        return { ok: false, error: e.message };
+      }
+    }
+
+    async function pollResult(cmdId: string, maxMs = 20000): Promise<any> {
+      const interval = 500;
+      let elapsed = 0;
+      while (elapsed < maxMs) {
+        await new Promise(r => setTimeout(r, interval));
+        elapsed += interval;
+        try {
+          const r = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const d = await r.json() as any;
+          if (d.status && d.status !== "pending") return d;
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    if (!sub || sub === "help") {
+      return ok([
+        "record start [title]   — start WASAPI loopback capture",
+        "record stop            — stop capture and trigger transcription",
+        "record status          — show recording state",
+      ].join(nl));
+    }
+
+    if (sub === "start") {
+      const title = args.slice(1).join(" ") || "";
+      const sent = await sendAudioCmd("audio_start", title ? { title } : {});
+      if (!sent.ok) return fail(`[record] ${sent.error || "agent not connected"}`);
+      const result = await pollResult(sent.commandId!, 20000);
+      if (!result) return fail("[record] Timed out (20s)");
+      if (result.status === "error") return fail(`[record] ${result.error}`);
+      const d = result.data || {};
+      return ok([
+        "Recording started",
+        `Session : ${d.sessionId || "?"}`,
+        `Transcript: ${d.transcriptId || "?"}`,
+        `Device  : ${d.device || "?"}`,
+        `Rate    : ${d.sampleRate || 16000}Hz`,
+        `Silence : RMS < ${d.silenceThreshold || 150} skipped`,
+        "",
+        "Run  record stop  when finished.",
+      ].join(nl));
+    }
+
+    if (sub === "stop") {
+      const sent = await sendAudioCmd("audio_stop");
+      if (!sent.ok) return fail(`[record] ${sent.error || "agent not connected"}`);
+      const result = await pollResult(sent.commandId!, 30000);
+      if (!result) return fail("[record] Timed out (30s)");
+      if (result.status === "error") return fail(`[record] ${result.error}`);
+      const d = result.data || {};
+      return ok([
+        "Recording stopped",
+        `Session   : ${d.sessionId || "?"}`,
+        `Duration  : ${d.durationSeconds || 0}s`,
+        `Uploaded  : ${Math.round((d.bytesUploaded || 0) / 1024)}KB`,
+        `Skipped   : ${d.chunksSkipped || 0} silent chunks`,
+        "",
+        "Transcription queued. View in: transcripts",
+      ].join(nl));
+    }
+
+    if (sub === "status") {
+      const sent = await sendAudioCmd("audio_status");
+      if (!sent.ok) return fail(`[record] ${sent.error || "agent not connected"}`);
+      const result = await pollResult(sent.commandId!, 10000);
+      if (!result) return fail("[record] Timed out (10s)");
+      if (result.status === "error") return fail(`[record] ${result.error}`);
+      const d = result.data || {};
+      if (!d.active) return ok("Not recording.");
+      return ok([
+        "Recording active",
+        `Session   : ${d.sessionId}`,
+        `Elapsed   : ${d.elapsedSeconds}s`,
+        `Uploaded  : ${Math.round((d.bytesUploaded || 0) / 1024)}KB`,
+        `Skipped   : ${d.chunksSkipped} silent chunks`,
+        `Device    : ${d.device}`,
+        `Silence   : RMS < ${d.silenceThreshold}`,
+      ].join(nl));
+    }
+
+    return fail(`Unknown subcommand: ${sub}. Try: record start | record stop | record status`);
+  });
+
   registerCommand("epic", "Epic Hyperspace activity tools", "epic [view|do|screen|fields|menu|search|go|activities|navigate|screenshot|click|status|setup|uia] <env> [target]", async (args) => {
     const nl = String.fromCharCode(10);
     const EPIC_ENVS = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);

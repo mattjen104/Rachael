@@ -28,6 +28,28 @@ import traceback
 import random
 import webbrowser
 import threading
+import collections
+import wave
+import struct
+
+try:
+    import numpy as _np
+    _NUMPY_AVAILABLE = True
+except ImportError:
+    _NUMPY_AVAILABLE = False
+
+# ── Audio capture constants ──
+_AUDIO_SAMPLE_RATE = 16000
+_AUDIO_CHANNELS = 1
+_AUDIO_SAMPLE_WIDTH = 2  # 16-bit PCM
+_AUDIO_CHUNK_FRAMES = 1024  # PortAudio callback frames
+_AUDIO_CHUNK_SECONDS = 10   # encoder upload cadence
+_AUDIO_PREROLL_FRAMES = int(_AUDIO_SAMPLE_RATE * 0.200)  # 200ms pre-roll
+_AUDIO_SILENCE_THRESHOLD = 150  # default RMS threshold (~quiet room)
+_AUDIO_RING_MAXLEN = int(30 * _AUDIO_SAMPLE_RATE / _AUDIO_CHUNK_FRAMES)  # 30s max
+
+# Module-level audio session state (cleared on stop)
+_audio_session: dict = {}
 
 try:
     import ctypes
@@ -2242,6 +2264,305 @@ def execute_record_stop(cmd):
         recording_state["pending_steps"] = []
     print(f"  [record] Recording stopped")
     post_result(cmd.get("id", "unknown"), "complete", data={"recording": False})
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# WASAPI Loopback Audio Capture  (execute_audio_start / stop / status)
+# ────────────────────────────────────────────────────────────────────────────
+
+def _audio_compute_rms(pcm_bytes: bytes) -> float:
+    """RMS amplitude of 16-bit LE PCM. Uses numpy when available."""
+    if _NUMPY_AVAILABLE:
+        samples = _np.frombuffer(pcm_bytes, dtype=_np.int16)
+        if len(samples) == 0:
+            return 0.0
+        return float(_np.sqrt(_np.mean(samples.astype(_np.float32) ** 2)))
+    n = len(pcm_bytes) // 2
+    if n == 0:
+        return 0.0
+    total = sum(s * s for s in struct.unpack_from(f"<{n}h", pcm_bytes))
+    return (total / n) ** 0.5
+
+
+def _audio_pcm_to_wav(pcm_bytes: bytes) -> bytes:
+    """Wrap raw 16-bit mono PCM in a WAV container (no disk I/O)."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(_AUDIO_CHANNELS)
+        wf.setsampwidth(_AUDIO_SAMPLE_WIDTH)
+        wf.setframerate(_AUDIO_SAMPLE_RATE)
+        wf.writeframes(pcm_bytes)
+    return buf.getvalue()
+
+
+def _audio_encoder_loop(stop_event: threading.Event, ring_buf: collections.deque) -> None:
+    """Runs in daemon thread. Drains ring buffer every CHUNK_SECONDS, silencegates,
+    wraps in WAV, and POSTs to /api/transcripts/record/:id/chunk."""
+    global _audio_session
+    threshold = _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD)
+    preroll_bytes = b""
+
+    while not stop_event.is_set():
+        stop_event.wait(timeout=_AUDIO_CHUNK_SECONDS)
+        frames: list = []
+        while True:
+            try:
+                frames.append(ring_buf.popleft())
+            except IndexError:
+                break
+        if not frames:
+            continue
+        pcm = b"".join(frames)
+        rms = _audio_compute_rms(pcm)
+        upload_pcm = preroll_bytes + pcm
+        preroll_bytes = pcm[-(_AUDIO_PREROLL_FRAMES * _AUDIO_SAMPLE_WIDTH):]
+        if rms < threshold:
+            _audio_session["chunks_skipped"] = _audio_session.get("chunks_skipped", 0) + 1
+            print(f"  [audio] Silent (RMS={rms:.0f}<{threshold}) — skipped")
+            continue
+        wav_bytes = _audio_pcm_to_wav(upload_pcm)
+        session_id = _audio_session.get("session_id")
+        if not session_id:
+            continue
+        try:
+            resp = requests.post(
+                f"{ORGCLOUD_URL}/api/transcripts/record/{session_id}/chunk",
+                headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+                files={"audio": ("audio.wav", wav_bytes, "audio/wav")},
+                timeout=30,
+            )
+            if resp and resp.status_code == 200:
+                _audio_session["bytes_uploaded"] = _audio_session.get("bytes_uploaded", 0) + len(wav_bytes)
+                print(f"  [audio] Chunk {len(wav_bytes)//1024}KB RMS={rms:.0f}")
+            else:
+                code = resp.status_code if resp else "timeout"
+                print(f"  [audio] Chunk upload failed: {code}")
+        except Exception as exc:
+            print(f"  [audio] Chunk upload error: {exc}")
+    print("  [audio] Encoder thread exit")
+
+
+def execute_audio_start(cmd: dict) -> None:
+    """Start WASAPI loopback recording. Streams 10s WAV chunks to transcript service."""
+    global _audio_session
+    command_id = cmd.get("id", "unknown")
+    title = cmd.get("title", "")
+    threshold = int(cmd.get("silenceThreshold", _AUDIO_SILENCE_THRESHOLD))
+
+    if _audio_session.get("active"):
+        post_result(command_id, "error",
+                    error=f"Already recording session {_audio_session.get('session_id')}. Stop first.")
+        return
+
+    # Create server-side transcript session
+    try:
+        resp = requests.post(
+            f"{ORGCLOUD_URL}/api/transcripts/record/start",
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}",
+                     "Content-Type": "application/json"},
+            json={"sourceUrl": "", "tabTitle": title or "Windows audio recording",
+                  "recordingType": "system"},
+            timeout=15,
+        )
+        if not resp or resp.status_code != 200:
+            code = resp.status_code if resp else "timeout"
+            post_result(command_id, "error", error=f"Server session start failed: {code}")
+            return
+        srv = resp.json()
+        session_id = srv.get("sessionId")
+        transcript_id = srv.get("transcriptId")
+    except Exception as exc:
+        post_result(command_id, "error", error=f"Server session error: {exc}")
+        return
+
+    # Import pyaudio (prefer pyaudiowpatch for WASAPI loopback)
+    try:
+        import pyaudiowpatch as pyaudio  # type: ignore
+    except ImportError:
+        try:
+            import pyaudio  # type: ignore
+        except ImportError:
+            post_result(command_id, "error",
+                        error="pyaudiowpatch not installed. Run: pip install pyaudiowpatch")
+            return
+
+    # Find loopback device
+    p = pyaudio.PyAudio()
+    loopback = None
+    try:
+        if hasattr(p, "get_default_wasapi_loopback"):
+            loopback = p.get_default_wasapi_loopback()
+    except Exception:
+        pass
+    if not loopback:
+        for i in range(p.get_device_count()):
+            info = p.get_device_info_by_index(i)
+            if info.get("isLoopbackDevice") or "loopback" in str(info.get("name", "")).lower():
+                loopback = info
+                break
+    if not loopback:
+        try:
+            loopback = p.get_default_input_device_info()
+        except Exception:
+            p.terminate()
+            post_result(command_id, "error", error="No audio capture device found.")
+            return
+
+    device_name = loopback.get("name", "unknown")
+    print(f"  [audio] Device: {device_name}")
+
+    ring_buf: collections.deque = collections.deque(maxlen=_AUDIO_RING_MAXLEN)
+    stop_event = threading.Event()
+
+    def _cb(in_data, frame_count, time_info, status):
+        ring_buf.append(in_data)
+        return (None, pyaudio.paContinue)
+
+    try:
+        stream = p.open(
+            format=pyaudio.paInt16,
+            channels=_AUDIO_CHANNELS,
+            rate=_AUDIO_SAMPLE_RATE,
+            input=True,
+            frames_per_buffer=_AUDIO_CHUNK_FRAMES,
+            input_device_index=loopback.get("index"),
+            stream_callback=_cb,
+        )
+    except Exception as exc:
+        p.terminate()
+        post_result(command_id, "error", error=f"Audio stream open failed: {exc}")
+        return
+
+    stream.start_stream()
+
+    _audio_session = {
+        "active": True,
+        "session_id": session_id,
+        "transcript_id": transcript_id,
+        "session_start": time.time(),
+        "ring_buf": ring_buf,
+        "stop_event": stop_event,
+        "stream": stream,
+        "pyaudio": p,
+        "bytes_uploaded": 0,
+        "chunks_skipped": 0,
+        "silence_threshold": threshold,
+        "device_name": device_name,
+    }
+
+    enc = threading.Thread(target=_audio_encoder_loop,
+                           args=(stop_event, ring_buf),
+                           daemon=True, name="audio-encoder")
+    enc.start()
+    _audio_session["encoder_thread"] = enc
+
+    print(f"  [audio] Started: session={session_id} transcript={transcript_id}")
+    post_result(command_id, "complete", data={
+        "sessionId": session_id,
+        "transcriptId": transcript_id,
+        "device": device_name,
+        "sampleRate": _AUDIO_SAMPLE_RATE,
+        "silenceThreshold": threshold,
+    })
+
+
+def execute_audio_stop(cmd: dict) -> None:
+    """Stop audio recording, flush remaining frames, trigger server transcription."""
+    global _audio_session
+    command_id = cmd.get("id", "unknown")
+
+    if not _audio_session.get("active"):
+        post_result(command_id, "error", error="No active audio recording.")
+        return
+
+    session_id = _audio_session.get("session_id")
+
+    # Signal encoder thread to stop
+    stop_event = _audio_session.get("stop_event")
+    if stop_event:
+        stop_event.set()
+    enc = _audio_session.get("encoder_thread")
+    if enc and enc.is_alive():
+        enc.join(timeout=15)
+
+    # Final drain — upload any leftover frames
+    ring_buf = _audio_session.get("ring_buf")
+    if ring_buf:
+        frames = []
+        while True:
+            try:
+                frames.append(ring_buf.popleft())
+            except IndexError:
+                break
+        if frames:
+            pcm = b"".join(frames)
+            rms = _audio_compute_rms(pcm)
+            if rms >= _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD):
+                wav_bytes = _audio_pcm_to_wav(pcm)
+                try:
+                    requests.post(
+                        f"{ORGCLOUD_URL}/api/transcripts/record/{session_id}/chunk",
+                        headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+                        files={"audio": ("audio.wav", wav_bytes, "audio/wav")},
+                        timeout=30,
+                    )
+                    print(f"  [audio] Final chunk {len(wav_bytes)//1024}KB uploaded")
+                except Exception as exc:
+                    print(f"  [audio] Final chunk error: {exc}")
+
+    # Close PortAudio
+    try:
+        stream = _audio_session.get("stream")
+        p = _audio_session.get("pyaudio")
+        if stream:
+            stream.stop_stream()
+            stream.close()
+        if p:
+            p.terminate()
+    except Exception as exc:
+        print(f"  [audio] Stream close error: {exc}")
+
+    # Signal server to stop + transcribe
+    try:
+        resp = requests.post(
+            f"{ORGCLOUD_URL}/api/transcripts/record/{session_id}/stop",
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+            timeout=15,
+        )
+        code = resp.status_code if resp else "timeout"
+        print(f"  [audio] Stop signal: {code}")
+    except Exception as exc:
+        print(f"  [audio] Stop signal error: {exc}")
+
+    duration = int(time.time() - _audio_session.get("session_start", time.time()))
+    result = {
+        "sessionId": session_id,
+        "durationSeconds": duration,
+        "bytesUploaded": _audio_session.get("bytes_uploaded", 0),
+        "chunksSkipped": _audio_session.get("chunks_skipped", 0),
+    }
+    _audio_session = {}
+    post_result(command_id, "complete", data=result)
+    print(f"  [audio] Stopped. Duration={duration}s uploaded={result['bytesUploaded']//1024}KB")
+
+
+def execute_audio_status(cmd: dict) -> None:
+    """Return current audio recording status."""
+    command_id = cmd.get("id", "unknown")
+    if not _audio_session.get("active"):
+        post_result(command_id, "complete", data={"active": False})
+        return
+    elapsed = int(time.time() - _audio_session.get("session_start", time.time()))
+    post_result(command_id, "complete", data={
+        "active": True,
+        "sessionId": _audio_session.get("session_id"),
+        "transcriptId": _audio_session.get("transcript_id"),
+        "elapsedSeconds": elapsed,
+        "bytesUploaded": _audio_session.get("bytes_uploaded", 0),
+        "chunksSkipped": _audio_session.get("chunks_skipped", 0),
+        "device": _audio_session.get("device_name", "unknown"),
+        "silenceThreshold": _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD),
+    })
 
 
 def execute_replay(cmd):
@@ -6133,6 +6454,12 @@ def execute_command(cmd):
             execute_detect_new_window(cmd)
         elif cmd_type == "login":
             execute_login(cmd)
+        elif cmd_type == "audio_start":
+            execute_audio_start(cmd)
+        elif cmd_type == "audio_stop":
+            execute_audio_stop(cmd)
+        elif cmd_type == "audio_status":
+            execute_audio_status(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except pyautogui.FailSafeException:
