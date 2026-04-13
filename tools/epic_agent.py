@@ -732,7 +732,7 @@ def _always_on_start_capture(window_title):
         "action_buffer": [],
         "action_buffer_lock": threading.Lock(),
         "last_fp_change_time": time.time(),
-        "listeners": [],
+        "last_transition_ts": 0.0,
     }
 
     ss_thread = threading.Thread(
@@ -1003,6 +1003,7 @@ def _always_on_screenshot_loop(cap):
                     })
                     cap["transition_count"] += 1
                     cap["last_fp_change_time"] = now
+                    cap["last_transition_ts"] = now
 
             cap["last_fingerprint"] = fp
             cap["last_img"] = img
@@ -1127,6 +1128,7 @@ def _always_on_get_capture_state():
         for key, cap in _ALWAYS_ON_CAPTURES.items():
             if cap["active"]:
                 result[key] = {
+                    "recording_active": True,
                     "window": cap["window_title"],
                     "sessionId": cap["session_id"],
                     "elapsed_s": int(time.time() - cap["start_time"]),
@@ -1134,12 +1136,40 @@ def _always_on_get_capture_state():
                     "edges": cap["edge_count"],
                     "transitions": cap["transition_count"],
                     "screenshots": cap["screenshot_seq"],
+                    "last_transition_ts": cap.get("last_transition_ts", 0),
                 }
         return result
 
 
-def _always_on_heartbeat_tick(windows_found):
-    for win_title in windows_found:
+_AON_MIN_WINDOW_SIZE = 200
+_AON_EXCLUDED_TITLES = {
+    "", "program manager", "settings", "task switching",
+    "start", "search", "cortana", "task view", "new notification",
+}
+
+
+def _always_on_discover_windows():
+    titles = []
+    try:
+        for w in gw.getAllWindows():
+            t = (w.title or "").strip()
+            if not t or t.lower() in _AON_EXCLUDED_TITLES:
+                continue
+            if w.width < _AON_MIN_WINDOW_SIZE or w.height < _AON_MIN_WINDOW_SIZE:
+                continue
+            if not w.visible:
+                continue
+            titles.append(t)
+    except Exception:
+        pass
+    return titles
+
+
+def _always_on_heartbeat_tick(epic_window_titles):
+    desktop_titles = _always_on_discover_windows()
+    all_titles = list(set(epic_window_titles + desktop_titles))
+
+    for win_title in all_titles:
         key = _always_on_window_key(win_title)
         with _always_on_lock:
             if key in _ALWAYS_ON_CAPTURES and _ALWAYS_ON_CAPTURES[key]["active"]:
@@ -1153,7 +1183,7 @@ def _always_on_heartbeat_tick(windows_found):
 
     with _always_on_lock:
         active_keys = list(_ALWAYS_ON_CAPTURES.keys())
-    found_keys = set(_always_on_window_key(w) for w in windows_found)
+    found_keys = set(_always_on_window_key(w) for w in all_titles)
     for key in active_keys:
         if key not in found_keys:
             _always_on_stop_capture(key)

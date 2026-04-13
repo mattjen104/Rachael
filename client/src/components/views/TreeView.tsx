@@ -427,7 +427,9 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
           for (const ck of capKeys) {
             const cs = captureState![ck];
             const elapsed = cs.elapsed_s ? `${Math.floor(cs.elapsed_s / 60)}m${cs.elapsed_s % 60}s` : "";
-            nodes.push({ type: "bridge-info", label: `  * ${(cs.window || ck).slice(0, 30)} ${elapsed} ${cs.nodes || 0}n/${cs.edges || 0}e/${cs.transitions || 0}t`, actionCmd: "" });
+            const lastT = cs.last_transition_ts ? new Date(cs.last_transition_ts * 1000).toLocaleTimeString() : "---";
+            const tag = cs.recording_active ? "*" : "-";
+            nodes.push({ type: "bridge-info", label: `  ${tag} ${(cs.window || ck).slice(0, 28)} ${elapsed} ${cs.nodes || 0}n/${cs.edges || 0}e/${cs.transitions || 0}t last:${lastT}`, actionCmd: "" });
           }
         }
 

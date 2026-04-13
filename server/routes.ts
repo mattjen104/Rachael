@@ -1289,7 +1289,6 @@ export async function registerRoutes(
           if (!tree.nodes[fp]) {
             tree.nodes[fp] = { fingerprint: fp, titles: [], visitCount: 0, lastSeen: 0, sessions: [], labelCrops: [] };
           }
-          tree.nodes[fp].visitCount += (info.count || 1);
           tree.nodes[fp].lastSeen = nowMs;
           if (sessionId && !tree.nodes[fp].sessions.includes(sessionId)) {
             tree.nodes[fp].sessions.push(sessionId);
@@ -1308,9 +1307,11 @@ export async function registerRoutes(
           if (!tree.nodes[fromFp]) {
             tree.nodes[fromFp] = { fingerprint: fromFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
           }
+          tree.nodes[fromFp].visitCount++;
           if (!tree.nodes[toFp]) {
             tree.nodes[toFp] = { fingerprint: toFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
           }
+          tree.nodes[toFp].visitCount++;
           let existing = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
           if (!existing) {
             existing = {

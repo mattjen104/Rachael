@@ -4356,7 +4356,8 @@ ${fullHtml}`;
             lines.push("", "Always-on Capture:");
             for (const [ck, cs] of Object.entries(data.capture as Record<string, any>)) {
               const elapsed = cs.elapsed_s ? `${Math.floor(cs.elapsed_s / 60)}m${cs.elapsed_s % 60}s` : "0s";
-              lines.push(`  ${(cs.window || ck).slice(0, 40)}  ${elapsed}  ${cs.nodes || 0} nodes  ${cs.edges || 0} edges  ${cs.transitions || 0} transitions  ${cs.screenshots || 0} screenshots`);
+              const lastTrans = cs.last_transition_ts ? new Date(cs.last_transition_ts * 1000).toLocaleTimeString() : "none";
+              lines.push(`  ${cs.recording_active ? "[ACTIVE]" : "[IDLE]"} ${(cs.window || ck).slice(0, 35)}  ${elapsed}  ${cs.nodes || 0}n ${cs.edges || 0}e ${cs.transitions || 0}t  last:${lastTrans}  ${cs.screenshots || 0}ss`);
             }
           } else {
             lines.push("", "Always-on Capture: inactive (no windows tracked)");
