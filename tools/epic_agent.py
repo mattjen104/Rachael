@@ -729,6 +729,10 @@ def _always_on_start_capture(window_title):
         "edge_count": 0,
         "transition_count": 0,
         "screenshot_seq": 0,
+        "action_buffer": [],
+        "action_buffer_lock": threading.Lock(),
+        "last_fp_change_time": time.time(),
+        "listeners": [],
     }
 
     ss_thread = threading.Thread(
@@ -751,11 +755,145 @@ def _always_on_start_capture(window_title):
     flush_thread.start()
     cap["threads"] = [ss_thread, title_thread, flush_thread]
 
+    listeners = _always_on_start_input_listeners(cap)
+    cap["listeners"] = listeners
+
     with _always_on_lock:
         _ALWAYS_ON_CAPTURES[key] = cap
 
-    print(f"  [always-on] Started capture: {window_title} (key={key}, sid={session_id})")
+    input_status = "full" if listeners else "screenshot-only"
+    print(f"  [always-on] Started capture: {window_title} (key={key}, sid={session_id}, input={input_status})")
     return cap
+
+
+def _always_on_start_input_listeners(cap):
+    listeners = []
+    try:
+        from pynput import mouse as pm, keyboard as pk
+    except ImportError:
+        return listeners
+
+    stop_event = cap["stop_event"]
+
+    def on_click(x, y, button, pressed):
+        if not pressed:
+            return
+        if stop_event.is_set():
+            return False
+        with cap["action_buffer_lock"]:
+            cap["action_buffer"].append({
+                "type": "click",
+                "x": x, "y": y,
+                "button": str(button),
+                "ts": time.time(),
+            })
+        try:
+            img, win = _session_grab_window(cap["window_title"])
+            if img:
+                w, h = img.size
+                win_left = win.left if win else 0
+                win_top = win.top if win else 0
+                rel_x = x - win_left
+                rel_y = y - win_top
+                if 0 <= rel_x < w and 0 <= rel_y < h:
+                    crop_fname = _session_save_crop(cap["session_dir"], img, rel_x, rel_y, cap["screenshot_seq"] + 50000)
+                    with cap["action_buffer_lock"]:
+                        cap["action_buffer"].append({
+                            "type": "label_crop",
+                            "file": crop_fname,
+                            "rel_x": rel_x, "rel_y": rel_y,
+                            "ts": time.time(),
+                        })
+        except Exception:
+            pass
+
+    significant_keys = set()
+    try:
+        for kname in ["enter", "tab", "esc", "backspace", "delete",
+                       "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8",
+                       "f9", "f10", "f11", "f12", "home", "end",
+                       "page_up", "page_down"]:
+            try:
+                significant_keys.add(getattr(pk.Key, kname))
+            except AttributeError:
+                pass
+    except Exception:
+        pass
+
+    active_modifiers = set()
+
+    def on_press(key):
+        if stop_event.is_set():
+            return False
+        try:
+            if key in (pk.Key.ctrl_l, pk.Key.ctrl_r, pk.Key.alt_l, pk.Key.alt_r,
+                        pk.Key.shift_l, pk.Key.shift_r, pk.Key.cmd, pk.Key.cmd_r):
+                active_modifiers.add(key)
+                return
+        except Exception:
+            pass
+
+        is_sig = key in significant_keys
+        has_modifier = len(active_modifiers) > 0
+        is_ctrl_combo = has_modifier and hasattr(key, 'char') and key.char
+
+        if is_sig or is_ctrl_combo:
+            if is_ctrl_combo:
+                mod_names = []
+                for m in active_modifiers:
+                    try:
+                        mod_names.append(m.name)
+                    except Exception:
+                        mod_names.append(str(m))
+                key_desc = "+".join(mod_names) + "+" + (key.char if hasattr(key, 'char') and key.char else str(key))
+            else:
+                key_desc = key.name if hasattr(key, 'name') else str(key)
+            with cap["action_buffer_lock"]:
+                cap["action_buffer"].append({
+                    "type": "key",
+                    "key": key_desc,
+                    "special": True,
+                    "ts": time.time(),
+                })
+
+    def on_release(key):
+        try:
+            active_modifiers.discard(key)
+        except Exception:
+            pass
+
+    try:
+        mouse_l = pm.Listener(on_click=on_click)
+        key_l = pk.Listener(on_press=on_press, on_release=on_release)
+        mouse_l.daemon = True
+        key_l.daemon = True
+        mouse_l.start()
+        key_l.start()
+        listeners.extend([mouse_l, key_l])
+    except Exception as e:
+        print(f"  [always-on] Input listener error: {e}")
+
+    return listeners
+
+
+def _always_on_drain_actions(cap):
+    with cap["action_buffer_lock"]:
+        actions = list(cap["action_buffer"])
+        cap["action_buffer"] = []
+    return actions
+
+
+def _always_on_extract_action_keys(actions):
+    keys = []
+    label_crops = []
+    for a in actions:
+        if a["type"] == "key" and a.get("key"):
+            keys.append(a["key"])
+        elif a["type"] == "click":
+            keys.append(f"click({a.get('x', 0)},{a.get('y', 0)})")
+        elif a["type"] == "label_crop" and a.get("file"):
+            label_crops.append(a["file"])
+    return keys[-10:], label_crops[-3:]
 
 
 def _always_on_screenshot_loop(cap):
@@ -785,6 +923,7 @@ def _always_on_screenshot_loop(cap):
             current_title = (win.title if win else None) or cap["window_title"]
             prev_fp = cap["last_fingerprint"]
             prev_title = cap.get("_last_win_title") or cap["window_title"]
+            now = time.time()
 
             with cap["pending_lock"]:
                 if fp not in cap["pending_fingerprints"]:
@@ -796,15 +935,22 @@ def _always_on_screenshot_loop(cap):
                 cap["fingerprints"][fp] = cap["fingerprints"].get(fp, 0) + 1
 
                 if prev_fp and prev_fp != fp:
+                    actions_since = _always_on_drain_actions(cap)
+                    action_keys, label_crops = _always_on_extract_action_keys(actions_since)
+                    transition_ms = int((now - cap.get("last_fp_change_time", now)) * 1000)
+
                     cap["pending_transitions"].append({
                         "from_fp": prev_fp,
                         "to_fp": fp,
                         "from_title": prev_title,
                         "to_title": current_title,
-                        "timestamp": time.time(),
-                        "transition_ms": 0,
+                        "timestamp": now,
+                        "transition_ms": transition_ms,
+                        "action_keys": action_keys,
+                        "label_crop": label_crops[0] if label_crops else None,
                     })
                     cap["transition_count"] += 1
+                    cap["last_fp_change_time"] = now
 
             cap["last_fingerprint"] = fp
             cap["last_img"] = img
@@ -902,6 +1048,12 @@ def _always_on_stop_capture(window_key):
     stop_event = cap.get("stop_event")
     if stop_event:
         stop_event.set()
+
+    for listener in cap.get("listeners", []):
+        try:
+            listener.stop()
+        except Exception:
+            pass
 
     for thread in cap.get("threads", []):
         try:

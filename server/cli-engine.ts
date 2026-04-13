@@ -4347,7 +4347,21 @@ ${fullHtml}`;
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/status`);
         const data = await resp.json() as any;
         if (data.connected) {
-          return ok(`Epic Desktop Agent: CONNECTED${nl}Windows: ${(data.windows || []).join(", ") || "none"}${nl}Last seen: ${new Date(data.lastSeen).toLocaleTimeString()}`);
+          const lines = [
+            `Epic Desktop Agent: CONNECTED`,
+            `Windows: ${(data.windows || []).join(", ") || "none"}`,
+            `Last seen: ${new Date(data.lastSeen).toLocaleTimeString()}`,
+          ];
+          if (data.capture && Object.keys(data.capture).length > 0) {
+            lines.push("", "Always-on Capture:");
+            for (const [ck, cs] of Object.entries(data.capture as Record<string, any>)) {
+              const elapsed = cs.elapsed_s ? `${Math.floor(cs.elapsed_s / 60)}m${cs.elapsed_s % 60}s` : "0s";
+              lines.push(`  ${(cs.window || ck).slice(0, 40)}  ${elapsed}  ${cs.nodes || 0} nodes  ${cs.edges || 0} edges  ${cs.transitions || 0} transitions  ${cs.screenshots || 0} screenshots`);
+            }
+          } else {
+            lines.push("", "Always-on Capture: inactive (no windows tracked)");
+          }
+          return ok(lines.join(nl));
         }
         return ok(`Epic Desktop Agent: DISCONNECTED${nl}Run epic_agent.py on your desktop to connect.`);
       } catch (e: any) {
