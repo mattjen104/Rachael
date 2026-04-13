@@ -1149,6 +1149,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
               if (["Edit", "ComboBox", "Spinner"].includes(node.controlType)) tags.push("editable");
               if (["CheckBox", "RadioButton"].includes(node.controlType)) tags.push("toggleable");
               if (["ListItem", "TreeItem", "TabItem"].includes(node.controlType)) tags.push("selectable");
+              if (["TreeItem", "Group", "Tree", "Pane", "SplitButton", "ComboBox"].includes(node.controlType)) tags.push("expandable");
               if (tags.length > 0) extra = `[${tags.join(",")}]`;
             }
           }

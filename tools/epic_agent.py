@@ -5022,6 +5022,7 @@ def execute_nav_view(cmd):
         "elementCount": len(elements),
         "interactiveCount": len(interactive_elements),
         "searchTerm": search_term,
+        "matchCount": len(elements) if search_term else None,
     })
 
     _post_uia_cache({
@@ -5052,11 +5053,16 @@ def execute_nav_do(cmd):
 
     cache_key = None
     hint_map = None
-    for k, v in _vimium_element_maps.items():
-        if k.startswith("NAV:") and window_title_arg.lower() in k.lower():
-            cache_key = k
-            hint_map = v
-            break
+    exact_key = f"NAV:{window_title_arg}"
+    if exact_key in _vimium_element_maps:
+        cache_key = exact_key
+        hint_map = _vimium_element_maps[exact_key]
+    else:
+        for k, v in _vimium_element_maps.items():
+            if k.startswith("NAV:") and window_title_arg.lower() in k.lower():
+                cache_key = k
+                hint_map = v
+                break
     if not hint_map:
         post_result(command_id, "error", error=f"No element map for '{window_title_arg}'. Run nav_view first.")
         return
