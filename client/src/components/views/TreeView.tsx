@@ -474,6 +474,8 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                 const nodeKey = `${wKey}-fp-${node.fingerprint || displayTitle}`;
                 nodes.push({ type: "section", label: `      ${displayTitle}`, key: nodeKey, count: visits });
                 if (expanded.has(nodeKey)) {
+                  const goTitle = ((node.titles || []).length > 0 ? node.titles[0] : node.fingerprint || "?").replace(/[;&|"`$\\]/g, "");
+                  nodes.push({ type: "bridge-info", label: `        >> Go here`, actionCmd: `epic go SUP "${goTitle}"` });
                   nodes.push({ type: "bridge-info", label: `        fp:${(node.fingerprint || "?").slice(0, 16)}  ${visits} visits`, actionCmd: "" });
                   if ((node.titles || []).length > 1) {
                     nodes.push({ type: "bridge-info", label: `        titles: ${node.titles.slice(0, 3).join(", ")}`, actionCmd: "" });
@@ -485,7 +487,8 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                     const ms = e.avgTransitionMs ? ` ~${e.avgTransitionMs}ms` : "";
                     const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
                     const crops = (e.labelCrops || []).length > 0 ? " +crop" : "";
-                    nodes.push({ type: "bridge-info", label: `        -> ${toLabel}  (${e.count}x${ms}${keys}${crops})`, actionCmd: "" });
+                    const recipeStatus = e.count >= 3 ? " {confirmed}" : e.count >= 1 ? " {new}" : "";
+                    nodes.push({ type: "bridge-info", label: `        -> ${toLabel}  (${e.count}x${ms}${keys}${crops}${recipeStatus})`, actionCmd: "" });
                   }
                   for (const e of inEdges.slice(0, 8)) {
                     const fromLabel = e.fromTitle?.slice(0, 25) || e.from?.slice(0, 12) || "?";

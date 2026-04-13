@@ -4832,7 +4832,88 @@ ${fullHtml}`;
         }
       }
 
-      if (!resolved) return fail(`[epic] No activity matching "${target}" found in ${env} tree. Run epic search ${target} to find it.`);
+      if (!resolved) {
+        try {
+          const { fuzzyMatchNode: fzMatch, buildReplayPlan: brPlan } = await import("./replay-engine");
+          const windowTreesCfg = await storage.getAgentConfig("session_window_trees");
+          if (windowTreesCfg?.value) {
+            const windowTrees: Record<string, string> = JSON.parse(windowTreesCfg.value);
+            for (const [wk, wTitle] of Object.entries(windowTrees)) {
+              const wtCfg = await storage.getAgentConfig(`session_tree_${wk}`);
+              if (!wtCfg?.value) continue;
+              const tree = JSON.parse(wtCfg.value);
+              const match = fzMatch(tree.nodes, target);
+              if (match && match.score >= 30) {
+                let currentFp = "";
+                try {
+                  const statusResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/status`);
+                  const statusData = await statusResp.json() as any;
+                  const capState = statusData.capture || {};
+                  const wCap = capState[wk];
+                  if (wCap?.current_fp) currentFp = wCap.current_fp;
+                } catch {}
+
+                if (!currentFp) {
+                  return fail(`[epic] Found "${match.title}" in nav tree but no current screen fingerprint. Is the desktop agent recording?`);
+                }
+
+                const plan = await brPlan(wk, currentFp, match.fingerprint);
+                if (!plan) {
+                  return fail(`[epic] Found "${match.title}" but no path from current screen. Try navigating closer first.`);
+                }
+
+                if (plan.requiresApproval) {
+                  return fail(`[epic] Path to "${match.title}" requires approval (${plan.maxSafetyLevel} risk). Use the TreeView to review and approve.`);
+                }
+
+                const replaySteps = plan.segments.map((seg: any, i: number) => ({
+                  step: i + 1,
+                  fromFp: seg.fromFp,
+                  toFp: seg.toFp,
+                  fromTitle: seg.fromTitle,
+                  toTitle: seg.toTitle,
+                  actions: seg.recipe?.steps || [],
+                  triggerKeys: seg.edge?.triggerKeys || [],
+                  expectedFp: seg.toFp,
+                  waitMs: seg.recipe?.avgTransitionMs || seg.edge?.avgTransitionMs || 1000,
+                }));
+
+                const agentPort = process.env.PORT || 5000;
+                const sendResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    type: "nav_replay",
+                    windowKey: wk,
+                    targetTitle: match.title,
+                    steps: replaySteps,
+                  }),
+                });
+                const sendData = await sendResp.json() as any;
+                if (!sendData.ok) return fail("[epic] Failed to send nav-replay command");
+
+                const lines: string[] = [];
+                lines.push(`=== NAV REPLAY: ${match.title} ===`);
+                lines.push(`Window: ${wTitle}`);
+                lines.push(`Path: ${plan.segments.length} hops`);
+                for (const seg of plan.segments) {
+                  const recipe = seg.recipe;
+                  const keys = seg.edge?.triggerKeys?.join(",") || "click";
+                  const badge = recipe ? `[${recipe.confidence >= 0.7 ? "confirmed" : "new"}]` : "[no-recipe]";
+                  lines.push(`  ${seg.fromTitle.slice(0, 25)} -> ${seg.toTitle.slice(0, 25)}  ${badge} ${keys}`);
+                }
+                lines.push(`Est. time: ${plan.totalEstimatedMs}ms`);
+                lines.push(`Command ID: ${sendData.commandId}`);
+                return ok(lines.join(nl));
+              }
+            }
+          }
+        } catch (e: any) {
+          console.error(`[epic go] nav-tree lookup error: ${e.message}`);
+        }
+
+        return fail(`[epic] No activity matching "${target}" found in ${env} tree or navigation map. Run epic search ${target} to find it.`);
+      }
 
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {

@@ -33,6 +33,19 @@ All data lives in Postgres tables:
 - `outlook_emails` — Persisted Outlook emails (messageId, from, subject, date, body, unread, syncedAt)
 - `snow_tickets` — Persisted ServiceNow tickets (number, type, shortDescription, state, priority, assignedTo, assignmentGroup, updatedOn, source, syncedAt)
 
+## Instant Replay / Navigation Replay Engine
+
+- **Replay Engine** (`server/replay-engine.ts`) — LLM-synthesized recipes per navigation edge, BFS pathfinding, chained replay execution with fingerprint verification
+- **Recipe storage**: `agent_configs` key `nav_recipe_{from_fp}_{to_fp}` — one recipe per unique edge (source + destination fingerprint pair)
+- **Recipe synthesis**: On every new edge in `/api/sessions/stream`, LLM generates a named procedure with parameterized steps, tags, safety level. Fallback recipe from recorded action keys if LLM fails.
+- **Recipe strengthening**: Repeated edge observations increment confidence, update timing, add alternative action keys
+- **Pathfinding**: BFS on navigation tree edges. `GET /api/sessions/pathfind?from=fp&to=fp&windowKey=wk` or `&target=name` for fuzzy match
+- **Replay execution**: `POST /api/sessions/replay` queues `nav_replay` command to desktop agent. Agent executes each step, verifies destination via screenshot fingerprint, retries on mismatch (up to 2x)
+- **Safety gate**: Hard-block patterns (password, delete, submit order, logout) + LLM risk classification (low/medium/high). High-risk paths require approval.
+- **TreeView**: Every destination node shows `>> Go here` action (runs `epic go SUP <title>`). Edges show recipe status: `{new}` or `{confirmed}` (3+ observations)
+- **CLI**: `epic go <screen-name>` first checks Epic activity tree, then falls back to nav-tree fuzzy match + pathfinding + replay
+- **Agent command**: `nav_replay` type — receives ordered steps with action sequences, trigger keys, expected fingerprints, wait times
+
 ## Morning Boot System
 
 - **`boot` command** — Sequences workday startup: epic login → outlook sync → snow sync → citrix keepalive

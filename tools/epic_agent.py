@@ -1137,6 +1137,7 @@ def _always_on_get_capture_state():
                     "transitions": cap["transition_count"],
                     "screenshots": cap["screenshot_seq"],
                     "last_transition_ts": cap.get("last_transition_ts", 0),
+                    "current_fp": cap.get("last_fingerprint", ""),
                 }
         return result
 
@@ -4033,6 +4034,162 @@ def execute_audio_status(cmd: dict) -> None:
         "ambientRms": _audio_session.get("ambient_rms", 0),
         "encoderHealthy": encoder_healthy,
     })
+
+
+def execute_nav_replay(cmd):
+    """Replay a navigation path using recorded fingerprint-verified steps."""
+    command_id = cmd.get("id", "unknown")
+    steps = cmd.get("steps", [])
+    window_key = cmd.get("windowKey", "")
+    target_title = cmd.get("targetTitle", "")
+
+    print(f"  [nav-replay] Starting replay to '{target_title}' ({len(steps)} hops)")
+
+    cap = None
+    with _always_on_lock:
+        cap = _ALWAYS_ON_CAPTURES.get(window_key)
+
+    if not cap or not cap.get("active"):
+        all_windows = list(gw.getAllWindows())
+        target_win = None
+        for w in all_windows:
+            t = w.title or ""
+            if window_key.replace("_", " ") in t.lower() and w.width > 200:
+                target_win = w
+                break
+        if not target_win:
+            post_result(command_id, "error", error=f"No window found for key '{window_key}'")
+            return
+        win_title = target_win.title
+    else:
+        win_title = cap["window_title"]
+
+    results = []
+    for i, step in enumerate(steps):
+        step_num = step.get("step", i + 1)
+        from_title = step.get("fromTitle", "?")
+        to_title = step.get("toTitle", "?")
+        expected_fp = step.get("expectedFp", "")
+        trigger_keys = step.get("triggerKeys", [])
+        actions = step.get("actions", [])
+        wait_ms = step.get("waitMs", 1000)
+
+        print(f"  [nav-replay] Step {step_num}/{len(steps)}: {from_title} -> {to_title}")
+
+        success = False
+        max_retries = 2
+
+        for attempt in range(max_retries + 1):
+            if trigger_keys:
+                for tk in trigger_keys:
+                    if "+" in tk:
+                        parts = tk.split("+")
+                        try:
+                            sendinput_hotkey(*parts)
+                        except Exception:
+                            pyautogui.hotkey(*parts)
+                    else:
+                        try:
+                            sendinput_press(tk)
+                        except Exception:
+                            pyautogui.press(tk)
+                    time.sleep(0.3)
+            elif actions:
+                for act in actions:
+                    act_type = act.get("action", "click")
+                    act_key = act.get("key", "")
+                    act_wait = act.get("waitMs", 500)
+
+                    if act_type == "key" and act_key:
+                        try:
+                            sendinput_press(act_key)
+                        except Exception:
+                            pyautogui.press(act_key)
+                    elif act_type == "hotkey" and act_key:
+                        parts = act_key.split("+")
+                        try:
+                            sendinput_hotkey(*parts)
+                        except Exception:
+                            pyautogui.hotkey(*parts)
+                    elif act_type == "click":
+                        pass
+                    elif act_type == "wait":
+                        time.sleep(act_wait / 1000.0)
+
+                    time.sleep(act_wait / 1000.0)
+            else:
+                time.sleep(wait_ms / 1000.0)
+
+            time.sleep(max(0.5, wait_ms / 1000.0))
+
+            if expected_fp:
+                img, win = _session_grab_window(win_title)
+                if img:
+                    fp_region = _session_fingerprint_region(img)
+                    current_fp = _session_phash(fp_region)
+
+                    if current_fp == expected_fp:
+                        results.append({
+                            "step": step_num,
+                            "status": "verified",
+                            "attempt": attempt + 1,
+                            "fromTitle": from_title,
+                            "toTitle": to_title,
+                        })
+                        success = True
+                        break
+                    elif attempt < max_retries:
+                        print(f"  [nav-replay] Step {step_num} mismatch (attempt {attempt + 1}), expected={expected_fp[:12]}, got={current_fp[:12]}")
+                        time.sleep(1.0)
+                        continue
+                    else:
+                        results.append({
+                            "step": step_num,
+                            "status": "fp_mismatch",
+                            "attempt": attempt + 1,
+                            "expectedFp": expected_fp[:16],
+                            "actualFp": current_fp[:16],
+                            "fromTitle": from_title,
+                            "toTitle": to_title,
+                        })
+                        success = False
+                        break
+            else:
+                results.append({
+                    "step": step_num,
+                    "status": "executed_unverified",
+                    "attempt": attempt + 1,
+                    "fromTitle": from_title,
+                    "toTitle": to_title,
+                })
+                success = True
+                break
+
+        if not success:
+            results.append({
+                "step": step_num,
+                "status": "failed",
+                "fromTitle": from_title,
+                "toTitle": to_title,
+            })
+            break
+
+    final_img, _ = _session_grab_window(win_title)
+    final_b64 = img_to_base64(final_img) if final_img else ""
+
+    verified_count = sum(1 for r in results if r.get("status") == "verified")
+    total = len(steps)
+    overall = "complete" if verified_count == total else "partial"
+
+    post_result(command_id, "complete", screenshot_b64=final_b64, data={
+        "mode": "nav_replay",
+        "target": target_title,
+        "steps_total": total,
+        "steps_verified": verified_count,
+        "overall": overall,
+        "results": results,
+    })
+    print(f"  [nav-replay] Done: {verified_count}/{total} verified ({overall})")
 
 
 def execute_replay(cmd):
@@ -8156,6 +8313,8 @@ def execute_command(cmd):
             execute_record_stop(cmd)
         elif cmd_type == "replay":
             execute_replay(cmd)
+        elif cmd_type == "nav_replay":
+            execute_nav_replay(cmd)
         elif cmd_type == "menu_crawl":
             execute_menu_crawl(cmd)
         elif cmd_type == "search_crawl":

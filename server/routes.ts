@@ -17,6 +17,7 @@ import { subscribe, getEventHistory, type CockpitEvent } from "./event-bus";
 import { createNavigationSession, updateNavigationState, getNavigationSession, getActiveSessions, closeNavigationSession, getNavigationHistory } from "./navigation-session";
 import { getControlState, getControlMode, toggleControlMode, setControlMode, getActivityStream, getPendingTakeoverPoints, resolveTakeoverPoint, recordAction, checkPermission, createTakeoverPoint, enqueueCommand, dequeueCommand, completeCommand, drainQueue, getQueueDepth, setActionPermission, getActionPermissions, getPausedExecutions, removePausedExecution, clearPausedExecutions, onResume, type PausedExecution } from "./control-bus";
 import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
+import { synthesizeRecipe, buildReplayPlan, getAllRecipesForWindow, fuzzyMatchNode, findShortestPath, getRecipe } from "./replay-engine";
 import { insertRecipeSchema } from "@shared/schema";
 import { claimJobsTracked, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken, recordHeartbeat, isExtensionConnected, smartFetch } from "./bridge-queue";
 import { startRecordingSession, addAudioChunk, stopRecordingSession, getActiveRecordingSessions, transcribeUploadedAudio } from "./transcription-service";
@@ -804,7 +805,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold, windowKey, targetTitle } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, unknown> = { id, type, env: env || "SUP" };
@@ -826,6 +827,8 @@ export async function registerRoutes(
     if (search) cmd.search = search;
     if (title) cmd.title = title;
     if (silenceThreshold !== undefined) cmd.silenceThreshold = silenceThreshold;
+    if (windowKey) cmd.windowKey = windowKey;
+    if (targetTitle) cmd.targetTitle = targetTitle;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });
@@ -1373,6 +1376,18 @@ export async function registerRoutes(
       windowTrees[windowKey] = windowTitle;
       await storage.setAgentConfig("session_window_trees", JSON.stringify(windowTrees));
 
+      if (Array.isArray(transitions)) {
+        for (const t of transitions) {
+          const fromFp = t.from_fingerprint || t.from_fp || "";
+          const toFp = t.to_fingerprint || t.to_fp || "";
+          if (!fromFp || !toFp || fromFp === "0" || toFp === "0") continue;
+          const edge = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
+          if (edge) {
+            synthesizeRecipe(edge).catch(e => console.error(`[replay] async synthesis error: ${e.message}`));
+          }
+        }
+      }
+
       res.json({
         ok: true, windowKey,
         treeNodes: Object.keys(tree.nodes).length,
@@ -1381,6 +1396,113 @@ export async function registerRoutes(
       });
     } catch (e: any) {
       console.error(`[sessions] stream error: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/sessions/pathfind", async (req, res) => {
+    try {
+      const { from, to, windowKey: wk, target } = req.query as Record<string, string>;
+      if (!wk) return res.status(400).json({ error: "Missing windowKey" });
+
+      const treeConfigKey = `session_tree_${wk}`;
+      const treeCfg = await storage.getAgentConfig(treeConfigKey);
+      if (!treeCfg?.value) return res.status(404).json({ error: "No tree data for window" });
+
+      let tree: { nodes: Record<string, any>; edges: any[] };
+      try { tree = JSON.parse(treeCfg.value); } catch { return res.status(500).json({ error: "Invalid tree data" }); }
+
+      let toFp = to;
+      if (!toFp && target) {
+        const match = fuzzyMatchNode(tree.nodes, target);
+        if (!match) return res.status(404).json({ error: `No node matching "${target}"` });
+        toFp = match.fingerprint;
+      }
+      if (!from || !toFp) return res.status(400).json({ error: "Missing from/to fingerprints or target name" });
+
+      const plan = await buildReplayPlan(wk, from, toFp);
+      if (!plan) return res.json({ found: false, error: "No path found" });
+
+      res.json({ found: true, plan });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/sessions/replay", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    try {
+      const { windowKey: wk, fromFp, toFp, targetName } = req.body;
+      if (!wk) return res.status(400).json({ error: "Missing windowKey" });
+
+      const treeConfigKey = `session_tree_${wk}`;
+      const treeCfg = await storage.getAgentConfig(treeConfigKey);
+      if (!treeCfg?.value) return res.status(404).json({ error: "No tree data" });
+
+      let tree: { nodes: Record<string, any>; edges: any[] };
+      try { tree = JSON.parse(treeCfg.value); } catch { return res.status(500).json({ error: "Invalid tree" }); }
+
+      let resolvedTo = toFp;
+      if (!resolvedTo && targetName) {
+        const match = fuzzyMatchNode(tree.nodes, targetName);
+        if (!match) return res.status(404).json({ error: `No node matching "${targetName}"` });
+        resolvedTo = match.fingerprint;
+      }
+
+      if (!fromFp || !resolvedTo) return res.status(400).json({ error: "Missing fromFp or toFp/targetName" });
+
+      const plan = await buildReplayPlan(wk, fromFp, resolvedTo);
+      if (!plan || plan.segments.length === 0) {
+        return res.json({ ok: false, error: "No path found or already at destination" });
+      }
+
+      if (plan.requiresApproval) {
+        return res.json({
+          ok: false,
+          error: "Path requires approval — contains high-risk steps",
+          plan,
+          requiresApproval: true,
+        });
+      }
+
+      const replaySteps = plan.segments.map((seg, i) => ({
+        step: i + 1,
+        fromFp: seg.fromFp,
+        toFp: seg.toFp,
+        fromTitle: seg.fromTitle,
+        toTitle: seg.toTitle,
+        actions: seg.recipe?.steps || [],
+        triggerKeys: seg.edge?.triggerKeys || [],
+        expectedFp: seg.toFp,
+        waitMs: seg.recipe?.avgTransitionMs || seg.edge?.avgTransitionMs || 1000,
+      }));
+
+      const id = `replay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      epicCommandQueue.push({
+        id,
+        type: "nav_replay",
+        windowKey: wk,
+        targetTitle: plan.toTitle,
+        steps: replaySteps,
+      });
+
+      res.json({ ok: true, commandId: id, plan });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/sessions/recipes", async (req, res) => {
+    try {
+      const wk = req.query.windowKey as string;
+      if (!wk) return res.status(400).json({ error: "Missing windowKey" });
+      const recipes = await getAllRecipesForWindow(wk);
+      res.json({ recipes });
+    } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
