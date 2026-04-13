@@ -317,8 +317,8 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
     const dwScannedKeys = Object.keys(dwScanned);
     const dwTotalCount = dwWindowList.length || dwScannedKeys.length;
 
-    if (dwTotalCount > 0 || !dw?.empty) {
-      nodes.push({ type: "section", label: "DESKTOP", key: "desktop", count: dwTotalCount });
+    {
+      nodes.push({ type: "section", label: "DESKTOP", key: "desktop", count: dwTotalCount > 0 ? dwTotalCount : -1 });
       if (expanded.has("desktop")) {
         if (desktopFilterActive && desktopFilter) {
           const filterLower = desktopFilter.toLowerCase();
@@ -350,6 +350,10 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
           const windowTitles = dwWindowList.length > 0
             ? dwWindowList.map((w: any) => w.title)
             : dwScannedKeys;
+
+          if (windowTitles.length === 0) {
+            nodes.push({ type: "bridge-info", label: "No windows cached. Run epic_agent.py then: nav", actionCmd: "nav" });
+          }
 
           for (const title of windowTitles) {
             const scanned = dwScanned[title];
