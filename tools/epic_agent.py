@@ -5971,7 +5971,7 @@ def execute_nav_do(cmd):
 
 
 def _post_uia_cache(data):
-    """Post UIA scan data to the server cache."""
+    """Post UIA scan data to the server cache (best-effort, server also updates from results)."""
     try:
         resp = requests.post(
             f"{ORGCLOUD_URL}/api/epic/uia-tree",
@@ -5981,10 +5981,8 @@ def _post_uia_cache(data):
         )
         if resp.status_code == 200:
             print(f"  [cache] UIA tree cached")
-        else:
-            print(f"  [cache] Cache post failed: {resp.status_code}")
-    except Exception as e:
-        print(f"  [cache] Cache post error: {e}")
+    except Exception:
+        pass
 
 
 _LOGIN_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "login_input_method.json")
