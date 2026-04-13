@@ -359,32 +359,30 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
             nodes.push({ type: "section", label: `  ${title.slice(0, 55)}`, key: winKey, count: hasDetail ? elCount : -1 });
             if (expanded.has(winKey)) {
               if (hasDetail && scanned.elements) {
-                const elements = scanned.elements;
-                const groups = new Map<string, typeof elements>();
+                const elements: any[] = scanned.elements;
+                const minDepth = elements.reduce((m: number, e: any) => Math.min(m, e.depth ?? 0), 99);
+                let lastParent = "";
                 for (const el of elements) {
-                  const group = el.parent || "Window";
-                  if (!groups.has(group)) groups.set(group, []);
-                  groups.get(group)!.push(el);
-                }
-                for (const [group, items] of groups) {
-                  const groupKey = `${winKey}-g-${group}`;
-                  nodes.push({ type: "section", label: `    ${group}`, key: groupKey, count: items.length });
-                  if (expanded.has(groupKey)) {
-                    for (const el of items) {
-                      nodes.push({
-                        type: "uiaElement",
-                        hint: el.hint || "",
-                        name: el.name || `(${el.controlType})`,
-                        controlType: el.controlType || "",
-                        value: el.value || "",
-                        checked: el.checked ?? null,
-                        enabled: el.enabled !== false,
-                        windowTitle: title,
-                        parent: group,
-                        isStatic: !!el.static,
-                      });
-                    }
+                  const elDepth = (el.depth ?? 0) - minDepth;
+                  if (el.parent && el.parent !== lastParent) {
+                    const groupKey = `${winKey}-g-${el.parent}`;
+                    nodes.push({ type: "section", label: `    ${el.parent}`, key: groupKey, count: 0 });
+                    if (!expanded.has(groupKey)) continue;
+                    lastParent = el.parent;
                   }
+                  const indent = "  ".repeat(Math.max(0, elDepth));
+                  nodes.push({
+                    type: "uiaElement",
+                    hint: el.hint || "",
+                    name: `${indent}${el.name || `(${el.controlType})`}`,
+                    controlType: el.controlType || "",
+                    value: el.value || "",
+                    checked: el.checked ?? null,
+                    enabled: el.enabled !== false,
+                    windowTitle: title,
+                    parent: el.parent || "",
+                    isStatic: !!el.static,
+                  });
                 }
                 const ageS = scanned.ageMs ? Math.round(scanned.ageMs / 1000) : 0;
                 if (ageS > 0) {
@@ -783,10 +781,27 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
         setNavActionPending(node.hint);
         (async () => {
           try {
-            await apiRequest("POST", "/api/epic/agent/send", { type: "nav_do", window: node.windowTitle, hint: node.hint });
+            const sendResp = await apiRequest("POST", "/api/epic/agent/send", { type: "nav_do", window: node.windowTitle, hint: node.hint });
+            const sendData = await sendResp.json() as any;
+            const cmdId = sendData.commandId;
+            if (cmdId) {
+              const maxWait = 30000;
+              const pollInterval = 600;
+              let elapsed = 0;
+              while (elapsed < maxWait) {
+                await new Promise(r => setTimeout(r, pollInterval));
+                elapsed += pollInterval;
+                try {
+                  const pollResp = await fetch(apiUrl(`/api/epic/agent/result/${cmdId}`));
+                  const pollData = await pollResp.json() as any;
+                  if (pollData.status && pollData.status !== "pending") break;
+                } catch {}
+              }
+            }
+            await new Promise(r => setTimeout(r, 2000));
             queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
           } catch {}
-          setTimeout(() => setNavActionPending(null), 3000);
+          setNavActionPending(null);
         })();
       }
     }
@@ -911,6 +926,21 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
+
+  useEffect(() => {
+    if (!desktopFilterActive || !desktopFilter || !data) return;
+    const timer = setTimeout(async () => {
+      const dw = (data as any).desktopWindows;
+      const scannedKeys = Object.keys(dw?.scannedWindows || {});
+      for (const winTitle of scannedKeys) {
+        try {
+          await apiRequest("POST", "/api/epic/agent/send", { type: "nav_view", window: winTitle, search: desktopFilter });
+        } catch {}
+      }
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["/api/tree"] }), 5000);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [desktopFilter, desktopFilterActive, data]);
 
   useEffect(() => {
     containerRef.current?.querySelector(`[data-idx="${selectedIdx}"]`)?.scrollIntoView({ block: "nearest" });
