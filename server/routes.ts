@@ -1134,33 +1134,53 @@ export async function registerRoutes(
         try { tree = JSON.parse(treeCfg.value); } catch {}
       }
       const nowMs = Date.now();
-      for (const th of (summary.title_history || [])) {
-        const title = th.title || "";
-        if (!title) continue;
-        if (!tree.nodes[title]) {
-          tree.nodes[title] = { title, fingerprints: {}, visitCount: 0, lastSeen: 0, sessions: [] };
-        }
-        tree.nodes[title].visitCount++;
-        tree.nodes[title].lastSeen = nowMs;
-        if (!tree.nodes[title].sessions.includes(summary.session_id)) {
-          tree.nodes[title].sessions.push(summary.session_id);
-        }
-      }
+      const fpTitleMap: Record<string, string[]> = summary.fingerprint_titles || {};
+
       for (const [fp, count] of Object.entries(summary.fingerprints || {})) {
-        for (const th of (summary.title_history || [])) {
-          const title = th.title || "";
-          if (title && tree.nodes[title]) {
-            tree.nodes[title].fingerprints[fp] = (tree.nodes[title].fingerprints[fp] || 0) + (count as number);
+        if (!fp || fp === "0") continue;
+        if (!tree.nodes[fp]) {
+          tree.nodes[fp] = {
+            fingerprint: fp,
+            titles: [],
+            visitCount: 0,
+            lastSeen: 0,
+            sessions: [],
+            labelCrops: [],
+          };
+        }
+        tree.nodes[fp].visitCount += (count as number);
+        tree.nodes[fp].lastSeen = nowMs;
+        if (!tree.nodes[fp].sessions.includes(summary.session_id)) {
+          tree.nodes[fp].sessions.push(summary.session_id);
+        }
+        const assocTitles: string[] = fpTitleMap[fp] || [];
+        for (const t of assocTitles) {
+          if (t && !tree.nodes[fp].titles.includes(t)) {
+            tree.nodes[fp].titles.push(t);
           }
         }
       }
+
       for (const t of (summary.transitions || [])) {
-        const from = t.from_title || "";
-        const to = t.to_title || "";
-        if (!from || !to) continue;
-        let existing = tree.edges.find((e: any) => e.from === from && e.to === to);
+        const fromFp = t.from_fingerprint || "";
+        const toFp = t.to_fingerprint || "";
+        if (!fromFp || !toFp || fromFp === "0" || toFp === "0") continue;
+        let existing = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
         if (!existing) {
-          existing = { from, to, count: 0, sessions: [], avgTransitionMs: 0, totalTransitionMs: 0, triggerKeys: [], triggerClicks: [] };
+          existing = {
+            from: fromFp,
+            to: toFp,
+            fromTitle: t.from_title || "",
+            toTitle: t.to_title || "",
+            count: 0,
+            sessions: [],
+            avgTransitionMs: 0,
+            totalTransitionMs: 0,
+            triggerKeys: [],
+            labelCrops: [],
+            prevScreenshots: [],
+            afterScreenshots: [],
+          };
           tree.edges.push(existing);
         }
         if (!existing.sessions.includes(summary.session_id)) {
@@ -1174,10 +1194,61 @@ export async function registerRoutes(
         if (t.trigger_key?.key && !existing.triggerKeys.includes(t.trigger_key.key)) {
           existing.triggerKeys.push(t.trigger_key.key);
         }
+        if (t.label_crop && !existing.labelCrops.includes(t.label_crop)) {
+          existing.labelCrops.push(t.label_crop);
+        }
+        if (t.prev_screenshot && existing.prevScreenshots.length < 5 && !existing.prevScreenshots.includes(t.prev_screenshot)) {
+          existing.prevScreenshots.push(t.prev_screenshot);
+        }
+        if (t.after_screenshot && existing.afterScreenshots.length < 5 && !existing.afterScreenshots.includes(t.after_screenshot)) {
+          existing.afterScreenshots.push(t.after_screenshot);
+        }
+        if (!existing.fromTitle && t.from_title) existing.fromTitle = t.from_title;
+        if (!existing.toTitle && t.to_title) existing.toTitle = t.to_title;
       }
       await storage.setAgentConfig("session_desktop_tree", JSON.stringify(tree));
 
-      res.json({ ok: true, session_id: summary.session_id, treeNodes: Object.keys(tree.nodes).length, treeEdges: tree.edges.length });
+      const allSessionsCfg = await storage.getAgentConfig("session_recorder_list");
+      let allSessions: any[] = [];
+      if (allSessionsCfg?.value) { try { allSessions = JSON.parse(allSessionsCfg.value); } catch {} }
+      let sequencePatterns: any[] = [];
+      if (allSessions.length >= 3 && tree.edges.length > 0) {
+        const sessionSeqs: Record<string, string[]> = {};
+        for (const edge of tree.edges) {
+          for (const sid of edge.sessions) {
+            if (!sessionSeqs[sid]) sessionSeqs[sid] = [];
+            sessionSeqs[sid].push(`${edge.from}->${edge.to}`);
+          }
+        }
+        const pairSeqCounts: Record<string, number> = {};
+        for (const [sid, seq] of Object.entries(sessionSeqs)) {
+          const seen = new Set<string>();
+          for (let j = 0; j < seq.length - 1; j++) {
+            const pair = `${seq[j]}|||${seq[j + 1]}`;
+            if (!seen.has(pair)) {
+              seen.add(pair);
+              pairSeqCounts[pair] = (pairSeqCounts[pair] || 0) + 1;
+            }
+          }
+        }
+        for (const [pair, count] of Object.entries(pairSeqCounts)) {
+          if (count >= 3) {
+            const [step1, step2] = pair.split("|||");
+            sequencePatterns.push({ sequence: [step1, step2], frequency: count, sessionsTotal: allSessions.length });
+          }
+        }
+        if (sequencePatterns.length > 0) {
+          await storage.setAgentConfig("session_sequence_patterns", JSON.stringify(sequencePatterns));
+        }
+      }
+
+      res.json({
+        ok: true,
+        session_id: summary.session_id,
+        treeNodes: Object.keys(tree.nodes).length,
+        treeEdges: tree.edges.length,
+        sequencePatterns: sequencePatterns.length,
+      });
     } catch (e: any) {
       console.error(`[sessions] upload error: ${e.message}`);
       res.status(500).json({ error: e.message });
@@ -1226,53 +1297,38 @@ export async function registerRoutes(
         try { tree = JSON.parse(treeCfg.value); } catch {}
       }
 
-      const transitions = session.transitions || [];
-      const titleHistory = session.title_history || [];
       const fingerprints = session.fingerprints || {};
+      const fpTitleMap: Record<string, string[]> = session.fingerprint_titles || {};
       const now = Date.now();
 
-      for (const th of titleHistory) {
-        const title = th.title || "";
-        if (!title) continue;
-        if (!tree.nodes[title]) {
-          tree.nodes[title] = {
-            title,
-            fingerprints: {},
-            visitCount: 0,
-            lastSeen: 0,
-            sessions: [],
-          };
-        }
-        tree.nodes[title].visitCount++;
-        tree.nodes[title].lastSeen = now;
-        if (!tree.nodes[title].sessions.includes(session.session_id)) {
-          tree.nodes[title].sessions.push(session.session_id);
-        }
-      }
-
       for (const [fp, count] of Object.entries(fingerprints)) {
-        for (const nodeKey of Object.keys(tree.nodes)) {
-          if (tree.nodes[nodeKey].fingerprints) {
-            tree.nodes[nodeKey].fingerprints[fp] = (tree.nodes[nodeKey].fingerprints[fp] || 0) + (count as number);
-          }
+        if (!fp || fp === "0") continue;
+        if (!tree.nodes[fp]) {
+          tree.nodes[fp] = { fingerprint: fp, titles: [], visitCount: 0, lastSeen: 0, sessions: [], labelCrops: [] };
+        }
+        tree.nodes[fp].visitCount += (count as number);
+        tree.nodes[fp].lastSeen = now;
+        if (!tree.nodes[fp].sessions.includes(session.session_id)) {
+          tree.nodes[fp].sessions.push(session.session_id);
+        }
+        for (const t of (fpTitleMap[fp] || [])) {
+          if (t && !tree.nodes[fp].titles.includes(t)) tree.nodes[fp].titles.push(t);
         }
       }
 
-      for (const t of transitions) {
-        const from = t.from_title || "";
-        const to = t.to_title || "";
-        if (!from || !to) continue;
-        let existing = tree.edges.find((e: any) => e.from === from && e.to === to);
+      for (const t of (session.transitions || [])) {
+        const fromFp = t.from_fingerprint || "";
+        const toFp = t.to_fingerprint || "";
+        if (!fromFp || !toFp || fromFp === "0" || toFp === "0") continue;
+        let existing = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
         if (!existing) {
           existing = {
-            from,
-            to,
-            count: 0,
-            sessions: [],
-            avgTransitionMs: 0,
-            totalTransitionMs: 0,
-            triggerKeys: [],
-            triggerClicks: [],
+            from: fromFp, to: toFp,
+            fromTitle: t.from_title || "", toTitle: t.to_title || "",
+            count: 0, sessions: [],
+            avgTransitionMs: 0, totalTransitionMs: 0,
+            triggerKeys: [], labelCrops: [],
+            prevScreenshots: [], afterScreenshots: [],
           };
           tree.edges.push(existing);
         }
@@ -1287,28 +1343,54 @@ export async function registerRoutes(
         if (t.trigger_key?.key && !existing.triggerKeys.includes(t.trigger_key.key)) {
           existing.triggerKeys.push(t.trigger_key.key);
         }
+        if (t.label_crop && !existing.labelCrops.includes(t.label_crop)) {
+          existing.labelCrops.push(t.label_crop);
+        }
+        if (t.prev_screenshot && existing.prevScreenshots.length < 5) existing.prevScreenshots.push(t.prev_screenshot);
+        if (t.after_screenshot && existing.afterScreenshots.length < 5) existing.afterScreenshots.push(t.after_screenshot);
       }
 
       await storage.setAgentConfig("session_desktop_tree", JSON.stringify(tree));
 
       const listCfg = await storage.getAgentConfig("session_recorder_list");
       let allSessions: any[] = [];
-      if (listCfg?.value) {
-        try { allSessions = JSON.parse(listCfg.value); } catch {}
-      }
+      if (listCfg?.value) { try { allSessions = JSON.parse(listCfg.value); } catch {} }
+
       const crossSessionPatterns: any[] = [];
       if (allSessions.length >= 3) {
-        const edgeCounts: Record<string, { from: string; to: string; count: number }> = {};
         for (const edge of tree.edges) {
           if (edge.sessions.length >= 3) {
             crossSessionPatterns.push({
               from: edge.from,
               to: edge.to,
+              fromTitle: edge.fromTitle || "",
+              toTitle: edge.toTitle || "",
               frequency: edge.sessions.length,
               sessionsTotal: allSessions.length,
               confidence: Math.round((edge.sessions.length / allSessions.length) * 100) / 100,
               avgTransitionMs: edge.avgTransitionMs || 0,
             });
+          }
+        }
+        const sessionSeqs: Record<string, string[]> = {};
+        for (const edge of tree.edges) {
+          for (const sid of edge.sessions) {
+            if (!sessionSeqs[sid]) sessionSeqs[sid] = [];
+            sessionSeqs[sid].push(`${edge.from}->${edge.to}`);
+          }
+        }
+        const pairCounts: Record<string, number> = {};
+        for (const seq of Object.values(sessionSeqs)) {
+          const seen = new Set<string>();
+          for (let j = 0; j < seq.length - 1; j++) {
+            const pair = `${seq[j]}|||${seq[j + 1]}`;
+            if (!seen.has(pair)) { seen.add(pair); pairCounts[pair] = (pairCounts[pair] || 0) + 1; }
+          }
+        }
+        for (const [pair, count] of Object.entries(pairCounts)) {
+          if (count >= 3) {
+            const [s1, s2] = pair.split("|||");
+            crossSessionPatterns.push({ type: "sequence", steps: [s1, s2], frequency: count, sessionsTotal: allSessions.length });
           }
         }
       }

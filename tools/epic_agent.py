@@ -1052,17 +1052,34 @@ def _session_post_process(session_dir, session_id, window_title, events, fingerp
     """Post-process a recording session: build transition graph, upload summary."""
     unique_screens = {}
     for fp, count in fingerprints.items():
-        unique_screens[fp] = {"fingerprint": fp, "count": count, "titles": []}
+        unique_screens[fp] = {"fingerprint": fp, "count": count, "titles": set()}
 
-    for th in title_history:
-        t = th.get("title", "")
-        for fp in unique_screens:
-            unique_screens[fp]["titles"].append(t)
+    screenshot_events = [e for e in events if e["type"] in ("screenshot", "click_screenshot", "key_screenshot")]
+    click_screenshot_events = [e for e in events if e["type"] == "click_screenshot"]
+    key_screenshot_events = [e for e in events if e["type"] == "key_screenshot"]
+
+    fp_title_map = {}
+    title_idx = 0
+    sorted_titles = sorted(title_history, key=lambda x: x.get("timestamp", 0))
+    for se in screenshot_events:
+        se_ts = se["timestamp"]
+        while title_idx < len(sorted_titles) - 1 and sorted_titles[title_idx + 1]["timestamp"] <= se_ts:
+            title_idx += 1
+        current_title = sorted_titles[title_idx]["title"] if title_idx < len(sorted_titles) else ""
+        fp = se["data"].get("fingerprint", "")
+        if fp and fp in unique_screens:
+            unique_screens[fp]["titles"].add(current_title)
+        if fp and current_title:
+            if fp not in fp_title_map:
+                fp_title_map[fp] = set()
+            fp_title_map[fp].add(current_title)
+
+    for fp in unique_screens:
+        unique_screens[fp]["titles"] = list(unique_screens[fp]["titles"])
 
     transitions = []
     click_events = [e for e in events if e["type"] == "click"]
     title_events = [e for e in events if e["type"] == "title_change"]
-    screenshot_events = [e for e in events if e["type"] in ("screenshot", "click_screenshot", "key_screenshot")]
 
     for i, tc in enumerate(title_events):
         prev_title = tc["data"].get("old", "")
@@ -1070,27 +1087,42 @@ def _session_post_process(session_dir, session_id, window_title, events, fingerp
         ts = tc["timestamp"]
         trigger_click = None
         trigger_click_ts = 0
+        label_crop = None
+        prev_screenshot = None
+        after_screenshot = None
         for ce in reversed(click_events):
             if ce["timestamp"] < ts and ts - ce["timestamp"] < 5.0:
                 trigger_click = ce["data"]
                 trigger_click_ts = ce["timestamp"]
+                for cse in reversed(click_screenshot_events):
+                    if abs(cse["timestamp"] - ce["timestamp"]) < 1.0:
+                        label_crop = cse["data"].get("crop", "")
+                        prev_screenshot = cse["data"].get("file", "")
+                        break
                 break
         trigger_key = None
-        key_events = [e for e in events if e["type"] == "key"]
-        for ke in reversed(key_events):
+        key_events_list = [e for e in events if e["type"] == "key"]
+        for ke in reversed(key_events_list):
             if ke["timestamp"] < ts and ts - ke["timestamp"] < 3.0:
                 trigger_key = ke["data"]
+                for kse in reversed(key_screenshot_events):
+                    if abs(kse["timestamp"] - ke["timestamp"]) < 1.0:
+                        prev_screenshot = prev_screenshot or kse["data"].get("file", "")
+                        break
                 break
 
         prev_fp = None
         for se in reversed(screenshot_events):
             if se["timestamp"] < ts:
                 prev_fp = se["data"].get("fingerprint", "")
+                if not prev_screenshot:
+                    prev_screenshot = se["data"].get("file", "")
                 break
         after_fp = None
         for se in screenshot_events:
             if se["timestamp"] > ts:
                 after_fp = se["data"].get("fingerprint", "")
+                after_screenshot = se["data"].get("file", "")
                 break
 
         transition_ms = 0
@@ -1106,7 +1138,12 @@ def _session_post_process(session_dir, session_id, window_title, events, fingerp
             "from_fingerprint": prev_fp,
             "to_fingerprint": after_fp,
             "transition_ms": transition_ms,
+            "label_crop": label_crop,
+            "prev_screenshot": prev_screenshot,
+            "after_screenshot": after_screenshot,
         })
+
+    fp_title_serializable = {fp: list(titles) for fp, titles in fp_title_map.items()}
 
     summary = {
         "session_id": session_id,
@@ -1120,6 +1157,7 @@ def _session_post_process(session_dir, session_id, window_title, events, fingerp
         "transitions": transitions,
         "title_history": title_history,
         "fingerprints": {fp: d["count"] for fp, d in unique_screens.items()},
+        "fingerprint_titles": fp_title_serializable,
         "click_count": len(click_events),
         "key_count": len([e for e in events if e["type"] == "key"]),
     }

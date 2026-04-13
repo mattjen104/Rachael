@@ -424,23 +424,28 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
           if (expanded.has("sessions-screens")) {
             const sortedNodes = [...treeNodes].sort((a: any, b: any) => (b.visitCount || 0) - (a.visitCount || 0));
             for (const node of sortedNodes.slice(0, 30)) {
-              const title = (node.title || "?").slice(0, 40);
+              const displayTitle = (node.titles || []).length > 0 ? node.titles[0].slice(0, 35) : node.fingerprint?.slice(0, 12) || "?";
               const visits = node.visitCount || 0;
               const sessCount = (node.sessions || []).length;
-              const fp = Object.keys(node.fingerprints || {}).length;
-              const nodeKey = `sessions-screen-${node.title}`;
-              nodes.push({ type: "section", label: `    ${title}`, key: nodeKey, count: visits });
+              const nodeKey = `sessions-screen-${node.fingerprint || displayTitle}`;
+              nodes.push({ type: "section", label: `    ${displayTitle}`, key: nodeKey, count: visits });
               if (expanded.has(nodeKey)) {
-                nodes.push({ type: "bridge-info", label: `      ${visits} visits, ${sessCount} sessions, ${fp} fingerprints`, actionCmd: "" });
-                const outEdges = treeEdges.filter((e: any) => e.from === node.title);
-                const inEdges = treeEdges.filter((e: any) => e.to === node.title);
+                nodes.push({ type: "bridge-info", label: `      fp:${(node.fingerprint || "?").slice(0, 16)}  ${visits} visits  ${sessCount} sessions`, actionCmd: "" });
+                if ((node.titles || []).length > 1) {
+                  nodes.push({ type: "bridge-info", label: `      titles: ${node.titles.slice(0, 3).join(", ")}`, actionCmd: "" });
+                }
+                const outEdges = treeEdges.filter((e: any) => e.from === node.fingerprint);
+                const inEdges = treeEdges.filter((e: any) => e.to === node.fingerprint);
                 for (const e of outEdges.slice(0, 5)) {
+                  const toLabel = e.toTitle?.slice(0, 25) || e.to?.slice(0, 12) || "?";
                   const ms = e.avgTransitionMs ? ` ~${e.avgTransitionMs}ms` : "";
                   const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
-                  nodes.push({ type: "bridge-info", label: `      -> ${(e.to || "?").slice(0, 30)}  (${e.count}x${ms}${keys})`, actionCmd: "" });
+                  const crops = (e.labelCrops || []).length > 0 ? " +crop" : "";
+                  nodes.push({ type: "bridge-info", label: `      -> ${toLabel}  (${e.count}x${ms}${keys}${crops})`, actionCmd: "" });
                 }
                 for (const e of inEdges.slice(0, 5)) {
-                  nodes.push({ type: "bridge-info", label: `      <- ${(e.from || "?").slice(0, 30)}  (${e.count}x)`, actionCmd: "" });
+                  const fromLabel = e.fromTitle?.slice(0, 25) || e.from?.slice(0, 12) || "?";
+                  nodes.push({ type: "bridge-info", label: `      <- ${fromLabel}  (${e.count}x)`, actionCmd: "" });
                 }
               }
             }
