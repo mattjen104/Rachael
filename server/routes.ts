@@ -1128,7 +1128,56 @@ export async function registerRoutes(
         await storage.setAgentConfig(graphKey, JSON.stringify(graph));
       }
 
-      res.json({ ok: true, session_id: summary.session_id });
+      const treeCfg = await storage.getAgentConfig("session_desktop_tree");
+      let tree: { nodes: Record<string, any>; edges: any[] } = { nodes: {}, edges: [] };
+      if (treeCfg?.value) {
+        try { tree = JSON.parse(treeCfg.value); } catch {}
+      }
+      const nowMs = Date.now();
+      for (const th of (summary.title_history || [])) {
+        const title = th.title || "";
+        if (!title) continue;
+        if (!tree.nodes[title]) {
+          tree.nodes[title] = { title, fingerprints: {}, visitCount: 0, lastSeen: 0, sessions: [] };
+        }
+        tree.nodes[title].visitCount++;
+        tree.nodes[title].lastSeen = nowMs;
+        if (!tree.nodes[title].sessions.includes(summary.session_id)) {
+          tree.nodes[title].sessions.push(summary.session_id);
+        }
+      }
+      for (const [fp, count] of Object.entries(summary.fingerprints || {})) {
+        for (const th of (summary.title_history || [])) {
+          const title = th.title || "";
+          if (title && tree.nodes[title]) {
+            tree.nodes[title].fingerprints[fp] = (tree.nodes[title].fingerprints[fp] || 0) + (count as number);
+          }
+        }
+      }
+      for (const t of (summary.transitions || [])) {
+        const from = t.from_title || "";
+        const to = t.to_title || "";
+        if (!from || !to) continue;
+        let existing = tree.edges.find((e: any) => e.from === from && e.to === to);
+        if (!existing) {
+          existing = { from, to, count: 0, sessions: [], avgTransitionMs: 0, totalTransitionMs: 0, triggerKeys: [], triggerClicks: [] };
+          tree.edges.push(existing);
+        }
+        if (!existing.sessions.includes(summary.session_id)) {
+          existing.count++;
+          existing.sessions.push(summary.session_id);
+        }
+        if (t.transition_ms > 0) {
+          existing.totalTransitionMs = (existing.totalTransitionMs || 0) + t.transition_ms;
+          existing.avgTransitionMs = Math.round(existing.totalTransitionMs / existing.count);
+        }
+        if (t.trigger_key?.key && !existing.triggerKeys.includes(t.trigger_key.key)) {
+          existing.triggerKeys.push(t.trigger_key.key);
+        }
+      }
+      await storage.setAgentConfig("session_desktop_tree", JSON.stringify(tree));
+
+      res.json({ ok: true, session_id: summary.session_id, treeNodes: Object.keys(tree.nodes).length, treeEdges: tree.edges.length });
     } catch (e: any) {
       console.error(`[sessions] upload error: ${e.message}`);
       res.status(500).json({ error: e.message });
@@ -1145,21 +1194,143 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/sessions/:id", async (req, res) => {
-    try {
-      const cfg = await storage.getAgentConfig(`session_detail_${req.params.id}`);
-      if (!cfg?.value) return res.status(404).json({ error: "Session not found" });
-      res.json(JSON.parse(cfg.value));
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
   app.get("/api/sessions/graph/transitions", async (_req, res) => {
     try {
       const cfg = await storage.getAgentConfig("session_transition_graph");
       const graph = cfg?.value ? JSON.parse(cfg.value) : {};
       res.json({ edges: Object.values(graph) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/sessions/desktop-tree", async (_req, res) => {
+    try {
+      const cfg = await storage.getAgentConfig("session_desktop_tree");
+      const tree = cfg?.value ? JSON.parse(cfg.value) : { nodes: {}, edges: [] };
+      res.json(tree);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/sessions/:id/analyze", async (req, res) => {
+    try {
+      const sessionCfg = await storage.getAgentConfig(`session_detail_${req.params.id}`);
+      if (!sessionCfg?.value) return res.status(404).json({ error: "Session not found" });
+      const session = JSON.parse(sessionCfg.value);
+
+      const treeCfg = await storage.getAgentConfig("session_desktop_tree");
+      let tree: { nodes: Record<string, any>; edges: any[] } = { nodes: {}, edges: [] };
+      if (treeCfg?.value) {
+        try { tree = JSON.parse(treeCfg.value); } catch {}
+      }
+
+      const transitions = session.transitions || [];
+      const titleHistory = session.title_history || [];
+      const fingerprints = session.fingerprints || {};
+      const now = Date.now();
+
+      for (const th of titleHistory) {
+        const title = th.title || "";
+        if (!title) continue;
+        if (!tree.nodes[title]) {
+          tree.nodes[title] = {
+            title,
+            fingerprints: {},
+            visitCount: 0,
+            lastSeen: 0,
+            sessions: [],
+          };
+        }
+        tree.nodes[title].visitCount++;
+        tree.nodes[title].lastSeen = now;
+        if (!tree.nodes[title].sessions.includes(session.session_id)) {
+          tree.nodes[title].sessions.push(session.session_id);
+        }
+      }
+
+      for (const [fp, count] of Object.entries(fingerprints)) {
+        for (const nodeKey of Object.keys(tree.nodes)) {
+          if (tree.nodes[nodeKey].fingerprints) {
+            tree.nodes[nodeKey].fingerprints[fp] = (tree.nodes[nodeKey].fingerprints[fp] || 0) + (count as number);
+          }
+        }
+      }
+
+      for (const t of transitions) {
+        const from = t.from_title || "";
+        const to = t.to_title || "";
+        if (!from || !to) continue;
+        let existing = tree.edges.find((e: any) => e.from === from && e.to === to);
+        if (!existing) {
+          existing = {
+            from,
+            to,
+            count: 0,
+            sessions: [],
+            avgTransitionMs: 0,
+            totalTransitionMs: 0,
+            triggerKeys: [],
+            triggerClicks: [],
+          };
+          tree.edges.push(existing);
+        }
+        if (!existing.sessions.includes(session.session_id)) {
+          existing.count++;
+          existing.sessions.push(session.session_id);
+        }
+        if (t.transition_ms > 0) {
+          existing.totalTransitionMs = (existing.totalTransitionMs || 0) + t.transition_ms;
+          existing.avgTransitionMs = Math.round(existing.totalTransitionMs / existing.count);
+        }
+        if (t.trigger_key?.key && !existing.triggerKeys.includes(t.trigger_key.key)) {
+          existing.triggerKeys.push(t.trigger_key.key);
+        }
+      }
+
+      await storage.setAgentConfig("session_desktop_tree", JSON.stringify(tree));
+
+      const listCfg = await storage.getAgentConfig("session_recorder_list");
+      let allSessions: any[] = [];
+      if (listCfg?.value) {
+        try { allSessions = JSON.parse(listCfg.value); } catch {}
+      }
+      const crossSessionPatterns: any[] = [];
+      if (allSessions.length >= 3) {
+        const edgeCounts: Record<string, { from: string; to: string; count: number }> = {};
+        for (const edge of tree.edges) {
+          if (edge.sessions.length >= 3) {
+            crossSessionPatterns.push({
+              from: edge.from,
+              to: edge.to,
+              frequency: edge.sessions.length,
+              sessionsTotal: allSessions.length,
+              confidence: Math.round((edge.sessions.length / allSessions.length) * 100) / 100,
+              avgTransitionMs: edge.avgTransitionMs || 0,
+            });
+          }
+        }
+      }
+
+      res.json({
+        ok: true,
+        session_id: session.session_id,
+        treeNodes: Object.keys(tree.nodes).length,
+        treeEdges: tree.edges.length,
+        patterns: crossSessionPatterns,
+      });
+    } catch (e: any) {
+      console.error(`[sessions] analyze error: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/sessions/:id", async (req, res) => {
+    try {
+      const cfg = await storage.getAgentConfig(`session_detail_${req.params.id}`);
+      if (!cfg?.value) return res.status(404).json({ error: "Session not found" });
+      res.json(JSON.parse(cfg.value));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1433,11 +1604,14 @@ export async function registerRoutes(
 
     let recordedSessions: any[] = [];
     let transitionGraph: any = {};
+    let sessionDesktopTree: any = { nodes: {}, edges: [] };
     try {
       const sessionListCfg = await storage.getAgentConfig("session_recorder_list");
       if (sessionListCfg?.value) recordedSessions = JSON.parse(sessionListCfg.value);
       const graphCfg = await storage.getAgentConfig("session_transition_graph");
       if (graphCfg?.value) transitionGraph = JSON.parse(graphCfg.value);
+      const treeCfg = await storage.getAgentConfig("session_desktop_tree");
+      if (treeCfg?.value) sessionDesktopTree = JSON.parse(treeCfg.value);
     } catch {}
 
     res.json({
@@ -1462,6 +1636,7 @@ export async function registerRoutes(
       desktopWindows,
       recordedSessions,
       transitionGraph,
+      sessionDesktopTree,
     });
   });
 

@@ -5581,6 +5581,16 @@ ${fullHtml}`;
         const sessionId = args[2]?.trim();
         if (!sessionId) return fail("[epic] Usage: epic record-session analyze <session_id>");
         try {
+          const analyzeResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/sessions/${encodeURIComponent(sessionId)}/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          let analyzeResult: any = {};
+          if (analyzeResp.ok) {
+            analyzeResult = await analyzeResp.json() as any;
+          }
+
           const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/sessions/${encodeURIComponent(sessionId)}`);
           if (resp.status === 404) return fail(`[epic] Session "${sessionId}" not found`);
           const data = await resp.json() as any;
@@ -5597,12 +5607,26 @@ ${fullHtml}`;
             "",
           ];
 
+          if (analyzeResult.treeNodes || analyzeResult.treeEdges) {
+            lines.push(`  DESKTOP TREE: ${analyzeResult.treeNodes || 0} nodes, ${analyzeResult.treeEdges || 0} edges`);
+          }
+
+          const patterns = analyzeResult.patterns || [];
+          if (patterns.length > 0) {
+            lines.push(`  CROSS-SESSION PATTERNS (3+ sessions):`);
+            for (const p of patterns.slice(0, 10)) {
+              lines.push(`    ${p.from?.slice(0, 25)} -> ${p.to?.slice(0, 25)}  (${p.frequency}x, ${Math.round(p.confidence * 100)}% confidence, ~${p.avgTransitionMs}ms)`);
+            }
+            lines.push("");
+          }
+
           const transitions = data.transitions || [];
           if (transitions.length > 0) {
             lines.push(`  TRANSITIONS (${transitions.length}):`);
             for (const t of transitions.slice(0, 20)) {
               const trigger = t.trigger_key?.key || (t.trigger_click ? `click(${t.trigger_click.x},${t.trigger_click.y})` : "?");
-              lines.push(`    ${t.from_title?.slice(0, 30) || "?"} -> ${t.to_title?.slice(0, 30) || "?"}  [${trigger}]`);
+              const ms = t.transition_ms > 0 ? ` ${t.transition_ms}ms` : "";
+              lines.push(`    ${t.from_title?.slice(0, 30) || "?"} -> ${t.to_title?.slice(0, 30) || "?"}  [${trigger}]${ms}`);
             }
             if (transitions.length > 20) lines.push(`    ... and ${transitions.length - 20} more`);
             lines.push("");

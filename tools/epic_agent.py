@@ -966,25 +966,58 @@ def _session_start_input_listeners(stop_event, session_dir, window_title):
                     "data": {"text": text},
                 })
 
+    active_modifiers = set()
+
     def on_press(key):
         if stop_event.is_set():
             return False
         now = time.time()
-        is_sig = key in significant_keys
-        has_ctrl = False
+
         try:
-            has_ctrl = any(getattr(key, 'vk', 0) == v for v in []) if False else False
+            if key in (pk.Key.ctrl_l, pk.Key.ctrl_r, pk.Key.alt_l, pk.Key.alt_r,
+                        pk.Key.shift_l, pk.Key.shift_r, pk.Key.cmd, pk.Key.cmd_r):
+                active_modifiers.add(key)
+                return
         except Exception:
             pass
 
-        if is_sig:
+        is_sig = key in significant_keys
+        has_modifier = len(active_modifiers) > 0
+        is_ctrl_combo = has_modifier and hasattr(key, 'char') and key.char
+
+        if is_sig or is_ctrl_combo:
             flush_typing()
-            key_name = key.name if hasattr(key, 'name') else str(key)
-            _session_add_event({
+            if is_ctrl_combo:
+                mod_names = []
+                for m in active_modifiers:
+                    try:
+                        mod_names.append(m.name)
+                    except Exception:
+                        mod_names.append(str(m))
+                key_desc = "+".join(mod_names) + "+" + (key.char if hasattr(key, 'char') and key.char else str(key))
+            else:
+                key_desc = key.name if hasattr(key, 'name') else str(key)
+            ev = {
                 "timestamp": now,
                 "type": "key",
-                "data": {"key": key_name, "special": True},
-            })
+                "data": {"key": key_desc, "special": True, "modifiers": [str(m) for m in active_modifiers] if has_modifier else []},
+            }
+            _session_add_event(ev)
+            try:
+                img, win = _session_grab_window(window_title)
+                if img:
+                    screenshot_seq_ref[0] += 1
+                    seq = _session_rec.get("_screenshot_seq", 0) + screenshot_seq_ref[0] + 20000
+                    fname = _session_save_screenshot(session_dir, img.copy(), seq)
+                    fp_region = _session_fingerprint_region(img)
+                    fp = _session_phash(fp_region)
+                    _session_add_event({
+                        "timestamp": now,
+                        "type": "key_screenshot",
+                        "data": {"file": fname, "fingerprint": fp, "key": key_desc},
+                    })
+            except Exception:
+                pass
         elif hasattr(key, 'char') and key.char:
             with typing_lock:
                 typing_buf.append(key.char)
@@ -997,8 +1030,14 @@ def _session_start_input_listeners(stop_event, session_dir, window_title):
                 "data": {"key": str(key), "special": False},
             })
 
+    def on_release(key):
+        try:
+            active_modifiers.discard(key)
+        except Exception:
+            pass
+
     mouse_l = pm.Listener(on_click=on_click)
-    key_l = pk.Listener(on_press=on_press)
+    key_l = pk.Listener(on_press=on_press, on_release=on_release)
     mouse_l.daemon = True
     key_l.daemon = True
     mouse_l.start()
@@ -1023,7 +1062,7 @@ def _session_post_process(session_dir, session_id, window_title, events, fingerp
     transitions = []
     click_events = [e for e in events if e["type"] == "click"]
     title_events = [e for e in events if e["type"] == "title_change"]
-    screenshot_events = [e for e in events if e["type"] in ("screenshot", "click_screenshot")]
+    screenshot_events = [e for e in events if e["type"] in ("screenshot", "click_screenshot", "key_screenshot")]
 
     for i, tc in enumerate(title_events):
         prev_title = tc["data"].get("old", "")

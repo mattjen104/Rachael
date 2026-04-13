@@ -410,11 +410,43 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
 
     const recordedSessions: any[] = (data as any).recordedSessions || [];
     const transitionGraph: any = (data as any).transitionGraph || {};
+    const sessionDesktopTree: any = (data as any).sessionDesktopTree || { nodes: {}, edges: [] };
     const graphEdges = Object.values(transitionGraph) as any[];
+    const treeNodes = Object.values(sessionDesktopTree.nodes || {}) as any[];
+    const treeEdges = (sessionDesktopTree.edges || []) as any[];
 
-    if (recordedSessions.length > 0 || graphEdges.length > 0) {
-      nodes.push({ type: "section", label: "SESSIONS", key: "sessions", count: recordedSessions.length });
+    if (recordedSessions.length > 0 || graphEdges.length > 0 || treeNodes.length > 0) {
+      const totalItems = recordedSessions.length + treeNodes.length;
+      nodes.push({ type: "section", label: "SESSIONS", key: "sessions", count: totalItems });
       if (expanded.has("sessions")) {
+        if (treeNodes.length > 0 || treeEdges.length > 0) {
+          nodes.push({ type: "section", label: "  Discovered Screens", key: "sessions-screens", count: treeNodes.length });
+          if (expanded.has("sessions-screens")) {
+            const sortedNodes = [...treeNodes].sort((a: any, b: any) => (b.visitCount || 0) - (a.visitCount || 0));
+            for (const node of sortedNodes.slice(0, 30)) {
+              const title = (node.title || "?").slice(0, 40);
+              const visits = node.visitCount || 0;
+              const sessCount = (node.sessions || []).length;
+              const fp = Object.keys(node.fingerprints || {}).length;
+              const nodeKey = `sessions-screen-${node.title}`;
+              nodes.push({ type: "section", label: `    ${title}`, key: nodeKey, count: visits });
+              if (expanded.has(nodeKey)) {
+                nodes.push({ type: "bridge-info", label: `      ${visits} visits, ${sessCount} sessions, ${fp} fingerprints`, actionCmd: "" });
+                const outEdges = treeEdges.filter((e: any) => e.from === node.title);
+                const inEdges = treeEdges.filter((e: any) => e.to === node.title);
+                for (const e of outEdges.slice(0, 5)) {
+                  const ms = e.avgTransitionMs ? ` ~${e.avgTransitionMs}ms` : "";
+                  const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
+                  nodes.push({ type: "bridge-info", label: `      -> ${(e.to || "?").slice(0, 30)}  (${e.count}x${ms}${keys})`, actionCmd: "" });
+                }
+                for (const e of inEdges.slice(0, 5)) {
+                  nodes.push({ type: "bridge-info", label: `      <- ${(e.from || "?").slice(0, 30)}  (${e.count}x)`, actionCmd: "" });
+                }
+              }
+            }
+          }
+        }
+
         if (graphEdges.length > 0) {
           const sortedEdges = [...graphEdges].sort((a: any, b: any) => (b.count || 0) - (a.count || 0));
           nodes.push({ type: "section", label: "  Navigation Paths", key: "sessions-graph", count: sortedEdges.length });
@@ -430,38 +462,42 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
             }
           }
         }
-        for (const sess of recordedSessions.slice(0, 20)) {
-          const dur = sess.duration_s ? `${Math.floor(sess.duration_s / 60)}m${sess.duration_s % 60}s` : "";
-          const winShort = (sess.window_title || "").slice(0, 30);
-          const sessKey = `session-${sess.session_id}`;
-          nodes.push({
-            type: "section",
-            label: `  ${winShort}  ${dur}  ${sess.event_count || 0}ev`,
-            key: sessKey,
-            count: sess.transition_count || 0,
-          });
-          if (expanded.has(sessKey)) {
+
+        nodes.push({ type: "section", label: "  Recordings", key: "sessions-list", count: recordedSessions.length });
+        if (expanded.has("sessions-list")) {
+          for (const sess of recordedSessions.slice(0, 20)) {
+            const dur = sess.duration_s ? `${Math.floor(sess.duration_s / 60)}m${sess.duration_s % 60}s` : "";
+            const winShort = (sess.window_title || "").slice(0, 30);
+            const sessKey = `session-${sess.session_id}`;
             nodes.push({
-              type: "bridge-info",
-              label: `    ID: ${sess.session_id}`,
-              actionCmd: `epic record-session analyze ${sess.session_id}`,
+              type: "section",
+              label: `    ${winShort}  ${dur}  ${sess.event_count || 0}ev`,
+              key: sessKey,
+              count: sess.transition_count || 0,
             });
-            nodes.push({
-              type: "bridge-info",
-              label: `    ${sess.screenshot_count || 0} screenshots, ${sess.click_count || 0} clicks, ${sess.key_count || 0} keys`,
-              actionCmd: "",
-            });
-            if (sess.transition_count > 0) {
+            if (expanded.has(sessKey)) {
               nodes.push({
                 type: "bridge-info",
-                label: `    ${sess.transition_count} screen transitions detected`,
+                label: `      ID: ${sess.session_id}`,
+                actionCmd: `epic record-session analyze ${sess.session_id}`,
+              });
+              nodes.push({
+                type: "bridge-info",
+                label: `      ${sess.screenshot_count || 0} screenshots, ${sess.click_count || 0} clicks, ${sess.key_count || 0} keys`,
                 actionCmd: "",
               });
+              if (sess.transition_count > 0) {
+                nodes.push({
+                  type: "bridge-info",
+                  label: `      ${sess.transition_count} screen transitions detected`,
+                  actionCmd: "",
+                });
+              }
             }
           }
-        }
-        if (recordedSessions.length > 20) {
-          nodes.push({ type: "bridge-info", label: `  ... and ${recordedSessions.length - 20} more`, actionCmd: "" });
+          if (recordedSessions.length > 20) {
+            nodes.push({ type: "bridge-info", label: `    ... and ${recordedSessions.length - 20} more`, actionCmd: "" });
+          }
         }
       }
     }
