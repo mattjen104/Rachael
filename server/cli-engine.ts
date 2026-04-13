@@ -3908,7 +3908,6 @@ ${fullHtml}`;
               lines.push(`${idx}  ${title}`);
             }
             lines.push("", `${windows.length} window(s). Use: nav <title> to scan a window`);
-            queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
             return ok(lines.join(nl));
           }
         }
@@ -3982,7 +3981,6 @@ ${fullHtml}`;
           lines.push(...renderElementLines(elements));
         }
         lines.push(`Next: nav ${windowArg} <hint> [value]`);
-        queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
         return ok(lines.join(nl));
       } catch (e: any) {
         return fail(`[nav] ${e.message}`);
@@ -4024,7 +4022,6 @@ ${fullHtml}`;
           }
           lines.push(`Act: nav ${windowArg} <hint> [value]`);
           lines.push(`Refresh: nav ${windowArg}`);
-          queryClient.invalidateQueries({ queryKey: ["/api/tree"] });
           return ok(lines.join(nl));
         }
       }
