@@ -788,7 +788,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, unknown> = { id, type, env: env || "SUP" };
@@ -808,6 +808,8 @@ export async function registerRoutes(
     if (type === "login" && credentials) cmd.credentials = credentials;
     if (windowArg) cmd.window = windowArg;
     if (search) cmd.search = search;
+    if (title) cmd.title = title;
+    if (silenceThreshold !== undefined) cmd.silenceThreshold = silenceThreshold;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });

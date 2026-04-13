@@ -2375,6 +2375,17 @@ def execute_audio_start(cmd: dict) -> None:
         post_result(command_id, "error", error=f"Server session error: {exc}")
         return
 
+    def _cancel_server_session(sid):
+        """Best-effort cancel: stop the recording session so its status isn't stuck at 'recording'."""
+        try:
+            requests.post(
+                f"{ORGCLOUD_URL}/api/transcripts/record/{sid}/stop",
+                headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+                timeout=5,
+            )
+        except Exception:
+            pass
+
     # Import pyaudio (prefer pyaudiowpatch for WASAPI loopback)
     try:
         import pyaudiowpatch as pyaudio  # type: ignore
@@ -2382,6 +2393,7 @@ def execute_audio_start(cmd: dict) -> None:
         try:
             import pyaudio  # type: ignore
         except ImportError:
+            _cancel_server_session(session_id)
             post_result(command_id, "error",
                         error="pyaudiowpatch not installed. Run: pip install pyaudiowpatch")
             return
@@ -2405,6 +2417,7 @@ def execute_audio_start(cmd: dict) -> None:
             loopback = p.get_default_input_device_info()
         except Exception:
             p.terminate()
+            _cancel_server_session(session_id)
             post_result(command_id, "error", error="No audio capture device found.")
             return
 
@@ -2430,6 +2443,7 @@ def execute_audio_start(cmd: dict) -> None:
         )
     except Exception as exc:
         p.terminate()
+        _cancel_server_session(session_id)
         post_result(command_id, "error", error=f"Audio stream open failed: {exc}")
         return
 
@@ -2506,6 +2520,7 @@ def execute_audio_stop(cmd: dict) -> None:
                         files={"audio": ("audio.wav", wav_bytes, "audio/wav")},
                         timeout=30,
                     )
+                    _audio_session["bytes_uploaded"] = _audio_session.get("bytes_uploaded", 0) + len(wav_bytes)
                     print(f"  [audio] Final chunk {len(wav_bytes)//1024}KB uploaded")
                 except Exception as exc:
                     print(f"  [audio] Final chunk error: {exc}")
