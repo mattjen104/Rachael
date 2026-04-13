@@ -668,6 +668,666 @@ recording_state = {
 _window_snapshot = {}
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Universal Session Recorder — passive capture for any window
+# Records keyboard/mouse events, change-detection screenshots, window title
+# changes. Zero vision calls during recording; post-processed offline.
+# ────────────────────────────────────────────────────────────────────────────
+
+_SESSION_SCREENSHOT_INTERVAL = 1.0
+_SESSION_PIXEL_DIFF_THRESHOLD = 0.05
+_SESSION_CROP_SIZE = 150
+_SESSION_HASH_SIZE = 8
+_SESSION_DIR_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
+
+_session_rec = {
+    "active": False,
+    "window_title": "",
+    "session_id": "",
+    "session_dir": "",
+    "start_time": 0.0,
+    "stop_event": None,
+    "events": [],
+    "event_lock": None,
+    "screenshot_count": 0,
+    "event_count": 0,
+    "listeners": [],
+    "threads": [],
+    "last_screenshot_hash": None,
+    "last_screenshot_img": None,
+    "fingerprints": {},
+    "title_history": [],
+}
+
+
+def _session_phash(img):
+    """Compute average perceptual hash of an image region."""
+    try:
+        from PIL import Image
+        small = img.resize((_SESSION_HASH_SIZE, _SESSION_HASH_SIZE), Image.LANCZOS).convert("L")
+        pixels = list(small.getdata())
+        avg = sum(pixels) / len(pixels) if pixels else 128
+        bits = "".join("1" if p > avg else "0" for p in pixels)
+        return hex(int(bits, 2))[2:].zfill((_SESSION_HASH_SIZE * _SESSION_HASH_SIZE) // 4)
+    except Exception:
+        return "0"
+
+
+def _session_pixel_diff(img1, img2):
+    """Fraction of pixels that differ significantly between two images (0-1)."""
+    try:
+        if img1.size != img2.size:
+            img2 = img2.resize(img1.size)
+        p1 = list(img1.convert("L").getdata())
+        p2 = list(img2.convert("L").getdata())
+        if not p1:
+            return 1.0
+        diffs = sum(1 for a, b in zip(p1, p2) if abs(a - b) > 25)
+        return diffs / len(p1)
+    except Exception:
+        return 1.0
+
+
+def _session_fingerprint_region(img):
+    """Extract the top 15% of the image for stable fingerprinting (header/breadcrumb area)."""
+    w, h = img.size
+    crop_h = max(20, int(h * 0.15))
+    return img.crop((0, 0, w, crop_h))
+
+
+def _session_grab_window(window_title):
+    """Capture a screenshot of the window matching title. Returns PIL Image or None."""
+    try:
+        for w in gw.getAllWindows():
+            t = w.title or ""
+            if window_title.lower() in t.lower() and w.width > 50 and w.height > 50:
+                bbox = (w.left, w.top, w.left + w.width, w.top + w.height)
+                img = ImageGrab.grab(bbox=bbox, include_layered_windows=True)
+                return img, w
+    except Exception:
+        pass
+    return None, None
+
+
+def _session_save_screenshot(session_dir, img, seq, annotation=None):
+    """Save a screenshot PNG to the session directory. Returns filename."""
+    fname = f"frame_{seq:05d}.png"
+    fpath = os.path.join(session_dir, fname)
+    if annotation:
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        x, y = annotation["x"], annotation["y"]
+        r = 12
+        draw.line([(x - r, y), (x + r, y)], fill="red", width=3)
+        draw.line([(x, y - r), (x, y + r)], fill="red", width=3)
+        draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=2)
+    img.save(fpath, format="PNG", compress_level=6)
+    return fname
+
+
+def _session_save_crop(session_dir, img, x, y, seq):
+    """Save a 150x150 crop around click coordinates. Returns filename."""
+    w, h = img.size
+    half = _SESSION_CROP_SIZE // 2
+    left = max(0, x - half)
+    top = max(0, y - half)
+    right = min(w, x + half)
+    bottom = min(h, y + half)
+    crop = img.crop((left, top, right, bottom))
+    fname = f"crop_{seq:05d}.png"
+    fpath = os.path.join(session_dir, fname)
+    crop.save(fpath, format="PNG")
+    return fname
+
+
+def _session_add_event(ev):
+    """Thread-safe append to session events."""
+    lock = _session_rec.get("event_lock")
+    if lock:
+        with lock:
+            _session_rec["events"].append(ev)
+            _session_rec["event_count"] += 1
+    else:
+        _session_rec["events"].append(ev)
+        _session_rec["event_count"] += 1
+
+
+def _session_screenshot_thread(stop_event, window_title, session_dir):
+    """Background thread: capture screenshots on change detection."""
+    seq = [0]
+    last_img = [None]
+
+    while not stop_event.is_set():
+        try:
+            img, win = _session_grab_window(window_title)
+            if img is None:
+                stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
+                continue
+
+            if last_img[0] is not None:
+                diff = _session_pixel_diff(last_img[0], img)
+                if diff < _SESSION_PIXEL_DIFF_THRESHOLD:
+                    stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
+                    continue
+
+            seq[0] += 1
+            fname = _session_save_screenshot(session_dir, img.copy(), seq[0])
+            fp_region = _session_fingerprint_region(img)
+            fp = _session_phash(fp_region)
+
+            lock = _session_rec.get("event_lock")
+            if lock:
+                with lock:
+                    _session_rec["screenshot_count"] = seq[0]
+                    _session_rec["fingerprints"][fp] = _session_rec["fingerprints"].get(fp, 0) + 1
+                    _session_rec["last_screenshot_img"] = img
+                    _session_rec["last_screenshot_hash"] = fp
+            else:
+                _session_rec["screenshot_count"] = seq[0]
+                _session_rec["fingerprints"][fp] = _session_rec["fingerprints"].get(fp, 0) + 1
+                _session_rec["last_screenshot_img"] = img
+                _session_rec["last_screenshot_hash"] = fp
+
+            _session_add_event({
+                "timestamp": time.time(),
+                "type": "screenshot",
+                "data": {"file": fname, "fingerprint": fp, "seq": seq[0]},
+            })
+
+            last_img[0] = img
+
+        except Exception as e:
+            print(f"  [session-rec] screenshot error: {e}")
+
+        stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
+
+    _session_rec["_screenshot_seq"] = seq[0]
+
+
+def _session_title_thread(stop_event, window_title):
+    """Background thread: track foreground window title changes."""
+    last_title = [""]
+
+    while not stop_event.is_set():
+        try:
+            current_title = ""
+            try:
+                import ctypes
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                    current_title = buf.value
+            except Exception:
+                try:
+                    fw = gw.getActiveWindow()
+                    current_title = fw.title if fw else ""
+                except Exception:
+                    pass
+
+            if current_title and current_title != last_title[0]:
+                now = time.time()
+                _session_add_event({
+                    "timestamp": now,
+                    "type": "title_change",
+                    "data": {"old": last_title[0], "new": current_title},
+                })
+                lock = _session_rec.get("event_lock")
+                entry = {"timestamp": now, "title": current_title}
+                if lock:
+                    with lock:
+                        _session_rec["title_history"].append(entry)
+                else:
+                    _session_rec["title_history"].append(entry)
+                last_title[0] = current_title
+
+        except Exception:
+            pass
+
+        stop_event.wait(0.5)
+
+
+def _session_start_input_listeners(stop_event, session_dir, window_title):
+    """Start pynput keyboard+mouse listeners for event capture."""
+    listeners = []
+
+    try:
+        from pynput import mouse as pm, keyboard as pk
+    except ImportError:
+        print("  [session-rec] pynput not installed — input capture disabled. pip install pynput")
+        return listeners
+
+    screenshot_seq_ref = [0]
+
+    def on_click(x, y, button, pressed):
+        if not pressed:
+            return
+        if stop_event.is_set():
+            return False
+        now = time.time()
+        _session_add_event({
+            "timestamp": now,
+            "type": "click",
+            "data": {"x": x, "y": y, "button": str(button)},
+        })
+        try:
+            img, win = _session_grab_window(window_title)
+            if img:
+                screenshot_seq_ref[0] += 1
+                seq = _session_rec.get("_screenshot_seq", 0) + screenshot_seq_ref[0] + 10000
+                win_obj_left = win.left if win else 0
+                win_obj_top = win.top if win else 0
+                rel_x = x - win_obj_left
+                rel_y = y - win_obj_top
+                img_w, img_h = img.size
+                if 0 <= rel_x < img_w and 0 <= rel_y < img_h:
+                    fname = _session_save_screenshot(
+                        session_dir, img.copy(), seq,
+                        annotation={"x": rel_x, "y": rel_y}
+                    )
+                    crop_fname = _session_save_crop(session_dir, img, rel_x, rel_y, seq)
+                    _session_add_event({
+                        "timestamp": now,
+                        "type": "click_screenshot",
+                        "data": {
+                            "file": fname, "crop": crop_fname,
+                            "x": x, "y": y, "rel_x": rel_x, "rel_y": rel_y,
+                        },
+                    })
+        except Exception as e:
+            print(f"  [session-rec] click screenshot error: {e}")
+
+    significant_keys = set()
+    try:
+        for kname in ["enter", "tab", "esc", "backspace", "delete", "space",
+                       "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8",
+                       "f9", "f10", "f11", "f12", "home", "end",
+                       "page_up", "page_down", "insert"]:
+            try:
+                significant_keys.add(getattr(pk.Key, kname))
+            except AttributeError:
+                pass
+    except Exception:
+        pass
+
+    typing_buf = []
+    typing_lock = threading.Lock()
+    last_type_time = [0.0]
+
+    def flush_typing():
+        with typing_lock:
+            if typing_buf:
+                text = "".join(typing_buf)
+                typing_buf.clear()
+                _session_add_event({
+                    "timestamp": last_type_time[0],
+                    "type": "typing",
+                    "data": {"text": text},
+                })
+
+    def on_press(key):
+        if stop_event.is_set():
+            return False
+        now = time.time()
+        is_sig = key in significant_keys
+        has_ctrl = False
+        try:
+            has_ctrl = any(getattr(key, 'vk', 0) == v for v in []) if False else False
+        except Exception:
+            pass
+
+        if is_sig:
+            flush_typing()
+            key_name = key.name if hasattr(key, 'name') else str(key)
+            _session_add_event({
+                "timestamp": now,
+                "type": "key",
+                "data": {"key": key_name, "special": True},
+            })
+        elif hasattr(key, 'char') and key.char:
+            with typing_lock:
+                typing_buf.append(key.char)
+                last_type_time[0] = now
+        elif hasattr(key, 'vk') and key.vk:
+            flush_typing()
+            _session_add_event({
+                "timestamp": now,
+                "type": "key",
+                "data": {"key": str(key), "special": False},
+            })
+
+    mouse_l = pm.Listener(on_click=on_click)
+    key_l = pk.Listener(on_press=on_press)
+    mouse_l.daemon = True
+    key_l.daemon = True
+    mouse_l.start()
+    key_l.start()
+    listeners.extend([mouse_l, key_l])
+    _session_rec["_flush_typing"] = flush_typing
+    print(f"  [session-rec] Input listeners started (mouse + keyboard)")
+    return listeners
+
+
+def _session_post_process(session_dir, session_id, window_title, events, fingerprints, title_history):
+    """Post-process a recording session: build transition graph, upload summary."""
+    unique_screens = {}
+    for fp, count in fingerprints.items():
+        unique_screens[fp] = {"fingerprint": fp, "count": count, "titles": []}
+
+    for th in title_history:
+        t = th.get("title", "")
+        for fp in unique_screens:
+            unique_screens[fp]["titles"].append(t)
+
+    transitions = []
+    click_events = [e for e in events if e["type"] == "click"]
+    title_events = [e for e in events if e["type"] == "title_change"]
+    screenshot_events = [e for e in events if e["type"] in ("screenshot", "click_screenshot")]
+
+    for i, tc in enumerate(title_events):
+        prev_title = tc["data"].get("old", "")
+        new_title = tc["data"].get("new", "")
+        ts = tc["timestamp"]
+        trigger_click = None
+        trigger_click_ts = 0
+        for ce in reversed(click_events):
+            if ce["timestamp"] < ts and ts - ce["timestamp"] < 5.0:
+                trigger_click = ce["data"]
+                trigger_click_ts = ce["timestamp"]
+                break
+        trigger_key = None
+        key_events = [e for e in events if e["type"] == "key"]
+        for ke in reversed(key_events):
+            if ke["timestamp"] < ts and ts - ke["timestamp"] < 3.0:
+                trigger_key = ke["data"]
+                break
+
+        prev_fp = None
+        for se in reversed(screenshot_events):
+            if se["timestamp"] < ts:
+                prev_fp = se["data"].get("fingerprint", "")
+                break
+        after_fp = None
+        for se in screenshot_events:
+            if se["timestamp"] > ts:
+                after_fp = se["data"].get("fingerprint", "")
+                break
+
+        transition_ms = 0
+        if trigger_click and trigger_click_ts > 0:
+            transition_ms = int((ts - trigger_click_ts) * 1000)
+
+        transitions.append({
+            "from_title": prev_title,
+            "to_title": new_title,
+            "timestamp": ts,
+            "trigger_click": trigger_click,
+            "trigger_key": trigger_key,
+            "from_fingerprint": prev_fp,
+            "to_fingerprint": after_fp,
+            "transition_ms": transition_ms,
+        })
+
+    summary = {
+        "session_id": session_id,
+        "window_title": window_title,
+        "start_time": _session_rec["start_time"],
+        "end_time": time.time(),
+        "duration_s": int(time.time() - _session_rec["start_time"]),
+        "event_count": len(events),
+        "screenshot_count": _session_rec["screenshot_count"],
+        "unique_screens": len(unique_screens),
+        "transitions": transitions,
+        "title_history": title_history,
+        "fingerprints": {fp: d["count"] for fp, d in unique_screens.items()},
+        "click_count": len(click_events),
+        "key_count": len([e for e in events if e["type"] == "key"]),
+    }
+
+    timeline_path = os.path.join(session_dir, "timeline.json")
+    try:
+        with open(timeline_path, "w") as f:
+            json.dump({"summary": summary, "events": events}, f, indent=1)
+        print(f"  [session-rec] Timeline saved: {timeline_path}")
+    except Exception as e:
+        print(f"  [session-rec] Timeline save error: {e}")
+
+    try:
+        _bridge_request(
+            "post", "/api/sessions/upload", "session-upload", timeout=30,
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=summary,
+        )
+        print(f"  [session-rec] Summary uploaded to server")
+    except Exception as e:
+        print(f"  [session-rec] Upload failed (summary saved locally): {e}")
+
+    return summary
+
+
+def execute_record_session_start(cmd):
+    """Start universal session recording for any window."""
+    window_title = cmd.get("window", "")
+    command_id = cmd.get("id", "unknown")
+
+    if _session_rec["active"]:
+        post_result(command_id, "error",
+                    error=f"Session already recording: {_session_rec['window_title']}")
+        return
+
+    if not window_title:
+        post_result(command_id, "error", error="Missing window title. Usage: record-session start <window title>")
+        return
+
+    img, win = _session_grab_window(window_title)
+    if img is None:
+        post_result(command_id, "error", error=f"No window matching '{window_title}'")
+        return
+
+    actual_title = win.title if win else window_title
+
+    session_id = f"sess_{int(time.time())}_{random.randint(1000,9999)}"
+    os.makedirs(_SESSION_DIR_BASE, exist_ok=True)
+    session_dir = os.path.join(_SESSION_DIR_BASE, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+
+    stop_event = threading.Event()
+
+    _session_rec.update({
+        "active": True,
+        "window_title": actual_title,
+        "session_id": session_id,
+        "session_dir": session_dir,
+        "start_time": time.time(),
+        "stop_event": stop_event,
+        "events": [],
+        "event_lock": threading.Lock(),
+        "screenshot_count": 0,
+        "event_count": 0,
+        "listeners": [],
+        "threads": [],
+        "last_screenshot_hash": None,
+        "last_screenshot_img": None,
+        "fingerprints": {},
+        "title_history": [{"timestamp": time.time(), "title": actual_title}],
+        "_screenshot_seq": 0,
+    })
+
+    ss_thread = threading.Thread(
+        target=_session_screenshot_thread,
+        args=(stop_event, actual_title, session_dir),
+        daemon=True, name="session-screenshot"
+    )
+    title_thread = threading.Thread(
+        target=_session_title_thread,
+        args=(stop_event, actual_title),
+        daemon=True, name="session-title"
+    )
+    ss_thread.start()
+    title_thread.start()
+    _session_rec["threads"] = [ss_thread, title_thread]
+
+    listeners = _session_start_input_listeners(stop_event, session_dir, actual_title)
+    _session_rec["listeners"] = listeners
+
+    print(f"  [session-rec] Recording started: {actual_title}")
+    print(f"  [session-rec] Session ID: {session_id}")
+    print(f"  [session-rec] Session dir: {session_dir}")
+
+    post_result(command_id, "complete", data={
+        "recording": True,
+        "window": actual_title,
+        "sessionId": session_id,
+    })
+
+
+def execute_record_session_stop(cmd):
+    """Stop universal session recording and post-process."""
+    command_id = cmd.get("id", "unknown")
+
+    if not _session_rec["active"]:
+        post_result(command_id, "error", error="No active session recording")
+        return
+
+    print(f"  [session-rec] Stopping recording...")
+
+    flush_fn = _session_rec.get("_flush_typing")
+    if callable(flush_fn):
+        try:
+            flush_fn()
+        except Exception:
+            pass
+
+    _session_rec["active"] = False
+    stop_event = _session_rec.get("stop_event")
+    if stop_event:
+        stop_event.set()
+
+    for listener in _session_rec.get("listeners", []):
+        try:
+            listener.stop()
+        except Exception:
+            pass
+
+    for thread in _session_rec.get("threads", []):
+        try:
+            thread.join(timeout=3)
+        except Exception:
+            pass
+
+    events = list(_session_rec["events"])
+    fingerprints = dict(_session_rec["fingerprints"])
+    title_history = list(_session_rec["title_history"])
+    session_id = _session_rec["session_id"]
+    session_dir = _session_rec["session_dir"]
+    window_title = _session_rec["window_title"]
+
+    summary = _session_post_process(
+        session_dir, session_id, window_title,
+        events, fingerprints, title_history
+    )
+
+    print(f"  [session-rec] Recording stopped. {summary['event_count']} events, "
+          f"{summary['screenshot_count']} screenshots, {summary['unique_screens']} unique screens, "
+          f"{len(summary['transitions'])} transitions in {summary['duration_s']}s")
+
+    post_result(command_id, "complete", data=summary)
+
+
+def execute_record_session_status(cmd):
+    """Get status of current session recording."""
+    command_id = cmd.get("id", "unknown")
+
+    if not _session_rec["active"]:
+        sessions_list = []
+        if os.path.isdir(_SESSION_DIR_BASE):
+            for d in sorted(os.listdir(_SESSION_DIR_BASE), reverse=True)[:10]:
+                timeline_path = os.path.join(_SESSION_DIR_BASE, d, "timeline.json")
+                if os.path.exists(timeline_path):
+                    try:
+                        with open(timeline_path, "r") as f:
+                            data = json.load(f)
+                        s = data.get("summary", {})
+                        sessions_list.append({
+                            "session_id": s.get("session_id", d),
+                            "window_title": s.get("window_title", ""),
+                            "duration_s": s.get("duration_s", 0),
+                            "event_count": s.get("event_count", 0),
+                            "screenshot_count": s.get("screenshot_count", 0),
+                            "transitions": len(s.get("transitions", [])),
+                        })
+                    except Exception:
+                        pass
+        post_result(command_id, "complete", data={
+            "active": False,
+            "sessions": sessions_list,
+        })
+        return
+
+    elapsed = int(time.time() - _session_rec["start_time"])
+    post_result(command_id, "complete", data={
+        "active": True,
+        "window": _session_rec["window_title"],
+        "sessionId": _session_rec["session_id"],
+        "elapsed_s": elapsed,
+        "event_count": _session_rec["event_count"],
+        "screenshot_count": _session_rec["screenshot_count"],
+        "unique_screens": len(_session_rec["fingerprints"]),
+        "title_changes": len(_session_rec["title_history"]),
+    })
+
+
+def _session_cross_session_patterns(window_title):
+    """Analyze multiple sessions for the same window to find repeated patterns."""
+    if not os.path.isdir(_SESSION_DIR_BASE):
+        return []
+
+    all_transitions = []
+    for d in sorted(os.listdir(_SESSION_DIR_BASE)):
+        timeline_path = os.path.join(_SESSION_DIR_BASE, d, "timeline.json")
+        if not os.path.exists(timeline_path):
+            continue
+        try:
+            with open(timeline_path, "r") as f:
+                data = json.load(f)
+            s = data.get("summary", {})
+            if window_title.lower() not in s.get("window_title", "").lower():
+                continue
+            transitions = s.get("transitions", [])
+            seq = [(t["from_title"], t["to_title"]) for t in transitions if t.get("from_title") and t.get("to_title")]
+            all_transitions.append(seq)
+        except Exception:
+            continue
+
+    if len(all_transitions) < 2:
+        return []
+
+    pair_counts = {}
+    for seq in all_transitions:
+        seen_in_session = set()
+        for pair in seq:
+            if pair not in seen_in_session:
+                seen_in_session.add(pair)
+                pair_counts[pair] = pair_counts.get(pair, 0) + 1
+
+    patterns = []
+    for (from_t, to_t), count in sorted(pair_counts.items(), key=lambda x: -x[1]):
+        if count >= 2:
+            patterns.append({
+                "from": from_t,
+                "to": to_t,
+                "frequency": count,
+                "sessions_total": len(all_transitions),
+                "confidence": round(count / len(all_transitions), 2),
+            })
+
+    return patterns[:50]
+
+
 def find_window_by_hwnd(hwnd):
     for w in gw.getAllWindows():
         if getattr(w, '_hWnd', None) == hwnd:
@@ -6935,6 +7595,12 @@ def execute_command(cmd):
             execute_audio_stop(cmd)
         elif cmd_type == "audio_status":
             execute_audio_status(cmd)
+        elif cmd_type == "record_session_start":
+            execute_record_session_start(cmd)
+        elif cmd_type == "record_session_stop":
+            execute_record_session_stop(cmd)
+        elif cmd_type == "record_session_status":
+            execute_record_session_status(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except pyautogui.FailSafeException:

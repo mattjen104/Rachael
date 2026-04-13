@@ -5469,6 +5469,191 @@ ${fullHtml}`;
       }
     }
 
+    if (args[0] === "record-session") {
+      if (args[1] === "start") {
+        const windowTitle = args.slice(2).join(" ").trim();
+        if (!windowTitle) return fail("[epic] Usage: epic record-session start <window title>");
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "record_session_start", window: windowTitle }),
+          });
+          const data = await resp.json() as any;
+          if (data.ok) {
+            return ok(`Session recording started for: ${windowTitle}${nl}Command ID: ${data.commandId}${nl}Capturing mouse, keyboard, screenshots, and window title changes.${nl}Run: epic record-session stop  to finish.`);
+          }
+          return fail(`[epic] Failed to send command`);
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      if (args[1] === "stop") {
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "record_session_stop" }),
+          });
+          const data = await resp.json() as any;
+          if (data.ok) {
+            return ok(`Session recording stop command sent.${nl}Command ID: ${data.commandId}${nl}Timeline and screenshots will be saved locally on the desktop.${nl}Summary will be uploaded to the server.`);
+          }
+          return fail(`[epic] Failed to send command`);
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      if (args[1] === "status") {
+        try {
+          const sendResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "record_session_status" }),
+          });
+          const sendData = await sendResp.json() as any;
+          if (!sendData.ok) return fail(`[epic] Failed to send command`);
+          const commandId = sendData.commandId;
+          const maxWait = 10000;
+          const pollInterval = 500;
+          let elapsed = 0;
+          while (elapsed < maxWait) {
+            await new Promise(r => setTimeout(r, pollInterval));
+            elapsed += pollInterval;
+            try {
+              const resultResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${commandId}`);
+              const resultData = await resultResp.json() as any;
+              if (resultData.status === "pending") continue;
+              if (resultData.status === "error") return fail(`[epic] ${resultData.error || "Agent error"}`);
+              const d = resultData.data || {};
+              if (d.active) {
+                return ok([
+                  `Session recording ACTIVE`,
+                  `  Window:    ${d.window || "?"}`,
+                  `  Session:   ${d.sessionId || "?"}`,
+                  `  Elapsed:   ${d.elapsed_s || 0}s`,
+                  `  Events:    ${d.event_count || 0}`,
+                  `  Screenshots: ${d.screenshot_count || 0}`,
+                  `  Unique screens: ${d.unique_screens || 0}`,
+                  `  Title changes: ${d.title_changes || 0}`,
+                  "",
+                  "Run: epic record-session stop  to finish.",
+                ].join(nl));
+              }
+              const sessions: any[] = d.sessions || [];
+              if (sessions.length === 0) {
+                return ok(`No active session recording.${nl}Start one: epic record-session start <window title>`);
+              }
+              const lines = [`No active recording. Recent sessions:`, ""];
+              for (const s of sessions.slice(0, 5)) {
+                const dur = s.duration_s ? `${Math.floor(s.duration_s / 60)}m${s.duration_s % 60}s` : "";
+                lines.push(`  ${s.session_id}  ${(s.window_title || "").slice(0, 35)}  ${dur}  ${s.event_count || 0} events`);
+              }
+              return ok(lines.join(nl));
+            } catch { continue; }
+          }
+          return ok(`Status query sent (agent may be offline).${nl}Command ID: ${commandId}`);
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      if (args[1] === "list") {
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/sessions`);
+          const data = await resp.json() as any;
+          const sessions: any[] = data.sessions || [];
+          if (sessions.length === 0) {
+            return ok(`No recorded sessions.${nl}Start one: epic record-session start <window title>`);
+          }
+          const lines = [`=== RECORDED SESSIONS === (${sessions.length})`, ""];
+          for (const s of sessions) {
+            const dur = s.duration_s ? `${Math.floor(s.duration_s / 60)}m${s.duration_s % 60}s` : "?";
+            const dt = s.start_time ? new Date(s.start_time * 1000).toLocaleString() : "";
+            lines.push(`  ${s.session_id}  ${s.window_title?.slice(0, 40) || ""}  ${dur}  ${s.event_count || 0} events  ${s.transition_count || 0} transitions  ${dt}`);
+          }
+          lines.push("", "Details: epic record-session analyze <session_id>");
+          return ok(lines.join(nl));
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      if (args[1] === "analyze") {
+        const sessionId = args[2]?.trim();
+        if (!sessionId) return fail("[epic] Usage: epic record-session analyze <session_id>");
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/sessions/${encodeURIComponent(sessionId)}`);
+          if (resp.status === 404) return fail(`[epic] Session "${sessionId}" not found`);
+          const data = await resp.json() as any;
+          const lines = [
+            `=== SESSION: ${data.session_id} ===`,
+            "",
+            `  Window:       ${data.window_title || "?"}`,
+            `  Duration:     ${data.duration_s || 0}s`,
+            `  Events:       ${data.event_count || 0}`,
+            `  Screenshots:  ${data.screenshot_count || 0}`,
+            `  Unique Screens: ${data.unique_screens || 0}`,
+            `  Clicks:       ${data.click_count || 0}`,
+            `  Keystrokes:   ${data.key_count || 0}`,
+            "",
+          ];
+
+          const transitions = data.transitions || [];
+          if (transitions.length > 0) {
+            lines.push(`  TRANSITIONS (${transitions.length}):`);
+            for (const t of transitions.slice(0, 20)) {
+              const trigger = t.trigger_key?.key || (t.trigger_click ? `click(${t.trigger_click.x},${t.trigger_click.y})` : "?");
+              lines.push(`    ${t.from_title?.slice(0, 30) || "?"} -> ${t.to_title?.slice(0, 30) || "?"}  [${trigger}]`);
+            }
+            if (transitions.length > 20) lines.push(`    ... and ${transitions.length - 20} more`);
+            lines.push("");
+          }
+
+          const fps = data.fingerprints || {};
+          const fpEntries = Object.entries(fps).sort((a: any, b: any) => b[1] - a[1]);
+          if (fpEntries.length > 0) {
+            lines.push(`  SCREEN FINGERPRINTS (${fpEntries.length} unique):`);
+            for (const [fp, count] of fpEntries.slice(0, 10)) {
+              lines.push(`    ${fp}  (seen ${count}x)`);
+            }
+            lines.push("");
+          }
+
+          return ok(lines.join(nl));
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      if (args[1] === "graph") {
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/sessions/graph/transitions`);
+          const data = await resp.json() as any;
+          const edges: any[] = data.edges || [];
+          if (edges.length === 0) {
+            return ok(`No navigation patterns detected yet.${nl}Record sessions to build the transition graph.`);
+          }
+          const sorted = edges.sort((a: any, b: any) => b.count - a.count);
+          const lines = [`=== NAVIGATION TRANSITION GRAPH === (${edges.length} edges)`, ""];
+          for (const e of sorted.slice(0, 30)) {
+            lines.push(`  ${e.from?.slice(0, 30)} -> ${e.to?.slice(0, 30)}  (${e.count}x, ${e.sessions?.length || 0} sessions)`);
+          }
+          if (sorted.length > 30) lines.push(`  ... and ${sorted.length - 30} more edges`);
+          return ok(lines.join(nl));
+        } catch (e: any) {
+          return fail(`[epic] ${e.message}`);
+        }
+      }
+      return ok([
+        "Universal Session Recorder",
+        "==========================",
+        "  epic record-session start <window>   - Start recording (any window)",
+        "  epic record-session stop             - Stop and post-process",
+        "  epic record-session status           - Check recording status",
+        "  epic record-session list             - List past sessions",
+        "  epic record-session analyze <id>     - Show session details",
+        "  epic record-session graph            - Show navigation patterns",
+      ].join(nl));
+    }
+
     if (args[0] === "workflows") {
       const allCfgs = await storage.getAgentConfigs();
       const workflows: any[] = [];
@@ -5784,6 +5969,14 @@ ${fullHtml}`;
       "  epic record save <name>   - Save recorded workflow",
       "  epic workflows            - List saved workflows",
       "  epic replay <name>        - Replay a saved workflow",
+      "",
+      "  SESSION RECORDER (Universal)",
+      "  epic record-session start <window> - Record any window",
+      "  epic record-session stop           - Stop + post-process",
+      "  epic record-session status         - Check status",
+      "  epic record-session list           - List past sessions",
+      "  epic record-session analyze <id>   - Show session detail",
+      "  epic record-session graph          - Navigation patterns",
       "",
       "  UIA TREE (Live Accessibility)",
       "  epic uia                  - List all open windows on desktop",

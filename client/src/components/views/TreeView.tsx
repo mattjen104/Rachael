@@ -408,6 +408,64 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
       }
     }
 
+    const recordedSessions: any[] = (data as any).recordedSessions || [];
+    const transitionGraph: any = (data as any).transitionGraph || {};
+    const graphEdges = Object.values(transitionGraph) as any[];
+
+    if (recordedSessions.length > 0 || graphEdges.length > 0) {
+      nodes.push({ type: "section", label: "SESSIONS", key: "sessions", count: recordedSessions.length });
+      if (expanded.has("sessions")) {
+        if (graphEdges.length > 0) {
+          const sortedEdges = [...graphEdges].sort((a: any, b: any) => (b.count || 0) - (a.count || 0));
+          nodes.push({ type: "section", label: "  Navigation Paths", key: "sessions-graph", count: sortedEdges.length });
+          if (expanded.has("sessions-graph")) {
+            for (const edge of sortedEdges.slice(0, 30)) {
+              const fromShort = (edge.from || "?").slice(0, 25);
+              const toShort = (edge.to || "?").slice(0, 25);
+              nodes.push({
+                type: "bridge-info",
+                label: `  ${fromShort} -> ${toShort}  (${edge.count}x)`,
+                actionCmd: "",
+              });
+            }
+          }
+        }
+        for (const sess of recordedSessions.slice(0, 20)) {
+          const dur = sess.duration_s ? `${Math.floor(sess.duration_s / 60)}m${sess.duration_s % 60}s` : "";
+          const winShort = (sess.window_title || "").slice(0, 30);
+          const sessKey = `session-${sess.session_id}`;
+          nodes.push({
+            type: "section",
+            label: `  ${winShort}  ${dur}  ${sess.event_count || 0}ev`,
+            key: sessKey,
+            count: sess.transition_count || 0,
+          });
+          if (expanded.has(sessKey)) {
+            nodes.push({
+              type: "bridge-info",
+              label: `    ID: ${sess.session_id}`,
+              actionCmd: `epic record-session analyze ${sess.session_id}`,
+            });
+            nodes.push({
+              type: "bridge-info",
+              label: `    ${sess.screenshot_count || 0} screenshots, ${sess.click_count || 0} clicks, ${sess.key_count || 0} keys`,
+              actionCmd: "",
+            });
+            if (sess.transition_count > 0) {
+              nodes.push({
+                type: "bridge-info",
+                label: `    ${sess.transition_count} screen transitions detected`,
+                actionCmd: "",
+              });
+            }
+          }
+        }
+        if (recordedSessions.length > 20) {
+          nodes.push({ type: "bridge-info", label: `  ... and ${recordedSessions.length - 20} more`, actionCmd: "" });
+        }
+      }
+    }
+
     const epicActs = (data as any).epicActivities || {};
     const epicTrees = (data as any).epicTrees || {};
     const epicEnvs = [...new Set([...Object.keys(epicActs), ...Object.keys(epicTrees)])].sort();

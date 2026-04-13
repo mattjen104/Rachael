@@ -1067,6 +1067,104 @@ export async function registerRoutes(
     res.json({ ok: true, key: safeName });
   });
 
+  // ── Universal Session Recorder endpoints ──
+
+  app.post("/api/sessions/upload", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const summary = req.body;
+    if (!summary || !summary.session_id) {
+      return res.status(400).json({ error: "Missing session data" });
+    }
+    try {
+      const listCfg = await storage.getAgentConfig("session_recorder_list");
+      let sessions: any[] = [];
+      if (listCfg?.value) {
+        try { sessions = JSON.parse(listCfg.value); } catch {}
+      }
+      sessions = sessions.filter((s: any) => s.session_id !== summary.session_id);
+      sessions.unshift({
+        session_id: summary.session_id,
+        window_title: summary.window_title || "",
+        start_time: summary.start_time || 0,
+        end_time: summary.end_time || 0,
+        duration_s: summary.duration_s || 0,
+        event_count: summary.event_count || 0,
+        screenshot_count: summary.screenshot_count || 0,
+        unique_screens: summary.unique_screens || 0,
+        click_count: summary.click_count || 0,
+        key_count: summary.key_count || 0,
+        transition_count: (summary.transitions || []).length,
+      });
+      if (sessions.length > 100) sessions = sessions.slice(0, 100);
+      await storage.setAgentConfig("session_recorder_list", JSON.stringify(sessions));
+      await storage.setAgentConfig(
+        `session_detail_${summary.session_id}`,
+        JSON.stringify(summary)
+      );
+
+      if (summary.transitions && summary.transitions.length > 0) {
+        const graphKey = "session_transition_graph";
+        const graphCfg = await storage.getAgentConfig(graphKey);
+        let graph: Record<string, any> = {};
+        if (graphCfg?.value) {
+          try { graph = JSON.parse(graphCfg.value); } catch {}
+        }
+        for (const t of summary.transitions) {
+          const from = t.from_title || "";
+          const to = t.to_title || "";
+          if (!from || !to) continue;
+          const edgeKey = `${from}|||${to}`;
+          if (!graph[edgeKey]) {
+            graph[edgeKey] = { from, to, count: 0, sessions: [] };
+          }
+          if (!graph[edgeKey].sessions.includes(summary.session_id)) {
+            graph[edgeKey].count++;
+            graph[edgeKey].sessions.push(summary.session_id);
+          }
+        }
+        await storage.setAgentConfig(graphKey, JSON.stringify(graph));
+      }
+
+      res.json({ ok: true, session_id: summary.session_id });
+    } catch (e: any) {
+      console.error(`[sessions] upload error: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/sessions", async (_req, res) => {
+    try {
+      const listCfg = await storage.getAgentConfig("session_recorder_list");
+      const sessions = listCfg?.value ? JSON.parse(listCfg.value) : [];
+      res.json({ sessions });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/sessions/:id", async (req, res) => {
+    try {
+      const cfg = await storage.getAgentConfig(`session_detail_${req.params.id}`);
+      if (!cfg?.value) return res.status(404).json({ error: "Session not found" });
+      res.json(JSON.parse(cfg.value));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/sessions/graph/transitions", async (_req, res) => {
+    try {
+      const cfg = await storage.getAgentConfig("session_transition_graph");
+      const graph = cfg?.value ? JSON.parse(cfg.value) : {};
+      res.json({ edges: Object.values(graph) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/epic/activities", async (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
@@ -1333,6 +1431,15 @@ export async function registerRoutes(
       desktopWindows.empty = true;
     }
 
+    let recordedSessions: any[] = [];
+    let transitionGraph: any = {};
+    try {
+      const sessionListCfg = await storage.getAgentConfig("session_recorder_list");
+      if (sessionListCfg?.value) recordedSessions = JSON.parse(sessionListCfg.value);
+      const graphCfg = await storage.getAgentConfig("session_transition_graph");
+      if (graphCfg?.value) transitionGraph = JSON.parse(graphCfg.value);
+    } catch {}
+
     res.json({
       tasks: allTasks,
       programs: allPrograms,
@@ -1353,6 +1460,8 @@ export async function registerRoutes(
       persistedTickets,
       bootStatus,
       desktopWindows,
+      recordedSessions,
+      transitionGraph,
     });
   });
 
