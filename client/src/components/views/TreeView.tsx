@@ -146,6 +146,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
   const [refilePanel, setRefilePanel] = useState<{ captureId: number; content: string; type: "task" | "note"; title: string; tags: string; priority: string; scheduledDate: string; deadlineDate: string; parentId: string } | null>(null);
   const [desktopFilter, setDesktopFilter] = useState("");
   const [desktopFilterActive, setDesktopFilterActive] = useState(false);
+  const desktopFilterWasActiveRef = useRef(false);
   const [navActionPending, setNavActionPending] = useState<string | null>(null);
   const [navInlineInput, setNavInlineInput] = useState<{ hint: string; windowTitle: string } | null>(null);
   const desktopFilterRef = useRef<HTMLInputElement>(null);
@@ -362,14 +363,20 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                 const elements: any[] = scanned.elements;
                 const minDepth = elements.reduce((m: number, e: any) => Math.min(m, e.depth ?? 0), 99);
                 let lastParent = "";
+                let lastParentExpanded = false;
                 for (const el of elements) {
                   const elDepth = (el.depth ?? 0) - minDepth;
-                  if (el.parent && el.parent !== lastParent) {
-                    const groupKey = `${winKey}-g-${el.parent}`;
-                    nodes.push({ type: "section", label: `    ${el.parent}`, key: groupKey, count: 0 });
-                    if (!expanded.has(groupKey)) continue;
-                    lastParent = el.parent;
+                  if (el.parent !== lastParent) {
+                    lastParent = el.parent || "";
+                    if (lastParent) {
+                      const groupKey = `${winKey}-g-${lastParent}`;
+                      nodes.push({ type: "section", label: `    ${lastParent}`, key: groupKey, count: 0 });
+                      lastParentExpanded = expanded.has(groupKey);
+                    } else {
+                      lastParentExpanded = true;
+                    }
                   }
+                  if (!lastParentExpanded) continue;
                   const indent = "  ".repeat(Math.max(0, elDepth));
                   nodes.push({
                     type: "uiaElement",
@@ -928,10 +935,29 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
   }, [handleKeyDown]);
 
   useEffect(() => {
-    if (!desktopFilterActive || !desktopFilter || !data) return;
+    if (!data) return;
+    const dw = (data as any).desktopWindows;
+    const scannedKeys = Object.keys(dw?.scannedWindows || {});
+    if (scannedKeys.length === 0) return;
+
+    const wasActive = desktopFilterWasActiveRef.current;
+    desktopFilterWasActiveRef.current = desktopFilterActive;
+
+    if (!desktopFilterActive) {
+      if (!wasActive) return;
+      const timer = setTimeout(async () => {
+        for (const winTitle of scannedKeys) {
+          try {
+            await apiRequest("POST", "/api/epic/agent/send", { type: "nav_view", window: winTitle });
+          } catch {}
+        }
+        setTimeout(() => queryClient.invalidateQueries({ queryKey: ["/api/tree"] }), 5000);
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+
+    if (!desktopFilter) return;
     const timer = setTimeout(async () => {
-      const dw = (data as any).desktopWindows;
-      const scannedKeys = Object.keys(dw?.scannedWindows || {});
       for (const winTitle of scannedKeys) {
         try {
           await apiRequest("POST", "/api/epic/agent/send", { type: "nav_view", window: winTitle, search: desktopFilter });
