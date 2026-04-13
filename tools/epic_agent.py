@@ -5454,6 +5454,255 @@ def _find_window_by_title(title_substring):
     return None, None
 
 
+def _get_hwnd(pywinauto_win):
+    """Extract the HWND from a pywinauto window object."""
+    try:
+        return pywinauto_win.element_info.handle
+    except Exception:
+        try:
+            return pywinauto_win.handle
+        except Exception:
+            return None
+
+
+def _walk_win32_backend(hwnd, max_depth=8):
+    """Walk the accessibility tree using the win32/MSAA backend (fallback for Citrix)."""
+    results = []
+    try:
+        from pywinauto import Desktop, Application
+        desktop_w32 = Desktop(backend="win32")
+        win_w32 = None
+        for w in desktop_w32.windows():
+            try:
+                if w.handle == hwnd:
+                    win_w32 = w
+                    break
+            except Exception:
+                continue
+        if not win_w32:
+            try:
+                app = Application(backend="win32").connect(handle=hwnd)
+                win_w32 = app.window(handle=hwnd)
+            except Exception as e:
+                print(f"  [nav_view:win32] connect failed: {e}")
+                return []
+
+        def _recurse_w32(elem, depth, parent_name):
+            if depth > max_depth:
+                return
+            try:
+                children = elem.children()
+            except Exception:
+                return
+            for child in children:
+                try:
+                    text = ""
+                    try:
+                        text = child.window_text() or ""
+                    except Exception:
+                        pass
+                    cls = ""
+                    try:
+                        cls = child.class_name() or ""
+                    except Exception:
+                        pass
+                    rect = None
+                    try:
+                        r = child.rectangle()
+                        if r and r.width() > 0 and r.height() > 0:
+                            rect = {"left": r.left, "top": r.top, "right": r.right, "bottom": r.bottom,
+                                    "cx": (r.left + r.right) // 2, "cy": (r.top + r.bottom) // 2}
+                    except Exception:
+                        pass
+                    ctrl_type = cls
+                    is_interactive = any(k in cls.lower() for k in ("button", "edit", "combo", "list", "check", "radio", "scroll", "tab", "tree", "menu"))
+                    if text or cls:
+                        entry = {
+                            "name": text if text else f"({cls})",
+                            "controlType": ctrl_type,
+                            "automationId": "",
+                            "className": cls,
+                            "enabled": True,
+                            "value": "",
+                            "checked": None,
+                            "rect": rect,
+                            "depth": depth,
+                            "parent": parent_name,
+                        }
+                        if not is_interactive:
+                            entry["static"] = True
+                        results.append(entry)
+                    _recurse_w32(child, depth + 1, text if text else parent_name)
+                except Exception:
+                    continue
+
+        _recurse_w32(win_w32, 0, "")
+        print(f"  [nav_view:win32] {len(results)} elements via MSAA/win32 backend")
+    except Exception as e:
+        print(f"  [nav_view:win32] failed: {e}")
+    return results
+
+
+def _walk_comtypes_uia(hwnd, max_depth=8):
+    """Walk UIA tree directly via comtypes IUIAutomation, bypassing pywinauto."""
+    results = []
+    try:
+        import comtypes.client
+        import comtypes
+        try:
+            from comtypes.gen import UIAutomationClient as uiac
+        except ImportError:
+            try:
+                comtypes.client.GetModule("UIAutomationCore.dll")
+                from comtypes.gen import UIAutomationClient as uiac
+            except Exception as e:
+                print(f"  [nav_view:comtypes] module load failed: {e}")
+                return []
+
+        uia_clsid = comtypes.GUID("{FF48DBA4-60EF-4201-AA87-54103EEF594E}")
+        uia = comtypes.client.CreateObject(uia_clsid, interface=uiac.IUIAutomation)
+        root = uia.ElementFromHandle(hwnd)
+        if root is None:
+            return []
+
+        INTERACTIVE_TYPES = {"Button", "Edit", "ComboBox", "CheckBox", "RadioButton",
+                              "ListItem", "MenuItem", "Hyperlink", "Slider", "Tab", "TabItem",
+                              "TreeItem", "Spinner", "ScrollBar"}
+        CONTAINER_TYPES = {"Pane", "Group", "List", "Tree", "MenuBar", "Menu",
+                           "ToolBar", "StatusBar", "Window", "Document", "DataGrid"}
+
+        def _recurse_ct(elem, depth, parent_name):
+            if depth > max_depth:
+                return
+            try:
+                ctrl_type_id = elem.CurrentControlType
+                ctrl_name_map = {
+                    50000: "Button", 50001: "Calendar", 50002: "CheckBox", 50003: "ComboBox",
+                    50004: "Edit", 50005: "Hyperlink", 50006: "Image", 50007: "ListItem",
+                    50008: "List", 50009: "Menu", 50010: "MenuBar", 50011: "MenuItem",
+                    50012: "ProgressBar", 50013: "RadioButton", 50014: "ScrollBar",
+                    50015: "Slider", 50016: "Spinner", 50017: "StatusBar", 50018: "Tab",
+                    50019: "TabItem", 50020: "Text", 50021: "ToolBar", 50022: "ToolTip",
+                    50023: "Tree", 50024: "TreeItem", 50025: "Custom", 50026: "Group",
+                    50027: "Thumb", 50028: "DataGrid", 50029: "DataItem", 50030: "Document",
+                    50031: "SplitButton", 50032: "Window", 50033: "Pane", 50034: "Header",
+                    50035: "HeaderItem", 50036: "Table", 50037: "TitleBar", 50038: "Separator",
+                }
+                ctrl_type = ctrl_name_map.get(ctrl_type_id, f"Type{ctrl_type_id}")
+                name = ""
+                try:
+                    name = elem.CurrentName or ""
+                except Exception:
+                    pass
+                auto_id = ""
+                try:
+                    auto_id = elem.CurrentAutomationId or ""
+                except Exception:
+                    pass
+                rect = None
+                try:
+                    r = elem.CurrentBoundingRectangle
+                    w = r.right - r.left
+                    h = r.bottom - r.top
+                    if w > 0 and h > 0:
+                        rect = {"left": r.left, "top": r.top, "right": r.right, "bottom": r.bottom,
+                                "cx": (r.left + r.right) // 2, "cy": (r.top + r.bottom) // 2}
+                except Exception:
+                    pass
+                is_interactive = ctrl_type in INTERACTIVE_TYPES
+                is_container = ctrl_type in CONTAINER_TYPES
+                if name or is_interactive:
+                    entry = {
+                        "name": name if name else f"({ctrl_type})",
+                        "controlType": ctrl_type,
+                        "automationId": auto_id,
+                        "className": "",
+                        "enabled": True,
+                        "value": "",
+                        "checked": None,
+                        "rect": rect,
+                        "depth": depth,
+                        "parent": parent_name,
+                    }
+                    if not is_interactive:
+                        entry["static"] = True
+                    results.append(entry)
+                if depth < max_depth and (is_container or not is_interactive):
+                    cond = uia.CreateTrueCondition()
+                    children = elem.FindAll(uiac.TreeScope_Children, cond)
+                    if children:
+                        for i in range(children.Length):
+                            try:
+                                child = children.GetElement(i)
+                                sub_parent = name if name else parent_name
+                                _recurse_ct(child, depth + 1, sub_parent)
+                            except Exception:
+                                continue
+            except Exception:
+                pass
+
+        cond = uia.CreateTrueCondition()
+        children = root.FindAll(uiac.TreeScope_Children, cond)
+        if children:
+            for i in range(children.Length):
+                try:
+                    child = children.GetElement(i)
+                    _recurse_ct(child, 0, "")
+                except Exception:
+                    continue
+        print(f"  [nav_view:comtypes] {len(results)} elements via IUIAutomation direct")
+    except Exception as e:
+        print(f"  [nav_view:comtypes] failed: {e}")
+    return results
+
+
+def _walk_enum_child_windows(hwnd):
+    """Enumerate all child HWNDs via raw win32gui — always works, even for Citrix."""
+    results = []
+    try:
+        import win32gui
+        import win32con
+
+        def _enum_cb(child_hwnd, _):
+            try:
+                if not win32gui.IsWindowVisible(child_hwnd):
+                    return True
+                text = win32gui.GetWindowText(child_hwnd) or ""
+                cls = win32gui.GetClassName(child_hwnd) or ""
+                rect = win32gui.GetWindowRect(child_hwnd)
+                left, top, right, bottom = rect
+                w = right - left
+                h = bottom - top
+                if w <= 0 or h <= 0:
+                    return True
+                is_interactive = any(k in cls.lower() for k in ("button", "edit", "combo", "listbox", "check", "scroll", "tab", "richedit", "static", "spin"))
+                entry = {
+                    "name": text if text else f"({cls})",
+                    "controlType": cls,
+                    "automationId": f"hwnd:{child_hwnd}",
+                    "className": cls,
+                    "enabled": True,
+                    "value": "",
+                    "checked": None,
+                    "rect": {"left": left, "top": top, "right": right, "bottom": bottom,
+                             "cx": (left + right) // 2, "cy": (top + bottom) // 2},
+                    "depth": 0,
+                    "parent": "",
+                }
+                if not is_interactive:
+                    entry["static"] = True
+                results.append(entry)
+            except Exception:
+                pass
+            return True
+
+        win32gui.EnumChildWindows(hwnd, _enum_cb, None)
+        print(f"  [nav_view:enum] {len(results)} child windows via EnumChildWindows")
+    except Exception as e:
+        print(f"  [nav_view:enum] failed: {e}")
+    return results
+
+
 def execute_nav_view(cmd):
     """Read the live UIA accessibility tree for ANY window by title substring."""
     window_title_arg = cmd.get("window", "")
@@ -5517,7 +5766,24 @@ def execute_nav_view(cmd):
     elements = _walk_uia_tree(target_window, 0, max_depth, show_all, "")
     walked_nodes = _walk_node_count
     timed_out = time.time() > _walk_deadline
-    print(f"  [nav_view] Walk: {walked_nodes} nodes, {len(elements)} elements" + (" (timed out)" if timed_out else ""))
+    print(f"  [nav_view] UIA walk: {walked_nodes} nodes, {len(elements)} elements" + (" (timed out)" if timed_out else ""))
+
+    if len(elements) == 0 and not timed_out:
+        hwnd = _get_hwnd(target_window)
+        if hwnd:
+            print(f"  [nav_view] UIA returned 0 — trying comtypes IUIAutomation direct (hwnd={hwnd})...")
+            elements = _walk_comtypes_uia(hwnd, max_depth)
+        if len(elements) == 0 and hwnd:
+            print(f"  [nav_view] comtypes returned 0 — trying win32/MSAA backend...")
+            elements = _walk_win32_backend(hwnd, max_depth)
+        if len(elements) == 0 and hwnd:
+            print(f"  [nav_view] MSAA returned 0 — trying raw EnumChildWindows...")
+            elements = _walk_enum_child_windows(hwnd)
+        if len(elements) == 0:
+            print(f"  [nav_view] All backends returned 0. Citrix accessibility virtual channel may not be enabled.")
+
+    if not show_all:
+        elements = [e for e in elements if not e.get("static", False)]
 
     if search_term:
         search_lower = search_term.lower()
