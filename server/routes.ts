@@ -777,6 +777,21 @@ export async function registerRoutes(
       const oldest = Array.from(epicResults.keys()).slice(0, epicResults.size - 50);
       for (const k of oldest) epicResults.delete(k);
     }
+    if (status === "complete" && data) {
+      if (data.mode === "list" && Array.isArray(data.windows)) {
+        uiaWindowListCache = { windows: data.windows, storedAt: Date.now() };
+        persistUiaCache();
+      } else if (data.mode === "detail" && data.window) {
+        const title = (typeof data.window === "string" ? data.window : data.window?.title) || data.target || "";
+        if (title) {
+          const windowObj = typeof data.window === "string"
+            ? { title: data.window, elements: data.elements || [], hintMap: data.hintMap || {} }
+            : data.window;
+          uiaWindowCache.set(title, { data: windowObj, storedAt: Date.now() });
+          persistUiaCache();
+        }
+      }
+    }
     res.json({ ok: true });
   });
 
