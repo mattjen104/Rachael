@@ -4105,20 +4105,23 @@ ${fullHtml}`;
       const title = args.slice(1).join(" ") || "";
       const sent = await sendAudioCmd("audio_start", title ? { title } : {});
       if (!sent.ok) return fail(`[record] ${sent.error || "agent not connected"}`);
-      const result = await pollResult(sent.commandId!, 20000);
-      if (!result) return fail("[record] Timed out (20s)");
+      const result = await pollResult(sent.commandId!, 30000);
+      if (!result) return fail("[record] Timed out (30s)");
       if (result.status === "error") return fail(`[record] ${result.error}`);
       const d = result.data || {};
-      return ok([
+      const lines = [
         "Recording started",
-        `Session : ${d.sessionId || "?"}`,
+        `Session   : ${d.sessionId || "?"}`,
         `Transcript: ${d.transcriptId || "?"}`,
-        `Device  : ${d.device || "?"}`,
-        `Rate    : ${d.sampleRate || 16000}Hz`,
-        `Silence : RMS < ${d.silenceThreshold || 150} skipped`,
-        "",
-        "Run  record stop  when finished.",
-      ].join(nl));
+        `Loopback  : ${d.device || "?"}`,
+      ];
+      if (d.dualTrack) lines.push(`Mic       : ${d.micDevice || "microphone"} [dual-track]`);
+      else lines.push(`Mic       : (loopback only)`);
+      lines.push(`Rate      : ${d.sampleRate || 16000}Hz  silence RMS < ${d.silenceThreshold || 150}`);
+      lines.push(`Level     : ambient RMS ${d.ambientRms ?? "?"}`);
+      if (!d.deviceActive) lines.push(`WARNING   : ${d.warning || "device may be silent"}`);
+      lines.push("", "Run  record stop  when finished.");
+      return ok(lines.join(nl));
     }
 
     if (sub === "stop") {
@@ -4128,15 +4131,17 @@ ${fullHtml}`;
       if (!result) return fail("[record] Timed out (30s)");
       if (result.status === "error") return fail(`[record] ${result.error}`);
       const d = result.data || {};
-      return ok([
+      const stopLines = [
         "Recording stopped",
         `Session   : ${d.sessionId || "?"}`,
         `Duration  : ${d.durationSeconds || 0}s`,
         `Uploaded  : ${Math.round((d.bytesUploaded || 0) / 1024)}KB`,
         `Skipped   : ${d.chunksSkipped || 0} silent chunks`,
-        "",
-        "Transcription queued. View in: transcripts",
-      ].join(nl));
+      ];
+      if (d.splitSessions) stopLines.push(`Auto-split: ${d.splitSessions} additional session(s) created`);
+      if (d.dualTrack) stopLines.push(`Dual-track: loopback + mic mixed`);
+      stopLines.push("", "Transcription queued. View in: transcripts");
+      return ok(stopLines.join(nl));
     }
 
     if (sub === "status") {
@@ -4147,15 +4152,20 @@ ${fullHtml}`;
       if (result.status === "error") return fail(`[record] ${result.error}`);
       const d = result.data || {};
       if (!d.active) return ok("Not recording.");
-      return ok([
+      const remaining = d.maxDurationSeconds ? d.maxDurationSeconds - d.elapsedSeconds : null;
+      const statusLines = [
         "Recording active",
         `Session   : ${d.sessionId}`,
-        `Elapsed   : ${d.elapsedSeconds}s`,
+        `Elapsed   : ${d.elapsedSeconds}s${remaining !== null ? ` / ${d.maxDurationSeconds}s max (${Math.floor(remaining / 60)}m left)` : ""}`,
         `Uploaded  : ${Math.round((d.bytesUploaded || 0) / 1024)}KB`,
         `Skipped   : ${d.chunksSkipped} silent chunks`,
-        `Device    : ${d.device}`,
-        `Silence   : RMS < ${d.silenceThreshold}`,
-      ].join(nl));
+        `Loopback  : ${d.device}`,
+      ];
+      if (d.dualTrack) statusLines.push(`Mic       : ${d.micDevice || "microphone"} [dual-track]`);
+      statusLines.push(`Silence   : RMS < ${d.silenceThreshold}  ambient ${d.ambientRms}`);
+      if (d.splitCount) statusLines.push(`Splits    : ${d.splitCount}`);
+      statusLines.push(`Encoder   : ${d.encoderHealthy ? "healthy" : "UNHEALTHY"}`);
+      return ok(statusLines.join(nl));
     }
 
     return fail(`Unknown subcommand: ${sub}. Try: record start | record stop | record status`);

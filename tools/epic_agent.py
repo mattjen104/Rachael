@@ -45,8 +45,11 @@ _AUDIO_SAMPLE_WIDTH = 2  # 16-bit PCM
 _AUDIO_CHUNK_FRAMES = 1024  # PortAudio callback frames
 _AUDIO_CHUNK_SECONDS = 10   # encoder upload cadence
 _AUDIO_PREROLL_FRAMES = int(_AUDIO_SAMPLE_RATE * 0.200)  # 200ms pre-roll
-_AUDIO_SILENCE_THRESHOLD = 150  # default RMS threshold (~quiet room)
+_AUDIO_SILENCE_THRESHOLD = 150          # default RMS threshold (~quiet room)
 _AUDIO_RING_MAXLEN = int(30 * _AUDIO_SAMPLE_RATE / _AUDIO_CHUNK_FRAMES)  # 30s max
+_AUDIO_MAX_DURATION_SECS = 7200         # 2-hour auto-stop safety net
+_AUDIO_SPLIT_THRESHOLD_BYTES = 22 * 1024 * 1024  # auto-split at 22MB (server cap is 25MB)
+_AUDIO_UPLOAD_RETRIES = 2               # retry attempts on upload failure
 
 # Module-level audio session state (cleared on stop)
 _audio_session: dict = {}
@@ -2295,35 +2298,58 @@ def _audio_pcm_to_wav(pcm_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
-def _audio_encoder_loop(stop_event: threading.Event, ring_buf: collections.deque) -> None:
-    """Runs in daemon thread. Drains ring buffer every CHUNK_SECONDS, silencegates,
-    wraps in WAV, and POSTs to /api/transcripts/record/:id/chunk."""
-    global _audio_session
-    threshold = _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD)
-    preroll_bytes = b""
+def _audio_mix_pcm(loopback: bytes, mic: bytes) -> bytes:
+    """Mix two 16-bit mono PCM streams (average). Handles length mismatch gracefully."""
+    if not mic:
+        return loopback
+    if not loopback:
+        return mic
+    if _NUMPY_AVAILABLE:
+        a = _np.frombuffer(loopback, dtype=_np.int16).astype(_np.int32)
+        b = _np.frombuffer(mic, dtype=_np.int16).astype(_np.int32)
+        n = min(len(a), len(b))
+        mixed = _np.clip((a[:n] + b[:n]) >> 1, -32768, 32767).astype(_np.int16)
+        return mixed.tobytes()
+    n_lo = len(loopback) // 2
+    n_mic = len(mic) // 2
+    n = min(n_lo, n_mic)
+    lo_s = struct.unpack_from(f"<{n}h", loopback)
+    mi_s = struct.unpack_from(f"<{n}h", mic)
+    return struct.pack(f"<{n}h", *(max(-32768, min(32767, (a + b) >> 1)) for a, b in zip(lo_s, mi_s)))
 
-    while not stop_event.is_set():
-        stop_event.wait(timeout=_AUDIO_CHUNK_SECONDS)
-        frames: list = []
-        while True:
-            try:
-                frames.append(ring_buf.popleft())
-            except IndexError:
-                break
-        if not frames:
-            continue
-        pcm = b"".join(frames)
-        rms = _audio_compute_rms(pcm)
-        upload_pcm = preroll_bytes + pcm
-        preroll_bytes = pcm[-(_AUDIO_PREROLL_FRAMES * _AUDIO_SAMPLE_WIDTH):]
-        if rms < threshold:
-            _audio_session["chunks_skipped"] = _audio_session.get("chunks_skipped", 0) + 1
-            print(f"  [audio] Silent (RMS={rms:.0f}<{threshold}) — skipped")
-            continue
-        wav_bytes = _audio_pcm_to_wav(upload_pcm)
-        session_id = _audio_session.get("session_id")
-        if not session_id:
-            continue
+
+def _audio_new_server_session(title: str) -> tuple:
+    """Create a new server-side recording session. Returns (session_id, transcript_id) or (None, None)."""
+    try:
+        resp = requests.post(
+            f"{ORGCLOUD_URL}/api/transcripts/record/start",
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}", "Content-Type": "application/json"},
+            json={"sourceUrl": "", "tabTitle": title or "Windows audio recording", "recordingType": "system"},
+            timeout=15,
+        )
+        if resp and resp.status_code == 200:
+            d = resp.json()
+            return d.get("sessionId"), d.get("transcriptId")
+    except Exception as exc:
+        print(f"  [audio] New session error: {exc}")
+    return None, None
+
+
+def _audio_stop_server_session(session_id: str) -> None:
+    """Tell server to finalize and queue transcription for a session."""
+    try:
+        requests.post(
+            f"{ORGCLOUD_URL}/api/transcripts/record/{session_id}/stop",
+            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
+            timeout=15,
+        )
+    except Exception as exc:
+        print(f"  [audio] Stop session error: {exc}")
+
+
+def _audio_upload_chunk(session_id: str, wav_bytes: bytes) -> bool:
+    """Upload a WAV chunk with exponential-backoff retry. Returns True on success."""
+    for attempt in range(_AUDIO_UPLOAD_RETRIES + 1):
         try:
             resp = requests.post(
                 f"{ORGCLOUD_URL}/api/transcripts/record/{session_id}/chunk",
@@ -2332,18 +2358,145 @@ def _audio_encoder_loop(stop_event: threading.Event, ring_buf: collections.deque
                 timeout=30,
             )
             if resp and resp.status_code == 200:
-                _audio_session["bytes_uploaded"] = _audio_session.get("bytes_uploaded", 0) + len(wav_bytes)
-                print(f"  [audio] Chunk {len(wav_bytes)//1024}KB RMS={rms:.0f}")
-            else:
-                code = resp.status_code if resp else "timeout"
-                print(f"  [audio] Chunk upload failed: {code}")
+                return True
+            code = resp.status_code if resp else "timeout"
+            print(f"  [audio] Chunk HTTP {code} (attempt {attempt + 1}/{_AUDIO_UPLOAD_RETRIES + 1})")
         except Exception as exc:
-            print(f"  [audio] Chunk upload error: {exc}")
+            print(f"  [audio] Chunk error: {exc} (attempt {attempt + 1}/{_AUDIO_UPLOAD_RETRIES + 1})")
+        if attempt < _AUDIO_UPLOAD_RETRIES:
+            time.sleep(1.5 * (attempt + 1))
+    return False
+
+
+def _audio_encoder_loop(stop_event: threading.Event, ring_buf: collections.deque) -> None:
+    """Daemon thread: drains ring buffers every CHUNK_SECONDS, mixes dual-track,
+    silence-gates with RMS, uploads with retry, auto-splits sessions at 22MB."""
+    global _audio_session
+    threshold = _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD)
+    preroll_bytes = b""
+    try:
+        while not stop_event.is_set():
+            stop_event.wait(timeout=_AUDIO_CHUNK_SECONDS)
+
+            # Drain loopback ring buffer
+            frames: list = []
+            while True:
+                try:
+                    frames.append(ring_buf.popleft())
+                except IndexError:
+                    break
+
+            # Drain mic ring buffer if dual-track
+            mic_frames: list = []
+            mic_ring = _audio_session.get("mic_ring_buf")
+            if mic_ring is not None:
+                while True:
+                    try:
+                        mic_frames.append(mic_ring.popleft())
+                    except IndexError:
+                        break
+
+            if not frames:
+                continue
+
+            loopback_pcm = b"".join(frames)
+            mic_pcm = b"".join(mic_frames) if mic_frames else b""
+            pcm = _audio_mix_pcm(loopback_pcm, mic_pcm) if mic_pcm else loopback_pcm
+            rms = _audio_compute_rms(pcm)
+            upload_pcm = preroll_bytes + pcm
+            preroll_bytes = pcm[-(_AUDIO_PREROLL_FRAMES * _AUDIO_SAMPLE_WIDTH):]
+
+            if rms < threshold:
+                _audio_session["chunks_skipped"] = _audio_session.get("chunks_skipped", 0) + 1
+                print(f"  [audio] Silent (RMS={rms:.0f}<{threshold}) — skipped")
+                continue
+
+            wav_bytes = _audio_pcm_to_wav(upload_pcm)
+            session_id = _audio_session.get("session_id")
+            if not session_id:
+                continue
+
+            # ── Auto-split: start new session when approaching server size limit ──
+            projected = _audio_session.get("bytes_uploaded", 0) + len(wav_bytes)
+            if projected >= _AUDIO_SPLIT_THRESHOLD_BYTES:
+                title = _audio_session.get("title", "Windows audio recording")
+                part = _audio_session.get("split_count", 0) + 1
+                print(f"  [audio] Auto-split at {projected // 1024}KB → part {part + 1}")
+                _audio_stop_server_session(session_id)
+                new_sid, new_tid = _audio_new_server_session(f"{title} (part {part + 1})")
+                if new_sid:
+                    _audio_session["session_id"] = new_sid
+                    _audio_session["transcript_id"] = new_tid
+                    _audio_session["bytes_uploaded"] = 0
+                    _audio_session["split_count"] = part
+                    session_id = new_sid
+                else:
+                    print(f"  [audio] Auto-split failed — continuing current session")
+
+            if _audio_upload_chunk(session_id, wav_bytes):
+                _audio_session["bytes_uploaded"] = _audio_session.get("bytes_uploaded", 0) + len(wav_bytes)
+                track = " [dual]" if mic_pcm else ""
+                print(f"  [audio] Chunk {len(wav_bytes) // 1024}KB RMS={rms:.0f}{track}")
+            else:
+                print(f"  [audio] Chunk dropped after {_AUDIO_UPLOAD_RETRIES + 1} attempts")
+
+    except Exception as exc:
+        print(f"  [audio-encoder] Crashed: {exc}")
+        traceback.print_exc()
+        _audio_session["encoder_crashed"] = True
     print("  [audio] Encoder thread exit")
 
 
+def _audio_emergency_stop(reason: str) -> None:
+    """Lightweight auto-stop triggered by watchdog. No post_result — cleans up streams + server."""
+    global _audio_session
+    if not _audio_session.get("active"):
+        return
+    session_id = _audio_session.get("session_id")
+    stop_event = _audio_session.get("stop_event")
+    if stop_event:
+        stop_event.set()
+    try:
+        stream = _audio_session.get("stream")
+        mic_stream = _audio_session.get("mic_stream")
+        p = _audio_session.get("pyaudio")
+        if stream:
+            stream.stop_stream(); stream.close()
+        if mic_stream:
+            mic_stream.stop_stream(); mic_stream.close()
+        if p:
+            p.terminate()
+    except Exception:
+        pass
+    if session_id:
+        _audio_stop_server_session(session_id)
+    dur = int(time.time() - _audio_session.get("session_start", time.time()))
+    print(f"  [audio] Emergency stop: {reason} (duration={dur}s)")
+    _audio_session = {}
+
+
+def _audio_watchdog_tick() -> None:
+    """Called from main agent loop every poll cycle.
+    Detects encoder crashes and enforces the 2-hour max-duration safety net."""
+    if not _audio_session.get("active"):
+        return
+    if _audio_session.get("encoder_crashed"):
+        print("  [audio-watchdog] Encoder crashed — emergency stop")
+        _audio_emergency_stop("encoder crash")
+        return
+    enc = _audio_session.get("encoder_thread")
+    if enc and not enc.is_alive():
+        print("  [audio-watchdog] Encoder thread dead — emergency stop")
+        _audio_emergency_stop("encoder thread died unexpectedly")
+        return
+    elapsed = time.time() - _audio_session.get("session_start", time.time())
+    if elapsed > _AUDIO_MAX_DURATION_SECS:
+        print(f"  [audio-watchdog] {_AUDIO_MAX_DURATION_SECS // 3600}h limit reached — auto-stopping")
+        _audio_emergency_stop(f"max duration ({_AUDIO_MAX_DURATION_SECS // 3600}h) reached")
+
+
 def execute_audio_start(cmd: dict) -> None:
-    """Start WASAPI loopback recording. Streams 10s WAV chunks to transcript service."""
+    """Start WASAPI loopback + optional microphone dual-track recording."""
     global _audio_session
     command_id = cmd.get("id", "unknown")
     title = cmd.get("title", "")
@@ -2355,36 +2508,13 @@ def execute_audio_start(cmd: dict) -> None:
         return
 
     # Create server-side transcript session
-    try:
-        resp = requests.post(
-            f"{ORGCLOUD_URL}/api/transcripts/record/start",
-            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}",
-                     "Content-Type": "application/json"},
-            json={"sourceUrl": "", "tabTitle": title or "Windows audio recording",
-                  "recordingType": "system"},
-            timeout=15,
-        )
-        if not resp or resp.status_code != 200:
-            code = resp.status_code if resp else "timeout"
-            post_result(command_id, "error", error=f"Server session start failed: {code}")
-            return
-        srv = resp.json()
-        session_id = srv.get("sessionId")
-        transcript_id = srv.get("transcriptId")
-    except Exception as exc:
-        post_result(command_id, "error", error=f"Server session error: {exc}")
+    session_id, transcript_id = _audio_new_server_session(title)
+    if not session_id:
+        post_result(command_id, "error", error="Failed to create server recording session.")
         return
 
-    def _cancel_server_session(sid):
-        """Best-effort cancel: stop the recording session so its status isn't stuck at 'recording'."""
-        try:
-            requests.post(
-                f"{ORGCLOUD_URL}/api/transcripts/record/{sid}/stop",
-                headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
-                timeout=5,
-            )
-        except Exception:
-            pass
+    def _cancel():
+        _audio_stop_server_session(session_id)
 
     # Import pyaudio (prefer pyaudiowpatch for WASAPI loopback)
     try:
@@ -2393,7 +2523,7 @@ def execute_audio_start(cmd: dict) -> None:
         try:
             import pyaudio  # type: ignore
         except ImportError:
-            _cancel_server_session(session_id)
+            _cancel()
             post_result(command_id, "error",
                         error="pyaudiowpatch not installed. Run: pip install pyaudiowpatch")
             return
@@ -2417,12 +2547,12 @@ def execute_audio_start(cmd: dict) -> None:
             loopback = p.get_default_input_device_info()
         except Exception:
             p.terminate()
-            _cancel_server_session(session_id)
+            _cancel()
             post_result(command_id, "error", error="No audio capture device found.")
             return
 
     device_name = loopback.get("name", "unknown")
-    print(f"  [audio] Device: {device_name}")
+    print(f"  [audio] Loopback: {device_name}")
 
     ring_buf: collections.deque = collections.deque(maxlen=_AUDIO_RING_MAXLEN)
     stop_event = threading.Event()
@@ -2443,25 +2573,78 @@ def execute_audio_start(cmd: dict) -> None:
         )
     except Exception as exc:
         p.terminate()
-        _cancel_server_session(session_id)
+        _cancel()
         post_result(command_id, "error", error=f"Audio stream open failed: {exc}")
         return
 
     stream.start_stream()
+
+    # ── Dual-track: open microphone stream if it's a different device ──
+    mic_stream = None
+    mic_ring_buf = None
+    mic_name = None
+    try:
+        mic_info = p.get_default_input_device_info()
+        if mic_info and mic_info.get("index") != loopback.get("index"):
+            mic_ring_buf = collections.deque(maxlen=_AUDIO_RING_MAXLEN)
+
+            def _mic_cb(in_data, frame_count, time_info, status):
+                mic_ring_buf.append(in_data)
+                return (None, pyaudio.paContinue)
+
+            mic_stream = p.open(
+                format=pyaudio.paInt16,
+                channels=_AUDIO_CHANNELS,
+                rate=_AUDIO_SAMPLE_RATE,
+                input=True,
+                frames_per_buffer=_AUDIO_CHUNK_FRAMES,
+                input_device_index=mic_info.get("index"),
+                stream_callback=_mic_cb,
+            )
+            mic_stream.start_stream()
+            mic_name = mic_info.get("name", "microphone")
+            print(f"  [audio] Mic: {mic_name}")
+    except Exception as exc:
+        print(f"  [audio] Mic unavailable (loopback-only): {exc}")
+        mic_stream = None
+        mic_ring_buf = None
+
+    # ── Level check: sample 2s to verify audio is actually flowing ──
+    time.sleep(2.0)
+    level_frames: list = []
+    while True:
+        try:
+            level_frames.append(ring_buf.popleft())
+        except IndexError:
+            break
+    level_pcm = b"".join(level_frames)
+    ambient_rms = _audio_compute_rms(level_pcm) if level_pcm else 0.0
+    device_active = ambient_rms > 1.0
+    if not device_active:
+        print(f"  [audio] WARNING: ambient RMS={ambient_rms:.1f} — device may be silent or muted")
+    else:
+        print(f"  [audio] Level check OK: RMS={ambient_rms:.1f}")
 
     _audio_session = {
         "active": True,
         "session_id": session_id,
         "transcript_id": transcript_id,
         "session_start": time.time(),
+        "title": title or "Windows audio recording",
         "ring_buf": ring_buf,
+        "mic_ring_buf": mic_ring_buf,
         "stop_event": stop_event,
         "stream": stream,
+        "mic_stream": mic_stream,
         "pyaudio": p,
         "bytes_uploaded": 0,
         "chunks_skipped": 0,
+        "split_count": 0,
         "silence_threshold": threshold,
         "device_name": device_name,
+        "mic_name": mic_name,
+        "dual_track": mic_stream is not None,
+        "ambient_rms": round(ambient_rms, 1),
     }
 
     enc = threading.Thread(target=_audio_encoder_loop,
@@ -2470,13 +2653,18 @@ def execute_audio_start(cmd: dict) -> None:
     enc.start()
     _audio_session["encoder_thread"] = enc
 
-    print(f"  [audio] Started: session={session_id} transcript={transcript_id}")
+    print(f"  [audio] Started: session={session_id} dual={mic_stream is not None}")
     post_result(command_id, "complete", data={
         "sessionId": session_id,
         "transcriptId": transcript_id,
         "device": device_name,
+        "micDevice": mic_name,
+        "dualTrack": mic_stream is not None,
         "sampleRate": _AUDIO_SAMPLE_RATE,
         "silenceThreshold": threshold,
+        "ambientRms": round(ambient_rms, 1),
+        "deviceActive": device_active,
+        "warning": "Device may be silent (ambient RMS near zero)" if not device_active else None,
     })
 
 
@@ -2491,7 +2679,7 @@ def execute_audio_stop(cmd: dict) -> None:
 
     session_id = _audio_session.get("session_id")
 
-    # Signal encoder thread to stop
+    # Signal encoder thread to stop and wait
     stop_event = _audio_session.get("stop_event")
     if stop_event:
         stop_event.set()
@@ -2499,55 +2687,52 @@ def execute_audio_stop(cmd: dict) -> None:
     if enc and enc.is_alive():
         enc.join(timeout=15)
 
-    # Final drain — upload any leftover frames
+    # Final drain — loopback + mic, mixed, VAD-gated, uploaded
     ring_buf = _audio_session.get("ring_buf")
+    mic_ring = _audio_session.get("mic_ring_buf")
+    loopback_frames: list = []
+    mic_frames_final: list = []
     if ring_buf:
-        frames = []
         while True:
             try:
-                frames.append(ring_buf.popleft())
+                loopback_frames.append(ring_buf.popleft())
             except IndexError:
                 break
-        if frames:
-            pcm = b"".join(frames)
-            rms = _audio_compute_rms(pcm)
-            if rms >= _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD):
-                wav_bytes = _audio_pcm_to_wav(pcm)
-                try:
-                    requests.post(
-                        f"{ORGCLOUD_URL}/api/transcripts/record/{session_id}/chunk",
-                        headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
-                        files={"audio": ("audio.wav", wav_bytes, "audio/wav")},
-                        timeout=30,
-                    )
-                    _audio_session["bytes_uploaded"] = _audio_session.get("bytes_uploaded", 0) + len(wav_bytes)
-                    print(f"  [audio] Final chunk {len(wav_bytes)//1024}KB uploaded")
-                except Exception as exc:
-                    print(f"  [audio] Final chunk error: {exc}")
+    if mic_ring:
+        while True:
+            try:
+                mic_frames_final.append(mic_ring.popleft())
+            except IndexError:
+                break
+    if loopback_frames:
+        loopback_pcm = b"".join(loopback_frames)
+        mic_pcm = b"".join(mic_frames_final) if mic_frames_final else b""
+        pcm = _audio_mix_pcm(loopback_pcm, mic_pcm) if mic_pcm else loopback_pcm
+        rms = _audio_compute_rms(pcm)
+        if rms >= _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD):
+            wav_bytes = _audio_pcm_to_wav(pcm)
+            if _audio_upload_chunk(session_id, wav_bytes):
+                _audio_session["bytes_uploaded"] = _audio_session.get("bytes_uploaded", 0) + len(wav_bytes)
+                print(f"  [audio] Final chunk {len(wav_bytes) // 1024}KB uploaded")
+            else:
+                print(f"  [audio] Final chunk upload failed")
 
-    # Close PortAudio
+    # Close all PortAudio streams
     try:
         stream = _audio_session.get("stream")
+        mic_stream = _audio_session.get("mic_stream")
         p = _audio_session.get("pyaudio")
         if stream:
-            stream.stop_stream()
-            stream.close()
+            stream.stop_stream(); stream.close()
+        if mic_stream:
+            mic_stream.stop_stream(); mic_stream.close()
         if p:
             p.terminate()
     except Exception as exc:
         print(f"  [audio] Stream close error: {exc}")
 
-    # Signal server to stop + transcribe
-    try:
-        resp = requests.post(
-            f"{ORGCLOUD_URL}/api/transcripts/record/{session_id}/stop",
-            headers={"Authorization": f"Bearer {BRIDGE_TOKEN}"},
-            timeout=15,
-        )
-        code = resp.status_code if resp else "timeout"
-        print(f"  [audio] Stop signal: {code}")
-    except Exception as exc:
-        print(f"  [audio] Stop signal error: {exc}")
+    # Signal server to transcribe
+    _audio_stop_server_session(session_id)
 
     duration = int(time.time() - _audio_session.get("session_start", time.time()))
     result = {
@@ -2555,10 +2740,13 @@ def execute_audio_stop(cmd: dict) -> None:
         "durationSeconds": duration,
         "bytesUploaded": _audio_session.get("bytes_uploaded", 0),
         "chunksSkipped": _audio_session.get("chunks_skipped", 0),
+        "splitSessions": _audio_session.get("split_count", 0),
+        "dualTrack": _audio_session.get("dual_track", False),
     }
     _audio_session = {}
     post_result(command_id, "complete", data=result)
-    print(f"  [audio] Stopped. Duration={duration}s uploaded={result['bytesUploaded']//1024}KB")
+    print(f"  [audio] Stopped. Duration={duration}s "
+          f"uploaded={result['bytesUploaded'] // 1024}KB splits={result['splitSessions']}")
 
 
 def execute_audio_status(cmd: dict) -> None:
@@ -2568,15 +2756,23 @@ def execute_audio_status(cmd: dict) -> None:
         post_result(command_id, "complete", data={"active": False})
         return
     elapsed = int(time.time() - _audio_session.get("session_start", time.time()))
+    enc = _audio_session.get("encoder_thread")
+    encoder_healthy = enc is not None and enc.is_alive() and not _audio_session.get("encoder_crashed")
     post_result(command_id, "complete", data={
         "active": True,
         "sessionId": _audio_session.get("session_id"),
         "transcriptId": _audio_session.get("transcript_id"),
         "elapsedSeconds": elapsed,
+        "maxDurationSeconds": _AUDIO_MAX_DURATION_SECS,
         "bytesUploaded": _audio_session.get("bytes_uploaded", 0),
         "chunksSkipped": _audio_session.get("chunks_skipped", 0),
+        "splitCount": _audio_session.get("split_count", 0),
         "device": _audio_session.get("device_name", "unknown"),
+        "micDevice": _audio_session.get("mic_name"),
+        "dualTrack": _audio_session.get("dual_track", False),
         "silenceThreshold": _audio_session.get("silence_threshold", _AUDIO_SILENCE_THRESHOLD),
+        "ambientRms": _audio_session.get("ambient_rms", 0),
+        "encoderHealthy": encoder_healthy,
     })
 
 
@@ -6539,6 +6735,7 @@ def main():
                 execute_command(cmd)
 
             recording_capture_tick()
+            _audio_watchdog_tick()
 
             time.sleep(POLL_INTERVAL)
 
