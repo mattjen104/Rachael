@@ -755,31 +755,83 @@ def _always_on_start_capture(window_title):
     flush_thread.start()
     cap["threads"] = [ss_thread, title_thread, flush_thread]
 
-    listeners = _always_on_start_input_listeners(cap)
-    cap["listeners"] = listeners
-
     with _always_on_lock:
         _ALWAYS_ON_CAPTURES[key] = cap
 
-    input_status = "full" if listeners else "screenshot-only"
+    _aon_ensure_global_input()
+
+    input_status = "full" if _aon_global_input["active"] else "screenshot-only"
     print(f"  [always-on] Started capture: {window_title} (key={key}, sid={session_id}, input={input_status})")
     return cap
 
 
-def _always_on_start_input_listeners(cap):
-    listeners = []
+_aon_global_input = {
+    "active": False,
+    "listeners": [],
+    "significant_keys": set(),
+    "active_modifiers": set(),
+}
+
+
+def _aon_get_focused_capture():
+    try:
+        fg_title = ""
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                fg_title = buf.value
+        except Exception:
+            try:
+                fw = gw.getActiveWindow()
+                fg_title = fw.title if fw else ""
+            except Exception:
+                pass
+
+        if not fg_title:
+            return None
+
+        fg_lower = fg_title.lower()
+        with _always_on_lock:
+            for cap in _ALWAYS_ON_CAPTURES.values():
+                if cap["active"] and cap["window_title"].lower() in fg_lower:
+                    return cap
+    except Exception:
+        pass
+    return None
+
+
+def _aon_ensure_global_input():
+    if _aon_global_input["active"]:
+        return
+
     try:
         from pynput import mouse as pm, keyboard as pk
     except ImportError:
-        return listeners
+        print("  [always-on] pynput not installed — input capture disabled")
+        return
 
-    stop_event = cap["stop_event"]
+    try:
+        for kname in ["enter", "tab", "esc", "backspace", "delete",
+                       "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8",
+                       "f9", "f10", "f11", "f12", "home", "end",
+                       "page_up", "page_down"]:
+            try:
+                _aon_global_input["significant_keys"].add(getattr(pk.Key, kname))
+            except AttributeError:
+                pass
+    except Exception:
+        pass
 
     def on_click(x, y, button, pressed):
         if not pressed:
             return
-        if stop_event.is_set():
-            return False
+        cap = _aon_get_focused_capture()
+        if not cap:
+            return
         with cap["action_buffer_lock"]:
             cap["action_buffer"].append({
                 "type": "click",
@@ -807,40 +859,26 @@ def _always_on_start_input_listeners(cap):
         except Exception:
             pass
 
-    significant_keys = set()
-    try:
-        for kname in ["enter", "tab", "esc", "backspace", "delete",
-                       "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8",
-                       "f9", "f10", "f11", "f12", "home", "end",
-                       "page_up", "page_down"]:
-            try:
-                significant_keys.add(getattr(pk.Key, kname))
-            except AttributeError:
-                pass
-    except Exception:
-        pass
-
-    active_modifiers = set()
-
     def on_press(key):
-        if stop_event.is_set():
-            return False
         try:
             if key in (pk.Key.ctrl_l, pk.Key.ctrl_r, pk.Key.alt_l, pk.Key.alt_r,
                         pk.Key.shift_l, pk.Key.shift_r, pk.Key.cmd, pk.Key.cmd_r):
-                active_modifiers.add(key)
+                _aon_global_input["active_modifiers"].add(key)
                 return
         except Exception:
             pass
 
-        is_sig = key in significant_keys
-        has_modifier = len(active_modifiers) > 0
+        is_sig = key in _aon_global_input["significant_keys"]
+        has_modifier = len(_aon_global_input["active_modifiers"]) > 0
         is_ctrl_combo = has_modifier and hasattr(key, 'char') and key.char
 
         if is_sig or is_ctrl_combo:
+            cap = _aon_get_focused_capture()
+            if not cap:
+                return
             if is_ctrl_combo:
                 mod_names = []
-                for m in active_modifiers:
+                for m in _aon_global_input["active_modifiers"]:
                     try:
                         mod_names.append(m.name)
                     except Exception:
@@ -858,7 +896,7 @@ def _always_on_start_input_listeners(cap):
 
     def on_release(key):
         try:
-            active_modifiers.discard(key)
+            _aon_global_input["active_modifiers"].discard(key)
         except Exception:
             pass
 
@@ -869,11 +907,25 @@ def _always_on_start_input_listeners(cap):
         key_l.daemon = True
         mouse_l.start()
         key_l.start()
-        listeners.extend([mouse_l, key_l])
+        _aon_global_input["listeners"] = [mouse_l, key_l]
+        _aon_global_input["active"] = True
+        print("  [always-on] Global input listeners started (focus-aware dispatch)")
     except Exception as e:
         print(f"  [always-on] Input listener error: {e}")
 
-    return listeners
+
+def _aon_stop_global_input():
+    if not _aon_global_input["active"]:
+        return
+    for listener in _aon_global_input["listeners"]:
+        try:
+            listener.stop()
+        except Exception:
+            pass
+    _aon_global_input["listeners"] = []
+    _aon_global_input["active"] = False
+    _aon_global_input["active_modifiers"] = set()
+    print("  [always-on] Global input listeners stopped")
 
 
 def _always_on_drain_actions(cap):
@@ -1049,12 +1101,6 @@ def _always_on_stop_capture(window_key):
     if stop_event:
         stop_event.set()
 
-    for listener in cap.get("listeners", []):
-        try:
-            listener.stop()
-        except Exception:
-            pass
-
     for thread in cap.get("threads", []):
         try:
             thread.join(timeout=3)
@@ -1066,6 +1112,10 @@ def _always_on_stop_capture(window_key):
     with _always_on_lock:
         if window_key in _ALWAYS_ON_CAPTURES:
             del _ALWAYS_ON_CAPTURES[window_key]
+        remaining = sum(1 for c in _ALWAYS_ON_CAPTURES.values() if c["active"])
+
+    if remaining == 0:
+        _aon_stop_global_input()
 
     print(f"  [always-on] Stopped capture: {cap['window_title']} ({cap['transition_count']} transitions)")
     return cap
@@ -8177,11 +8227,11 @@ def main():
             if now - last_heartbeat > heartbeat_interval:
                 windows = list_windows()
                 window_titles = list(windows.values()) if windows else []
-                send_heartbeat(list(windows.keys()))
                 try:
                     _always_on_heartbeat_tick(window_titles)
                 except Exception as e:
                     print(f"  [always-on] tick error: {e}")
+                send_heartbeat(list(windows.keys()))
                 last_heartbeat = now
 
             commands = poll_commands()
