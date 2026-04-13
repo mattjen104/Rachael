@@ -1251,6 +1251,14 @@ def execute_record_session_start(cmd):
     listeners = _session_start_input_listeners(stop_event, session_dir, actual_title)
     _session_rec["listeners"] = listeners
 
+    if not listeners:
+        _session_rec["_input_degraded"] = True
+        print(f"  [session-rec] WARNING: Input capture unavailable (pynput missing)")
+        print(f"  [session-rec]   Screenshots and title tracking still active")
+        print(f"  [session-rec]   Install pynput for full capture: pip install pynput")
+    else:
+        _session_rec["_input_degraded"] = False
+
     print(f"  [session-rec] Recording started: {actual_title}")
     print(f"  [session-rec] Session ID: {session_id}")
     print(f"  [session-rec] Session dir: {session_dir}")
@@ -1259,6 +1267,7 @@ def execute_record_session_start(cmd):
         "recording": True,
         "window": actual_title,
         "sessionId": session_id,
+        "inputCapture": not _session_rec.get("_input_degraded", False),
     })
 
 

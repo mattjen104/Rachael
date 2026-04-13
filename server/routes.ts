@@ -1207,18 +1207,28 @@ export async function registerRoutes(
             });
           }
         }
-        const sessionSeqs: Record<string, string[]> = {};
-        for (const edge of tree.edges) {
-          for (const sid of edge.sessions) {
-            if (!sessionSeqs[sid]) sessionSeqs[sid] = [];
-            sessionSeqs[sid].push(`${edge.from}->${edge.to}`);
-          }
+
+        const sessionTimelines: Record<string, { from: string; to: string; ts: number }[]> = {};
+        for (const sid of tree.mergedSessions) {
+          try {
+            const sCfg = await storage.getAgentConfig(`session_detail_${sid}`);
+            if (sCfg?.value) {
+              const sd = JSON.parse(sCfg.value);
+              const sorted = (sd.transitions || [])
+                .filter((t: any) => t.from_fingerprint && t.to_fingerprint && t.from_fingerprint !== "0" && t.to_fingerprint !== "0")
+                .sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
+              sessionTimelines[sid] = sorted.map((t: any) => ({ from: t.from_fingerprint, to: t.to_fingerprint, ts: t.timestamp }));
+            }
+          } catch {}
         }
+
         const pairCounts: Record<string, number> = {};
-        for (const seq of Object.values(sessionSeqs)) {
+        for (const [sid, timeline] of Object.entries(sessionTimelines)) {
           const seen = new Set<string>();
-          for (let j = 0; j < seq.length - 1; j++) {
-            const pair = `${seq[j]}|||${seq[j + 1]}`;
+          for (let j = 0; j < timeline.length - 1; j++) {
+            const step1 = `${timeline[j].from}->${timeline[j].to}`;
+            const step2 = `${timeline[j + 1].from}->${timeline[j + 1].to}`;
+            const pair = `${step1}|||${step2}`;
             if (!seen.has(pair)) { seen.add(pair); pairCounts[pair] = (pairCounts[pair] || 0) + 1; }
           }
         }
