@@ -702,6 +702,47 @@ _LABEL_QUEUE = None
 _LABEL_MODEL = "google/gemini-2.0-flash-001"
 
 
+_EPIC_LABEL_PROMPT = """You are an Epic Hyperspace EMR screen identifier. Analyze this screenshot and return a structured label.
+
+EPIC HYPERSPACE VISUAL ANATOMY (where to look):
+1. TOOLBAR ROW (very top, ~40px tall): Contains the ACTIVITY NAME in bold text, usually left-of-center. This is the most important identifier. Common activities: Chart Review, Patient List, Storyboard, Schedule, InBasket, Orders, Notes, Results Review, Flowsheet, Synopsis, Snapshot, Care Everywhere, Referrals, Letters, Problem List, Medication List, Allergies, Immunizations, Health Maintenance, BestPractice Advisories, SmartSets, Preference List, My Patients.
+
+2. PATIENT HEADER BAR (below toolbar, colored banner ~60px): Shows patient name, MRN, DOB, age, sex, CSN. DO NOT include patient name or MRN in your label. Only note that a patient context is open.
+
+3. ACTIVITY TABS (horizontal tabs below header): Each tab = an open activity. The SELECTED tab (highlighted/bold) is the current activity. Read this tab text.
+
+4. NAVIGATOR PANE (left sidebar, tree structure): Shows department/unit lists, patient lists, or activity categories. If visible, note what it shows (e.g., "Lung TXP worklist").
+
+5. WORKSPACE (center/right main area): The content area. Could be a list, form, flowsheet grid, note editor, order entry, etc.
+
+6. DIALOG/POPUP: If a modal dialog or popup is open on top, identify THAT instead (e.g., "Order Entry Dialog", "Alert/BPA", "Print Dialog", "Medication Reconciliation").
+
+7. SUP ENVIRONMENT BANNER: A colored bar may indicate training/SUP environment vs production. Ignore this for labeling.
+
+RESPONSE FORMAT — reply with exactly ONE line in this format:
+LABEL: <2-6 word activity/screen name>
+
+Examples:
+LABEL: Chart Review
+LABEL: Patient List
+LABEL: InBasket Messages
+LABEL: Flowsheet I/O
+LABEL: Order Entry
+LABEL: Note Writer
+LABEL: Storyboard
+LABEL: Schedule Manager
+LABEL: Medication Reconciliation Dialog
+LABEL: BPA Alert
+LABEL: Results Review
+LABEL: Synopsis
+LABEL: Care Everywhere
+
+If the screen is blank, loading, or unrecognizable, reply:
+LABEL: Unknown Screen
+
+Do NOT include patient names, MRNs, or PHI in your label."""
+
+
 def _screen_labeler_thread():
     while True:
         try:
@@ -713,15 +754,6 @@ def _screen_labeler_thread():
                 continue
         try:
             b64 = img_to_base64(img, use_jpeg=True)
-            prompt = (
-                "This is a screenshot of an Epic Hyperspace EMR application screen. "
-                "Identify the specific screen, activity, menu, dialog, or panel shown. "
-                "Reply with ONLY a short label (2-6 words) like: "
-                "Patient List, Chart Review, Medication Orders, Flowsheet, "
-                "Demographics, Problem List, Appointment Schedule, Login Screen, etc. "
-                "If you see a specific patient context, include the activity name only (not the patient name). "
-                "Reply with just the label, nothing else."
-            )
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
@@ -732,22 +764,31 @@ def _screen_labeler_thread():
                     "model": _LABEL_MODEL,
                     "messages": [{"role": "user", "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": _EPIC_LABEL_PROMPT},
                     ]}],
-                    "max_tokens": 50,
+                    "max_tokens": 60,
                 },
                 timeout=30,
             )
             if resp.status_code == 200:
-                label = resp.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-                if label and len(label) < 80:
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                label = raw
+                if "LABEL:" in raw:
+                    label = raw.split("LABEL:")[-1].strip()
+                label = label.strip('"').strip("'").strip()
+                if label and len(label) < 80 and label.lower() != "unknown screen":
                     with _SCREEN_LABEL_LOCK:
                         _SCREEN_LABELS[fp] = label
                     print(f"  [label] {fp[:12]}.. = {label}")
                 else:
-                    print(f"  [label] {fp[:12]}.. bad response: {label[:60]}")
+                    print(f"  [label] {fp[:12]}.. unrecognized: {raw[:60]}")
             else:
-                print(f"  [label] API {resp.status_code} for {fp[:12]}..")
+                detail = ""
+                try:
+                    detail = resp.json().get("error", {}).get("message", resp.text[:120])
+                except Exception:
+                    detail = resp.text[:120]
+                print(f"  [label] API {resp.status_code} for {fp[:12]}.. : {detail}")
         except Exception as e:
             print(f"  [label] error for {fp[:12]}..: {e}")
 
