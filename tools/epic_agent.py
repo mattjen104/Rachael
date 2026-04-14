@@ -1281,10 +1281,9 @@ def _session_pixel_diff(img1, img2):
 
 
 def _session_fingerprint_region(img):
-    """Extract the top 15% of the image for stable fingerprinting (header/breadcrumb area)."""
-    w, h = img.size
-    crop_h = max(20, int(h * 0.15))
-    return img.crop((0, 0, w, crop_h))
+    """Use the full image for fingerprinting — phash downscales to 8x8 so this is fast.
+    The old top-15% crop missed most of Hyperspace's content area which lives lower."""
+    return img
 
 
 def _session_grab_window(window_title):
