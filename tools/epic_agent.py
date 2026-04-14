@@ -629,6 +629,63 @@ VISION_COORD_INSTRUCTION = (
     "This ensures clicks land on the most clickable part of the element."
 )
 
+EPIC_VISUAL_REFERENCE = """EPIC HYPERSPACE VISUAL REFERENCE
+=================================
+Epic Hyperspace has a fixed visual hierarchy. Use this to orient yourself:
+
+LAYER 1 — TOOLBAR (top ~40px, dark blue/gray bar):
+  Left side: "Epic button" (small round/square logo, top-left corner) -> opens the main navigation menu.
+  Center-left: ACTIVITY NAME in bold white/light text. This tells you what workspace/activity is currently open.
+    Common names: Chart Review, Storyboard, Synopsis, Snapshot, Patient List, Schedule, InBasket,
+    Orders, Notes, Results Review, Flowsheet, Care Everywhere, Referrals, Letters, Problem List,
+    Medication List, Allergies, Immunizations, Health Maintenance, SmartSets, Preference List.
+  Right side: Search bar (magnifying glass icon), then user avatar, notifications bell, settings gear.
+
+LAYER 2 — PATIENT HEADER (below toolbar, ~60px colored banner, ONLY present when a patient chart is open):
+  Structure (left to right): Patient photo/avatar icon | Patient name (large bold) | MRN | DOB | Age/Sex |
+    Encounter info (CSN, visit type) | Location/Room | FYI Flags button | Care Team icons.
+  Color: Usually teal/dark cyan for inpatient, different colors for ED, outpatient, etc.
+  If NO patient header is visible, you are on a non-patient screen (Patient List, Schedule, InBasket, etc.)
+
+LAYER 3 — ACTIVITY TABS (horizontal tab bar, just below patient header or toolbar):
+  Each tab = one open activity. The ACTIVE tab is highlighted/bold/underlined.
+  Tabs have text labels matching activity names. Small "x" to close each tab.
+  A "+" button at the end opens the activity search/launcher.
+
+LAYER 4 — WORKSPACE (takes up remaining vertical space):
+  Split into optional LEFT SIDEBAR (navigator pane) + MAIN CONTENT area.
+  LEFT SIDEBAR (~200px): Tree/list navigation. Examples:
+    - Patient List sidebar: department/unit folders, patient names
+    - Chart Review sidebar: report categories (Labs, Imaging, Notes, etc.)
+    - InBasket sidebar: message folders (In, Sent, Results, etc.)
+  MAIN CONTENT: The activity workspace. Varies per activity:
+    - Chart Review: tabular report list or document viewer
+    - Flowsheet: grid with columns (time) and rows (parameters/vitals)
+    - Orders: order entry form with search, order list
+    - Notes: text editor with SmartPhrases (.dotphrases)
+    - Patient List: table with columns (name, room, MRN, etc.)
+    - Storyboard: card-based timeline view
+    - Synopsis: summary panels (Problems, Meds, Allergies, etc.)
+
+DIALOGS/POPUPS (floating, higher z-index):
+  Modal dialogs appear centered with a dimmed background. Examples:
+    - Order entry dialog (search bar + order details)
+    - BPA/BestPractice Advisory alerts (yellow/orange warning)
+    - Print preview, Sign/Submit, Medication Reconciliation
+    - SmartText/SmartPhrase picker, Column Picker, Filter dialog
+  If a dialog is visible, it takes priority — identify it, not the background activity.
+
+EPIC BUTTON MENU (floating overlay panel from clicking the Epic button):
+  Two-column layout: Left = Pinned Items + Recent. Right = Navigation categories
+  (e.g., Patient Care, Clinical Review, Orders, Results, etc.)
+  Each category expands to show specific activities.
+  Submenu items appear as additional floating panels to the right.
+
+ENVIRONMENT INDICATORS:
+  SUP/Training environments often show a colored banner (yellow/orange) across the top or bottom.
+  "SUP Environment" text may appear. This is for training — ignore for screen identification.
+"""
+
 
 def wait_for_stable_screen(window, max_wait=3.0, interval=0.5, threshold=0.02):
     """Wait until the screen stops changing (application has settled).
@@ -702,24 +759,14 @@ _LABEL_QUEUE = None
 _LABEL_MODEL = "google/gemini-2.0-flash-001"
 
 
-_EPIC_LABEL_PROMPT = """You are an Epic Hyperspace EMR screen identifier. Analyze this screenshot and return a structured label.
+_EPIC_LABEL_PROMPT = EPIC_VISUAL_REFERENCE + """
+TASK: Identify this screen and return a short label.
 
-EPIC HYPERSPACE VISUAL ANATOMY (where to look):
-1. TOOLBAR ROW (very top, ~40px tall): Contains the ACTIVITY NAME in bold text, usually left-of-center. This is the most important identifier. Common activities: Chart Review, Patient List, Storyboard, Schedule, InBasket, Orders, Notes, Results Review, Flowsheet, Synopsis, Snapshot, Care Everywhere, Referrals, Letters, Problem List, Medication List, Allergies, Immunizations, Health Maintenance, BestPractice Advisories, SmartSets, Preference List, My Patients.
+Read the ACTIVITY NAME from the toolbar (Layer 1, bold text center-left).
+If a dialog/popup is open (Layer 5 in reference), label the dialog instead.
+Check if a patient header (Layer 2) is present — if so, you are in a patient chart context.
 
-2. PATIENT HEADER BAR (below toolbar, colored banner ~60px): Shows patient name, MRN, DOB, age, sex, CSN. DO NOT include patient name or MRN in your label. Only note that a patient context is open.
-
-3. ACTIVITY TABS (horizontal tabs below header): Each tab = an open activity. The SELECTED tab (highlighted/bold) is the current activity. Read this tab text.
-
-4. NAVIGATOR PANE (left sidebar, tree structure): Shows department/unit lists, patient lists, or activity categories. If visible, note what it shows (e.g., "Lung TXP worklist").
-
-5. WORKSPACE (center/right main area): The content area. Could be a list, form, flowsheet grid, note editor, order entry, etc.
-
-6. DIALOG/POPUP: If a modal dialog or popup is open on top, identify THAT instead (e.g., "Order Entry Dialog", "Alert/BPA", "Print Dialog", "Medication Reconciliation").
-
-7. SUP ENVIRONMENT BANNER: A colored bar may indicate training/SUP environment vs production. Ignore this for labeling.
-
-RESPONSE FORMAT — reply with exactly ONE line in this format:
+RESPONSE FORMAT — reply with exactly ONE line:
 LABEL: <2-6 word activity/screen name>
 
 Examples:
@@ -736,11 +783,10 @@ LABEL: BPA Alert
 LABEL: Results Review
 LABEL: Synopsis
 LABEL: Care Everywhere
+LABEL: Epic Button Menu
 
-If the screen is blank, loading, or unrecognizable, reply:
-LABEL: Unknown Screen
-
-Do NOT include patient names, MRNs, or PHI in your label."""
+If the screen is blank, loading, or unrecognizable: LABEL: Unknown Screen
+Do NOT include patient names, MRNs, or PHI."""
 
 
 def _screen_labeler_thread():
@@ -2761,17 +2807,24 @@ def execute_screenshot(cmd):
     img = screenshot_window(window)
     b64 = img_to_base64(img)
 
-    prompt = """Describe what you see on this Epic Hyperspace/Hyperdrive screen.
-Include:
-- What area/activity/screen is currently displayed
-- Any patient context visible (no PHI - just "patient context is visible" or "no patient context")
-- What menu items, tabs, buttons are available
-- Any alerts, notifications, or status messages
+    prompt = EPIC_VISUAL_REFERENCE + """
+TASK: Describe this Epic Hyperspace screen using the visual reference above.
+
+Read each layer:
+1. TOOLBAR: What activity name is shown in bold text? Is the Epic button menu open?
+2. PATIENT HEADER: Is a patient header bar visible? (just say "patient context open" or "no patient context" — no PHI)
+3. ACTIVITY TABS: What tabs are open? Which is active?
+4. WORKSPACE: What is the main content showing? (list, form, grid, notes, etc.)
+5. DIALOGS: Any popups/dialogs overlaying the screen?
 
 Return a JSON object:
 {
-  "screen": "name/description of current screen",
-  "area": "which Epic area (e.g., Schedule, Patient Lookup, Orders, etc.)",
+  "screen": "activity name from toolbar",
+  "area": "which Epic area (e.g., Chart Review, Patient List, InBasket, etc.)",
+  "patientContext": true/false,
+  "activeTabs": ["list of open activity tabs"],
+  "sidebarContent": "what the left navigator shows, if visible",
+  "workspaceContent": "brief description of main content area",
   "availableActions": ["list", "of", "clickable", "items"],
   "alerts": ["any", "visible", "alerts"],
   "notes": "other observations"
@@ -3010,7 +3063,9 @@ def vision_find_on_screen(window, item_name):
     img = screenshot_window(window)
     b64 = img_to_base64(img)
     find_prompt = (
-        f"Find the menu item or button labeled \"{item_name}\" in this screenshot.\n"
+        f"{EPIC_VISUAL_REFERENCE}\n"
+        f"TASK: Find the UI element labeled \"{item_name}\" in this Epic Hyperspace screenshot.\n"
+        f"Check each layer: toolbar buttons, activity tabs, sidebar items, workspace controls, dialog buttons.\n"
         f"{VISION_COORD_INSTRUCTION}\n"
         f"Return ONLY: {{\"x\": <number>, \"y\": <number>, \"found\": true}}\n"
         f"If not found: {{\"found\": false, \"reason\": \"why\"}}"
@@ -3040,13 +3095,14 @@ def verify_click(window, expected_item, context=""):
              'same' (nothing changed), 'dialog', 'unknown'"""
     img, b64 = wait_for_stable_screen(window, max_wait=2.0, interval=0.4)
     prompt = (
-        f"After clicking '{expected_item}'{(' (' + context + ')') if context else ''}, what happened?\n"
-        "Classify the current screen state:\n"
-        f"- 'menu': A menu or submenu is visible (indicating '{expected_item}' expanded or a new menu appeared)\n"
-        "- 'activity': An activity, workspace, or form opened (the menu is gone)\n"
-        "- 'dialog': A dialog box or popup appeared\n"
-        "- 'desktop': Back to the main Epic desktop, no menus open\n"
-        "- 'same': Nothing seems to have changed\n\n"
+        f"{EPIC_VISUAL_REFERENCE}\n"
+        f"TASK: After clicking '{expected_item}'{(' (' + context + ')') if context else ''}, classify the result.\n\n"
+        "Using the visual reference above, check:\n"
+        "- Is a FLOATING MENU PANEL visible (Epic button menu or submenu overlay)? -> 'menu'\n"
+        "- Did a new ACTIVITY open (check toolbar activity name, check if activity tabs changed)? -> 'activity'\n"
+        "- Did a DIALOG/POPUP appear (modal overlay with dimmed background)? -> 'dialog'\n"
+        "- Is the main workspace/desktop showing with NO overlays? -> 'desktop'\n"
+        "- Did nothing change from before? -> 'same'\n\n"
         "Return ONLY: {\"state\": \"menu\"|\"activity\"|\"dialog\"|\"desktop\"|\"same\", "
         "\"description\": \"brief description of what you see\"}"
     )
@@ -3647,14 +3703,14 @@ def recording_capture_tick():
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{prev_screen}"}},
                         {"type": "text", "text": "Current Epic Hyperspace screen:"},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                        {"type": "text", "text": "Describe in one sentence what NAVIGATION action the user took between these two screens. Also identify the current screen/activity name. IMPORTANT: Only describe menu clicks, button presses, and screen transitions. Do NOT mention any patient names, MRNs, dates of birth, or any clinical/PHI data visible on screen. Reply as JSON: {\"action\": \"...\", \"screen\": \"...\"}"},
+                        {"type": "text", "text": f"{EPIC_VISUAL_REFERENCE}\nTASK: Compare these two Epic Hyperspace screens.\n1. Read the ACTIVITY NAME from the toolbar (Layer 1) on each screen.\n2. Check if activity tabs (Layer 3) changed.\n3. Check if a dialog appeared/disappeared.\n4. Describe the navigation action in one sentence (menu click, tab switch, button press, sidebar selection).\n\nIMPORTANT: Do NOT mention patient names, MRNs, DOB, or any PHI.\nReply as JSON: {{\"action\": \"what user clicked/did\", \"fromScreen\": \"previous activity name\", \"screen\": \"current activity name\"}}"},
                     ]
                 })
             else:
                 messages.append({
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "This is an Epic Hyperspace screen. Identify the current screen/activity name. IMPORTANT: Do NOT mention any patient names, MRNs, dates of birth, or any clinical/PHI data. Reply as JSON: {\"action\": \"Initial screen\", \"screen\": \"...\"}"},
+                        {"type": "text", "text": f"{EPIC_VISUAL_REFERENCE}\nTASK: Identify this Epic Hyperspace screen.\nRead the ACTIVITY NAME from the toolbar (Layer 1, bold text center-left).\nCheck if a patient header (Layer 2) is visible.\nIMPORTANT: Do NOT mention patient names, MRNs, DOB, or any PHI.\nReply as JSON: {{\"action\": \"Initial screen\", \"screen\": \"activity name from toolbar\"}}"},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
                     ]
                 })
@@ -4271,7 +4327,7 @@ def _nav_replay_vision_click(win_title, to_title, target_desc=""):
                     "role": "user",
                     "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                        {"type": "text", "text": f"I need to navigate to '{prompt_target}' in this application. What element should I click? Give precise pixel coordinates relative to this screenshot. Do NOT reference any patient names, MRNs, or PHI data. Reply as JSON only: {{\"action\": \"click\", \"x\": <int>, \"y\": <int>, \"target\": \"element description\"}} or {{\"action\": \"not_found\", \"reason\": \"...\"}}"},
+                        {"type": "text", "text": f"{EPIC_VISUAL_REFERENCE}\nTASK: Navigate to '{prompt_target}' in this Epic Hyperspace screen.\n\nUsing the visual reference, identify what to click:\n- Check toolbar buttons and search bar (Layer 1)\n- Check activity tabs (Layer 3) — is '{prompt_target}' already an open tab?\n- Check sidebar/navigator items (Layer 4)\n- Check workspace controls, links, or buttons (Layer 4)\n- If the Epic button menu is open, check menu items\n\n{VISION_COORD_INSTRUCTION}\nDo NOT reference patient names, MRNs, or PHI.\nReply as JSON only: {{\"action\": \"click\", \"x\": <int>, \"y\": <int>, \"target\": \"element description\"}} or {{\"action\": \"not_found\", \"reason\": \"...\"}}"},
                     ]
                 }],
                 "max_tokens": 200,
@@ -4883,22 +4939,15 @@ def execute_menu_crawl(cmd):
         if not check_b64:
             return "unknown", None
         prompt = (
-            f"Look at this Epic Hyperspace screen{(' (' + context + ')') if context else ''}.\n\n"
-            "Determine the current screen state by looking for these specific visual cues:\n\n"
-            "'menu': A dropdown/popup menu panel is visible OVERLAYING the main window. This looks like:\n"
-            "  - A floating panel/popup with a list of items\n"
-            "  - The Epic button menu has TWO columns: left=Pinned/Recent, right=Navigation categories\n"
-            "  - Submenu popups appear as additional floating panels\n"
-            "  - The menu panel has a distinct border/shadow separating it from the background\n\n"
-            "'desktop': The main Epic workspace/dashboard is showing with NO overlay menus. This is:\n"
-            "  - The normal working view with tabs, patient lists, or a dashboard\n"
-            "  - No floating menu panels visible\n"
-            "  - The toolbar/ribbon is visible at the top but no dropdown is open\n\n"
-            "'activity': A specific clinical activity/form has opened (like a patient chart, lab results, etc.)\n\n"
-            "'dialog': A modal dialog box (save prompt, confirmation, error message) is showing\n\n"
-            "IMPORTANT: If you see the Epic desktop/workspace with NO floating menu panels, that is 'desktop', not 'menu'.\n"
-            "A menu must be a FLOATING OVERLAY panel, not just the toolbar.\n\n"
-            "Return ONLY: {\"state\": \"menu\"|\"activity\"|\"dialog\"|\"desktop\", \"description\": \"brief description of what you see\"}"
+            f"{EPIC_VISUAL_REFERENCE}\n"
+            f"TASK: Classify this Epic screen state{(' (' + context + ')') if context else ''}.\n\n"
+            "Using the visual reference, check for these IN ORDER:\n\n"
+            "'menu': Is the EPIC BUTTON MENU visible? (floating two-column overlay panel from the top-left Epic button, or a submenu panel). Must be a floating overlay with distinct border/shadow, NOT the toolbar itself.\n\n"
+            "'dialog': Is a DIALOG/POPUP visible? (modal overlay centered on screen with dimmed background — BPA alert, order dialog, print preview, etc.)\n\n"
+            "'activity': Is a specific activity/workspace open with a patient chart or clinical form? (Check: does the toolbar show an activity name? Is a patient header visible?)\n\n"
+            "'desktop': The main Epic workspace with toolbar visible but NO floating overlays (no menu panels, no dialogs). Normal working view with tabs, patient lists, or dashboard.\n\n"
+            "IMPORTANT: The toolbar/ribbon is ALWAYS visible — that alone does NOT make it 'menu'. A menu requires a FLOATING OVERLAY panel.\n\n"
+            "Return ONLY: {\"state\": \"menu\"|\"activity\"|\"dialog\"|\"desktop\", \"description\": \"brief description\"}"
         )
         resp = ask_claude(check_b64, prompt)
         if not resp:
@@ -6385,15 +6434,16 @@ def execute_read_screen(cmd):
 
     focus_hint = f"Focus on: {focus}\n" if focus else ""
     prompt = (
-        f"You are looking at an Epic Hyperspace screen.\n"
-        f"{focus_hint}"
-        "Extract ALL visible data into structured JSON. Include:\n"
-        "- Patient demographics (name, MRN, DOB, age, sex, location, room)\n"
-        "- Current activity/workspace name\n"
-        "- Any visible clinical data (vitals, labs, meds, orders, allergies, diagnoses)\n"
-        "- Navigation breadcrumb or current location in Epic\n"
-        "- Status messages or alerts visible on screen\n"
-        "- Any table/grid data with column headers and row values\n\n"
+        f"{EPIC_VISUAL_REFERENCE}\n"
+        f"TASK: Extract structured data from this Epic Hyperspace screen.\n"
+        f"{focus_hint}\n"
+        "Using the visual reference above, read each layer:\n"
+        "1. TOOLBAR (Layer 1): Activity name\n"
+        "2. PATIENT HEADER (Layer 2): Demographics if visible (name, MRN, DOB, age, sex, location, room)\n"
+        "3. ACTIVITY TABS (Layer 3): List of open tabs, which is active\n"
+        "4. SIDEBAR (Layer 4 left): Navigator content if visible\n"
+        "5. WORKSPACE (Layer 4 main): All visible clinical data — vitals, labs, meds, orders, allergies, diagnoses, table/grid data with column headers and row values\n"
+        "6. DIALOGS: Any popup content\n\n"
         "Return ONLY a JSON object with the extracted data.\n"
         "Use descriptive keys. Include everything visible.\n"
         "If a section has no data, omit it.\n"
