@@ -747,7 +747,7 @@ export async function registerRoutes(
     res.json({ commands });
   });
 
-  app.post("/api/epic/agent/heartbeat", (req, res) => {
+  app.post("/api/epic/agent/heartbeat", async (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -758,7 +758,21 @@ export async function registerRoutes(
       windows: req.body.windows || [],
       capture: req.body.capture || null,
     };
-    res.json({ ok: true });
+
+    const streamResults: any[] = [];
+    if (Array.isArray(req.body.streamData)) {
+      for (const sd of req.body.streamData) {
+        try {
+          const r = await processStreamData(sd);
+          streamResults.push(r);
+        } catch (e: any) {
+          console.error(`[heartbeat] stream data error: ${e.message}`);
+          streamResults.push({ ok: false, error: e.message, windowKey: sd.windowKey || "?" });
+        }
+      }
+    }
+
+    res.json({ ok: true, streamResults });
   });
 
   app.post("/api/epic/agent/results", (req, res) => {
@@ -1265,136 +1279,142 @@ export async function registerRoutes(
     }
   });
 
+  async function processStreamData(data: { windowKey?: string; windowTitle?: string; transitions?: any[]; fingerprints?: Record<string, any>; sessionId?: string }): Promise<{ ok: boolean; windowKey: string; treeNodes: number; treeEdges: number; patterns: number }> {
+    const rawWindowKey = data.windowKey || "";
+    const windowTitle = data.windowTitle || "";
+    if (!rawWindowKey || !windowTitle) throw new Error("Missing windowKey or windowTitle");
+
+    const windowKey = rawWindowKey.replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 60).trim().replace(/\s+/g, "_").toLowerCase();
+    const treeConfigKey = `session_tree_${windowKey}`;
+    const treeCfg = await storage.getAgentConfig(treeConfigKey);
+    let tree: { nodes: Record<string, any>; edges: any[]; mergedSessions: string[]; patterns: any[] } = { nodes: {}, edges: [], mergedSessions: [], patterns: [] };
+    if (treeCfg?.value) {
+      try { tree = JSON.parse(treeCfg.value); } catch {}
+    }
+    if (!tree.mergedSessions) tree.mergedSessions = [];
+    if (!tree.patterns) tree.patterns = [];
+
+    const nowMs = Date.now();
+    const { fingerprints, transitions, sessionId } = data;
+
+    if (fingerprints && typeof fingerprints === "object") {
+      for (const [fp, info] of Object.entries(fingerprints as Record<string, any>)) {
+        if (!fp || fp === "0") continue;
+        if (!tree.nodes[fp]) {
+          tree.nodes[fp] = { fingerprint: fp, titles: [], visitCount: 0, lastSeen: 0, sessions: [], labelCrops: [] };
+        }
+        tree.nodes[fp].lastSeen = nowMs;
+        if (sessionId && !tree.nodes[fp].sessions.includes(sessionId)) {
+          tree.nodes[fp].sessions.push(sessionId);
+        }
+        for (const t of (info.titles || [])) {
+          if (t && !tree.nodes[fp].titles.includes(t)) tree.nodes[fp].titles.push(t);
+        }
+      }
+    }
+
+    if (Array.isArray(transitions)) {
+      for (const t of transitions) {
+        const fromFp = t.from_fingerprint || t.from_fp || "";
+        const toFp = t.to_fingerprint || t.to_fp || "";
+        if (!fromFp || !toFp || fromFp === "0" || toFp === "0") continue;
+        if (!tree.nodes[fromFp]) {
+          tree.nodes[fromFp] = { fingerprint: fromFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
+        }
+        if (!tree.nodes[toFp]) {
+          tree.nodes[toFp] = { fingerprint: toFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
+        }
+        tree.nodes[toFp].visitCount++;
+        let existing = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
+        if (!existing) {
+          existing = {
+            from: fromFp, to: toFp, fromTitle: t.from_title || "", toTitle: t.to_title || "",
+            count: 0, sessions: [], avgTransitionMs: 0, totalTransitionMs: 0,
+            triggerKeys: [], labelCrops: [], prevScreenshots: [], afterScreenshots: [],
+          };
+          tree.edges.push(existing);
+        }
+        existing.count++;
+        if (sessionId && !existing.sessions.includes(sessionId)) {
+          existing.sessions.push(sessionId);
+        }
+        if (t.transition_ms > 0) {
+          existing.totalTransitionMs = (existing.totalTransitionMs || 0) + t.transition_ms;
+          existing.avgTransitionMs = Math.round(existing.totalTransitionMs / Math.max(existing.count, 1));
+        }
+        if (t.trigger_key && !existing.triggerKeys.includes(t.trigger_key)) existing.triggerKeys.push(t.trigger_key);
+        if (t.action_keys) {
+          for (const ak of (Array.isArray(t.action_keys) ? t.action_keys : [t.action_keys])) {
+            if (ak && !existing.triggerKeys.includes(ak)) existing.triggerKeys.push(ak);
+          }
+        }
+        if (t.label_crop && !existing.labelCrops.includes(t.label_crop)) existing.labelCrops.push(t.label_crop);
+        if (t.from_title && !existing.fromTitle) existing.fromTitle = t.from_title;
+        if (t.to_title && !existing.toTitle) existing.toTitle = t.to_title;
+        if (t.from_title && tree.nodes[fromFp] && !tree.nodes[fromFp].titles.includes(t.from_title)) {
+          tree.nodes[fromFp].titles.push(t.from_title);
+        }
+        if (t.to_title && tree.nodes[toFp] && !tree.nodes[toFp].titles.includes(t.to_title)) {
+          tree.nodes[toFp].titles.push(t.to_title);
+        }
+      }
+    }
+
+    if (sessionId && !tree.mergedSessions.includes(sessionId)) {
+      tree.mergedSessions.push(sessionId);
+    }
+
+    tree.patterns = [];
+    for (const edge of tree.edges) {
+      if (edge.count >= 2) {
+        tree.patterns.push({
+          type: "edge",
+          from: edge.from, to: edge.to,
+          fromTitle: edge.fromTitle || "", toTitle: edge.toTitle || "",
+          frequency: edge.count,
+          sessionsTotal: tree.mergedSessions.length,
+          confidence: Math.round((edge.sessions.length / Math.max(tree.mergedSessions.length, 1)) * 100) / 100,
+          avgTransitionMs: edge.avgTransitionMs || 0,
+        });
+      }
+    }
+
+    await storage.setAgentConfig(treeConfigKey, JSON.stringify(tree));
+
+    const windowTreesCfg = await storage.getAgentConfig("session_window_trees");
+    let windowTrees: Record<string, string> = {};
+    if (windowTreesCfg?.value) { try { windowTrees = JSON.parse(windowTreesCfg.value); } catch {} }
+    windowTrees[windowKey] = windowTitle;
+    await storage.setAgentConfig("session_window_trees", JSON.stringify(windowTrees));
+
+    if (Array.isArray(transitions)) {
+      for (const t of transitions) {
+        const fromFp = t.from_fingerprint || t.from_fp || "";
+        const toFp = t.to_fingerprint || t.to_fp || "";
+        if (!fromFp || !toFp || fromFp === "0" || toFp === "0") continue;
+        const edge = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
+        if (edge) {
+          synthesizeRecipe(edge).catch(e => console.error(`[replay] async synthesis error: ${e.message}`));
+        }
+      }
+    }
+
+    return {
+      ok: true, windowKey,
+      treeNodes: Object.keys(tree.nodes).length,
+      treeEdges: tree.edges.length,
+      patterns: tree.patterns.length,
+    };
+  }
+
   app.post("/api/sessions/stream", async (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const { windowKey: rawWindowKey, windowTitle, transitions, fingerprints, sessionId } = req.body;
-    if (!rawWindowKey || !windowTitle) {
-      return res.status(400).json({ error: "Missing windowKey or windowTitle" });
-    }
     try {
-      const windowKey = rawWindowKey.replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 60).trim().replace(/\s+/g, "_").toLowerCase();
-      const treeConfigKey = `session_tree_${windowKey}`;
-      const treeCfg = await storage.getAgentConfig(treeConfigKey);
-      let tree: { nodes: Record<string, any>; edges: any[]; mergedSessions: string[]; patterns: any[] } = { nodes: {}, edges: [], mergedSessions: [], patterns: [] };
-      if (treeCfg?.value) {
-        try { tree = JSON.parse(treeCfg.value); } catch {}
-      }
-      if (!tree.mergedSessions) tree.mergedSessions = [];
-      if (!tree.patterns) tree.patterns = [];
-
-      const nowMs = Date.now();
-
-      if (fingerprints && typeof fingerprints === "object") {
-        for (const [fp, info] of Object.entries(fingerprints as Record<string, any>)) {
-          if (!fp || fp === "0") continue;
-          if (!tree.nodes[fp]) {
-            tree.nodes[fp] = { fingerprint: fp, titles: [], visitCount: 0, lastSeen: 0, sessions: [], labelCrops: [] };
-          }
-          tree.nodes[fp].lastSeen = nowMs;
-          if (sessionId && !tree.nodes[fp].sessions.includes(sessionId)) {
-            tree.nodes[fp].sessions.push(sessionId);
-          }
-          for (const t of (info.titles || [])) {
-            if (t && !tree.nodes[fp].titles.includes(t)) tree.nodes[fp].titles.push(t);
-          }
-        }
-      }
-
-      if (Array.isArray(transitions)) {
-        for (const t of transitions) {
-          const fromFp = t.from_fingerprint || t.from_fp || "";
-          const toFp = t.to_fingerprint || t.to_fp || "";
-          if (!fromFp || !toFp || fromFp === "0" || toFp === "0") continue;
-          if (!tree.nodes[fromFp]) {
-            tree.nodes[fromFp] = { fingerprint: fromFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
-          }
-          if (!tree.nodes[toFp]) {
-            tree.nodes[toFp] = { fingerprint: toFp, titles: [], visitCount: 0, lastSeen: nowMs, sessions: [], labelCrops: [] };
-          }
-          tree.nodes[toFp].visitCount++;
-          let existing = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
-          if (!existing) {
-            existing = {
-              from: fromFp, to: toFp, fromTitle: t.from_title || "", toTitle: t.to_title || "",
-              count: 0, sessions: [], avgTransitionMs: 0, totalTransitionMs: 0,
-              triggerKeys: [], labelCrops: [], prevScreenshots: [], afterScreenshots: [],
-            };
-            tree.edges.push(existing);
-          }
-          existing.count++;
-          if (sessionId && !existing.sessions.includes(sessionId)) {
-            existing.sessions.push(sessionId);
-          }
-          if (t.transition_ms > 0) {
-            existing.totalTransitionMs = (existing.totalTransitionMs || 0) + t.transition_ms;
-            existing.avgTransitionMs = Math.round(existing.totalTransitionMs / Math.max(existing.count, 1));
-          }
-          if (t.trigger_key && !existing.triggerKeys.includes(t.trigger_key)) existing.triggerKeys.push(t.trigger_key);
-          if (t.action_keys) {
-            for (const ak of (Array.isArray(t.action_keys) ? t.action_keys : [t.action_keys])) {
-              if (ak && !existing.triggerKeys.includes(ak)) existing.triggerKeys.push(ak);
-            }
-          }
-          if (t.label_crop && !existing.labelCrops.includes(t.label_crop)) existing.labelCrops.push(t.label_crop);
-          if (t.from_title && !existing.fromTitle) existing.fromTitle = t.from_title;
-          if (t.to_title && !existing.toTitle) existing.toTitle = t.to_title;
-          if (t.from_title && tree.nodes[fromFp] && !tree.nodes[fromFp].titles.includes(t.from_title)) {
-            tree.nodes[fromFp].titles.push(t.from_title);
-          }
-          if (t.to_title && tree.nodes[toFp] && !tree.nodes[toFp].titles.includes(t.to_title)) {
-            tree.nodes[toFp].titles.push(t.to_title);
-          }
-        }
-      }
-
-      if (sessionId && !tree.mergedSessions.includes(sessionId)) {
-        tree.mergedSessions.push(sessionId);
-      }
-
-      tree.patterns = [];
-      for (const edge of tree.edges) {
-        if (edge.count >= 2) {
-          tree.patterns.push({
-            type: "edge",
-            from: edge.from, to: edge.to,
-            fromTitle: edge.fromTitle || "", toTitle: edge.toTitle || "",
-            frequency: edge.count,
-            sessionsTotal: tree.mergedSessions.length,
-            confidence: Math.round((edge.sessions.length / Math.max(tree.mergedSessions.length, 1)) * 100) / 100,
-            avgTransitionMs: edge.avgTransitionMs || 0,
-          });
-        }
-      }
-
-      await storage.setAgentConfig(treeConfigKey, JSON.stringify(tree));
-
-      const windowTreesCfg = await storage.getAgentConfig("session_window_trees");
-      let windowTrees: Record<string, string> = {};
-      if (windowTreesCfg?.value) { try { windowTrees = JSON.parse(windowTreesCfg.value); } catch {} }
-      windowTrees[windowKey] = windowTitle;
-      await storage.setAgentConfig("session_window_trees", JSON.stringify(windowTrees));
-
-      if (Array.isArray(transitions)) {
-        for (const t of transitions) {
-          const fromFp = t.from_fingerprint || t.from_fp || "";
-          const toFp = t.to_fingerprint || t.to_fp || "";
-          if (!fromFp || !toFp || fromFp === "0" || toFp === "0") continue;
-          const edge = tree.edges.find((e: any) => e.from === fromFp && e.to === toFp);
-          if (edge) {
-            synthesizeRecipe(edge).catch(e => console.error(`[replay] async synthesis error: ${e.message}`));
-          }
-        }
-      }
-
-      res.json({
-        ok: true, windowKey,
-        treeNodes: Object.keys(tree.nodes).length,
-        treeEdges: tree.edges.length,
-        patterns: tree.patterns.length,
-      });
+      const result = await processStreamData(req.body);
+      res.json(result);
     } catch (e: any) {
       console.error(`[sessions] stream error: ${e.message}`);
       res.status(500).json({ error: e.message });

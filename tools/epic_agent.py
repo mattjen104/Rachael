@@ -756,15 +756,9 @@ def _always_on_start_capture(window_title):
         args=(cap,),
         daemon=True, name=f"aon-title-{key}"
     )
-    flush_thread = threading.Thread(
-        target=_always_on_flush_loop,
-        args=(cap,),
-        daemon=True, name=f"aon-flush-{key}"
-    )
     ss_thread.start()
     title_thread.start()
-    flush_thread.start()
-    cap["threads"] = [ss_thread, title_thread, flush_thread]
+    cap["threads"] = [ss_thread, title_thread]
 
     with _always_on_lock:
         _ALWAYS_ON_CAPTURES[key] = cap
@@ -2443,21 +2437,60 @@ def poll_commands():
     return []
 
 
+def _drain_all_stream_data():
+    stream_data = []
+    with _always_on_lock:
+        cap_keys = list(_ALWAYS_ON_CAPTURES.keys())
+    for key in cap_keys:
+        with _always_on_lock:
+            cap = _ALWAYS_ON_CAPTURES.get(key)
+        if not cap or not cap["active"]:
+            continue
+        with cap["pending_lock"]:
+            transitions = list(cap["pending_transitions"])
+            fingerprints = dict(cap["pending_fingerprints"])
+            cap["pending_transitions"] = []
+            cap["pending_fingerprints"] = {}
+        if not transitions and not fingerprints:
+            continue
+        stream_data.append({
+            "windowKey": cap["window_key"],
+            "windowTitle": cap["window_title"],
+            "sessionId": cap["session_id"],
+            "transitions": transitions,
+            "fingerprints": fingerprints,
+        })
+    return stream_data
+
+
 def send_heartbeat(windows_found):
     capture_state = _always_on_get_capture_state()
+    stream_data = _drain_all_stream_data()
+    payload = {
+        "windows": windows_found,
+        "timestamp": time.time(),
+        "capture": capture_state if capture_state else None,
+    }
+    if stream_data:
+        payload["streamData"] = stream_data
     resp = _bridge_request(
-        "post", "/api/epic/agent/heartbeat", "heartbeat", timeout=5,
+        "post", "/api/epic/agent/heartbeat", "heartbeat", timeout=15,
         headers={
             "Authorization": f"Bearer {BRIDGE_TOKEN}",
             "Content-Type": "application/json",
         },
-        json={
-            "windows": windows_found,
-            "timestamp": time.time(),
-            "capture": capture_state if capture_state else None,
-        },
+        json=payload,
     )
-    if resp and resp.status_code != 200:
+    if resp and resp.status_code == 200:
+        rdata = resp.json()
+        results = rdata.get("streamResults", [])
+        for r in results:
+            if r.get("ok"):
+                wk = (r.get("windowKey") or "?")[:28]
+                print(f"  [heartbeat] tree updated {wk}: {r.get('treeNodes', 0)}n/{r.get('treeEdges', 0)}e")
+            else:
+                print(f"  [heartbeat] tree error: {r.get('error', '?')}")
+    elif resp:
         print(f"  [heartbeat] HTTP {resp.status_code}: {resp.text[:200]}")
 
 
