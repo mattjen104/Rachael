@@ -4862,8 +4862,12 @@ ${fullHtml}`;
                   return fail(`[epic] Found "${match.title}" but no path from current screen. Try navigating closer first.`);
                 }
 
+                if (plan.hardBlocked) {
+                  return fail(`[epic] Path to "${match.title}" is BLOCKED: ${plan.hardBlockReason || "Contains hard-blocked actions (password, destructive ops, sign-out) that cannot be automated."}`);
+                }
+
                 if (plan.requiresApproval) {
-                  return fail(`[epic] Path to "${match.title}" requires approval (${plan.maxSafetyLevel} risk). Use the TreeView to review and approve.`);
+                  return fail(`[epic] Path to "${match.title}" requires approval (${plan.maxSafetyLevel} risk). Use the TreeView to review and approve, or call the /api/sessions/replay/approve endpoint.`);
                 }
 
                 const replaySteps = plan.segments.map((seg: any, i: number) => ({
@@ -4928,14 +4932,16 @@ ${fullHtml}`;
                   pollCount++;
                   try {
                     const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${cmdId}`);
-                    if (statusResp.status === 200) {
-                      const result = await statusResp.json() as any;
+                    const result = await statusResp.json() as any;
+                    if (result.status && result.status !== "pending") {
                       if (result.data?.results) {
                         for (const r of result.data.results) {
-                          const icon = r.status === "verified" || r.status === "verified_alt" ? "[OK]" : r.status === "killed" ? "[KILL]" : r.status === "fp_mismatch" ? "[MISS]" : "[??]";
+                          const icon = r.status === "verified" || r.status === "verified_alt" ? "[OK]" : r.status === "killed" ? "[KILL]" : r.status === "fp_mismatch" ? "[MISS]" : r.status === "executed_unverified" ? "[EXEC]" : "[FAIL]";
                           lines.push(`  Hop ${r.step}: ${r.fromTitle?.slice(0, 20)} -> ${r.toTitle?.slice(0, 20)} ${icon}`);
                         }
                         lines.push(`Result: ${result.data.overall} (${result.data.steps_verified}/${result.data.steps_total} verified)`);
+                      } else {
+                        lines.push(`Result: ${result.status}`);
                       }
                       break;
                     }

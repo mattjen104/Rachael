@@ -487,7 +487,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                     const ms = e.avgTransitionMs ? ` ~${e.avgTransitionMs}ms` : "";
                     const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
                     const crops = (e.labelCrops || []).length > 0 ? " +crop" : "";
-                    const recipeStatus = e.count >= 3 ? " {confirmed}" : e.count >= 1 ? " {new}" : "";
+                    const recipeStatus = e.approved ? " {approved-for-auto}" : e.count >= 3 ? " {confirmed}" : e.count >= 1 ? " {new}" : "";
                     nodes.push({ type: "bridge-info", label: `        -> ${toLabel}  (${e.count}x${ms}${keys}${crops}${recipeStatus})`, actionCmd: "" });
                   }
                   for (const e of inEdges.slice(0, 8)) {

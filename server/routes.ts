@@ -1461,13 +1461,27 @@ export async function registerRoutes(
         return res.json({ ok: false, error: "No path found or already at destination" });
       }
 
-      if (plan.requiresApproval) {
+      if (plan.hardBlocked) {
         return res.json({
           ok: false,
-          error: "Path requires approval — contains high-risk steps",
+          error: plan.hardBlockReason || "Path contains hard-blocked actions that cannot be automated",
           plan,
-          requiresApproval: true,
+          hardBlocked: true,
         });
+      }
+
+      if (plan.requiresApproval) {
+        const approvalKey = `replay_approval_${wk}_${plan.fromFp}_${plan.toFp}`;
+        const existing = await storage.getAgentConfig(approvalKey);
+        if (!existing?.value || existing.value !== "approved") {
+          return res.json({
+            ok: false,
+            error: "Path requires approval — contains high-risk steps. POST to /api/sessions/replay/approve to authorize.",
+            plan,
+            requiresApproval: true,
+            approvalKey,
+          });
+        }
       }
 
       const replaySteps = plan.segments.map((seg, i) => ({
@@ -1503,6 +1517,24 @@ export async function registerRoutes(
       });
 
       res.json({ ok: true, commandId: id, plan });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/sessions/replay/approve", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    try {
+      const { approvalKey } = req.body;
+      if (!approvalKey || typeof approvalKey !== "string" || !approvalKey.startsWith("replay_approval_")) {
+        return res.status(400).json({ error: "Invalid approvalKey" });
+      }
+      await storage.setAgentConfig(approvalKey, "approved");
+      res.json({ ok: true, message: "Path approved for automated replay. Re-submit the replay request to execute." });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1960,7 +1992,15 @@ export async function registerRoutes(
           const wtCfg = await storage.getAgentConfig(`session_tree_${wk}`);
           if (wtCfg?.value) {
             try {
-              sessionWindowTrees[wk] = { ...JSON.parse(wtCfg.value), windowTitle };
+              const treeData = JSON.parse(wtCfg.value);
+              if (treeData.edges) {
+                for (const edge of treeData.edges) {
+                  const approvalKey = `replay_approval_${wk}_${edge.from}_${edge.to}`;
+                  const approval = await storage.getAgentConfig(approvalKey);
+                  edge.approved = approval?.value === "approved";
+                }
+              }
+              sessionWindowTrees[wk] = { ...treeData, windowTitle };
             } catch {}
           }
         }

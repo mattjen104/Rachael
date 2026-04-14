@@ -44,6 +44,8 @@ export interface ReplayPlan {
   totalEstimatedMs: number;
   maxSafetyLevel: "low" | "medium" | "high";
   requiresApproval: boolean;
+  hardBlocked: boolean;
+  hardBlockReason?: string;
 }
 
 const SAFETY_HARD_BLOCK_PATTERNS = [
@@ -362,6 +364,10 @@ export async function buildReplayPlan(
 
   const toTitle = tree.nodes[toFp]?.titles?.[0] || toFp;
 
+  const hardBlockedSegments = segments.filter(s => checkHardBlock(s));
+  const isHardBlocked = hardBlockedSegments.length > 0;
+  const needsApproval = !isHardBlocked && maxSafety === "high";
+
   return {
     fromFp,
     toFp,
@@ -369,11 +375,15 @@ export async function buildReplayPlan(
     segments,
     totalEstimatedMs: totalMs,
     maxSafetyLevel: maxSafety,
-    requiresApproval: maxSafety === "high" || segments.some(s => checkSafetyBlock(s)),
+    requiresApproval: needsApproval,
+    hardBlocked: isHardBlocked,
+    hardBlockReason: isHardBlocked
+      ? `Path contains hard-blocked destination: ${hardBlockedSegments.map(s => s.toTitle).join(", ")}. These actions (password entry, destructive operations, sign-out) cannot be automated.`
+      : undefined,
   };
 }
 
-function checkSafetyBlock(segment: PathSegment): boolean {
+function checkHardBlock(segment: PathSegment): boolean {
   const textToCheck = [
     segment.toTitle,
     segment.fromTitle,
