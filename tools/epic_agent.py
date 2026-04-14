@@ -1186,8 +1186,6 @@ def _always_on_heartbeat_tick(epic_window_titles):
         with _always_on_lock:
             if key in _ALWAYS_ON_CAPTURES and _ALWAYS_ON_CAPTURES[key]["active"]:
                 continue
-        if _session_rec["active"]:
-            continue
         try:
             _always_on_start_capture(win_title)
         except Exception as e:
