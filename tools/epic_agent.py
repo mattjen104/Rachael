@@ -686,7 +686,7 @@ _window_snapshot = {}
 # ────────────────────────────────────────────────────────────────────────────
 
 _SESSION_SCREENSHOT_INTERVAL = 1.0
-_SESSION_PIXEL_DIFF_THRESHOLD = 0.05
+_SESSION_PIXEL_DIFF_THRESHOLD = 0.005
 _SESSION_CROP_SIZE = 150
 _SESSION_HASH_SIZE = 8
 _SESSION_DIR_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
@@ -961,6 +961,7 @@ def _always_on_extract_action_keys(actions):
 
 def _always_on_screenshot_loop(cap):
     stop_event = cap["stop_event"]
+    _dbg_cycle = 0
     while not stop_event.is_set():
         try:
             img, win = _session_grab_window(cap["window_title"])
@@ -970,6 +971,10 @@ def _always_on_screenshot_loop(cap):
 
             if cap["last_img"] is not None:
                 diff = _session_pixel_diff(cap["last_img"], img)
+                _dbg_cycle += 1
+                if _dbg_cycle % 5 == 0:
+                    wk = cap.get("window_key", "?")[:30]
+                    print(f"  [aon-diff] {wk}: diff={diff:.4f} (thresh={_SESSION_PIXEL_DIFF_THRESHOLD})")
                 if diff < _SESSION_PIXEL_DIFF_THRESHOLD:
                     stop_event.wait(_SESSION_SCREENSHOT_INTERVAL)
                     continue
