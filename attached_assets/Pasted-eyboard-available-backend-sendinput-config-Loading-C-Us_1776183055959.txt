@@ -1,0 +1,66 @@
+eyboard available (backend: sendinput)
+  [config] Loading C:\Users\mjensen\Downloads\.env
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+C:\Users\mjensen\Downloads\epic_agent (49).py:1260: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  pixels = list(small.getdata())
+  [always-on] Global input listeners started (focus-aware dispatch)
+  [always-on] Started capture: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote (key=hyperspace__exe_lung_txp__sup_environment__matthew_e_jensen, sid=aon_1776182717_1713, input=full)
+C:\Users\mjensen\Downloads\epic_agent (49).py:1273: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+C:\Users\mjensen\Downloads\epic_agent (49).py:1274: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.1025 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0644 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.1521 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.2299 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0122 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0085 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0003 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0014 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0043 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0020 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0020 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0020 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0020 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0020 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0219 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0001 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0173 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0114 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0007 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0003 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0059 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0274 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0001 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0228 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0236 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.5508 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0740 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.2762 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0159 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0851 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.2863 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0020 (thresh=0.005)
+
+
