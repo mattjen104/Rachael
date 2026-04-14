@@ -483,7 +483,9 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                   const outEdges = wEdges.filter((e: any) => e.from === node.fingerprint);
                   const inEdges = wEdges.filter((e: any) => e.to === node.fingerprint);
                   for (const e of outEdges.slice(0, 8)) {
-                    const toLabel = e.toTitle?.slice(0, 25) || e.to?.slice(0, 12) || "?";
+                    const toNode = wNodes.find((n: any) => n.fingerprint === e.to);
+                    const toNodeLabel = (toNode?.titles || []).length > 0 ? toNode.titles[0] : null;
+                    const toLabel = (toNodeLabel || e.toTitle || e.to?.slice(0, 12) || "?").slice(0, 30);
                     const ms = e.avgTransitionMs ? ` ~${e.avgTransitionMs}ms` : "";
                     const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
                     const crops = (e.labelCrops || []).length > 0 ? " +crop" : "";
@@ -491,7 +493,9 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                     nodes.push({ type: "bridge-info", label: `        -> ${toLabel}  (${e.count}x${ms}${keys}${crops}${recipeStatus})`, actionCmd: "" });
                   }
                   for (const e of inEdges.slice(0, 8)) {
-                    const fromLabel = e.fromTitle?.slice(0, 25) || e.from?.slice(0, 12) || "?";
+                    const fromNode = wNodes.find((n: any) => n.fingerprint === e.from);
+                    const fromNodeLabel = (fromNode?.titles || []).length > 0 ? fromNode.titles[0] : null;
+                    const fromLabel = (fromNodeLabel || e.fromTitle || e.from?.slice(0, 12) || "?").slice(0, 30);
                     const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
                     nodes.push({ type: "bridge-info", label: `        <- ${fromLabel}  (${e.count}x${keys})`, actionCmd: "" });
                   }

@@ -1308,7 +1308,14 @@ export async function registerRoutes(
           tree.nodes[fp].sessions.push(sessionId);
         }
         for (const t of (info.titles || [])) {
-          if (t && !tree.nodes[fp].titles.includes(t)) tree.nodes[fp].titles.push(t);
+          if (t && !tree.nodes[fp].titles.includes(t)) {
+            const isLlmLabel = t.length < 50 && !t.includes(" – ") && !t.includes("Hyperspace");
+            if (isLlmLabel && tree.nodes[fp].titles.length > 0) {
+              tree.nodes[fp].titles.unshift(t);
+            } else {
+              tree.nodes[fp].titles.push(t);
+            }
+          }
         }
       }
     }

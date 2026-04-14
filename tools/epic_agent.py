@@ -696,6 +696,61 @@ _ALWAYS_ON_STREAM_INTERVAL = 10.0
 _ALWAYS_ON_CAPTURES = {}
 _always_on_lock = threading.Lock()
 
+_SCREEN_LABELS = {}
+_SCREEN_LABEL_LOCK = threading.Lock()
+_LABEL_QUEUE = None
+_LABEL_MODEL = "google/gemini-2.0-flash-001"
+
+
+def _screen_labeler_thread():
+    while True:
+        try:
+            fp, img = _LABEL_QUEUE.get(timeout=5)
+        except Exception:
+            continue
+        with _SCREEN_LABEL_LOCK:
+            if fp in _SCREEN_LABELS:
+                continue
+        try:
+            b64 = img_to_base64(img, use_jpeg=True)
+            prompt = (
+                "This is a screenshot of an Epic Hyperspace EMR application screen. "
+                "Identify the specific screen, activity, menu, dialog, or panel shown. "
+                "Reply with ONLY a short label (2-6 words) like: "
+                "Patient List, Chart Review, Medication Orders, Flowsheet, "
+                "Demographics, Problem List, Appointment Schedule, Login Screen, etc. "
+                "If you see a specific patient context, include the activity name only (not the patient name). "
+                "Reply with just the label, nothing else."
+            )
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": _LABEL_MODEL,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                        {"type": "text", "text": prompt},
+                    ]}],
+                    "max_tokens": 50,
+                },
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                label = resp.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'")
+                if label and len(label) < 80:
+                    with _SCREEN_LABEL_LOCK:
+                        _SCREEN_LABELS[fp] = label
+                    print(f"  [label] {fp[:12]}.. = {label}")
+                else:
+                    print(f"  [label] {fp[:12]}.. bad response: {label[:60]}")
+            else:
+                print(f"  [label] API {resp.status_code} for {fp[:12]}..")
+        except Exception as e:
+            print(f"  [label] error for {fp[:12]}..: {e}")
+
 
 def _always_on_window_key(title):
     import re
@@ -764,6 +819,14 @@ def _always_on_start_capture(window_title):
         _ALWAYS_ON_CAPTURES[key] = cap
 
     _aon_ensure_global_input()
+
+    global _LABEL_QUEUE
+    if _LABEL_QUEUE is None:
+        import queue
+        _LABEL_QUEUE = queue.Queue()
+        t = threading.Thread(target=_screen_labeler_thread, daemon=True, name="screen-labeler")
+        t.start()
+        print("  [label] Screen labeler thread started")
 
     input_status = "full" if _aon_global_input["active"] else "screenshot-only"
     print(f"  [always-on] Started capture: {window_title} (key={key}, sid={session_id}, input={input_status})")
@@ -987,6 +1050,8 @@ def _always_on_screenshot_loop(cap):
             prev_title = cap.get("_last_win_title") or cap["window_title"]
             now = time.time()
 
+            is_new_fp = fp not in cap["fingerprints"]
+
             with cap["pending_lock"]:
                 if fp not in cap["pending_fingerprints"]:
                     cap["pending_fingerprints"][fp] = {"count": 0, "titles": []}
@@ -996,6 +1061,16 @@ def _always_on_screenshot_loop(cap):
 
                 cap["fingerprints"][fp] = cap["fingerprints"].get(fp, 0) + 1
 
+            if is_new_fp and _LABEL_QUEUE is not None:
+                with _SCREEN_LABEL_LOCK:
+                    already_labeled = fp in _SCREEN_LABELS
+                if not already_labeled:
+                    try:
+                        _LABEL_QUEUE.put_nowait((fp, img.copy()))
+                    except Exception:
+                        pass
+
+            with cap["pending_lock"]:
                 if prev_fp and prev_fp != fp:
                     actions_since = _always_on_drain_actions(cap)
                     action_keys, label_crops = _always_on_extract_action_keys(actions_since)
@@ -2451,6 +2526,16 @@ def _drain_all_stream_data():
             fingerprints = dict(cap["pending_fingerprints"])
             cap["pending_transitions"] = []
             cap["pending_fingerprints"] = {}
+
+        with _SCREEN_LABEL_LOCK:
+            for fp_key in list(cap["fingerprints"].keys()):
+                if fp_key in _SCREEN_LABELS:
+                    label = _SCREEN_LABELS[fp_key]
+                    if fp_key not in fingerprints:
+                        fingerprints[fp_key] = {"count": 0, "titles": []}
+                    if label not in fingerprints[fp_key]["titles"]:
+                        fingerprints[fp_key]["titles"].insert(0, label)
+
         if not transitions and not fingerprints:
             continue
         stream_data.append({
