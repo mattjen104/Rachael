@@ -629,61 +629,77 @@ VISION_COORD_INSTRUCTION = (
     "This ensures clicks land on the most clickable part of the element."
 )
 
-EPIC_VISUAL_REFERENCE = """EPIC HYPERSPACE VISUAL REFERENCE
-=================================
-Epic Hyperspace has a fixed visual hierarchy. Use this to orient yourself:
+EPIC_VISUAL_REFERENCE = """EPIC HYPERSPACE VISUAL REFERENCE (from actual screenshots)
+==========================================================
+Epic Hyperspace has a fixed visual hierarchy from top to bottom:
 
-LAYER 1 — TOOLBAR (top ~40px, dark blue/gray bar):
-  Left side: "Epic button" (small round/square logo, top-left corner) -> opens the main navigation menu.
-  Center-left: ACTIVITY NAME in bold white/light text. This tells you what workspace/activity is currently open.
-    Common names: Chart Review, Storyboard, Synopsis, Snapshot, Patient List, Schedule, InBasket,
-    Orders, Notes, Results Review, Flowsheet, Care Everywhere, Referrals, Letters, Problem List,
-    Medication List, Allergies, Immunizations, Health Maintenance, SmartSets, Preference List.
-  Right side: Search bar (magnifying glass icon), then user avatar, notifications bell, settings gear.
+LAYER 1 — TITLE BAR (topmost row, dark blue/navy, ~25px):
+  Far left: "Epic" logo (small blue icon). Clicking this opens the Epic button navigation menu.
+  Then: Full title string like "Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN"
+    This contains: app name, department context, environment (SUP/PRD), logged-in user name.
+    The department/environment part does NOT change when switching activities — it is constant.
+  Center: Search bar with "Search (Ctrl+Space)" placeholder text.
+  Right side: Notification badges (Staff Messages count, My Open Non-Billable count, Referral Triage count),
+    small icon buttons, then a green "SUP ENVIRONMENT" badge (in training), then user initials avatar (e.g., "MJ").
 
-LAYER 2 — PATIENT HEADER (below toolbar, ~60px colored banner, ONLY present when a patient chart is open):
-  Structure (left to right): Patient photo/avatar icon | Patient name (large bold) | MRN | DOB | Age/Sex |
-    Encounter info (CSN, visit type) | Location/Room | FYI Flags button | Care Team icons.
-  Color: Usually teal/dark cyan for inpatient, different colors for ED, outpatient, etc.
-  If NO patient header is visible, you are on a non-patient screen (Patient List, Schedule, InBasket, etc.)
+LAYER 2 — SHORTCUT TOOLBAR (gray bar with small icons + text labels, ~20px):
+  A row of quick-launch shortcut buttons. These are NOT the current activity — they are shortcuts to OPEN activities.
+  Common shortcuts: Builder, Unit Manager, In Basket, Schedule, Patient Lists, Chart, Manage Orders,
+    Encounter, Telephone Call, Patient Station, Record Viewer, Build Comparison, Personalize,
+    On-Call Finder, Census Inquiry Editor, More...
+  Far right: Print button, Log Out button.
+  These shortcuts are configurable per user/role — analysts may see Builder, Unit Manager, etc.
 
-LAYER 3 — ACTIVITY TABS (horizontal tab bar, just below patient header or toolbar):
-  Each tab = one open activity. The ACTIVE tab is highlighted/bold/underlined.
-  Tabs have text labels matching activity names. Small "x" to close each tab.
-  A "+" button at the end opens the activity search/launcher.
+LAYER 3 — WORKSPACE TABS (horizontal tabs, ~22px, just below shortcut toolbar):
+  These tabs show what is currently OPEN. Each tab = one open workspace or patient context.
+  Tab types:
+    - Patient tabs: Show patient name (e.g., "Nuno, David") — means a patient chart is open.
+    - Workspace tabs: Show workspace name (e.g., "Radar Admin", "Schedule", "In Basket").
+    - Build tabs: Show record being edited (e.g., "Radar Admin", "Report Writer").
+  The ACTIVE/SELECTED tab is the one currently displayed in the workspace below.
+  Clicking a different tab switches the workspace content.
 
-LAYER 4 — WORKSPACE (takes up remaining vertical space):
-  Split into optional LEFT SIDEBAR (navigator pane) + MAIN CONTENT area.
-  LEFT SIDEBAR (~200px): Tree/list navigation. Examples:
-    - Patient List sidebar: department/unit folders, patient names
-    - Chart Review sidebar: report categories (Labs, Imaging, Notes, etc.)
-    - InBasket sidebar: message folders (In, Sent, Results, etc.)
-  MAIN CONTENT: The activity workspace. Varies per activity:
-    - Chart Review: tabular report list or document viewer
-    - Flowsheet: grid with columns (time) and rows (parameters/vitals)
-    - Orders: order entry form with search, order list
-    - Notes: text editor with SmartPhrases (.dotphrases)
-    - Patient List: table with columns (name, room, MRN, etc.)
-    - Storyboard: card-based timeline view
-    - Synopsis: summary panels (Problems, Meds, Allergies, etc.)
+LAYER 4 — BREADCRUMB / RECORD TITLE (below tabs, shows current context):
+  Back/forward navigation arrows (< >) on the left.
+  Then the current record or screen title, often with an ID in brackets.
+  Examples: "UCSD TXP Transplant Staff Dashboard [100645]", "Patient Lookup", "Order Entry".
+  THIS IS THE BEST IDENTIFIER for what specific screen/record the user is working on.
 
-DIALOGS/POPUPS (floating, higher z-index):
-  Modal dialogs appear centered with a dimmed background. Examples:
-    - Order entry dialog (search bar + order details)
-    - BPA/BestPractice Advisory alerts (yellow/orange warning)
-    - Print preview, Sign/Submit, Medication Reconciliation
-    - SmartText/SmartPhrase picker, Column Picker, Filter dialog
-  If a dialog is visible, it takes priority — identify it, not the background activity.
+LAYER 5 — LEFT SIDEBAR (vertical navigation pane, colored background, ~120px wide):
+  Context-dependent navigation categories. The sidebar content changes based on the active workspace:
+    - Radar Admin / Builder: Dashboards, Components, Messages, Resources, Metrics, Queries,
+      Properties, Notifications, Levels, Fields, Redirectors, Settings
+    - Patient Chart: Clinical categories (Notes, Results, Orders, Flowsheets, etc.)
+    - Patient List: Department/unit folders, patient groupings
+    - In Basket: Message folders (In, Sent, Results, Rx Requests, etc.)
+  The sidebar has its own highlighted/selected item showing the current sub-section.
 
-EPIC BUTTON MENU (floating overlay panel from clicking the Epic button):
-  Two-column layout: Left = Pinned Items + Recent. Right = Navigation categories
-  (e.g., Patient Care, Clinical Review, Orders, Results, etc.)
-  Each category expands to show specific activities.
-  Submenu items appear as additional floating panels to the right.
+LAYER 6 — MAIN WORKSPACE (center/right, largest area):
+  Content varies per activity and sidebar selection:
+    - Build/Admin screens: Form fields (Record name, Display title, Description, etc.) with sub-tabs
+      (Basic Information, Content, Parameters, Distribution)
+    - Clinical screens: Patient data displays, order entry, note editors, flowsheet grids
+    - List screens: Tables with sortable columns
+  May contain its own sub-tabs within the workspace area.
 
-ENVIRONMENT INDICATORS:
-  SUP/Training environments often show a colored banner (yellow/orange) across the top or bottom.
-  "SUP Environment" text may appear. This is for training — ignore for screen identification.
+LAYER 7 — BOTTOM BAR (bottom of screen, ~25px):
+  Action buttons: typically Cancel and Accept (for build/edit screens), or Sign/Submit (for clinical).
+  Settings gear icon may appear on far left of bottom bar.
+
+FLOATING ELEMENTS (higher z-index, overlaying the workspace):
+  - Secure Chat popup (top-right corner): "You have N staff conversation(s) with unread messages"
+  - BPA/BestPractice Advisory alerts: Yellow/orange warning dialogs
+  - Modal dialogs: Order entry, medication reconciliation, print preview, etc.
+  - Epic button menu: Floating overlay panel from clicking the Epic logo (Layer 1, far left)
+  If a floating element is visible, identify IT as the primary screen element.
+
+IDENTIFYING THE CURRENT SCREEN — priority order:
+  1. Check for FLOATING ELEMENTS first (dialogs, popups, menus) — if present, label the dialog/popup.
+  2. Read the BREADCRUMB/RECORD TITLE (Layer 4) — this is the most specific identifier.
+  3. Read the ACTIVE WORKSPACE TAB (Layer 3) — this tells you the workspace context.
+  4. Check the LEFT SIDEBAR selection (Layer 5) — this tells you the sub-section.
+  5. Glance at workspace content (Layer 6) — confirms what type of screen it is.
+  DO NOT read the title bar (Layer 1) for screen identification — it only shows department/environment.
 """
 
 
@@ -762,28 +778,32 @@ _LABEL_MODEL = "google/gemini-2.0-flash-001"
 _EPIC_LABEL_PROMPT = EPIC_VISUAL_REFERENCE + """
 TASK: Identify this screen and return a short label.
 
-Read the ACTIVITY NAME from the toolbar (Layer 1, bold text center-left).
-If a dialog/popup is open (Layer 5 in reference), label the dialog instead.
-Check if a patient header (Layer 2) is present — if so, you are in a patient chart context.
+Follow the IDENTIFYING THE CURRENT SCREEN priority order from the reference:
+1. Check for FLOATING ELEMENTS (dialogs, Secure Chat, BPA alerts, Epic menu) — label those if present.
+2. Read the BREADCRUMB / RECORD TITLE (Layer 4) — this is the most specific identifier.
+   Examples: "UCSD TXP Transplant Staff Dashboard [100645]" -> label as "TXP Dashboard"
+3. Read the ACTIVE WORKSPACE TAB (Layer 3) — e.g., "Radar Admin", "Schedule", patient name tab.
+4. Check the LEFT SIDEBAR selection (Layer 5) — what sub-section is highlighted?
+5. Look at workspace content (Layer 6) to confirm.
+DO NOT use the title bar (Layer 1) — it only shows department/environment, not the current screen.
 
 RESPONSE FORMAT — reply with exactly ONE line:
-LABEL: <2-6 word activity/screen name>
+LABEL: <2-6 word screen/activity name>
 
 Examples:
-LABEL: Chart Review
+LABEL: Radar Admin - Dashboards
 LABEL: Patient List
-LABEL: InBasket Messages
+LABEL: InBasket
+LABEL: Chart Review
 LABEL: Flowsheet I/O
 LABEL: Order Entry
-LABEL: Note Writer
-LABEL: Storyboard
-LABEL: Schedule Manager
-LABEL: Medication Reconciliation Dialog
-LABEL: BPA Alert
-LABEL: Results Review
-LABEL: Synopsis
-LABEL: Care Everywhere
+LABEL: Schedule
+LABEL: Builder - Components
+LABEL: Record Viewer
+LABEL: BPA Alert Dialog
+LABEL: Secure Chat Popup
 LABEL: Epic Button Menu
+LABEL: Dashboard Editor
 
 If the screen is blank, loading, or unrecognizable: LABEL: Unknown Screen
 Do NOT include patient names, MRNs, or PHI."""
@@ -2811,22 +2831,25 @@ def execute_screenshot(cmd):
 TASK: Describe this Epic Hyperspace screen using the visual reference above.
 
 Read each layer:
-1. TOOLBAR: What activity name is shown in bold text? Is the Epic button menu open?
-2. PATIENT HEADER: Is a patient header bar visible? (just say "patient context open" or "no patient context" — no PHI)
-3. ACTIVITY TABS: What tabs are open? Which is active?
-4. WORKSPACE: What is the main content showing? (list, form, grid, notes, etc.)
-5. DIALOGS: Any popups/dialogs overlaying the screen?
+1. TITLE BAR (Layer 1): Department and environment context.
+2. SHORTCUT TOOLBAR (Layer 2): What shortcut buttons are visible?
+3. WORKSPACE TABS (Layer 3): What tabs are open? Which is active? Any patient name tabs?
+4. BREADCRUMB/TITLE (Layer 4): What record or screen title is shown?
+5. LEFT SIDEBAR (Layer 5): What navigation categories are visible? Which is selected?
+6. WORKSPACE (Layer 6): What is the main content showing? (form, list, grid, notes, etc.)
+7. FLOATING ELEMENTS: Any popups, Secure Chat, BPA alerts, dialogs?
 
 Return a JSON object:
 {
-  "screen": "activity name from toolbar",
-  "area": "which Epic area (e.g., Chart Review, Patient List, InBasket, etc.)",
+  "screen": "breadcrumb/record title from Layer 4",
+  "activeTab": "which workspace tab is selected (Layer 3)",
+  "area": "which Epic area (e.g., Radar Admin, Chart Review, Patient List, Builder, etc.)",
   "patientContext": true/false,
-  "activeTabs": ["list of open activity tabs"],
-  "sidebarContent": "what the left navigator shows, if visible",
+  "openTabs": ["list of all open workspace tabs"],
+  "sidebarSection": "which sidebar item is highlighted (Layer 5)",
   "workspaceContent": "brief description of main content area",
   "availableActions": ["list", "of", "clickable", "items"],
-  "alerts": ["any", "visible", "alerts"],
+  "floatingElements": ["any", "visible", "popups/alerts"],
   "notes": "other observations"
 }
 Return ONLY the JSON object."""
@@ -3703,14 +3726,14 @@ def recording_capture_tick():
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{prev_screen}"}},
                         {"type": "text", "text": "Current Epic Hyperspace screen:"},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                        {"type": "text", "text": f"{EPIC_VISUAL_REFERENCE}\nTASK: Compare these two Epic Hyperspace screens.\n1. Read the ACTIVITY NAME from the toolbar (Layer 1) on each screen.\n2. Check if activity tabs (Layer 3) changed.\n3. Check if a dialog appeared/disappeared.\n4. Describe the navigation action in one sentence (menu click, tab switch, button press, sidebar selection).\n\nIMPORTANT: Do NOT mention patient names, MRNs, DOB, or any PHI.\nReply as JSON: {{\"action\": \"what user clicked/did\", \"fromScreen\": \"previous activity name\", \"screen\": \"current activity name\"}}"},
+                        {"type": "text", "text": f"{EPIC_VISUAL_REFERENCE}\nTASK: Compare these two Epic Hyperspace screens.\n1. Read the BREADCRUMB/TITLE (Layer 4) on each screen — what changed?\n2. Check if WORKSPACE TABS (Layer 3) changed — did the user switch tabs?\n3. Check if LEFT SIDEBAR selection (Layer 5) changed — did user click a different section?\n4. Check if a dialog/popup appeared or disappeared.\n5. Describe the navigation action in one sentence (shortcut click, tab switch, sidebar click, breadcrumb navigation, dialog interaction).\n\nIMPORTANT: Do NOT mention patient names, MRNs, DOB, or any PHI.\nReply as JSON: {{\"action\": \"what user clicked/did\", \"fromScreen\": \"previous breadcrumb/title\", \"screen\": \"current breadcrumb/title\"}}"},
                     ]
                 })
             else:
                 messages.append({
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": f"{EPIC_VISUAL_REFERENCE}\nTASK: Identify this Epic Hyperspace screen.\nRead the ACTIVITY NAME from the toolbar (Layer 1, bold text center-left).\nCheck if a patient header (Layer 2) is visible.\nIMPORTANT: Do NOT mention patient names, MRNs, DOB, or any PHI.\nReply as JSON: {{\"action\": \"Initial screen\", \"screen\": \"activity name from toolbar\"}}"},
+                        {"type": "text", "text": f"{EPIC_VISUAL_REFERENCE}\nTASK: Identify this Epic Hyperspace screen.\nRead the BREADCRUMB/TITLE (Layer 4) and the ACTIVE WORKSPACE TAB (Layer 3).\nCheck if any patient name tabs are open (Layer 3) — just note 'patient context open', no PHI.\nIMPORTANT: Do NOT mention patient names, MRNs, DOB, or any PHI.\nReply as JSON: {{\"action\": \"Initial screen\", \"screen\": \"breadcrumb/record title\"}}"},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
                     ]
                 })
@@ -6438,12 +6461,12 @@ def execute_read_screen(cmd):
         f"TASK: Extract structured data from this Epic Hyperspace screen.\n"
         f"{focus_hint}\n"
         "Using the visual reference above, read each layer:\n"
-        "1. TOOLBAR (Layer 1): Activity name\n"
-        "2. PATIENT HEADER (Layer 2): Demographics if visible (name, MRN, DOB, age, sex, location, room)\n"
-        "3. ACTIVITY TABS (Layer 3): List of open tabs, which is active\n"
-        "4. SIDEBAR (Layer 4 left): Navigator content if visible\n"
-        "5. WORKSPACE (Layer 4 main): All visible clinical data — vitals, labs, meds, orders, allergies, diagnoses, table/grid data with column headers and row values\n"
-        "6. DIALOGS: Any popup content\n\n"
+        "1. TITLE BAR (Layer 1): Department, environment, user\n"
+        "2. WORKSPACE TABS (Layer 3): List of open tabs, which is active, any patient name tabs\n"
+        "3. BREADCRUMB/TITLE (Layer 4): Current record/screen name\n"
+        "4. LEFT SIDEBAR (Layer 5): Navigation categories and selected item\n"
+        "5. WORKSPACE (Layer 6): All visible data — form fields, clinical data, tables/grids with column headers and row values, vitals, labs, meds, orders, allergies, diagnoses\n"
+        "6. FLOATING ELEMENTS: Any popups, Secure Chat, dialogs\n\n"
         "Return ONLY a JSON object with the extracted data.\n"
         "Use descriptive keys. Include everything visible.\n"
         "If a section has no data, omit it.\n"
