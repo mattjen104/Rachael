@@ -4773,9 +4773,11 @@ ${fullHtml}`;
     }
 
     if (args[0] === "go") {
-      const env = (args[1] || "SUP").toUpperCase();
-      const target = args.slice(2).join(" ");
-      if (!target) return fail("[epic] Usage: epic go SUP Patient Lookup");
+      const forceReplay = args[1] === "--replay";
+      const envIdx = forceReplay ? 2 : 1;
+      const env = (args[envIdx] || "SUP").toUpperCase();
+      const target = args.slice(envIdx + 1).join(" ");
+      if (!target) return fail("[epic] Usage: epic go [--replay] SUP Patient Lookup");
 
       function fMatch(text: string, q: string): boolean {
         const lower = text.toLowerCase();
@@ -4796,38 +4798,40 @@ ${fullHtml}`;
 
       let resolved: { path: string; client: string; name: string } | null = null;
 
-      const aliasCfg = await storage.getAgentConfig("epic_aliases");
-      let epicAliases: Record<string, string> = {};
-      if (aliasCfg?.value) {
-        try { epicAliases = JSON.parse(aliasCfg.value); } catch {}
-      }
-      const resolvedAlias = epicAliases[target.toLowerCase()];
-      const effectiveTarget = resolvedAlias || target;
-
-      if (effectiveTarget.includes(">")) {
-        const isTextPath = /^\d+\s/.test(effectiveTarget.split(">")[0].trim());
-        resolved = { path: effectiveTarget, client: isTextPath ? "text" : "hyperspace", name: resolvedAlias ? `${target} -> ${effectiveTarget}` : effectiveTarget };
-      } else {
-        for (const client of ["hyperspace", "text"]) {
-          const key = `epic_tree_${env.toLowerCase()}_${client}`;
-          const cfg = await storage.getAgentConfig(key);
-          if (cfg?.value) {
-            try {
-              const tree = JSON.parse(cfg.value);
-              const found = findInTree(tree, target, client);
-              if (found) { resolved = found; break; }
-            } catch {}
-          }
+      if (!forceReplay) {
+        const aliasCfg = await storage.getAgentConfig("epic_aliases");
+        let epicAliases: Record<string, string> = {};
+        if (aliasCfg?.value) {
+          try { epicAliases = JSON.parse(aliasCfg.value); } catch {}
         }
-        if (!resolved) {
-          const actKey = `epic_activities_${env.toLowerCase()}`;
-          const actCfg = await storage.getAgentConfig(actKey);
-          if (actCfg?.value) {
-            try {
-              const acts = JSON.parse(actCfg.value);
-              const match = acts.find((a: any) => fMatch(a.name || "", target));
-              if (match) resolved = { path: match.name, client: "hyperspace", name: match.name };
-            } catch {}
+        const resolvedAlias = epicAliases[target.toLowerCase()];
+        const effectiveTarget = resolvedAlias || target;
+
+        if (effectiveTarget.includes(">")) {
+          const isTextPath = /^\d+\s/.test(effectiveTarget.split(">")[0].trim());
+          resolved = { path: effectiveTarget, client: isTextPath ? "text" : "hyperspace", name: resolvedAlias ? `${target} -> ${effectiveTarget}` : effectiveTarget };
+        } else {
+          for (const client of ["hyperspace", "text"]) {
+            const key = `epic_tree_${env.toLowerCase()}_${client}`;
+            const cfg = await storage.getAgentConfig(key);
+            if (cfg?.value) {
+              try {
+                const tree = JSON.parse(cfg.value);
+                const found = findInTree(tree, target, client);
+                if (found) { resolved = found; break; }
+              } catch {}
+            }
+          }
+          if (!resolved) {
+            const actKey = `epic_activities_${env.toLowerCase()}`;
+            const actCfg = await storage.getAgentConfig(actKey);
+            if (actCfg?.value) {
+              try {
+                const acts = JSON.parse(actCfg.value);
+                const match = acts.find((a: any) => fMatch(a.name || "", target));
+                if (match) resolved = { path: match.name, client: "hyperspace", name: match.name };
+              } catch {}
+            }
           }
         }
       }

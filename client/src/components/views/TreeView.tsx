@@ -475,7 +475,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                 nodes.push({ type: "section", label: `      ${displayTitle}`, key: nodeKey, count: visits });
                 if (expanded.has(nodeKey)) {
                   const goTitle = ((node.titles || []).length > 0 ? node.titles[0] : node.fingerprint || "?").replace(/[;&|"`$\\]/g, "");
-                  nodes.push({ type: "bridge-info", label: `        >> Go here`, actionCmd: `epic go SUP "${goTitle}"` });
+                  nodes.push({ type: "bridge-info", label: `        >> Go here`, actionCmd: `epic go --replay SUP "${goTitle}"` });
                   nodes.push({ type: "bridge-info", label: `        fp:${(node.fingerprint || "?").slice(0, 16)}  ${visits} visits`, actionCmd: "" });
                   if ((node.titles || []).length > 1) {
                     nodes.push({ type: "bridge-info", label: `        titles: ${node.titles.slice(0, 3).join(", ")}`, actionCmd: "" });

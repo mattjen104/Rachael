@@ -1529,11 +1529,23 @@ export async function registerRoutes(
     }
 
     try {
-      const { approvalKey } = req.body;
+      const { approvalKey, plan } = req.body;
       if (!approvalKey || typeof approvalKey !== "string" || !approvalKey.startsWith("replay_approval_")) {
         return res.status(400).json({ error: "Invalid approvalKey" });
       }
       await storage.setAgentConfig(approvalKey, "approved");
+
+      if (plan?.segments && Array.isArray(plan.segments)) {
+        const parts = approvalKey.split("_");
+        const wk = parts.slice(2, -2).join("_");
+        for (const seg of plan.segments) {
+          if (seg.fromFp && seg.toFp) {
+            const edgeKey = `replay_approval_${wk}_${seg.fromFp}_${seg.toFp}`;
+            await storage.setAgentConfig(edgeKey, "approved");
+          }
+        }
+      }
+
       res.json({ ok: true, message: "Path approved for automated replay. Re-submit the replay request to execute." });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1994,10 +2006,17 @@ export async function registerRoutes(
             try {
               const treeData = JSON.parse(wtCfg.value);
               if (treeData.edges) {
+                const approvalCache: Record<string, boolean> = {};
+                const allApprovalKeys = treeData.edges.map((e: any) => `replay_approval_${wk}_${e.from}_${e.to}`);
+                for (const key of allApprovalKeys) {
+                  if (approvalCache[key] === undefined) {
+                    const approval = await storage.getAgentConfig(key);
+                    approvalCache[key] = approval?.value === "approved";
+                  }
+                }
                 for (const edge of treeData.edges) {
-                  const approvalKey = `replay_approval_${wk}_${edge.from}_${edge.to}`;
-                  const approval = await storage.getAgentConfig(approvalKey);
-                  edge.approved = approval?.value === "approved";
+                  const directKey = `replay_approval_${wk}_${edge.from}_${edge.to}`;
+                  edge.approved = approvalCache[directKey] || false;
                 }
               }
               sessionWindowTrees[wk] = { ...treeData, windowTitle };
