@@ -1099,6 +1099,7 @@ def _always_on_flush(cap):
             },
             json=payload,
         )
+        print(f"  [aon-flush-resp] resp={resp.status_code if resp else 'None'} body={resp.text[:120] if resp else 'N/A'}")
         if resp and resp.status_code == 200:
             rdata = resp.json()
             cap["node_count"] = rdata.get("treeNodes", cap["node_count"])
