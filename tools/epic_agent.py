@@ -1289,7 +1289,11 @@ def _session_grab_window(window_title):
             t = w.title or ""
             if window_title.lower() in t.lower() and w.width > 50 and w.height > 50:
                 bbox = (w.left, w.top, w.left + w.width, w.top + w.height)
-                img = ImageGrab.grab(bbox=bbox, include_layered_windows=True)
+                try:
+                    full = ImageGrab.grab(all_screens=True)
+                    img = full.crop(bbox)
+                except Exception:
+                    img = ImageGrab.grab(bbox=bbox, include_layered_windows=True)
                 return img, w
     except Exception:
         pass
