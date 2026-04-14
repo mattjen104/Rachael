@@ -639,7 +639,10 @@ LAYER 1 — TITLE BAR (topmost row, dark blue/navy, ~25px):
     This contains: app name, department context, environment (SUP/PRD), logged-in user name.
     The department/environment part does NOT change when switching activities — it is constant.
   Center: Search bar with "Search (Ctrl+Space)" placeholder text.
-  Right side: Notification badges (Staff Messages count, My Open Non-Billable count, Referral Triage count),
+    IMPORTANT: Pressing Ctrl+Space activates the search — the title bar turns RED, the search field
+    expands and highlights BLUE, and the user can type an activity name to navigate. This is the
+    PRIMARY navigation method. When the search is active, the entire title bar looks different.
+  Right side: Notification badges (Staff Messages count, Open Non-Billable count, Referral Triage count),
     small icon buttons, then a green "SUP ENVIRONMENT" badge (in training), then user initials avatar (e.g., "MJ").
 
 LAYER 2 — SHORTCUT TOOLBAR (gray bar with small icons + text labels, ~20px):
@@ -653,52 +656,84 @@ LAYER 2 — SHORTCUT TOOLBAR (gray bar with small icons + text labels, ~20px):
 LAYER 3 — WORKSPACE TABS (horizontal tabs, ~22px, just below shortcut toolbar):
   These tabs show what is currently OPEN. Each tab = one open workspace or patient context.
   Tab types:
-    - Patient tabs: Show patient name (e.g., "Nuno, David") — means a patient chart is open.
+    - Patient tabs: Show patient name (e.g., "Nuno, David") with an "x" to close — means a patient chart is open.
     - Workspace tabs: Show workspace name (e.g., "Radar Admin", "Schedule", "In Basket").
     - Build tabs: Show record being edited (e.g., "Radar Admin", "Report Writer").
   The ACTIVE/SELECTED tab is the one currently displayed in the workspace below.
   Clicking a different tab switches the workspace content.
 
+LAYER 3b — ACTIVITY TABS (ONLY inside a patient chart, below workspace tabs):
+  When a patient tab is active, a SECOND row of tabs appears showing clinical activities:
+    SnapShot, Chart Review, Review Flowsheets, Synopsis, Results Review, Demographics,
+    Allergies, History, Problem List, Send Letter, Transplant, Dialysis Overview, iReport,
+    Report, Identity Manager, etc.
+  Some tabs may have special icons (e.g., Transplant has a colored icon).
+  These activity tabs are specific to the patient chart context and do NOT appear in non-patient workspaces.
+  The SELECTED activity tab determines what shows in the workspace below.
+
 LAYER 4 — BREADCRUMB / RECORD TITLE (below tabs, shows current context):
   Back/forward navigation arrows (< >) on the left.
   Then the current record or screen title, often with an ID in brackets.
-  Examples: "UCSD TXP Transplant Staff Dashboard [100645]", "Patient Lookup", "Order Entry".
+  Examples: "UCSD TXP Transplant Staff Dashboard [100645]", "Snapshot Report", "Patient Lookup".
   THIS IS THE BEST IDENTIFIER for what specific screen/record the user is working on.
+  In patient chart context, may also show REPORT SUB-TABS below the title:
+    e.g., Snapshot Report | PCAR | Due Meds | Vitals-Last Day | VS Graph | MAR | IO 72 | Wt
 
 LAYER 5 — LEFT SIDEBAR (vertical navigation pane, colored background, ~120px wide):
   Context-dependent navigation categories. The sidebar content changes based on the active workspace:
     - Radar Admin / Builder: Dashboards, Components, Messages, Resources, Metrics, Queries,
       Properties, Notifications, Levels, Fields, Redirectors, Settings
-    - Patient Chart: Clinical categories (Notes, Results, Orders, Flowsheets, etc.)
+    - Patient Chart: Patient-specific navigation (problems, allergies, medications, etc. with colored highlights)
     - Patient List: Department/unit folders, patient groupings
     - In Basket: Message folders (In, Sent, Results, Rx Requests, etc.)
+    - Home/Dashboard: May not be visible (dashboard takes full width)
   The sidebar has its own highlighted/selected item showing the current sub-section.
 
 LAYER 6 — MAIN WORKSPACE (center/right, largest area):
   Content varies per activity and sidebar selection:
+    - HOME DASHBOARD: Multi-column report layout. Example — Transplant Staff Dashboard shows:
+      Left column: "Kidney Reports" (Committee Review Reports, Pre Kidney patient lists, Post Kidney)
+      Center column: Patient lists with "Ready to run" / "New" / "Total" status badges
+      Right column: "Compliance Reports" (CMS Survey Reports) and "UNOS Forms Due" tables
     - Build/Admin screens: Form fields (Record name, Display title, Description, etc.) with sub-tabs
       (Basic Information, Content, Parameters, Distribution)
-    - Clinical screens: Patient data displays, order entry, note editors, flowsheet grids
+    - Patient Chart — Snapshot Report: Color-coded clinical summary sections (red/pink/purple headers),
+      vitals, recent results, transplant-specific data, clinical notes
+    - Patient Chart — Chart Review: Tabular report list or document viewer
+    - Patient Chart — Flowsheets: Grid with time columns and parameter rows
+    - Patient Chart — Orders: Order entry with search and order list
     - List screens: Tables with sortable columns
   May contain its own sub-tabs within the workspace area.
 
 LAYER 7 — BOTTOM BAR (bottom of screen, ~25px):
   Action buttons: typically Cancel and Accept (for build/edit screens), or Sign/Submit (for clinical).
   Settings gear icon may appear on far left of bottom bar.
+  May show status text (e.g., "UCSD TXP Post-Lung Overdue Tasks").
 
 FLOATING ELEMENTS (higher z-index, overlaying the workspace):
-  - Secure Chat popup (top-right corner): "You have N staff conversation(s) with unread messages"
+  - Secure Chat popup (top-right corner): "You have N staff conversation(s) with unread messages. Open Chat"
   - BPA/BestPractice Advisory alerts: Yellow/orange warning dialogs
   - Modal dialogs: Order entry, medication reconciliation, print preview, etc.
-  - Epic button menu: Floating overlay panel from clicking the Epic logo (Layer 1, far left)
-  If a floating element is visible, identify IT as the primary screen element.
+  - EPIC BUTTON MENU (floating overlay from clicking the Epic logo, left side of screen):
+      Top: "Search activities" text input field
+      "Pinned" section (may say "No pinned items")
+      "Recent" section: recently opened items (e.g., Dashboard Editor, Transplant Configuration)
+      Navigation CATEGORIES (vertical list): Lab, Patient Care, Pharmacy, Radiology, Surgery,
+        CRM/CM, Billing, HIM, Utilization Management, Referrals, Registration/ADT, Scheduling,
+        Interfaces, Reports, Tools, Admin, My Settings
+      Each category has ">" arrow and expands to show submenu items on the right
+      Bottom: Log Out button, "Secure" indicator
+  - Ctrl+Space SEARCH MODE: Title bar turns RED, search field expands with BLUE highlight,
+      user types activity/record name to navigate directly. This is the primary navigation method.
+  If any floating element is visible, identify IT as the primary screen element.
 
 IDENTIFYING THE CURRENT SCREEN — priority order:
-  1. Check for FLOATING ELEMENTS first (dialogs, popups, menus) — if present, label the dialog/popup.
+  1. Check for FLOATING ELEMENTS first (dialogs, Epic menu, Ctrl+Space search active) — if present, label it.
   2. Read the BREADCRUMB/RECORD TITLE (Layer 4) — this is the most specific identifier.
   3. Read the ACTIVE WORKSPACE TAB (Layer 3) — this tells you the workspace context.
-  4. Check the LEFT SIDEBAR selection (Layer 5) — this tells you the sub-section.
-  5. Glance at workspace content (Layer 6) — confirms what type of screen it is.
+  4. If patient chart is open, read the ACTIVITY TAB (Layer 3b) — which clinical activity is selected.
+  5. Check the LEFT SIDEBAR selection (Layer 5) — this tells you the sub-section.
+  6. Glance at workspace content (Layer 6) — confirms what type of screen it is.
   DO NOT read the title bar (Layer 1) for screen identification — it only shows department/environment.
 """
 
@@ -779,31 +814,37 @@ _EPIC_LABEL_PROMPT = EPIC_VISUAL_REFERENCE + """
 TASK: Identify this screen and return a short label.
 
 Follow the IDENTIFYING THE CURRENT SCREEN priority order from the reference:
-1. Check for FLOATING ELEMENTS (dialogs, Secure Chat, BPA alerts, Epic menu) — label those if present.
-2. Read the BREADCRUMB / RECORD TITLE (Layer 4) — this is the most specific identifier.
-   Examples: "UCSD TXP Transplant Staff Dashboard [100645]" -> label as "TXP Dashboard"
-3. Read the ACTIVE WORKSPACE TAB (Layer 3) — e.g., "Radar Admin", "Schedule", patient name tab.
-4. Check the LEFT SIDEBAR selection (Layer 5) — what sub-section is highlighted?
-5. Look at workspace content (Layer 6) to confirm.
-DO NOT use the title bar (Layer 1) — it only shows department/environment, not the current screen.
+1. Is the title bar RED with a BLUE search field? -> LABEL: Search Active
+2. Is the EPIC BUTTON MENU open (floating overlay on left)? -> LABEL: Epic Menu
+3. Any other floating element (dialog, Secure Chat, BPA alert)? -> Label that element.
+4. Read the BREADCRUMB / RECORD TITLE (Layer 4) — most specific identifier.
+   Examples: "UCSD TXP Transplant Staff Dashboard [100645]" -> "TXP Staff Dashboard"
+             "Snapshot Report" -> "Snapshot Report"
+5. If in a patient chart, read the ACTIVITY TAB (Layer 3b): SnapShot, Chart Review, etc.
+6. Read the ACTIVE WORKSPACE TAB (Layer 3): "Radar Admin", "Schedule", etc.
+7. Check LEFT SIDEBAR selection (Layer 5) for sub-section context.
+DO NOT use the title bar text (Layer 1) — it only shows department/environment.
 
 RESPONSE FORMAT — reply with exactly ONE line:
 LABEL: <2-6 word screen/activity name>
 
 Examples:
+LABEL: TXP Staff Dashboard
+LABEL: Snapshot Report
+LABEL: Chart Review
+LABEL: Review Flowsheets
+LABEL: Synopsis
+LABEL: Results Review
+LABEL: Demographics
 LABEL: Radar Admin - Dashboards
+LABEL: Dashboard Editor
+LABEL: Builder - Components
 LABEL: Patient List
 LABEL: InBasket
-LABEL: Chart Review
-LABEL: Flowsheet I/O
-LABEL: Order Entry
 LABEL: Schedule
-LABEL: Builder - Components
-LABEL: Record Viewer
+LABEL: Epic Menu
+LABEL: Search Active
 LABEL: BPA Alert Dialog
-LABEL: Secure Chat Popup
-LABEL: Epic Button Menu
-LABEL: Dashboard Editor
 
 If the screen is blank, loading, or unrecognizable: LABEL: Unknown Screen
 Do NOT include patient names, MRNs, or PHI."""
@@ -2831,25 +2872,26 @@ def execute_screenshot(cmd):
 TASK: Describe this Epic Hyperspace screen using the visual reference above.
 
 Read each layer:
-1. TITLE BAR (Layer 1): Department and environment context.
-2. SHORTCUT TOOLBAR (Layer 2): What shortcut buttons are visible?
-3. WORKSPACE TABS (Layer 3): What tabs are open? Which is active? Any patient name tabs?
-4. BREADCRUMB/TITLE (Layer 4): What record or screen title is shown?
-5. LEFT SIDEBAR (Layer 5): What navigation categories are visible? Which is selected?
-6. WORKSPACE (Layer 6): What is the main content showing? (form, list, grid, notes, etc.)
-7. FLOATING ELEMENTS: Any popups, Secure Chat, BPA alerts, dialogs?
+1. TITLE BAR (Layer 1): Is Ctrl+Space search active (red bar, blue search field)?
+2. WORKSPACE TABS (Layer 3): What tabs are open? Which is active? Any patient name tabs?
+3. ACTIVITY TABS (Layer 3b): If patient chart is open, which clinical activity tab is selected?
+4. BREADCRUMB/TITLE (Layer 4): What record/screen title and any report sub-tabs?
+5. LEFT SIDEBAR (Layer 5): Navigation categories visible? Which is selected?
+6. WORKSPACE (Layer 6): Main content — dashboard reports, form, list, clinical data?
+7. FLOATING: Epic menu open? Secure Chat? BPA alert? Ctrl+Space search active?
 
 Return a JSON object:
 {
   "screen": "breadcrumb/record title from Layer 4",
   "activeTab": "which workspace tab is selected (Layer 3)",
-  "area": "which Epic area (e.g., Radar Admin, Chart Review, Patient List, Builder, etc.)",
+  "activityTab": "which patient chart activity tab if applicable (Layer 3b)",
+  "area": "which Epic area (e.g., Home Dashboard, Radar Admin, Chart Review, Patient List, etc.)",
   "patientContext": true/false,
   "openTabs": ["list of all open workspace tabs"],
   "sidebarSection": "which sidebar item is highlighted (Layer 5)",
   "workspaceContent": "brief description of main content area",
   "availableActions": ["list", "of", "clickable", "items"],
-  "floatingElements": ["any", "visible", "popups/alerts"],
+  "floatingElements": ["any", "visible", "popups/alerts/menus"],
   "notes": "other observations"
 }
 Return ONLY the JSON object."""
