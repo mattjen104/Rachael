@@ -1101,6 +1101,8 @@ def _always_on_flush(cap):
             rdata = resp.json()
             cap["node_count"] = rdata.get("treeNodes", cap["node_count"])
             cap["edge_count"] = rdata.get("treeEdges", cap["edge_count"])
+            wk = cap.get("window_key", "?")[:28]
+            print(f"  [always-on] flush OK {wk}: {cap['node_count']}n/{cap['edge_count']}e ({len(transitions)}t sent)")
         elif resp:
             print(f"  [always-on] stream flush HTTP {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
