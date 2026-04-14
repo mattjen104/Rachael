@@ -1,0 +1,244 @@
+input] Low-level keyboard available (backend: sendinput)
+  [config] Loading C:\Users\mjensen\Downloads\.env
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+No Hyperspace windows detected yet (will keep checking)
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: Calculator (key=calculator, sid=aon_1776178563_9600, input=screenshot-only)
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: Microsoft Text Input Application (key=microsoft_text_input_application, sid=aon_1776178563_1884, input=screenshot-only)
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: C:\Users\mjensen\AppData\Local\Programs\Python\Launcher\py.exe (key=cusersmjensenappdatalocalprogramspythonlauncherpyexe, sid=aon_1776178563_7895, input=screenshot-only)
+C:\Users\mjensen\Downloads\epic_agent (44).py:1226: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  pixels = list(small.getdata())
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: 146.190.33.157:5000 - Google Chrome (key=146190331575000_-_google_chrome, sid=aon_1776178564_1607, input=screenshot-only)
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: Phantom - DigitalOcean Droplet Web Console - Google Chrome (key=phantom_-_digitalocean_droplet_web_console_-_google_chrome, sid=aon_1776178564_5798, input=screenshot-only)
+C:\Users\mjensen\Downloads\epic_agent (44).py:1239: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+C:\Users\mjensen\Downloads\epic_agent (44).py:1240: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: UC San Diego Health - Google Chrome (key=uc_san_diego_health_-_google_chrome, sid=aon_1776178594_9367, input=screenshot-only)
+  [always-on] Stopped capture: C:\Users\mjensen\AppData\Local\Programs\Python\Launcher\py.exe (2 transitions)
+  [always-on] Stopped capture: Phantom - DigitalOcean Droplet Web Console - Google Chrome (1 transitions)
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: Recent download history (key=recent_download_history, sid=aon_1776178625_3391, input=screenshot-only)
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: Hyperspace – SUP Environment - \\Remote (key=hyperspace__sup_environment_-_remote, sid=aon_1776178657_5501, input=screenshot-only)
+  [always-on] pynput not installed — input capture disabled
+  [always-on] Started capture: Hyperspace – SUP Environment – MATTHEW E JENSEN - \\Remote (key=hyperspace__sup_environment__matthew_e_jensen_-_remote, sid=aon_1776178721_9390, input=screenshot-only)
+  [always-on] Stopped capture: Hyperspace – SUP Environment - \\Remote (1 transitions)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

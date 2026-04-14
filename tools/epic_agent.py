@@ -1159,6 +1159,32 @@ _AON_EXCLUDED_TITLES = {
     "start", "search", "cortana", "task view", "new notification",
 }
 
+_AON_CITRIX_PATTERNS = [
+    "\\\\remote",
+    "citrix",
+    "hyperspace",
+    "epic",
+    "haiku",
+    "canto",
+    "willow",
+    "caboodle",
+    "radar",
+    "cogito",
+    "cheers",
+    "resolute",
+    "prelude",
+    "cadence",
+    "kaleidoscope",
+    "tapestry",
+    "beaker",
+    "beacon",
+    "stork",
+    "optime",
+    "rover",
+    "cupid",
+    "wisdom",
+]
+
 
 def _always_on_discover_windows():
     titles = []
@@ -1170,6 +1196,9 @@ def _always_on_discover_windows():
             if w.width < _AON_MIN_WINDOW_SIZE or w.height < _AON_MIN_WINDOW_SIZE:
                 continue
             if not w.visible:
+                continue
+            t_lower = t.lower()
+            if not any(p in t_lower for p in _AON_CITRIX_PATTERNS):
                 continue
             titles.append(t)
     except Exception:
