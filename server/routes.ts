@@ -1481,6 +1481,16 @@ export async function registerRoutes(
         waitMs: seg.recipe?.avgTransitionMs || seg.edge?.avgTransitionMs || 1000,
       }));
 
+      const alternateEdges: Record<string, any[]> = {};
+      for (const seg of plan.segments) {
+        const alts = tree.edges.filter(
+          e => e.to === seg.toFp && e.from !== seg.fromFp && e.triggerKeys?.length > 0
+        ).map(e => ({ triggerKeys: e.triggerKeys, fromFp: e.from }));
+        if (alts.length > 0) {
+          alternateEdges[seg.toFp] = alts;
+        }
+      }
+
       const id = `replay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       epicCommandQueue.push({
         id,
@@ -1488,6 +1498,7 @@ export async function registerRoutes(
         windowKey: wk,
         targetTitle: plan.toTitle,
         steps: replaySteps,
+        alternateEdges,
       });
 
       res.json({ ok: true, commandId: id, plan });

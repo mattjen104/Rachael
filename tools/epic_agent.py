@@ -528,22 +528,28 @@ def _hotkey_listener():
         HOTKEY_COMMAND = 2
         HOTKEY_SEARCH  = 3
         HOTKEY_AGENDA  = 4
+        HOTKEY_KILL_REPLAY = 5
 
         VK_C = 0x43
         VK_X = 0x58
         VK_S = 0x53
         VK_A = 0x41
+        VK_ESCAPE = 0x1B
+
+        MOD_CTRL = 0x0002
+        MOD_SHIFT = 0x0004
 
         hotkey_map = {
-            HOTKEY_CAPTURE: ("capture", VK_C, "Alt+C"),
-            HOTKEY_COMMAND: ("command", VK_X, "Alt+X"),
-            HOTKEY_SEARCH:  ("search",  VK_S, "Alt+S"),
-            HOTKEY_AGENDA:  ("agenda",  VK_A, "Alt+A"),
+            HOTKEY_CAPTURE: ("capture", VK_C, mods, "Alt+C"),
+            HOTKEY_COMMAND: ("command", VK_X, mods, "Alt+X"),
+            HOTKEY_SEARCH:  ("search",  VK_S, mods, "Alt+S"),
+            HOTKEY_AGENDA:  ("agenda",  VK_A, mods, "Alt+A"),
+            HOTKEY_KILL_REPLAY: ("kill_replay", VK_ESCAPE, MOD_CTRL | MOD_SHIFT | MOD_NOREPEAT, "Ctrl+Shift+Esc"),
         }
 
         registered = []
-        for hk_id, (mode, vk, label) in hotkey_map.items():
-            ok = user32.RegisterHotKey(None, hk_id, mods, vk)
+        for hk_id, (mode, vk, hk_mods, label) in hotkey_map.items():
+            ok = user32.RegisterHotKey(None, hk_id, hk_mods, vk)
             if ok:
                 registered.append(label)
             else:
@@ -553,6 +559,7 @@ def _hotkey_listener():
             print(f"  [hotkey] Global hotkeys registered: {', '.join(registered)}")
             print("    Alt+C = Capture  |  Alt+X = Command (M-x)")
             print("    Alt+S = Search   |  Alt+A = Agenda")
+            print("    Ctrl+Shift+Esc = Kill replay")
         else:
             print("  [hotkey] No hotkeys could be registered")
             return
@@ -564,7 +571,11 @@ def _hotkey_listener():
                 hk_id = msg.wParam
                 if hk_id in hotkey_map:
                     mode_name = hotkey_map[hk_id][0]
-                    _open_orgcloud_mode(mode_name)
+                    if mode_name == "kill_replay":
+                        _nav_replay_kill.set()
+                        print("  [hotkey] KILL REPLAY triggered (Ctrl+Shift+Esc)")
+                    else:
+                        _open_orgcloud_mode(mode_name)
 
         for hk_id in hotkey_map:
             user32.UnregisterHotKey(None, hk_id)
@@ -4036,12 +4047,66 @@ def execute_audio_status(cmd: dict) -> None:
     })
 
 
+_nav_replay_kill = threading.Event()
+
+
+def _nav_replay_vision_click(win_title, to_title, target_desc=""):
+    """Use LLM vision to find and click a target element on the current screen."""
+    if not OPENROUTER_API_KEY:
+        return False
+    try:
+        img, win = _session_grab_window(win_title)
+        if not img or not win:
+            return False
+        b64 = img_to_base64(img)
+        prompt_target = target_desc or to_title
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        {"type": "text", "text": f"I need to navigate to '{prompt_target}' in this application. What element should I click? Give precise pixel coordinates relative to this screenshot. Do NOT reference any patient names, MRNs, or PHI data. Reply as JSON only: {{\"action\": \"click\", \"x\": <int>, \"y\": <int>, \"target\": \"element description\"}} or {{\"action\": \"not_found\", \"reason\": \"...\"}}"},
+                    ]
+                }],
+                "max_tokens": 200,
+            },
+            timeout=30,
+        )
+        data = resp.json()
+        text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        parsed = _extract_json_object(text)
+        if parsed and parsed.get("action") == "click" and parsed.get("x") and parsed.get("y"):
+            wx, wy = win.left, win.top
+            click_x = wx + int(parsed["x"])
+            click_y = wy + int(parsed["y"])
+            pyautogui.click(click_x, click_y)
+            print(f"  [nav-replay] Vision click at ({parsed['x']},{parsed['y']}): {parsed.get('target', '?')}")
+            return True
+        else:
+            reason = parsed.get("reason", "unknown") if parsed else "no JSON response"
+            print(f"  [nav-replay] Vision could not find target: {reason}")
+            return False
+    except Exception as e:
+        print(f"  [nav-replay] Vision click error: {e}")
+        return False
+
+
 def execute_nav_replay(cmd):
     """Replay a navigation path using recorded fingerprint-verified steps."""
     command_id = cmd.get("id", "unknown")
     steps = cmd.get("steps", [])
     window_key = cmd.get("windowKey", "")
     target_title = cmd.get("targetTitle", "")
+    alternate_edges = cmd.get("alternateEdges", {})
+
+    _nav_replay_kill.clear()
 
     print(f"  [nav-replay] Starting replay to '{target_title}' ({len(steps)} hops)")
 
@@ -4052,9 +4117,10 @@ def execute_nav_replay(cmd):
     if not cap or not cap.get("active"):
         all_windows = list(gw.getAllWindows())
         target_win = None
+        wk_spaces = window_key.replace("_", " ")
         for w in all_windows:
-            t = w.title or ""
-            if window_key.replace("_", " ") in t.lower() and w.width > 200:
+            t = (w.title or "").lower()
+            if wk_spaces and wk_spaces in t and w.width > 200:
                 target_win = w
                 break
         if not target_win:
@@ -4066,6 +4132,10 @@ def execute_nav_replay(cmd):
 
     results = []
     for i, step in enumerate(steps):
+        if _nav_replay_kill.is_set():
+            results.append({"step": i + 1, "status": "killed", "fromTitle": step.get("fromTitle", "?"), "toTitle": step.get("toTitle", "?")})
+            break
+
         step_num = step.get("step", i + 1)
         from_title = step.get("fromTitle", "?")
         to_title = step.get("toTitle", "?")
@@ -4080,6 +4150,10 @@ def execute_nav_replay(cmd):
         max_retries = 2
 
         for attempt in range(max_retries + 1):
+            if _nav_replay_kill.is_set():
+                break
+
+            executed_action = False
             if trigger_keys:
                 for tk in trigger_keys:
                     if "+" in tk:
@@ -4094,10 +4168,12 @@ def execute_nav_replay(cmd):
                         except Exception:
                             pyautogui.press(tk)
                     time.sleep(0.3)
+                executed_action = True
             elif actions:
                 for act in actions:
                     act_type = act.get("action", "click")
                     act_key = act.get("key", "")
+                    act_target = act.get("target", "")
                     act_wait = act.get("waitMs", 500)
 
                     if act_type == "key" and act_key:
@@ -4105,20 +4181,25 @@ def execute_nav_replay(cmd):
                             sendinput_press(act_key)
                         except Exception:
                             pyautogui.press(act_key)
+                        executed_action = True
                     elif act_type == "hotkey" and act_key:
                         parts = act_key.split("+")
                         try:
                             sendinput_hotkey(*parts)
                         except Exception:
                             pyautogui.hotkey(*parts)
+                        executed_action = True
                     elif act_type == "click":
-                        pass
+                        clicked = _nav_replay_vision_click(win_title, to_title, act_target)
+                        executed_action = clicked
                     elif act_type == "wait":
                         time.sleep(act_wait / 1000.0)
 
-                    time.sleep(act_wait / 1000.0)
-            else:
-                time.sleep(wait_ms / 1000.0)
+                    time.sleep(min(act_wait / 1000.0, 2.0))
+
+            if not executed_action:
+                clicked = _nav_replay_vision_click(win_title, to_title)
+                executed_action = clicked
 
             time.sleep(max(0.5, wait_ms / 1000.0))
 
@@ -4140,6 +4221,30 @@ def execute_nav_replay(cmd):
                         break
                     elif attempt < max_retries:
                         print(f"  [nav-replay] Step {step_num} mismatch (attempt {attempt + 1}), expected={expected_fp[:12]}, got={current_fp[:12]}")
+                        if attempt == max_retries - 1:
+                            alt_edges = alternate_edges.get(expected_fp, [])
+                            for alt in alt_edges:
+                                alt_keys = alt.get("triggerKeys", [])
+                                if alt_keys:
+                                    print(f"  [nav-replay] Trying alternate edge: {alt_keys}")
+                                    for tk in alt_keys:
+                                        if "+" in tk:
+                                            try: sendinput_hotkey(*tk.split("+"))
+                                            except: pyautogui.hotkey(*tk.split("+"))
+                                        else:
+                                            try: sendinput_press(tk)
+                                            except: pyautogui.press(tk)
+                                        time.sleep(0.3)
+                                    time.sleep(max(0.5, wait_ms / 1000.0))
+                                    img2, _ = _session_grab_window(win_title)
+                                    if img2:
+                                        fp2 = _session_phash(_session_fingerprint_region(img2))
+                                        if fp2 == expected_fp:
+                                            results.append({"step": step_num, "status": "verified_alt", "attempt": attempt + 1, "fromTitle": from_title, "toTitle": to_title})
+                                            success = True
+                                            break
+                            if success:
+                                break
                         time.sleep(1.0)
                         continue
                     else:
@@ -4166,20 +4271,17 @@ def execute_nav_replay(cmd):
                 break
 
         if not success:
-            results.append({
-                "step": step_num,
-                "status": "failed",
-                "fromTitle": from_title,
-                "toTitle": to_title,
-            })
+            if not any(r.get("step") == step_num for r in results):
+                results.append({"step": step_num, "status": "failed", "fromTitle": from_title, "toTitle": to_title})
             break
 
     final_img, _ = _session_grab_window(win_title)
     final_b64 = img_to_base64(final_img) if final_img else ""
 
-    verified_count = sum(1 for r in results if r.get("status") == "verified")
+    verified_count = sum(1 for r in results if r.get("status") in ("verified", "verified_alt"))
     total = len(steps)
-    overall = "complete" if verified_count == total else "partial"
+    killed = _nav_replay_kill.is_set()
+    overall = "killed" if killed else ("complete" if verified_count == total else "partial")
 
     post_result(command_id, "complete", screenshot_b64=final_b64, data={
         "mode": "nav_replay",

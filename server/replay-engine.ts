@@ -212,6 +212,59 @@ async function strengthenRecipe(existing: NavRecipe, edge: {
     }
   }
 
+  if (edge.count >= 3 && existing.confidence >= 0.5 && existing.tags.includes("auto-generated")) {
+    try {
+      const refineMsgs: LLMMessage[] = [{
+        role: "user",
+        content: `You are refining a navigation recipe based on repeated observations.
+
+Current recipe:
+- Name: ${existing.name}
+- Description: ${existing.description}
+- From: "${existing.fromTitle}" -> To: "${existing.toTitle}"
+- Steps: ${JSON.stringify(existing.steps)}
+- Trigger keys seen across ${edge.count} observations: ${JSON.stringify(edge.triggerKeys)}
+- Average transition time: ${edge.avgTransitionMs}ms
+- Safety level: ${existing.safetyLevel}
+- Also-seen keys: ${existing.tags.filter(t => t.startsWith("also-seen:")).join(", ")}
+
+Refine this recipe:
+1. Improve the name to be more descriptive and human-readable
+2. Improve the description
+3. Add/update tags (e.g., "keyboard-shortcut", "menu-navigation", "tab-switch", etc.)
+4. Re-evaluate safetyLevel based on the destination: "low" (read-only), "medium" (editable), "high" (destructive/sensitive)
+
+Reply as JSON only:
+{"name": "improved-recipe-name", "description": "improved description", "tags": ["tag1","tag2"], "safetyLevel": "low|medium|high"}
+
+Do NOT reference any patient names, MRNs, or PHI data.`
+      }];
+
+      const refineResp = await executeLLM(refineMsgs, { maxTokens: 300 });
+      const jsonMatch = refineResp.match(/\{[\s\S]*?\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.name && typeof parsed.name === "string") {
+          existing.name = parsed.name.slice(0, 80).replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+        }
+        if (parsed.description && typeof parsed.description === "string") {
+          existing.description = parsed.description.slice(0, 200);
+        }
+        if (Array.isArray(parsed.tags)) {
+          const validTags = parsed.tags.filter((t: any) => typeof t === "string" && t.length < 40);
+          existing.tags = [...new Set([...validTags, ...existing.tags.filter(t => t.startsWith("also-seen:"))])];
+        }
+        if (parsed.safetyLevel && ["low", "medium", "high"].includes(parsed.safetyLevel)) {
+          existing.safetyLevel = parsed.safetyLevel;
+        }
+        existing.tags = existing.tags.filter(t => t !== "auto-generated");
+        existing.tags.push("llm-refined");
+      }
+    } catch (e) {
+      // LLM refinement is best-effort; keep existing recipe
+    }
+  }
+
   await saveRecipe(existing);
   return existing;
 }
