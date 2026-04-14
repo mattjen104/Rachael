@@ -42,7 +42,9 @@ All data lives in Postgres tables:
 - **Pathfinding**: BFS on navigation tree edges. `GET /api/sessions/pathfind?from=fp&to=fp&windowKey=wk` or `&target=name` for fuzzy match
 - **Replay execution**: `POST /api/sessions/replay` queues `nav_replay` command to desktop agent. Agent executes each step, verifies destination via screenshot fingerprint, retries on mismatch (up to 2x)
 - **Safety gate**: Hard-block patterns (password, delete, submit order, logout) + LLM risk classification (low/medium/high). High-risk paths require approval.
-- **TreeView**: Every destination node shows `>> Go here` action (runs `epic go SUP <title>`). Edges show recipe status: `{new}` or `{confirmed}` (3+ observations)
+- **Screen labeling**: When a new fingerprint is first seen, the screenshot is queued for LLM vision analysis (Gemini Flash). The LLM returns a short label like "Patient List", "Chart Review", etc. Labels are cached globally (`_SCREEN_LABELS`), injected into heartbeat payloads, and stored as the first element of each node's `titles[]` array. Server prioritizes short LLM labels over window titles via `unshift`.
+- **Heartbeat piggyback**: Tree stream data (fingerprints + transitions) is sent through the working heartbeat channel (`/api/epic/agent/heartbeat`) instead of the blocked `/api/sessions/stream` endpoint. The `_drain_all_stream_data()` function collects pending data from all captures and includes it as `streamData[]` in the heartbeat payload.
+- **TreeView**: Every destination node shows `>> Go here` action (runs `epic go SUP <title>`). Edges show recipe status: `{new}` or `{confirmed}` (3+ observations). Edge labels resolve to LLM-generated node titles when available.
 - **CLI**: `epic go <screen-name>` first checks Epic activity tree, then falls back to nav-tree fuzzy match + pathfinding + replay
 - **Agent command**: `nav_replay` type — receives ordered steps with action sequences, trigger keys, expected fingerprints, wait times
 
