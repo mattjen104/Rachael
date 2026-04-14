@@ -4878,6 +4878,14 @@ ${fullHtml}`;
                   waitMs: seg.recipe?.avgTransitionMs || seg.edge?.avgTransitionMs || 1000,
                 }));
 
+                const alternateEdges: Record<string, any[]> = {};
+                for (const seg of plan.segments) {
+                  const alts = tree.edges.filter(
+                    (e: any) => e.to === seg.toFp && e.from !== seg.fromFp && e.triggerKeys?.length > 0
+                  ).map((e: any) => ({ triggerKeys: e.triggerKeys, fromFp: e.from }));
+                  if (alts.length > 0) alternateEdges[seg.toFp] = alts;
+                }
+
                 const agentPort = process.env.PORT || 5000;
                 const sendResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
                   method: "POST",
@@ -4887,6 +4895,7 @@ ${fullHtml}`;
                     windowKey: wk,
                     targetTitle: match.title,
                     steps: replaySteps,
+                    alternateEdges,
                   }),
                 });
                 const sendData = await sendResp.json() as any;
@@ -4904,6 +4913,39 @@ ${fullHtml}`;
                 }
                 lines.push(`Est. time: ${plan.totalEstimatedMs}ms`);
                 lines.push(`Command ID: ${sendData.commandId}`);
+                lines.push(`Kill switch: Ctrl+Shift+Esc`);
+                lines.push("");
+                lines.push("Polling replay progress...");
+
+                const cmdId = sendData.commandId;
+                const totalHops = plan.segments.length;
+                let pollCount = 0;
+                const maxPolls = Math.max(20, totalHops * 5);
+                const pollInterval = 2000;
+
+                while (pollCount < maxPolls) {
+                  await new Promise(r => setTimeout(r, pollInterval));
+                  pollCount++;
+                  try {
+                    const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${cmdId}`);
+                    if (statusResp.status === 200) {
+                      const result = await statusResp.json() as any;
+                      if (result.data?.results) {
+                        for (const r of result.data.results) {
+                          const icon = r.status === "verified" || r.status === "verified_alt" ? "[OK]" : r.status === "killed" ? "[KILL]" : r.status === "fp_mismatch" ? "[MISS]" : "[??]";
+                          lines.push(`  Hop ${r.step}: ${r.fromTitle?.slice(0, 20)} -> ${r.toTitle?.slice(0, 20)} ${icon}`);
+                        }
+                        lines.push(`Result: ${result.data.overall} (${result.data.steps_verified}/${result.data.steps_total} verified)`);
+                      }
+                      break;
+                    }
+                  } catch {}
+                }
+
+                if (pollCount >= maxPolls) {
+                  lines.push("  (timed out waiting for replay result)");
+                }
+
                 return ok(lines.join(nl));
               }
             }

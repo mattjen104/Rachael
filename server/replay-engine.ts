@@ -240,8 +240,8 @@ Reply as JSON only:
 Do NOT reference any patient names, MRNs, or PHI data.`
       }];
 
-      const refineResp = await executeLLM(refineMsgs, { maxTokens: 300 });
-      const jsonMatch = refineResp.match(/\{[\s\S]*?\}/);
+      const refineResp = await executeLLM(refineMsgs, undefined, undefined, {}, { maxTokens: 300 });
+      const jsonMatch = refineResp.content.match(/\{[\s\S]*?\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         if (parsed.name && typeof parsed.name === "string") {
