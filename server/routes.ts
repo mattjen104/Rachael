@@ -1371,6 +1371,69 @@ export async function registerRoutes(
       tree.mergedSessions.push(sessionId);
     }
 
+    tree.edges = tree.edges.filter((e: any) => e.from !== e.to);
+
+    function hammingDistance(a: string, b: string): number {
+      if (a.length !== b.length) return 999;
+      const ai = BigInt("0x" + a), bi = BigInt("0x" + b);
+      let x = ai ^ bi, d = 0;
+      while (x > 0n) { d += Number(x & 1n); x >>= 1n; }
+      return d;
+    }
+
+    const fpList = Object.keys(tree.nodes);
+    const mergeMap: Record<string, string> = {};
+    for (let i = 0; i < fpList.length; i++) {
+      if (mergeMap[fpList[i]]) continue;
+      for (let j = i + 1; j < fpList.length; j++) {
+        if (mergeMap[fpList[j]]) continue;
+        if (hammingDistance(fpList[i], fpList[j]) <= 3) {
+          const ni = tree.nodes[fpList[i]], nj = tree.nodes[fpList[j]];
+          const iHasLabel = ni.titles.some((t: string) => t.length < 50 && !t.includes(" – ") && !t.includes("Hyperspace"));
+          const jHasLabel = nj.titles.some((t: string) => t.length < 50 && !t.includes(" – ") && !t.includes("Hyperspace"));
+          const keepFp = (iHasLabel && !jHasLabel) ? fpList[i] : (jHasLabel && !iHasLabel) ? fpList[j] :
+            (ni.visitCount || 0) >= (nj.visitCount || 0) ? fpList[i] : fpList[j];
+          const removeFp = keepFp === fpList[i] ? fpList[j] : fpList[i];
+          mergeMap[removeFp] = keepFp;
+        }
+      }
+    }
+
+    if (Object.keys(mergeMap).length > 0) {
+      for (const [removeFp, keepFp] of Object.entries(mergeMap)) {
+        const removeNode = tree.nodes[removeFp];
+        const keepNode = tree.nodes[keepFp];
+        if (removeNode && keepNode) {
+          keepNode.visitCount = (keepNode.visitCount || 0) + (removeNode.visitCount || 0);
+          for (const t of (removeNode.titles || [])) {
+            if (t && !keepNode.titles.includes(t)) keepNode.titles.push(t);
+          }
+          for (const s of (removeNode.sessions || [])) {
+            if (s && !keepNode.sessions.includes(s)) keepNode.sessions.push(s);
+          }
+          delete tree.nodes[removeFp];
+        }
+      }
+      for (const edge of tree.edges) {
+        if (mergeMap[edge.from]) edge.from = mergeMap[edge.from];
+        if (mergeMap[edge.to]) edge.to = mergeMap[edge.to];
+      }
+      tree.edges = tree.edges.filter((e: any) => e.from !== e.to);
+      const dedupEdges: any[] = [];
+      for (const e of tree.edges) {
+        const existing = dedupEdges.find((d: any) => d.from === e.from && d.to === e.to);
+        if (existing) {
+          existing.count += e.count;
+          existing.totalTransitionMs = (existing.totalTransitionMs || 0) + (e.totalTransitionMs || 0);
+          existing.avgTransitionMs = Math.round(existing.totalTransitionMs / Math.max(existing.count, 1));
+          for (const k of (e.triggerKeys || [])) { if (k && !existing.triggerKeys.includes(k)) existing.triggerKeys.push(k); }
+        } else {
+          dedupEdges.push(e);
+        }
+      }
+      tree.edges = dedupEdges;
+    }
+
     tree.patterns = [];
     for (const edge of tree.edges) {
       if (edge.count >= 2) {

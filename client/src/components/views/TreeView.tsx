@@ -464,41 +464,86 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
               }
             }
 
-            const sortedWNodes = [...wNodes].sort((a: any, b: any) => (b.visitCount || 0) - (a.visitCount || 0));
+            const getNodeLabel = (n: any) => {
+              const titles = n?.titles || [];
+              const llmLabel = titles.find((t: string) => t.length < 50 && !t.includes(" – ") && !t.includes("Hyperspace") && !t.includes("\\\\"));
+              return llmLabel || (titles.length > 0 ? titles[0] : n?.fingerprint?.slice(0, 12) || "?");
+            };
+
+            const formatAction = (e: any) => {
+              const keys = e.triggerKeys || [];
+              const clickKeys = keys.filter((k: string) => k.startsWith("click("));
+              const kbKeys = keys.filter((k: string) => !k.startsWith("click("));
+              if (kbKeys.length > 0) return kbKeys[0];
+              if (clickKeys.length > 0) return clickKeys[0];
+              return "";
+            };
+
+            const rootFps = new Set(wNodes.map((n: any) => n.fingerprint));
+            const childFps = new Set(wEdges.map((e: any) => e.to));
+            const topFps = [...rootFps].filter(fp => !childFps.has(fp));
+            if (topFps.length === 0 && wNodes.length > 0) {
+              const sorted = [...wNodes].sort((a: any, b: any) => (a.lastSeen || 0) - (b.lastSeen || 0));
+              topFps.push(sorted[0].fingerprint);
+            }
+
+            const visited = new Set<string>();
+            const renderNode = (fp: string, depth: number) => {
+              if (visited.has(fp) || depth > 6) return;
+              visited.add(fp);
+              const node = wNodes.find((n: any) => n.fingerprint === fp);
+              if (!node) return;
+              const label = getNodeLabel(node);
+              const displayLabel = label.slice(0, 40);
+              const visits = node.visitCount || 0;
+              const indent = "    " + "  ".repeat(depth);
+              const nodeKey = `${wKey}-fp-${fp}`;
+              const outEdges = wEdges.filter((e: any) => e.from === fp);
+              const inEdges = wEdges.filter((e: any) => e.to === fp);
+              const childCount = outEdges.length;
+
+              nodes.push({ type: "section", label: `${indent}${displayLabel}`, key: nodeKey, count: childCount > 0 ? childCount : visits });
+              if (expanded.has(nodeKey)) {
+                const goTitle = label.replace(/[;&|"`$\\]/g, "");
+                nodes.push({ type: "bridge-info", label: `${indent}  >> Go here`, actionCmd: `epic go --replay SUP "${goTitle}"` });
+                if (visits > 0) {
+                  nodes.push({ type: "bridge-info", label: `${indent}  ${visits} visits  fp:${fp.slice(0, 12)}`, actionCmd: "" });
+                }
+
+                for (const e of inEdges.slice(0, 5)) {
+                  const fromNode = wNodes.find((n: any) => n.fingerprint === e.from);
+                  const fromLabel = getNodeLabel(fromNode || {}).slice(0, 25);
+                  const action = formatAction(e);
+                  const via = action ? ` via ${action}` : "";
+                  nodes.push({ type: "bridge-info", label: `${indent}  <- ${fromLabel}${via}`, actionCmd: "" });
+                }
+
+                for (const e of outEdges) {
+                  const toNode = wNodes.find((n: any) => n.fingerprint === e.to);
+                  const toLabel = getNodeLabel(toNode || {}).slice(0, 30);
+                  const action = formatAction(e);
+                  const ms = e.avgTransitionMs ? ` ~${Math.round(e.avgTransitionMs / 1000)}s` : "";
+                  const via = action ? ` [${action}]` : "";
+                  const status = e.approved ? " *" : e.count >= 3 ? " ~" : "";
+                  if (!visited.has(e.to)) {
+                    renderNode(e.to, depth + 1);
+                  } else {
+                    nodes.push({ type: "bridge-info", label: `${indent}  -> ${toLabel}  (${e.count}x${ms}${via}${status})`, actionCmd: "" });
+                  }
+                }
+              }
+            };
+
             const screenKey = `${wKey}-screens`;
-            nodes.push({ type: "section", label: `    Destinations`, key: screenKey, count: wNodes.length });
+            nodes.push({ type: "section", label: `    Navigation Graph`, key: screenKey, count: wNodes.length });
             if (expanded.has(screenKey)) {
-              for (const node of sortedWNodes.slice(0, 30)) {
-                const displayTitle = (node.titles || []).length > 0 ? node.titles[0].slice(0, 35) : node.fingerprint?.slice(0, 12) || "?";
-                const visits = node.visitCount || 0;
-                const nodeKey = `${wKey}-fp-${node.fingerprint || displayTitle}`;
-                nodes.push({ type: "section", label: `      ${displayTitle}`, key: nodeKey, count: visits });
-                if (expanded.has(nodeKey)) {
-                  const goTitle = ((node.titles || []).length > 0 ? node.titles[0] : node.fingerprint || "?").replace(/[;&|"`$\\]/g, "");
-                  nodes.push({ type: "bridge-info", label: `        >> Go here`, actionCmd: `epic go --replay SUP "${goTitle}"` });
-                  nodes.push({ type: "bridge-info", label: `        fp:${(node.fingerprint || "?").slice(0, 16)}  ${visits} visits`, actionCmd: "" });
-                  if ((node.titles || []).length > 1) {
-                    nodes.push({ type: "bridge-info", label: `        titles: ${node.titles.slice(0, 3).join(", ")}`, actionCmd: "" });
-                  }
-                  const outEdges = wEdges.filter((e: any) => e.from === node.fingerprint);
-                  const inEdges = wEdges.filter((e: any) => e.to === node.fingerprint);
-                  for (const e of outEdges.slice(0, 8)) {
-                    const toNode = wNodes.find((n: any) => n.fingerprint === e.to);
-                    const toNodeLabel = (toNode?.titles || []).length > 0 ? toNode.titles[0] : null;
-                    const toLabel = (toNodeLabel || e.toTitle || e.to?.slice(0, 12) || "?").slice(0, 30);
-                    const ms = e.avgTransitionMs ? ` ~${e.avgTransitionMs}ms` : "";
-                    const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
-                    const crops = (e.labelCrops || []).length > 0 ? " +crop" : "";
-                    const recipeStatus = e.approved ? " {approved-for-auto}" : e.count >= 3 ? " {confirmed}" : e.count >= 1 ? " {new}" : "";
-                    nodes.push({ type: "bridge-info", label: `        -> ${toLabel}  (${e.count}x${ms}${keys}${crops}${recipeStatus})`, actionCmd: "" });
-                  }
-                  for (const e of inEdges.slice(0, 8)) {
-                    const fromNode = wNodes.find((n: any) => n.fingerprint === e.from);
-                    const fromNodeLabel = (fromNode?.titles || []).length > 0 ? fromNode.titles[0] : null;
-                    const fromLabel = (fromNodeLabel || e.fromTitle || e.from?.slice(0, 12) || "?").slice(0, 30);
-                    const keys = (e.triggerKeys || []).length > 0 ? ` [${e.triggerKeys.join(",")}]` : "";
-                    nodes.push({ type: "bridge-info", label: `        <- ${fromLabel}  (${e.count}x${keys})`, actionCmd: "" });
-                  }
+              for (const rootFp of topFps) {
+                renderNode(rootFp, 0);
+              }
+              const unvisited = wNodes.filter((n: any) => !visited.has(n.fingerprint));
+              if (unvisited.length > 0) {
+                for (const n of unvisited) {
+                  renderNode(n.fingerprint, 0);
                 }
               }
             }

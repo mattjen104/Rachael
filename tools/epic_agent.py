@@ -2684,6 +2684,8 @@ def _drain_all_stream_data():
                     if label not in fingerprints[fp_key]["titles"]:
                         fingerprints[fp_key]["titles"].insert(0, label)
 
+        transitions = [t for t in transitions if (t.get("from_fingerprint") or t.get("from_fp", "")) != (t.get("to_fingerprint") or t.get("to_fp", ""))]
+
         if not transitions and not fingerprints:
             continue
         stream_data.append({
