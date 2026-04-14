@@ -1077,6 +1077,8 @@ def _always_on_flush(cap):
         cap["pending_transitions"] = []
         cap["pending_fingerprints"] = {}
 
+    wk = cap.get("window_key", "?")[:28]
+    print(f"  [aon-flush-dbg] {wk}: {len(fingerprints)} fps, {len(transitions)} trans")
     if not transitions and not fingerprints:
         return
 
