@@ -471,41 +471,36 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
             };
 
             const formatAction = (e: any) => {
+              const method = e.preferredMethod || "";
               const keys = e.triggerKeys || [];
-              const clickKeys = keys.filter((k: string) => k.startsWith("click("));
               const kbKeys = keys.filter((k: string) => !k.startsWith("click("));
               if (kbKeys.length > 0) return kbKeys[0];
-              if (clickKeys.length > 0) return clickKeys[0];
+              if (method) return method;
               return "";
             };
 
-            const rootFps = new Set(wNodes.map((n: any) => n.fingerprint));
-            const childFps = new Set(wEdges.map((e: any) => e.to));
-            const topFps = [...rootFps].filter(fp => !childFps.has(fp));
-            if (topFps.length === 0 && wNodes.length > 0) {
-              const sorted = [...wNodes].sort((a: any, b: any) => (a.lastSeen || 0) - (b.lastSeen || 0));
-              topFps.push(sorted[0].fingerprint);
-            }
+            const ctxIcon = (ctx: any) => {
+              if (!ctx) return "";
+              if (ctx.ephemeral) return " ~";
+              if (ctx.contextLevel === "encounter") return " +E";
+              if (ctx.contextLevel === "patient") return " +P";
+              return "";
+            };
 
-            const visited = new Set<string>();
-            const renderNode = (fp: string, depth: number) => {
-              if (visited.has(fp) || depth > 6) return;
-              visited.add(fp);
-              const node = wNodes.find((n: any) => n.fingerprint === fp);
-              if (!node) return;
+            const renderNodeDetail = (node: any, fp: string, indent: string) => {
+              const nodeKey = `${wKey}-fp-${fp}`;
               const label = getNodeLabel(node);
               const displayLabel = label.slice(0, 40);
               const visits = node.visitCount || 0;
-              const indent = "    " + "  ".repeat(depth);
-              const nodeKey = `${wKey}-fp-${fp}`;
+              const ctx = node.context;
+              const ctxTag = ctxIcon(ctx);
               const outEdges = wEdges.filter((e: any) => e.from === fp);
               const inEdges = wEdges.filter((e: any) => e.to === fp);
-              const childCount = outEdges.length;
 
-              nodes.push({ type: "section", label: `${indent}${displayLabel}`, key: nodeKey, count: childCount > 0 ? childCount : visits });
+              nodes.push({ type: "section", label: `${indent}${displayLabel}${ctxTag}`, key: nodeKey, count: visits });
               if (expanded.has(nodeKey)) {
                 const goTitle = label.replace(/[;&|"`$\\]/g, "");
-                nodes.push({ type: "bridge-info", label: `${indent}  >> Go here`, actionCmd: `epic go --replay SUP "${goTitle}"` });
+                nodes.push({ type: "bridge-info", label: `${indent}  >> Go here`, actionCmd: `epic go SUP "${goTitle}"` });
                 if (visits > 0) {
                   nodes.push({ type: "bridge-info", label: `${indent}  ${visits} visits  fp:${fp.slice(0, 12)}`, actionCmd: "" });
                 }
@@ -518,32 +513,75 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                   nodes.push({ type: "bridge-info", label: `${indent}  <- ${fromLabel}${via}`, actionCmd: "" });
                 }
 
-                for (const e of outEdges) {
+                for (const e of outEdges.slice(0, 10)) {
                   const toNode = wNodes.find((n: any) => n.fingerprint === e.to);
                   const toLabel = getNodeLabel(toNode || {}).slice(0, 30);
                   const action = formatAction(e);
                   const ms = e.avgTransitionMs ? ` ~${Math.round(e.avgTransitionMs / 1000)}s` : "";
                   const via = action ? ` [${action}]` : "";
                   const status = e.approved ? " *" : e.count >= 3 ? " ~" : "";
-                  if (!visited.has(e.to)) {
-                    renderNode(e.to, depth + 1);
-                  } else {
-                    nodes.push({ type: "bridge-info", label: `${indent}  -> ${toLabel}  (${e.count}x${ms}${via}${status})`, actionCmd: "" });
-                  }
+                  nodes.push({ type: "bridge-info", label: `${indent}  -> ${toLabel}  (${e.count}x${ms}${via}${status})`, actionCmd: "" });
                 }
               }
             };
 
-            const screenKey = `${wKey}-screens`;
-            nodes.push({ type: "section", label: `    Navigation Graph`, key: screenKey, count: wNodes.length });
-            if (expanded.has(screenKey)) {
-              for (const rootFp of topFps) {
-                renderNode(rootFp, 0);
+            const pinnedKey = `${wKey}-pinned`;
+            const sortedByVisits = [...wNodes].sort((a: any, b: any) => (b.visitCount || 0) - (a.visitCount || 0));
+            const pinned = sortedByVisits.filter((n: any) => (n.visitCount || 0) >= 2).slice(0, 8);
+            if (pinned.length > 0) {
+              nodes.push({ type: "section", label: `    Shortcuts`, key: pinnedKey, count: pinned.length });
+              if (expanded.has(pinnedKey)) {
+                for (const n of pinned) {
+                  const label = getNodeLabel(n).slice(0, 35);
+                  const goTitle = label.replace(/[;&|"`$\\]/g, "");
+                  const ctx = n.context;
+                  const ctxTag = ctx?.contextLevel === "patient" ? " [patient]" : ctx?.contextLevel === "encounter" ? " [encounter]" : "";
+                  nodes.push({ type: "bridge-info", label: `      >> ${label}${ctxTag}`, actionCmd: `epic go SUP "${goTitle}"` });
+                }
               }
-              const unvisited = wNodes.filter((n: any) => !visited.has(n.fingerprint));
-              if (unvisited.length > 0) {
-                for (const n of unvisited) {
-                  renderNode(n.fingerprint, 0);
+            }
+
+            const ephemeralNodes = wNodes.filter((n: any) => n.context?.ephemeral);
+            const ephemeralFps = new Set(ephemeralNodes.map((n: any) => n.fingerprint));
+            const workspaceNodes = wNodes.filter((n: any) => !ephemeralFps.has(n.fingerprint) && (!n.context || n.context.contextLevel === "none"));
+            const patientNodes = wNodes.filter((n: any) => !ephemeralFps.has(n.fingerprint) && n.context?.contextLevel === "patient");
+            const encounterNodes = wNodes.filter((n: any) => !ephemeralFps.has(n.fingerprint) && n.context?.contextLevel === "encounter");
+            const classifiedFps = new Set([...ephemeralFps, ...workspaceNodes.map((n: any) => n.fingerprint), ...patientNodes.map((n: any) => n.fingerprint), ...encounterNodes.map((n: any) => n.fingerprint)]);
+            const unclassified = wNodes.filter((n: any) => !classifiedFps.has(n.fingerprint));
+
+            const contextGroups = [
+              { label: "Workspace", key: `${wKey}-ctx-workspace`, items: workspaceNodes },
+              { label: "Patient Chart", key: `${wKey}-ctx-patient`, items: patientNodes },
+              { label: "Encounter", key: `${wKey}-ctx-encounter`, items: encounterNodes },
+              { label: "Overlays", key: `${wKey}-ctx-ephemeral`, items: ephemeralNodes },
+            ];
+
+            if (workspaceNodes.length === 0 && patientNodes.length === 0 && encounterNodes.length === 0) {
+              const screenKey = `${wKey}-screens`;
+              nodes.push({ type: "section", label: `    All Destinations`, key: screenKey, count: wNodes.length });
+              if (expanded.has(screenKey)) {
+                for (const n of sortedByVisits.slice(0, 30)) {
+                  renderNodeDetail(n, n.fingerprint, "      ");
+                }
+              }
+            } else {
+              for (const group of contextGroups) {
+                if (group.items.length === 0) continue;
+                const sorted = [...group.items].sort((a: any, b: any) => (b.visitCount || 0) - (a.visitCount || 0));
+                nodes.push({ type: "section", label: `    ${group.label}`, key: group.key, count: group.items.length });
+                if (expanded.has(group.key)) {
+                  for (const n of sorted.slice(0, 20)) {
+                    renderNodeDetail(n, n.fingerprint, "      ");
+                  }
+                }
+              }
+              if (unclassified.length > 0) {
+                const unkKey = `${wKey}-ctx-unknown`;
+                nodes.push({ type: "section", label: `    Unclassified`, key: unkKey, count: unclassified.length });
+                if (expanded.has(unkKey)) {
+                  for (const n of unclassified.slice(0, 20)) {
+                    renderNodeDetail(n, n.fingerprint, "      ");
+                  }
                 }
               }
             }

@@ -4964,6 +4964,55 @@ ${fullHtml}`;
           console.error(`[epic go] nav-tree lookup error: ${e.message}`);
         }
 
+        try {
+          const skeletonCfg = await storage.getAgentConfig("epic_app_skeleton");
+          if (skeletonCfg?.value) {
+            const skeleton = JSON.parse(skeletonCfg.value);
+            const activities = skeleton.activities || {};
+            const targetLower = target.toLowerCase();
+            let bestMatch = "";
+            let bestScore = 0;
+            for (const actName of Object.keys(activities)) {
+              const actLower = actName.toLowerCase();
+              const words = targetLower.split(/\s+/);
+              const matched = words.filter(w => actLower.includes(w)).length;
+              const score = matched / Math.max(words.length, 1);
+              if (score > bestScore) {
+                bestScore = score;
+                bestMatch = actName;
+              }
+            }
+            if (bestScore >= 0.5 && bestMatch) {
+              const lines: string[] = [];
+              const actInfo = activities[bestMatch];
+              lines.push(`[epic] Synthesizing Ctrl+Space search for "${bestMatch}"`);
+              if (actInfo?.contextReq && actInfo.contextReq !== "none") {
+                lines.push(`  Context required: ${actInfo.contextReq} (ensure a patient is open)`);
+              }
+              const sendResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  type: "search",
+                  env,
+                  query: bestMatch,
+                  windowKey: Object.keys((await (await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/status`)).json() as any).capture || {})[0] || "",
+                }),
+              });
+              const sendData = await sendResp.json() as any;
+              if (sendData.ok) {
+                lines.push(`  Command sent: ${sendData.commandId}`);
+                lines.push(`  Strategy: Ctrl+Space -> type "${bestMatch}" -> select`);
+                return ok(lines.join(nl));
+              }
+              lines.push(`  Failed to send search command, falling back`);
+              return fail(lines.join(nl));
+            }
+          }
+        } catch (e: any) {
+          console.error(`[epic go] skeleton lookup error: ${e.message}`);
+        }
+
         return fail(`[epic] No activity matching "${target}" found in ${env} tree or navigation map. Run epic search ${target} to find it.`);
       }
 

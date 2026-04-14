@@ -811,7 +811,7 @@ _LABEL_MODEL = "google/gemini-2.0-flash-001"
 
 
 _EPIC_LABEL_PROMPT = EPIC_VISUAL_REFERENCE + """
-TASK: Identify this screen and return a short label.
+TASK: Identify this screen and return a label + context.
 
 Follow the IDENTIFYING THE CURRENT SCREEN priority order from the reference:
 1. Is the title bar RED with a BLUE search field? -> LABEL: Search Active
@@ -825,29 +825,117 @@ Follow the IDENTIFYING THE CURRENT SCREEN priority order from the reference:
 7. Check LEFT SIDEBAR selection (Layer 5) for sub-section context.
 DO NOT use the title bar text (Layer 1) — it only shows department/environment.
 
-RESPONSE FORMAT — reply with exactly ONE line:
+RESPONSE FORMAT — reply with exactly these lines:
 LABEL: <2-6 word screen/activity name>
+CONTEXT: <none|patient|encounter>
+EPHEMERAL: <true|false>
+ACTIVITY: <current activity name or none>
+PATIENT_TAB: <true|false>
+
+Context detection rules:
+- CONTEXT: none = no patient tabs visible in Layer 3, workspace-level screen
+- CONTEXT: patient = patient name tab visible in Layer 3 (e.g. "Nuno, David" with x close button), viewing patient chart in review mode
+- CONTEXT: encounter = patient tab visible AND encounter-specific indicators (order entry, documentation, encounter-level flowsheets)
+- EPHEMERAL: true = floating overlay (dialog, BPA alert, Epic Menu, search overlay, right-click menu) — dismissing returns to previous screen
+- EPHEMERAL: false = persistent screen (workspace, patient chart, activity)
+- ACTIVITY: the specific activity name from Layer 3b activity tabs or Layer 4 breadcrumb (e.g. "Chart Review", "Flowsheets", "InBasket"). Write "none" if no specific activity.
+- PATIENT_TAB: true if Layer 3 has patient name tabs with close buttons, false otherwise
 
 Examples:
 LABEL: TXP Staff Dashboard
-LABEL: Snapshot Report
+CONTEXT: none
+EPHEMERAL: false
+ACTIVITY: TXP Staff Dashboard
+PATIENT_TAB: false
+
 LABEL: Chart Review
-LABEL: Review Flowsheets
-LABEL: Synopsis
-LABEL: Results Review
-LABEL: Demographics
-LABEL: Radar Admin - Dashboards
-LABEL: Dashboard Editor
-LABEL: Builder - Components
-LABEL: Patient List
-LABEL: InBasket
-LABEL: Schedule
+CONTEXT: patient
+EPHEMERAL: false
+ACTIVITY: Chart Review
+PATIENT_TAB: true
+
 LABEL: Epic Menu
-LABEL: Search Active
+CONTEXT: none
+EPHEMERAL: true
+ACTIVITY: none
+PATIENT_TAB: false
+
 LABEL: BPA Alert Dialog
+CONTEXT: patient
+EPHEMERAL: true
+ACTIVITY: none
+PATIENT_TAB: true
 
 If the screen is blank, loading, or unrecognizable: LABEL: Unknown Screen
-Do NOT include patient names, MRNs, or PHI."""
+Do NOT include patient names, MRNs, or PHI in the LABEL."""
+
+
+_SCREEN_CONTEXTS = {}
+_SCREEN_CONTEXT_LOCK = threading.Lock()
+
+_CONTEXT_STACKS = {}
+_CONTEXT_STACK_LOCK = threading.Lock()
+
+
+def _update_context_stack(window_key, prev_fp, fp, from_ctx, to_ctx, nav_strategy):
+    with _CONTEXT_STACK_LOCK:
+        if window_key not in _CONTEXT_STACKS:
+            _CONTEXT_STACKS[window_key] = {
+                "base": "none",
+                "ephemeral_depth": 0,
+                "history": [],
+                "current_fp": None,
+                "current_ctx": {},
+            }
+        stack = _CONTEXT_STACKS[window_key]
+
+        to_level = to_ctx.get("contextLevel", "none") if to_ctx else "none"
+        to_ephemeral = to_ctx.get("ephemeral", False) if to_ctx else False
+        from_ephemeral = from_ctx.get("ephemeral", False) if from_ctx else False
+
+        if from_ephemeral and not to_ephemeral:
+            stack["ephemeral_depth"] = max(0, stack["ephemeral_depth"] - 1)
+        elif to_ephemeral and not from_ephemeral:
+            stack["ephemeral_depth"] += 1
+
+        if not to_ephemeral:
+            stack["base"] = to_level
+
+        stack["current_fp"] = fp
+        stack["current_ctx"] = to_ctx or {}
+        stack["history"].append({
+            "fp": fp,
+            "ctx": to_level,
+            "ephemeral": to_ephemeral,
+            "strategy": nav_strategy,
+            "ts": time.time(),
+        })
+        if len(stack["history"]) > 50:
+            stack["history"] = stack["history"][-30:]
+
+        return stack.copy()
+
+
+def _parse_label_response(raw):
+    label = None
+    context = {"contextLevel": "none", "ephemeral": False, "activity": None, "patientTab": False}
+    for line in raw.strip().split("\n"):
+        line = line.strip()
+        if line.startswith("LABEL:"):
+            label = line.split("LABEL:", 1)[1].strip().strip('"').strip("'").strip()
+        elif line.startswith("CONTEXT:"):
+            val = line.split("CONTEXT:", 1)[1].strip().lower()
+            if val in ("none", "patient", "encounter"):
+                context["contextLevel"] = val
+        elif line.startswith("EPHEMERAL:"):
+            context["ephemeral"] = line.split("EPHEMERAL:", 1)[1].strip().lower() == "true"
+        elif line.startswith("ACTIVITY:"):
+            val = line.split("ACTIVITY:", 1)[1].strip()
+            if val.lower() != "none" and val:
+                context["activity"] = val
+        elif line.startswith("PATIENT_TAB:"):
+            context["patientTab"] = line.split("PATIENT_TAB:", 1)[1].strip().lower() == "true"
+    return label, context
 
 
 def _screen_labeler_thread():
@@ -873,20 +961,24 @@ def _screen_labeler_thread():
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                         {"type": "text", "text": _EPIC_LABEL_PROMPT},
                     ]}],
-                    "max_tokens": 60,
+                    "max_tokens": 120,
                 },
                 timeout=30,
             )
             if resp.status_code == 200:
                 raw = resp.json()["choices"][0]["message"]["content"].strip()
-                label = raw
-                if "LABEL:" in raw:
-                    label = raw.split("LABEL:")[-1].strip()
-                label = label.strip('"').strip("'").strip()
+                label, context = _parse_label_response(raw)
                 if label and len(label) < 80 and label.lower() != "unknown screen":
                     with _SCREEN_LABEL_LOCK:
                         _SCREEN_LABELS[fp] = label
-                    print(f"  [label] {fp[:12]}.. = {label}")
+                    with _SCREEN_CONTEXT_LOCK:
+                        _SCREEN_CONTEXTS[fp] = context
+                    ctx_str = context["contextLevel"]
+                    if context["ephemeral"]:
+                        ctx_str += "/ephemeral"
+                    if context["activity"]:
+                        ctx_str += f"/{context['activity']}"
+                    print(f"  [label] {fp[:12]}.. = {label} [{ctx_str}]")
                 else:
                     print(f"  [label] {fp[:12]}.. unrecognized: {raw[:60]}")
             else:
@@ -1224,6 +1316,24 @@ def _always_on_screenshot_loop(cap):
                     action_keys, label_crops = _always_on_extract_action_keys(actions_since)
                     transition_ms = int((now - cap.get("last_fp_change_time", now)) * 1000)
 
+                    nav_strategy = "click"
+                    for ak in action_keys:
+                        ak_lower = ak.lower() if isinstance(ak, str) else ""
+                        if "ctrl" in ak_lower and "space" in ak_lower:
+                            nav_strategy = "search"
+                            break
+                        if ak_lower in ("f1","f2","f3","f4","f5","f6","f7","f8","f9","f10","f11","f12",
+                                        "alt","tab","escape","enter","home","end"):
+                            nav_strategy = "keyboard"
+                        if "alt+" in ak_lower or "ctrl+" in ak_lower:
+                            nav_strategy = "keyboard"
+
+                    with _SCREEN_CONTEXT_LOCK:
+                        from_ctx = _SCREEN_CONTEXTS.get(prev_fp, {})
+                        to_ctx = _SCREEN_CONTEXTS.get(fp, {})
+
+                    _update_context_stack(cap["window_key"], prev_fp, fp, from_ctx, to_ctx, nav_strategy)
+
                     cap["pending_transitions"].append({
                         "from_fp": prev_fp,
                         "to_fp": fp,
@@ -1233,6 +1343,9 @@ def _always_on_screenshot_loop(cap):
                         "transition_ms": transition_ms,
                         "action_keys": action_keys,
                         "label_crop": label_crops[0] if label_crops else None,
+                        "nav_strategy": nav_strategy,
+                        "from_context": from_ctx if from_ctx else None,
+                        "to_context": to_ctx if to_ctx else None,
                     })
                     cap["transition_count"] += 1
                     cap["last_fp_change_time"] = now
@@ -1377,6 +1490,14 @@ def _always_on_get_capture_state():
                     "last_transition_ts": cap.get("last_transition_ts", 0),
                     "current_fp": cap.get("last_fingerprint", ""),
                 }
+                with _CONTEXT_STACK_LOCK:
+                    cs = _CONTEXT_STACKS.get(key)
+                    if cs:
+                        result[key]["context"] = {
+                            "base": cs["base"],
+                            "ephemeral_depth": cs["ephemeral_depth"],
+                            "current_ctx": cs["current_ctx"],
+                        }
         return result
 
 
@@ -2683,6 +2804,12 @@ def _drain_all_stream_data():
                         fingerprints[fp_key] = {"count": 0, "titles": []}
                     if label not in fingerprints[fp_key]["titles"]:
                         fingerprints[fp_key]["titles"].insert(0, label)
+        with _SCREEN_CONTEXT_LOCK:
+            for fp_key in list(cap["fingerprints"].keys()):
+                if fp_key in _SCREEN_CONTEXTS:
+                    if fp_key not in fingerprints:
+                        fingerprints[fp_key] = {"count": 0, "titles": []}
+                    fingerprints[fp_key]["context"] = _SCREEN_CONTEXTS[fp_key]
 
         transitions = [t for t in transitions if (t.get("from_fingerprint") or t.get("from_fp", "")) != (t.get("to_fingerprint") or t.get("to_fp", ""))]
 

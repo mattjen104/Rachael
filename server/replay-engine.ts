@@ -271,6 +271,14 @@ Do NOT reference any patient names, MRNs, or PHI data.`
   return existing;
 }
 
+function edgeCost(e: any): number {
+  const method = e.preferredMethod || "click";
+  const methodCosts: Record<string, number> = { search: 1, keyboard: 2, toolbar: 4, click: 5 };
+  const baseCost = methodCosts[method] ?? 5;
+  const reliability = Math.min(e.count || 1, 10) / 10;
+  return baseCost * (1 - reliability * 0.3);
+}
+
 export function findShortestPath(
   nodes: Record<string, any>,
   edges: any[],
@@ -280,23 +288,27 @@ export function findShortestPath(
   if (fromFp === toFp) return [];
   if (!nodes[fromFp] || !nodes[toFp]) return null;
 
-  const adjacency: Record<string, { to: string; edge: any }[]> = {};
+  const adjacency: Record<string, { to: string; edge: any; cost: number }[]> = {};
   for (const fp of Object.keys(nodes)) {
     adjacency[fp] = [];
   }
   for (const e of edges) {
     if (adjacency[e.from]) {
-      adjacency[e.from].push({ to: e.to, edge: e });
+      adjacency[e.from].push({ to: e.to, edge: e, cost: edgeCost(e) });
     }
   }
 
-  const visited = new Set<string>();
+  const dist: Record<string, number> = {};
   const parent = new Map<string, { from: string; edge: any }>();
-  const queue: string[] = [fromFp];
-  visited.add(fromFp);
+  dist[fromFp] = 0;
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
+  const pq: { fp: string; d: number }[] = [{ fp: fromFp, d: 0 }];
+
+  while (pq.length > 0) {
+    pq.sort((a, b) => a.d - b.d);
+    const { fp: current, d: currentDist } = pq.shift()!;
+
+    if (currentDist > (dist[current] ?? Infinity)) continue;
     if (current === toFp) {
       const path: { from: string; to: string; edge: any }[] = [];
       let node = toFp;
@@ -309,10 +321,11 @@ export function findShortestPath(
     }
 
     for (const neighbor of (adjacency[current] || [])) {
-      if (!visited.has(neighbor.to)) {
-        visited.add(neighbor.to);
+      const newDist = currentDist + neighbor.cost;
+      if (newDist < (dist[neighbor.to] ?? Infinity)) {
+        dist[neighbor.to] = newDist;
         parent.set(neighbor.to, { from: current, edge: neighbor.edge });
-        queue.push(neighbor.to);
+        pq.push({ fp: neighbor.to, d: newDist });
       }
     }
   }

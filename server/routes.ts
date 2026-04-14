@@ -1294,6 +1294,11 @@ export async function registerRoutes(
     if (!tree.mergedSessions) tree.mergedSessions = [];
     if (!tree.patterns) tree.patterns = [];
 
+    const skeletonCfg = await storage.getAgentConfig("epic_app_skeleton");
+    let skeleton: { activities: Record<string, { contextReq: string; strategies: string[]; visitCount: number; lastSeen: number }> } = { activities: {} };
+    if (skeletonCfg?.value) { try { skeleton = JSON.parse(skeletonCfg.value); } catch {} }
+    if (!skeleton.activities) skeleton.activities = {};
+
     const nowMs = Date.now();
     const { fingerprints, transitions, sessionId } = data;
 
@@ -1301,11 +1306,26 @@ export async function registerRoutes(
       for (const [fp, info] of Object.entries(fingerprints as Record<string, any>)) {
         if (!fp || fp === "0") continue;
         if (!tree.nodes[fp]) {
-          tree.nodes[fp] = { fingerprint: fp, titles: [], visitCount: 0, lastSeen: 0, sessions: [], labelCrops: [] };
+          tree.nodes[fp] = { fingerprint: fp, titles: [], visitCount: 0, lastSeen: 0, sessions: [], labelCrops: [], context: null };
         }
         tree.nodes[fp].lastSeen = nowMs;
         if (sessionId && !tree.nodes[fp].sessions.includes(sessionId)) {
           tree.nodes[fp].sessions.push(sessionId);
+        }
+        if (info.context && typeof info.context === "object") {
+          tree.nodes[fp].context = info.context;
+          const activity = info.context.activity;
+          const ctxLevel = info.context.contextLevel || "none";
+          if (activity) {
+            if (!skeleton.activities[activity]) {
+              skeleton.activities[activity] = { contextReq: ctxLevel, strategies: [], visitCount: 0, lastSeen: 0 };
+            }
+            skeleton.activities[activity].visitCount++;
+            skeleton.activities[activity].lastSeen = nowMs;
+            if (ctxLevel !== "none" && (skeleton.activities[activity].contextReq === "none" || ctxLevel === "encounter")) {
+              skeleton.activities[activity].contextReq = ctxLevel;
+            }
+          }
         }
         for (const t of (info.titles || [])) {
           if (t && !tree.nodes[fp].titles.includes(t)) {
@@ -1353,6 +1373,24 @@ export async function registerRoutes(
         if (t.action_keys) {
           for (const ak of (Array.isArray(t.action_keys) ? t.action_keys : [t.action_keys])) {
             if (ak && !existing.triggerKeys.includes(ak)) existing.triggerKeys.push(ak);
+          }
+        }
+        if (t.nav_strategy) {
+          if (!existing.navStrategies) existing.navStrategies = [];
+          if (!existing.navStrategies.includes(t.nav_strategy)) existing.navStrategies.push(t.nav_strategy);
+          const strategyRank: Record<string, number> = { search: 3, keyboard: 2, toolbar: 1, click: 0 };
+          const best = existing.navStrategies.reduce((a: string, b: string) => (strategyRank[a] || 0) >= (strategyRank[b] || 0) ? a : b, "click");
+          existing.preferredMethod = best;
+
+          const toCtx = t.to_context;
+          if (toCtx?.activity) {
+            const act = toCtx.activity;
+            if (!skeleton.activities[act]) {
+              skeleton.activities[act] = { contextReq: toCtx.contextLevel || "none", strategies: [], visitCount: 0, lastSeen: nowMs };
+            }
+            if (!skeleton.activities[act].strategies.includes(t.nav_strategy)) {
+              skeleton.activities[act].strategies.push(t.nav_strategy);
+            }
           }
         }
         if (t.label_crop && !existing.labelCrops.includes(t.label_crop)) existing.labelCrops.push(t.label_crop);
@@ -1411,6 +1449,14 @@ export async function registerRoutes(
           for (const s of (removeNode.sessions || [])) {
             if (s && !keepNode.sessions.includes(s)) keepNode.sessions.push(s);
           }
+          if (removeNode.context && !keepNode.context) {
+            keepNode.context = removeNode.context;
+          } else if (removeNode.context && keepNode.context) {
+            const levelRank: Record<string, number> = { none: 0, patient: 1, encounter: 2 };
+            if ((levelRank[removeNode.context.contextLevel] || 0) > (levelRank[keepNode.context.contextLevel] || 0)) {
+              keepNode.context = removeNode.context;
+            }
+          }
           delete tree.nodes[removeFp];
         }
       }
@@ -1450,6 +1496,7 @@ export async function registerRoutes(
     }
 
     await storage.setAgentConfig(treeConfigKey, JSON.stringify(tree));
+    await storage.setAgentConfig("epic_app_skeleton", JSON.stringify(skeleton));
 
     const windowTreesCfg = await storage.getAgentConfig("session_window_trees");
     let windowTrees: Record<string, string> = {};
