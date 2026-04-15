@@ -1,0 +1,59 @@
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+[overlay] Launched OCR overlay (pid 4368)
+[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+  [always-on] Global input listeners started (focus-aware dispatch)
+  [label] Screen labeler thread started
+  [always-on] Started capture: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote (key=hyperspace__exe_lung_txp__sup_environment__matthew_e_jensen, sid=aon_1776275654_5635, input=full)
+  [always-on] Started capture: C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (key=cwindowssystem32cmdexe_-_python__toolsepic_agentpy, sid=aon_1776275654_1941, input=full)
+C:\Rachael\tools\epic_agent.py:1603: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  pixels = list(small.getdata())
+[ocr] Auto-detected Epic window: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Starting overlay over: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Ctrl+Shift+H=toggle hints  Ctrl+Shift+C=correction mode  Esc=cancel
+C:\Rachael\tools\epic_agent.py:1616: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+C:\Rachael\tools\epic_agent.py:1617: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [label] API 401 for c0d0f0e0c0e0.. : Missing Authentication header
+  [label] API 401 for 000f0f0f0fff.. : Missing Authentication header
+  [label] API 401 for 80f0e0c080fd.. : Missing Authentication header
+  [label] API 401 for 007fffffffff.. : Missing Authentication header
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-flush-dbg] cwindowssystem32cmdexe_-_pyt: 2 fps, 1 trans
+  [aon-flush-resp] resp=None body=N/A
+  [always-on] Stopped capture: C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (1 transitions)
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 92n/160e
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
