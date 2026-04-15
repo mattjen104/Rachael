@@ -872,9 +872,15 @@ class OverlayWindow:
             self.hint_map = hint_map
             dq = getattr(self, '_dispatch_q', None)
             if dq is not None:
-                dq.put(self._redraw)
+                def _finalize():
+                    self._redraw()
+                    if self.visible and self.hint_map:
+                        getattr(self, '_start_suppress_listener', lambda: None)()
+                dq.put(_finalize)
             else:
                 self._redraw()
+                if self.visible and self.hint_map:
+                    getattr(self, '_start_suppress_listener', lambda: None)()
         except Exception as ex:
             print(f"[overlay] Scan error: {ex}")
             dq = getattr(self, '_dispatch_q', None)
@@ -1315,9 +1321,9 @@ class OverlayWindow:
             # Show feedback badge immediately (Qt main thread is free)
             self._show_scanning_badge()
             # Run OCR scan on a background thread so Qt stays responsive
+            # NOTE: suppress listener is started AFTER scan completes (in _refresh_bg)
+            # so the keyboard stays normal during the scan.
             threading.Thread(target=self._refresh_bg, daemon=True).start()
-            # Start suppressing listener so hint keys don't reach Citrix/Epic
-            getattr(self, '_start_suppress_listener', lambda: None)()
         else:
             self._scene and self._scene.clear()
             # Stop suppressing — normal keyboard input returns to Epic
