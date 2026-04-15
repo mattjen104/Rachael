@@ -294,11 +294,11 @@ def _capture_window(sct, region: dict):
     return arr
 
 
-def _find_diff_bbox(prev_frame, curr_frame, threshold: int = 30, min_area: int = 50):
-    """Pixel-diff two BGR frames; return the largest changed bounding box or None.
+def _find_diff_bboxes(prev_frame, curr_frame, threshold: int = 30, min_area: int = 50):
+    """Pixel-diff two BGR frames; return ALL changed bounding boxes.
 
-    Returns (x1, y1, x2, y2) of the largest contiguous changed region,
-    or None if the change is too small / noisy.
+    Returns list of (x1, y1, x2, y2) for each contiguous changed region,
+    sorted by area descending. Empty list if no significant change.
     """
     import numpy as np
     diff = np.abs(curr_frame.astype(np.int16) - prev_frame.astype(np.int16))
@@ -306,24 +306,29 @@ def _find_diff_bbox(prev_frame, curr_frame, threshold: int = 30, min_area: int =
 
     changed = np.where(mask)
     if len(changed[0]) < min_area:
-        return None
+        return []
 
+    results = []
     try:
         import cv2
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
-        if w * h < min_area:
-            return None
-        return (x, y, x + w, y + h)
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            if w * h >= min_area:
+                results.append((x, y, x + w, y + h))
     except ImportError:
         y_min, y_max = int(changed[0].min()), int(changed[0].max())
         x_min, x_max = int(changed[1].min()), int(changed[1].max())
-        if (x_max - x_min) * (y_max - y_min) < min_area:
-            return None
-        return (x_min, y_min, x_max, y_max)
+        if (x_max - x_min) * (y_max - y_min) >= min_area:
+            results.append((x_min, y_min, x_max, y_max))
+
+    results.sort(key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True)
+    return results
+
+
+def _quantize_pos(cx: int, cy: int, cell: int = 20) -> tuple:
+    """Quantize a position to a grid cell for visited-set cycle detection."""
+    return (cx // cell, cy // cell)
 
 
 def tab_walk_scan(
@@ -331,18 +336,21 @@ def tab_walk_scan(
     max_steps: int = 300,
     tab_delay: float = 0.18,
     progress_cb=None,
+    cancel_flag=None,
 ) -> list[OcrElement]:
     """Discover interactive fields by Tab-walking and pixel-diffing the highlight.
 
-    Instead of full-screen OCR, this sends Tab keystrokes to Epic and detects
-    the focus highlight via pixel diff. Each highlighted region is OCR'd
-    individually for the label text.
+    Uses a three-frame strategy: each Tab's screenshot is diffed against a STABLE
+    BASELINE (pre-Tab screenshot), so only the NEW highlight region appears in the
+    diff — the old highlight's disappearance is not visible because the baseline
+    predates it.
 
     Args:
         window_title: Epic window title substring.
         max_steps: Maximum Tab presses before giving up.
         tab_delay: Seconds to wait after each Tab for Citrix render.
         progress_cb: Optional callback(count) called every 10 elements found.
+        cancel_flag: Optional threading.Event — if set, walk aborts early.
 
     Returns:
         List of OcrElement with pixel-perfect bounding boxes.
@@ -376,20 +384,72 @@ def tab_walk_scan(
     ocr = _get_ocr()
 
     elements: list[OcrElement] = []
-    first_bbox_center = None
+    visited: set = set()
     no_change_streak = 0
+    revisit_count = 0
+
+    def _ocr_crop(frame, x1, y1, x2, y2):
+        """OCR a small crop and return the text label."""
+        if ocr is None:
+            return ""
+        pad = 8
+        cy1 = max(0, y1 - pad)
+        cy2 = min(win_h, y2 + pad)
+        cx1 = max(0, x1 - pad)
+        cx2 = min(win_w, x2 + pad)
+        crop = frame[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
+            return ""
+        try:
+            result = ocr.ocr(crop, cls=False)
+        except Exception:
+            try:
+                result = ocr.ocr(crop)
+            except Exception:
+                return ""
+        if result and result[0]:
+            texts = [line[1][0].strip() for line in result[0]
+                     if line[1][0].strip() and line[1][1] > 0.4]
+            return " ".join(texts)
+        return ""
+
+    def _pick_new_bbox(bboxes, known_positions):
+        """From a list of diff bboxes, pick the one NOT matching any known position.
+        This isolates the NEW highlight from the old highlight's disappearance."""
+        if not bboxes:
+            return None
+        if len(bboxes) == 1:
+            return bboxes[0]
+        for bbox in bboxes:
+            bcx = (bbox[0] + bbox[2]) // 2
+            bcy = (bbox[1] + bbox[3]) // 2
+            is_known = False
+            for kx, ky in known_positions:
+                if abs(bcx - kx) < 20 and abs(bcy - ky) < 20:
+                    is_known = True
+                    break
+            if not is_known:
+                return bbox
+        return bboxes[0]
 
     with mss.mss() as sct:
-        prev_frame = _capture_window(sct, region)
+        baseline = _capture_window(sct, region)
+        prev_frame = baseline
+        known_centers: list[tuple] = []
 
         for step in range(max_steps):
+            if cancel_flag and cancel_flag.is_set():
+                print(f"[tab-walk] Cancelled at step {step}")
+                break
+
             pyautogui.press('tab')
             time.sleep(tab_delay)
 
             curr_frame = _capture_window(sct, region)
-            bbox = _find_diff_bbox(prev_frame, curr_frame, threshold=30, min_area=50)
 
-            if bbox is None:
+            bboxes = _find_diff_bboxes(prev_frame, curr_frame, threshold=30, min_area=50)
+
+            if not bboxes:
                 no_change_streak += 1
                 if no_change_streak > 5:
                     print(f"[tab-walk] No changes for 5 Tabs — stopping at step {step}")
@@ -398,55 +458,33 @@ def tab_walk_scan(
                 continue
             no_change_streak = 0
 
+            bbox = _pick_new_bbox(bboxes, known_centers)
+            if bbox is None:
+                prev_frame = curr_frame
+                continue
+
             x1, y1, x2, y2 = bbox
             cx = (x1 + x2) // 2
             cy = (y1 + y2) // 2
 
-            if first_bbox_center is not None:
-                fx, fy = first_bbox_center
-                if abs(cx - fx) < 15 and abs(cy - fy) < 15 and step > 2:
-                    print(f"[tab-walk] Cycle detected at step {step} — back to first field")
+            qpos = _quantize_pos(cx, cy)
+            if qpos in visited:
+                revisit_count += 1
+                if revisit_count >= 3:
+                    print(f"[tab-walk] Cycle detected at step {step} — "
+                          f"{revisit_count} revisits of known positions")
                     break
-
-            if first_bbox_center is None:
-                first_bbox_center = (cx, cy)
-
-            skip = False
-            for existing in elements:
-                ex = int(existing.rel_x * win_w)
-                ey = int(existing.rel_y * win_h)
-                if abs(cx - ex) < 10 and abs(cy - ey) < 10:
-                    skip = True
-                    break
-            if skip:
                 prev_frame = curr_frame
                 continue
+            revisit_count = 0
+            visited.add(qpos)
 
-            label = ""
-            if ocr is not None:
-                pad = 8
-                crop_y1 = max(0, y1 - pad)
-                crop_y2 = min(win_h, y2 + pad)
-                crop_x1 = max(0, x1 - pad)
-                crop_x2 = min(win_w, x2 + pad)
-                crop = curr_frame[crop_y1:crop_y2, crop_x1:crop_x2]
-                if crop.size > 0:
-                    try:
-                        result = ocr.ocr(crop, cls=False)
-                    except Exception:
-                        try:
-                            result = ocr.ocr(crop)
-                        except Exception:
-                            result = None
-                    if result and result[0]:
-                        texts = [line[1][0].strip() for line in result[0]
-                                 if line[1][0].strip() and line[1][1] > 0.4]
-                        label = " ".join(texts)
-
+            label = _ocr_crop(curr_frame, x1, y1, x2, y2)
             if not label:
                 label = f"field_{step}"
 
             layer = _classify_layer(cx, cy, win_w, win_h)
+            known_centers.append((cx, cy))
 
             elements.append(OcrElement(
                 text=label,
@@ -1036,6 +1074,10 @@ class OverlayWindow:
 
     def _refresh_bg(self):
         """Tab-walk scan on a background thread; dispatch _redraw to Qt main thread."""
+        scan_id = getattr(self, '_scan_id', 0) + 1
+        self._scan_id = scan_id
+        cancel = threading.Event()
+        self._scan_cancel = cancel
         try:
             win = self._find_epic_window()
             if not win:
@@ -1053,11 +1095,27 @@ class OverlayWindow:
                 max_steps=300,
                 tab_delay=0.18,
                 progress_cb=self._update_scan_badge,
+                cancel_flag=cancel,
             )
             print(f"[overlay] Tab-walk complete: {len(elements)} elements found")
 
+            if not self.visible or self._scan_id != scan_id:
+                print("[overlay] Scan aborted — visibility changed during walk")
+                if dq is not None and self._window:
+                    dq.put(lambda: self._window.show())
+                return
+
             if dq is not None and self._window:
                 dq.put(lambda: self._window.show())
+
+            if not elements:
+                print("[overlay] No elements found — skipping KB update")
+                self.elements = []
+                self.hint_map = {}
+                dq = getattr(self, '_dispatch_q', None)
+                if dq is not None:
+                    dq.put(self._redraw)
+                return
 
             fp = compute_screen_fp(elements)
             phash = _compute_window_phash(self.win_title)
@@ -1067,7 +1125,6 @@ class OverlayWindow:
             save_fp_bridge(self.conn, phash, fp)
             self._current_phash = phash
 
-            # Merge in reliable KB elements
             reliable = get_reliable_elements(self.conn, fp)
             seen_set = {(e.text, e.layer) for e in elements}
             for r in reliable:
@@ -1558,15 +1615,15 @@ class OverlayWindow:
     def toggle_hints(self):
         self.visible = not self.visible
         if self.visible:
-            # Show feedback badge immediately (Qt main thread is free)
             self._show_scanning_badge()
-            # Run OCR scan on a background thread so Qt stays responsive
-            # NOTE: suppress listener is started AFTER scan completes (in _refresh_bg)
-            # so the keyboard stays normal during the scan.
             threading.Thread(target=self._refresh_bg, daemon=True).start()
         else:
+            cancel = getattr(self, '_scan_cancel', None)
+            if cancel:
+                cancel.set()
             self._scene and self._scene.clear()
-            # Stop suppressing — normal keyboard input returns to Epic
+            if self._window:
+                self._window.show()
             getattr(self, '_stop_suppress_listener', lambda: None)()
         print(f"[overlay] Hints {'visible' if self.visible else 'hidden'}")
 
