@@ -1090,6 +1090,10 @@ class OverlayWindow:
             text_item.setPos(cx - text_w // 2 + 2, cy - text_h // 2)
             self._scene.addItem(text_item)
 
+        print(f"[overlay] Drew {len(self.hint_map)} hint(s) on scene")
+        if self._window:
+            self._window.viewport().update()
+
     def run(self):
         """Start the Qt event loop with the overlay window."""
         try:
