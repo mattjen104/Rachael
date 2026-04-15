@@ -8967,7 +8967,7 @@ def _start_ocr_overlay(bridge_url: str, bridge_token: str):
     try:
         proc = subprocess.Popen(cmd)
         print(f"[overlay] Launched OCR overlay (pid {proc.pid})")
-        print("[overlay]   F1 = toggle hints   F2 = correction mode")
+        print("[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode")
         return proc
     except Exception as e:
         print(f"[overlay] Could not launch overlay: {e}")

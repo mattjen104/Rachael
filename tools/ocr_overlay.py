@@ -570,41 +570,72 @@ LAYER_COLORS = {
 # SECTION 6 — PyQt5 Transparent Overlay
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Map of friendly key names → pynput Key attribute names.
-# Users pass e.g. --hint-key scroll_lock  or  --hint-key f9
-_KEY_NAME_MAP = {
-    "scroll_lock": "scroll_lock",
-    "scrolllock":  "scroll_lock",
-    "pause":       "pause",
-    "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4",
-    "f5": "f5", "f6": "f6", "f7": "f7", "f8": "f8",
-    "f9": "f9", "f10": "f10", "f11": "f11", "f12": "f12",
-}
+def _parse_hotkey_combo(combo: str):
+    """
+    Parse a hotkey combo string like "ctrl+shift+h" into (mods_frozenset, trigger).
 
-def _resolve_pynput_key(name: str):
-    """Return the pynput Key constant for a friendly key name string."""
+    mods_frozenset — frozenset of modifier names e.g. frozenset({'ctrl','shift'})
+    trigger        — lowercase single char e.g. 'h', or a pynput Key name e.g. 'f9'
+
+    Examples:
+        "ctrl+shift+h"  → (frozenset({'ctrl','shift'}), 'h')
+        "ctrl+alt+f9"   → (frozenset({'ctrl','alt'}),   'f9')
+        "scroll_lock"   → (frozenset(), 'scroll_lock')
+    """
+    _MODS = {"ctrl", "control", "shift", "alt", "cmd", "super", "win"}
+    parts = [p.strip().lower() for p in combo.replace("-", "+").split("+")]
+    mods = frozenset(p for p in parts if p in _MODS or p in ("control",))
+    # Normalise "control" → "ctrl"
+    mods = frozenset("ctrl" if m == "control" else m for m in mods)
+    trigger_parts = [p for p in parts if p not in _MODS and p != "control"]
+    trigger = trigger_parts[0] if trigger_parts else ""
+    return mods, trigger
+
+
+def _hotkey_matches(mods_held: set, key, mods_wanted: frozenset, trigger: str) -> bool:
+    """
+    Return True when the currently-held modifiers match mods_wanted and key
+    matches the trigger character/name.
+    """
     try:
         from pynput import keyboard as pk
-        attr = _KEY_NAME_MAP.get(name.lower().replace("-", "_"), name.lower())
-        return getattr(pk.Key, attr)
+        # Normalise held modifiers to simple names
+        norm = set()
+        for m in mods_held:
+            s = str(m)
+            if "ctrl" in s or "control" in s:   norm.add("ctrl")
+            elif "shift" in s:                   norm.add("shift")
+            elif "alt" in s:                     norm.add("alt")
+            elif "cmd" in s or "super" in s:     norm.add("cmd")
+        if norm != set(mods_wanted):
+            return False
+        # Match trigger: single char
+        if len(trigger) == 1:
+            return hasattr(key, 'char') and key.char and key.char.lower() == trigger
+        # Match trigger: named key (f9, scroll_lock, pause …)
+        try:
+            wanted_key = getattr(pk.Key, trigger)
+            return key == wanted_key
+        except AttributeError:
+            return False
     except Exception:
-        return None
+        return False
 
 
 class OverlayWindow:
     """
     PyQt5 transparent always-on-top overlay that draws Vimium hints over Epic.
 
-    Hotkeys (configurable; defaults avoid Epic key conflicts):
-      ScrollLock  — Toggle hints on/off   (--hint-key)
-      Pause       — Toggle correction mode (--correct-key)
+    Hotkeys (configurable via --hint-key / --correct-key; defaults avoid Epic conflicts):
+      Ctrl+Shift+H — Toggle hints on/off
+      Ctrl+Shift+C — Toggle correction mode
       Escape      — Hide hints / cancel input
       0-9, a-z    — Hint selection (multi-char, fires after 600ms idle)
       Backspace   — Delete last hint char
     """
 
     def __init__(self, win_title: str, db_path: str = DB_PATH,
-                 hint_key: str = "scroll_lock", correct_key: str = "pause"):
+                 hint_key: str = "ctrl+shift+h", correct_key: str = "ctrl+shift+c"):
         self.win_title = win_title
         self.db_path = db_path
         self.conn = _db_connect()
@@ -612,8 +643,8 @@ class OverlayWindow:
 
         self._hint_key_name    = hint_key
         self._correct_key_name = correct_key
-        self._hint_pkey    = _resolve_pynput_key(hint_key)
-        self._correct_pkey = _resolve_pynput_key(correct_key)
+        self._hint_mods,    self._hint_trigger    = _parse_hotkey_combo(hint_key)
+        self._correct_mods, self._correct_trigger = _parse_hotkey_combo(correct_key)
 
         self.elements: list[OcrElement] = []
         self.hint_map: dict[str, OcrElement] = {}
@@ -906,7 +937,7 @@ class OverlayWindow:
 
         # ── Hotkey listener setup ─────────────────────────────────────────────
         # Two separate pynput listeners:
-        #   1. hotkey_listener (suppress=False) — always running; handles F1/F2 only.
+        #   1. hotkey_listener (suppress=False) — always running; handles toggle combos only.
         #   2. hint_listener  (suppress=True)  — started when hints become visible so
         #      typed hint chars are consumed here and do NOT reach the Citrix/Epic app.
         # All Qt object access (QGraphicsScene etc.) is routed through QTimer.singleShot(0,…)
@@ -968,14 +999,40 @@ class OverlayWindow:
             self._start_suppress_listener = _start_suppress_listener
             self._stop_suppress_listener = _stop_suppress_listener
 
-            # Non-suppressing listener: toggle keys only (never leaks to Epic)
-            def on_hotkey(key):
-                if self._hint_pkey and key == self._hint_pkey:
+            # Non-suppressing listener: tracks modifier state and fires on full combo match.
+            # Uses on_press + on_release so Ctrl+Shift+H works reliably without
+            # interfering with any Epic key bindings.
+            _mods_held: set = set()
+            _mods_lock = threading.Lock()
+
+            def on_hotkey_press(key):
+                with _mods_lock:
+                    # Track held modifiers
+                    try:
+                        if key in (pk.Key.ctrl_l, pk.Key.ctrl_r, pk.Key.ctrl):
+                            _mods_held.add(key)
+                        elif key in (pk.Key.shift, pk.Key.shift_l, pk.Key.shift_r):
+                            _mods_held.add(key)
+                        elif key in (pk.Key.alt_l, pk.Key.alt_r, pk.Key.alt_gr, pk.Key.alt):
+                            _mods_held.add(key)
+                        elif key in (pk.Key.cmd, pk.Key.cmd_l, pk.Key.cmd_r):
+                            _mods_held.add(key)
+                    except Exception:
+                        pass
+                    held_snapshot = set(_mods_held)
+
+                if _hotkey_matches(held_snapshot, key, self._hint_mods, self._hint_trigger):
                     _dispatch(self.toggle_hints)
-                elif self._correct_pkey and key == self._correct_pkey:
+                elif _hotkey_matches(held_snapshot, key, self._correct_mods, self._correct_trigger):
                     _dispatch(self.toggle_correction)
 
-            hotkey_listener = pk.Listener(on_press=on_hotkey, suppress=False)
+            def on_hotkey_release(key):
+                with _mods_lock:
+                    _mods_held.discard(key)
+
+            hotkey_listener = pk.Listener(on_press=on_hotkey_press,
+                                          on_release=on_hotkey_release,
+                                          suppress=False)
             hotkey_listener.daemon = True
             hotkey_listener.start()
         except ImportError:
@@ -1646,12 +1703,12 @@ def main():
                         help="Tag a screen fingerprint with an activity name")
     parser.add_argument("--bridge-url", default=BRIDGE_URL)
     parser.add_argument("--bridge-token", default=BRIDGE_TOKEN)
-    parser.add_argument("--hint-key", default="scroll_lock",
-                        help="Key to toggle hint overlay (default: scroll_lock). "
-                             "Options: scroll_lock, pause, f9-f12, etc.")
-    parser.add_argument("--correct-key", default="pause",
-                        help="Key to toggle correction mode (default: pause). "
-                             "Options: pause, scroll_lock, f9-f12, etc.")
+    parser.add_argument("--hint-key", default="ctrl+shift+h",
+                        help="Hotkey to toggle hint overlay (default: ctrl+shift+h). "
+                             "Supports combos like ctrl+shift+h, or bare keys like f12.")
+    parser.add_argument("--correct-key", default="ctrl+shift+c",
+                        help="Hotkey to toggle correction mode (default: ctrl+shift+c). "
+                             "Supports combos like ctrl+shift+c, or bare keys like f11.")
     args = parser.parse_args()
     BRIDGE_URL = args.bridge_url
     BRIDGE_TOKEN = args.bridge_token
