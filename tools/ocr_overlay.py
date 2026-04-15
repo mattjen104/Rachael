@@ -28,6 +28,7 @@ import json
 import math
 import hashlib
 import sqlite3
+import queue
 import threading
 import argparse
 from dataclasses import dataclass, field, asdict
@@ -1061,9 +1062,16 @@ class OverlayWindow:
         self._window.show()
 
         # ── Hotkey listener setup ─────────────────────────────────────────────
-        # _dispatch: marshal any fn() onto the Qt main thread (safe from any thread).
+        # _dispatch: thread-safe cross-thread dispatch to the Qt main thread.
+        # QTimer.singleShot(0, fn) called from a non-Qt thread schedules the timer
+        # on the CALLING thread's event loop — daemon threads have none, so the call
+        # is silently dropped and fn() never executes.
+        # Fix: put fn into a SimpleQueue; a QTimer on the Qt main thread drains it.
+        _dispatch_q: queue.SimpleQueue = queue.SimpleQueue()
+        self._dispatch_q = _dispatch_q   # expose for _schedule_input_fire
+
         def _dispatch(fn):
-            QTimer.singleShot(0, fn)
+            _dispatch_q.put(fn)
 
         # ── 1. Suppressing hint-char listener (pynput) ────────────────────────
         # Active only while hints are visible; consumes typed hint chars so they
@@ -1175,6 +1183,17 @@ class OverlayWindow:
             except ImportError:
                 print("[overlay] pynput not installed — toggle hotkeys disabled (pip install pynput)")
 
+        # Drain cross-thread dispatch queue on the Qt main thread (50 ms poll)
+        _drain_timer = QTimer()
+        def _drain_dispatch():
+            while not _dispatch_q.empty():
+                try:
+                    _dispatch_q.get_nowait()()
+                except Exception:
+                    pass
+        _drain_timer.timeout.connect(_drain_dispatch)
+        _drain_timer.start(50)
+
         # Timer to track and reposition the overlay to Epic window
         def reposition():
             w = self._find_epic_window()
@@ -1217,14 +1236,14 @@ class OverlayWindow:
                 self._pending_input_timer.cancel()
             except Exception:
                 pass
-        # Timer fires on a background thread; use QTimer.singleShot(0, …) to
-        # marshal _try_fire_input back onto the Qt main thread before touching any Qt objects.
-        try:
-            from PyQt5.QtCore import QTimer as _QTimer
+        # Timer fires on a background thread; dispatch via the SimpleQueue so
+        # _try_fire_input always runs on the Qt main thread (same fix as _dispatch).
+        _dq = getattr(self, '_dispatch_q', None)
+        if _dq is not None:
             self._pending_input_timer = threading.Timer(
-                0.6, lambda: _QTimer.singleShot(0, self._try_fire_input)
+                0.6, lambda: _dq.put(self._try_fire_input)
             )
-        except ImportError:
+        else:
             self._pending_input_timer = threading.Timer(0.6, self._try_fire_input)
         self._pending_input_timer.daemon = True
         self._pending_input_timer.start()
