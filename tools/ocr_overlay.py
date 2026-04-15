@@ -340,6 +340,7 @@ def tab_walk_scan(
     tab_delay: float = 0.18,
     progress_cb=None,
     cancel_flag=None,
+    has_activity_tabs: bool = False,
 ) -> list[OcrElement]:
     """Discover interactive fields by Tab-walking and pixel-diffing the highlight.
 
@@ -504,7 +505,7 @@ def tab_walk_scan(
             if not label:
                 label = f"field_{step}"
 
-            layer = _classify_layer(cx, cy, win_w, win_h)
+            layer = _classify_layer(cx, cy, win_w, win_h, has_activity_tabs=has_activity_tabs)
             known_centers.append((cx, cy))
 
             elements.append(OcrElement(
@@ -1086,8 +1087,21 @@ class OverlayWindow:
         self._scene.addItem(badge_text)
 
     def _update_scan_badge(self, count: int):
-        """Log progress to console (overlay is hidden during tab-walk to avoid
-        polluting pixel diffs, so badge updates go to stdout instead)."""
+        """Flash a progress badge briefly during tab-walk.
+
+        The overlay is hidden during the walk to keep pixel diffs clean.
+        We briefly show it, update the badge, then hide it again. The brief
+        flash (~50ms) doesn't affect the next diff because we wait tab_delay
+        after each Tab before the next screenshot.
+        """
+        dq = getattr(self, '_dispatch_q', None)
+        if dq is not None and self._window:
+            def _flash_badge():
+                self._window.show()
+                self._show_scanning_badge(msg=f"Scanning… {count} fields")
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(80, lambda: self._window.hide() if not self.visible else None)
+            dq.put(_flash_badge)
         print(f"[overlay] Scanning… {count} fields found so far")
 
     def _refresh_bg(self):
@@ -1102,6 +1116,7 @@ class OverlayWindow:
                 print(f"[overlay] Epic window not found: {self.win_title!r} — is Hyperspace open?")
                 return
             print(f"[overlay] Tab-walk scanning: {win.title!r} ({win.width}x{win.height})")
+            has_activity_tabs = self._check_activity_tabs()
 
             dq = getattr(self, '_dispatch_q', None)
             if dq is not None and self._window:
@@ -1114,6 +1129,7 @@ class OverlayWindow:
                 tab_delay=0.18,
                 progress_cb=self._update_scan_badge,
                 cancel_flag=cancel,
+                has_activity_tabs=has_activity_tabs,
             )
             print(f"[overlay] Tab-walk complete: {len(elements)} elements found")
 
