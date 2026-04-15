@@ -570,23 +570,50 @@ LAYER_COLORS = {
 # SECTION 6 — PyQt5 Transparent Overlay
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Map of friendly key names → pynput Key attribute names.
+# Users pass e.g. --hint-key scroll_lock  or  --hint-key f9
+_KEY_NAME_MAP = {
+    "scroll_lock": "scroll_lock",
+    "scrolllock":  "scroll_lock",
+    "pause":       "pause",
+    "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4",
+    "f5": "f5", "f6": "f6", "f7": "f7", "f8": "f8",
+    "f9": "f9", "f10": "f10", "f11": "f11", "f12": "f12",
+}
+
+def _resolve_pynput_key(name: str):
+    """Return the pynput Key constant for a friendly key name string."""
+    try:
+        from pynput import keyboard as pk
+        attr = _KEY_NAME_MAP.get(name.lower().replace("-", "_"), name.lower())
+        return getattr(pk.Key, attr)
+    except Exception:
+        return None
+
+
 class OverlayWindow:
     """
     PyQt5 transparent always-on-top overlay that draws Vimium hints over Epic.
 
-    Hotkeys (all global, captured before Epic gets them):
-      F1          — Toggle hints on/off
-      F2          — Toggle correction mode
+    Hotkeys (configurable; defaults avoid Epic key conflicts):
+      ScrollLock  — Toggle hints on/off   (--hint-key)
+      Pause       — Toggle correction mode (--correct-key)
       Escape      — Hide hints / cancel input
       0-9, a-z    — Hint selection (multi-char, fires after 600ms idle)
       Backspace   — Delete last hint char
     """
 
-    def __init__(self, win_title: str, db_path: str = DB_PATH):
+    def __init__(self, win_title: str, db_path: str = DB_PATH,
+                 hint_key: str = "scroll_lock", correct_key: str = "pause"):
         self.win_title = win_title
         self.db_path = db_path
         self.conn = _db_connect()
         _seed_universal_elements(self.conn)
+
+        self._hint_key_name    = hint_key
+        self._correct_key_name = correct_key
+        self._hint_pkey    = _resolve_pynput_key(hint_key)
+        self._correct_pkey = _resolve_pynput_key(correct_key)
 
         self.elements: list[OcrElement] = []
         self.hint_map: dict[str, OcrElement] = {}
@@ -941,11 +968,11 @@ class OverlayWindow:
             self._start_suppress_listener = _start_suppress_listener
             self._stop_suppress_listener = _stop_suppress_listener
 
-            # Non-suppressing listener: F1 / F2 only (never leaks to Epic)
+            # Non-suppressing listener: toggle keys only (never leaks to Epic)
             def on_hotkey(key):
-                if key == pk.Key.f1:
+                if self._hint_pkey and key == self._hint_pkey:
                     _dispatch(self.toggle_hints)
-                elif key == pk.Key.f2:
+                elif self._correct_pkey and key == self._correct_pkey:
                     _dispatch(self.toggle_correction)
 
             hotkey_listener = pk.Listener(on_press=on_hotkey, suppress=False)
@@ -965,7 +992,9 @@ class OverlayWindow:
         timer.timeout.connect(reposition)
         timer.start(500)
 
-        print("[overlay] Running. F1=toggle hints, F2=correction mode, Esc=cancel")
+        hk = self._hint_key_name.replace("_", " ").title()
+        ck = self._correct_key_name.replace("_", " ").title()
+        print(f"[overlay] Running. {hk}=toggle hints, {ck}=correction mode, Esc=cancel")
         self._app.exec_()
 
     def toggle_hints(self):
@@ -1277,7 +1306,7 @@ class OverlayWindow:
             self._scene.addItem(lbl2)
 
         # Status line
-        status_parts = ["F2=exit correction"]
+        status_parts = [f"{self._correct_key_name.replace('_',' ').title()}=exit correction"]
         if self._corr_resize_mode and self._corr_selected:
             status_parts.insert(0, f"RESIZE '{self._corr_selected.get('text', '?')}' | drag=change size | release=save")
         elif self._corr_selected:
@@ -1617,6 +1646,12 @@ def main():
                         help="Tag a screen fingerprint with an activity name")
     parser.add_argument("--bridge-url", default=BRIDGE_URL)
     parser.add_argument("--bridge-token", default=BRIDGE_TOKEN)
+    parser.add_argument("--hint-key", default="scroll_lock",
+                        help="Key to toggle hint overlay (default: scroll_lock). "
+                             "Options: scroll_lock, pause, f9-f12, etc.")
+    parser.add_argument("--correct-key", default="pause",
+                        help="Key to toggle correction mode (default: pause). "
+                             "Options: pause, scroll_lock, f9-f12, etc.")
     args = parser.parse_args()
     BRIDGE_URL = args.bridge_url
     BRIDGE_TOKEN = args.bridge_token
@@ -1662,12 +1697,16 @@ def main():
         return
 
     # Interactive overlay mode
-    overlay = OverlayWindow(win_title)
+    overlay = OverlayWindow(win_title,
+                            hint_key=args.hint_key,
+                            correct_key=args.correct_key)
     if args.correct:
         overlay.correction_mode = True
 
     print(f"[ocr] Starting overlay over: {win_title!r}")
-    print("[ocr] F1=toggle hints  F2=correction mode  Esc=cancel")
+    hkn = args.hint_key.replace("_", " ").title()
+    ckn = args.correct_key.replace("_", " ").title()
+    print(f"[ocr] {hkn}=toggle hints  {ckn}=correction mode  Esc=cancel")
     overlay.run()
 
 
