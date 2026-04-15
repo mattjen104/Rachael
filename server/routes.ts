@@ -860,8 +860,9 @@ export async function registerRoutes(
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const { fingerprint, windowTitle, element } = req.body as {
+    const { fingerprint, phashFingerprint, windowTitle, element } = req.body as {
       fingerprint?: string;
+      phashFingerprint?: string;
       windowTitle?: string;
       element?: { text: string; layer: string; rel_x: number; rel_y: number; rel_w?: number; rel_h?: number; hint?: string };
     };
@@ -875,13 +876,23 @@ export async function registerRoutes(
       const treeCfg = await storage.getAgentConfig(treeConfigKey);
       if (treeCfg?.value) {
         const tree = JSON.parse(treeCfg.value) as { nodes: Record<string, any>; edges: any[]; mergedSessions: string[]; patterns: any[] };
-        if (tree.nodes[fingerprint]) {
-          if (!tree.nodes[fingerprint].ocrLayers) tree.nodes[fingerprint].ocrLayers = {};
+        // phashFingerprint is the canonical navigation-tree node key (matches epic_agent pHash);
+        // fall back to OCR text fp if phash was not sent or yields no match.
+        const nodeKey = (phashFingerprint && phashFingerprint !== "0" && tree.nodes[phashFingerprint])
+          ? phashFingerprint
+          : fingerprint;
+        if (tree.nodes[nodeKey]) {
+          if (!tree.nodes[nodeKey].ocrLayers) tree.nodes[nodeKey].ocrLayers = {};
           const layer = element.layer || "workspace";
-          const existing: string[] = tree.nodes[fingerprint].ocrLayers[layer] || [];
+          const existing: string[] = tree.nodes[nodeKey].ocrLayers[layer] || [];
           if (!existing.includes(element.text)) existing.push(element.text);
-          tree.nodes[fingerprint].ocrLayers[layer] = existing.slice(-30); // cap per layer
+          tree.nodes[nodeKey].ocrLayers[layer] = existing.slice(-30); // cap per layer
           await storage.setAgentConfig(treeConfigKey, JSON.stringify(tree));
+          console.log(`[ocr/click] '${element.text}' → node ${nodeKey.slice(0, 10)} (${layer})`);
+        } else {
+          // Node not found under either fp; this can happen before the first heartbeat.
+          // Log but still return ok so the overlay keeps running.
+          console.log(`[ocr/click] node not found for phash=${phashFingerprint?.slice(0, 8)} ocr=${fingerprint?.slice(0, 8)} — will appear after next heartbeat`);
         }
       }
     } catch (e: any) {

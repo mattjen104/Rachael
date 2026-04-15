@@ -280,9 +280,15 @@ CREATE TABLE IF NOT EXISTS screen_fingerprints (
     last_seen     REAL NOT NULL,
     visit_count   INTEGER DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS fp_bridge (
+    phash_fp  TEXT PRIMARY KEY,
+    ocr_fp    TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_elements_text ON elements(text);
 CREATE INDEX IF NOT EXISTS idx_elements_layer ON elements(layer);
 CREATE INDEX IF NOT EXISTS idx_elements_confidence ON elements(confidence);
+CREATE INDEX IF NOT EXISTS idx_fp_bridge_ocr ON fp_bridge(ocr_fp);
 """
 
 CONFIDENCE_TIERS = ["seen", "confirmed", "reliable", "named"]
@@ -480,6 +486,53 @@ def tag_fp_activity(conn, fp: str, activity_name: str):
     conn.commit()
 
 
+def _compute_window_phash(win_title: str) -> str:
+    """
+    Compute the same 8×8 average perceptual hash that epic_agent.py uses
+    (_session_phash / _SESSION_HASH_SIZE=8) so that OCR-KB fingerprints can
+    be cross-referenced with navigation-tree node keys.
+
+    Returns a 16-char hex string, or '0' on failure.
+    """
+    try:
+        import pygetwindow as _gw
+        import mss as _mss
+        from PIL import Image as _Image
+        wins = [w for w in _gw.getAllWindows()
+                if win_title.lower() in (w.title or "").lower() and w.width > 100]
+        if not wins:
+            return "0"
+        w = wins[0]
+        with _mss.mss() as sct:
+            region = {"left": w.left, "top": w.top, "width": w.width, "height": w.height}
+            shot = sct.grab(region)
+            img = _Image.frombytes("RGB", shot.size, shot.rgb)
+        SZ = 8
+        small = img.resize((SZ, SZ), _Image.LANCZOS).convert("L")
+        pixels = list(small.getdata())
+        avg = sum(pixels) / len(pixels) if pixels else 128
+        bits = "".join("1" if p > avg else "0" for p in pixels)
+        return hex(int(bits, 2))[2:].zfill((SZ * SZ) // 4)
+    except Exception:
+        return "0"
+
+
+def save_fp_bridge(conn, phash_fp: str, ocr_fp: str):
+    """
+    Record the mapping from a pHash fingerprint (used by epic_agent navigation
+    tree nodes) to the OCR text fingerprint (used by this module's KB entries).
+    This is the key cross-reference that lets get_ocr_kb_summary work correctly
+    when called from the agent heartbeat loop (which passes pHash fps).
+    """
+    if not phash_fp or phash_fp == "0":
+        return
+    conn.execute(
+        "INSERT OR REPLACE INTO fp_bridge (phash_fp, ocr_fp, updated_at) VALUES (?,?,?)",
+        (phash_fp, ocr_fp, time.time())
+    )
+    conn.commit()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5 — Hint Key Generation (mirror of epic_agent.py _generate_hint_keys)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -537,6 +590,7 @@ class OverlayWindow:
         self.current_input = ""
         self.visible = False
         self.correction_mode = False
+        self._current_phash: str = "0"    # updated by refresh(); same algo as epic_agent._session_phash
         self._pending_input_timer = None
 
         self._app = None
@@ -571,9 +625,12 @@ class OverlayWindow:
         self.elements = scan_window(self.win_title, with_activity_tabs=has_activity_tabs)
 
         fp = compute_screen_fp(self.elements)
+        self._current_phash = _compute_window_phash(self.win_title)
         save_screen_fp(self.conn, fp, self.elements)
         for e in self.elements:
             upsert_element(self.conn, e, fp)
+        # Bridge pHash (navigation tree key) ↔ OCR text fp (KB key)
+        save_fp_bridge(self.conn, self._current_phash, fp)
 
         # Merge in reliable KB elements for this screen
         reliable = get_reliable_elements(self.conn, fp)
@@ -692,7 +749,8 @@ class OverlayWindow:
             win = self._find_epic_window()
             win_title = win.title if win else self.win_title
             payload = json.dumps({
-                "fingerprint": fp,
+                "fingerprint": fp,              # OCR text fp (KB key)
+                "phashFingerprint": self._current_phash,   # pHash fp (navigation tree key)
                 "windowTitle": win_title,
                 "element": {
                     "text": elem.text,
@@ -1264,11 +1322,14 @@ def execute_ocr_view(cmd: dict):
         return
 
     fp = compute_screen_fp(elements)
+    phash_fp = _compute_window_phash(win_title)   # same algorithm as epic_agent.py
     conn = _db_connect()
     _seed_universal_elements(conn)
     save_screen_fp(conn, fp, elements)
     for e in elements:
         upsert_element(conn, e, fp)
+    # Bridge pHash (navigation tree key) ↔ OCR text fp (KB key)
+    save_fp_bridge(conn, phash_fp, fp)
 
     # Collision-proof hint map: KB semantics get reserved keys; positional keys never clash
     sem_map = get_semantic_map(conn)   # text → shortcut key (KB + defaults)
@@ -1305,6 +1366,7 @@ def execute_ocr_view(cmd: dict):
 
     post_result(command_id, "complete", data={
         "fingerprint": fp,
+        "phashFingerprint": phash_fp,
         "activity": get_activity_for_fp(conn, fp),
         "elementCount": len(elements),
         "hintMap": serialized_map,
@@ -1315,7 +1377,7 @@ def execute_ocr_view(cmd: dict):
             for k, e in hint_map.items()
         ],
     })
-    print(f"  [ocr-view] {len(elements)} elements, fp={fp[:8]}, env={env}")
+    print(f"  [ocr-view] {len(elements)} elements, fp={fp[:8]}, phash={phash_fp[:8]}, env={env}")
 
 
 def execute_ocr_do(cmd: dict):
@@ -1345,10 +1407,13 @@ def execute_ocr_do(cmd: dict):
         return
 
     fp = compute_screen_fp(elements)
+    phash_fp2 = _compute_window_phash(window.title)
     conn2 = _db_connect()
     _seed_universal_elements(conn2)
     for e in elements:
         upsert_element(conn2, e, fp)
+    # Bridge pHash (navigation tree key) ↔ OCR text fp (KB key)
+    save_fp_bridge(conn2, phash_fp2, fp)
 
     # Collision-proof hint map using KB semantics (same logic as execute_ocr_view)
     sem_map2 = get_semantic_map(conn2)
@@ -1398,8 +1463,9 @@ def execute_ocr_do(cmd: dict):
         "abs_cx": elem.abs_cx,
         "abs_cy": elem.abs_cy,
         "fingerprint": fp,
+        "phashFingerprint": phash_fp2,
     })
-    print(f"  [ocr-do] Clicked '{elem.text}' ({elem.layer}) via hint '{hint}'")
+    print(f"  [ocr-do] Clicked '{elem.text}' ({elem.layer}) via hint '{hint}', phash={phash_fp2[:8]}")
 
 
 def get_ocr_elements_for_heartbeat(window_title: str) -> dict:
@@ -1430,20 +1496,32 @@ def get_ocr_kb_summary(fp: str) -> dict:
     Read accumulated OCR element layer summary for a fingerprint from the KB.
     Does NOT run OCR — reads only from the local SQLite knowledge base.
     Safe to call frequently from the heartbeat loop.
+
+    fp may be either a pHash fp (from epic_agent.py heartbeat) or an OCR text fp.
+    The fp_bridge table is consulted first to resolve pHash → OCR fp when needed,
+    so that node.ocrLayers is populated even when called with the canonical tree fp.
     """
     try:
         conn = _db_connect()
+        # Resolve pHash fp → OCR text fp via bridge table.
+        # If not in bridge (or fp IS an ocr_fp), use fp directly.
+        bridge_row = conn.execute(
+            "SELECT ocr_fp FROM fp_bridge WHERE phash_fp=?", (fp,)
+        ).fetchone()
+        ocr_fp = bridge_row["ocr_fp"] if bridge_row else fp
+
         rows = conn.execute(
             "SELECT layer, text, confidence FROM elements "
             "WHERE confidence IN ('confirmed','reliable','named') AND screen_fps LIKE ?",
-            (f"%{fp}%",)
+            (f"%{ocr_fp}%",)
         ).fetchall()
         layer_summary: dict[str, list[str]] = {}
         for r in rows:
             if not _looks_like_phi(r["text"]):
                 layer_summary.setdefault(r["layer"], []).append(r["text"])
         return {
-            "fingerprint": fp,
+            "phashFp": fp,
+            "ocrFp": ocr_fp,
             "layerSummary": layer_summary,
             "elementCount": len(rows),
         } if rows else {}
