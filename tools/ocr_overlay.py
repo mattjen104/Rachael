@@ -100,12 +100,18 @@ def _get_ocr():
             if _ocr_engine is None:
                 try:
                     from paddleocr import PaddleOCR
-                    _ocr_engine = PaddleOCR(
-                        use_angle_cls=False,
-                        use_gpu=False,
-                        show_log=False,
-                        lang="en",
-                    )
+                    # Build kwargs compatible with both PaddleOCR v2 and v3+
+                    # (show_log and use_angle_cls removed in newer releases)
+                    _kwargs: dict = {"use_gpu": False, "lang": "en"}
+                    import inspect as _inspect
+                    _sig = _inspect.signature(PaddleOCR.__init__).parameters
+                    if "show_log" in _sig:
+                        _kwargs["show_log"] = False
+                    if "use_angle_cls" in _sig:
+                        _kwargs["use_angle_cls"] = False
+                    if "use_textline_orientation" in _sig:
+                        _kwargs["use_textline_orientation"] = False
+                    _ocr_engine = PaddleOCR(**_kwargs)
                     print("[ocr] PaddleOCR initialized")
                 except ImportError:
                     print("[ocr] PaddleOCR not found — install: pip install paddlepaddle paddleocr")
