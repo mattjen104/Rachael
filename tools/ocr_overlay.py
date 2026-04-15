@@ -1087,21 +1087,9 @@ class OverlayWindow:
         self._scene.addItem(badge_text)
 
     def _update_scan_badge(self, count: int):
-        """Flash a progress badge briefly during tab-walk.
-
-        The overlay is hidden during the walk to keep pixel diffs clean.
-        We briefly show it, update the badge, then hide it again after 80ms.
-        The brief flash doesn't affect the next diff because we wait tab_delay
-        after each Tab before the next screenshot.
-        """
-        dq = getattr(self, '_dispatch_q', None)
-        if dq is not None and self._window:
-            def _flash_badge():
-                self._window.show()
-                self._show_scanning_badge(msg=f"Scanning… {count} fields")
-                from PyQt5.QtCore import QTimer
-                QTimer.singleShot(80, lambda: self._window.hide())
-            dq.put(_flash_badge)
+        """Log progress to console. Overlay stays hidden during tab-walk
+        to guarantee clean pixel diffs — no badge flash that could leak
+        overlay pixels into captured frames."""
         print(f"[overlay] Scanning… {count} fields found so far")
 
     def _refresh_bg(self):
@@ -1143,7 +1131,13 @@ class OverlayWindow:
                 dq.put(lambda: self._window.show())
 
             if not elements:
-                print("[overlay] No elements found — skipping KB update")
+                print("[overlay] Tab-walk found 0 elements — falling back to OCR scan")
+                has_at = self._check_activity_tabs()
+                elements = scan_window(self.win_title, with_activity_tabs=has_at)
+                print(f"[overlay] OCR fallback: {len(elements)} elements found")
+
+            if not elements:
+                print("[overlay] No elements found by either method — skipping KB update")
                 self.elements = []
                 self.hint_map = {}
                 dq = getattr(self, '_dispatch_q', None)
