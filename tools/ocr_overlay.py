@@ -630,6 +630,88 @@ def _hotkey_matches(mods_held: set, key, mods_wanted: frozenset, trigger: str) -
         return False
 
 
+def _win32_overlay_hotkeys(dispatch_fn, toggle_hints_fn, toggle_correct_fn,
+                           hint_mods, hint_trigger, hint_key_name,
+                           correct_mods, correct_trigger, correct_key_name) -> bool:
+    """Register Ctrl+Shift+H / Ctrl+Shift+C via Win32 RegisterHotKey.
+
+    Uses the same WM_HOTKEY approach as epic_agent.py so the hotkeys fire even
+    when Citrix/Epic has focus and intercepts pynput's low-level hook.
+
+    Returns True if both hotkeys were registered and the message-loop thread is
+    running.  Returns False (with printed diagnostics) on any failure so the
+    caller can fall back to a pynput listener.
+    """
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        _u32 = ctypes.windll.user32
+
+        MOD_CTRL     = 0x0002
+        MOD_SHIFT    = 0x0004
+        MOD_NOREPEAT = 0x4000
+        WM_HOTKEY    = 0x0312
+        HK_HINTS     = 10   # IDs 10/11 — won't collide with agent (separate process)
+        HK_CORRECT   = 11
+
+        _VK_NAMED = {
+            "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
+            "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
+            "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
+            "pause": 0x13, "scroll_lock": 0x91,
+        }
+
+        def _combo_to_win32(mods_frozenset, trigger):
+            vk = (_VK_NAMED.get(trigger)
+                  if trigger in _VK_NAMED
+                  else (ord(trigger.upper()) if len(trigger) == 1 else 0))
+            w32 = MOD_NOREPEAT
+            if "ctrl"  in mods_frozenset: w32 |= MOD_CTRL
+            if "shift" in mods_frozenset: w32 |= MOD_SHIFT
+            return vk, w32
+
+        hint_vk, hint_w32 = _combo_to_win32(hint_mods,    hint_trigger)
+        corr_vk, corr_w32 = _combo_to_win32(correct_mods, correct_trigger)
+
+        ok1 = bool(_u32.RegisterHotKey(None, HK_HINTS,   hint_w32, hint_vk))
+        ok2 = bool(_u32.RegisterHotKey(None, HK_CORRECT, corr_w32, corr_vk))
+
+        if ok1 and ok2:
+            def _win32_msg_loop():
+                msg = ctypes.wintypes.MSG()
+                while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+                    if msg.message == WM_HOTKEY:
+                        if msg.wParam == HK_HINTS:
+                            dispatch_fn(toggle_hints_fn)
+                        elif msg.wParam == HK_CORRECT:
+                            dispatch_fn(toggle_correct_fn)
+                _u32.UnregisterHotKey(None, HK_HINTS)
+                _u32.UnregisterHotKey(None, HK_CORRECT)
+
+            _t = threading.Thread(target=_win32_msg_loop, daemon=True)
+            _t.start()
+            print(f"[overlay] Hotkeys registered via Win32: "
+                  f"{hint_key_name} = hints, {correct_key_name} = correction")
+            return True
+
+        # Partial or full registration failure — clean up and report
+        if ok1: _u32.UnregisterHotKey(None, HK_HINTS)
+        if ok2: _u32.UnregisterHotKey(None, HK_CORRECT)
+        if not ok1:
+            print(f"[overlay] WARNING: Win32 could not register {hint_key_name} "
+                  f"(already in use?). Try --hint-key with a different combo.")
+        if not ok2:
+            print(f"[overlay] WARNING: Win32 could not register {correct_key_name} "
+                  f"(already in use?). Try --correct-key with a different combo.")
+        print("[overlay] Falling back to pynput listener for toggle hotkeys.")
+        return False
+
+    except Exception as exc:
+        print(f"[overlay] Win32 hotkey setup failed ({exc}) — using pynput fallback")
+        return False
+
+
 class OverlayWindow:
     """
     PyQt5 transparent always-on-top overlay that draws Vimium hints over Epic.
@@ -1011,79 +1093,15 @@ class OverlayWindow:
             print("[overlay] pynput not installed — hint key input disabled (pip install pynput)")
 
         # ── 2. Toggle hotkeys: Win32 RegisterHotKey (works through Citrix) ────
-        # Win32 RegisterHotKey fires a WM_HOTKEY message regardless of which window
-        # has focus — including Citrix full-screen sessions that intercept pynput's
-        # low-level hook.  This is the same mechanism epic_agent uses for Alt+C/X/S/A.
-        #
-        # Fall back to a pynput non-suppressing listener on non-Windows.
-        _win32_ok = False
-        try:
-            import ctypes.wintypes
-            _u32 = ctypes.windll.user32
-
-            MOD_CTRL     = 0x0002
-            MOD_SHIFT    = 0x0004
-            MOD_NOREPEAT = 0x4000
-            WM_HOTKEY    = 0x0312
-            HK_HINTS     = 10   # IDs 10/11 — won't collide with agent (separate process)
-            HK_CORRECT   = 11
-
-            # Named-key VK table for non-letter triggers
-            _VK_NAMED = {
-                "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
-                "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
-                "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
-                "pause": 0x13, "scroll_lock": 0x91,
-            }
-
-            def _combo_to_win32(mods_frozenset, trigger):
-                vk = (_VK_NAMED.get(trigger)
-                      if trigger in _VK_NAMED
-                      else (ord(trigger.upper()) if len(trigger) == 1 else 0))
-                w32 = MOD_NOREPEAT
-                if "ctrl"  in mods_frozenset: w32 |= MOD_CTRL
-                if "shift" in mods_frozenset: w32 |= MOD_SHIFT
-                return vk, w32
-
-            hint_vk,  hint_w32  = _combo_to_win32(self._hint_mods,    self._hint_trigger)
-            corr_vk,  corr_w32  = _combo_to_win32(self._correct_mods, self._correct_trigger)
-
-            ok1 = bool(_u32.RegisterHotKey(None, HK_HINTS,   hint_w32, hint_vk))
-            ok2 = bool(_u32.RegisterHotKey(None, HK_CORRECT, corr_w32, corr_vk))
-
-            if ok1 and ok2:
-                # Both registered — start the Win32 message loop
-                def _win32_msg_loop():
-                    msg = ctypes.wintypes.MSG()
-                    while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-                        if msg.message == WM_HOTKEY:
-                            if msg.wParam == HK_HINTS:
-                                _dispatch(self.toggle_hints)
-                            elif msg.wParam == HK_CORRECT:
-                                _dispatch(self.toggle_correction)
-                    _u32.UnregisterHotKey(None, HK_HINTS)
-                    _u32.UnregisterHotKey(None, HK_CORRECT)
-
-                _w32_thread = threading.Thread(target=_win32_msg_loop, daemon=True)
-                _w32_thread.start()
-                _win32_ok = True
-                print(f"[overlay] Hotkeys registered via Win32: "
-                      f"{self._hint_key_name} = hints, "
-                      f"{self._correct_key_name} = correction")
-            else:
-                # At least one failed — unregister whichever succeeded and fall through
-                if ok1: _u32.UnregisterHotKey(None, HK_HINTS)
-                if ok2: _u32.UnregisterHotKey(None, HK_CORRECT)
-                if not ok1:
-                    print(f"[overlay] WARNING: Win32 could not register {self._hint_key_name} "
-                          f"(key already in use?). Try --hint-key with a different combo.")
-                if not ok2:
-                    print(f"[overlay] WARNING: Win32 could not register {self._correct_key_name} "
-                          f"(key already in use?). Try --correct-key with a different combo.")
-                print("[overlay] Falling back to pynput listener for toggle hotkeys.")
-
-        except Exception as _e:
-            pass  # non-Windows or ctypes unavailable — fall through to pynput
+        # Delegates to module-level helper so the logic is isolated and testable.
+        # Falls back to pynput if not on Windows or if registration fails.
+        _win32_ok = _win32_overlay_hotkeys(
+            _dispatch,
+            self.toggle_hints,
+            self.toggle_correction,
+            self._hint_mods,    self._hint_trigger,    self._hint_key_name,
+            self._correct_mods, self._correct_trigger, self._correct_key_name,
+        )
 
         if not _win32_ok:
             # Pynput fallback: modifier-tracking non-suppressing listener
