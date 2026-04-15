@@ -162,6 +162,7 @@ def scan_window(window_title: str, with_activity_tabs: bool = False) -> list[Ocr
 
     ocr = _get_ocr()
     if not ocr:
+        print("[ocr] No OCR engine — install PaddleOCR:  pip install paddlepaddle paddleocr")
         return []
 
     # Find window
@@ -944,6 +945,28 @@ class OverlayWindow:
         if not win:
             return
         ww, wh = win.width, win.height
+
+        # Status badge — always show when visible so the hotkey is visually confirmed
+        if not self.hint_map:
+            # Nothing to hint — show a small diagnostic badge top-right
+            ocr_ok = _get_ocr() is not None
+            msg = "OCR: 0 elements" if ocr_ok else "OCR engine not installed  pip install paddlepaddle paddleocr"
+            badge_font = QFont("Consolas", 10, QFont.Bold)
+            badge_text = QGraphicsTextItem(f" {msg} ")
+            badge_text.setFont(badge_font)
+            badge_text.setDefaultTextColor(QColor("#000000"))
+            bw = len(msg) * 8 + 16
+            bh = 22
+            bx = ww - bw - 10
+            by = 10
+            badge_bg = QGraphicsRectItem(bx, by, bw, bh)
+            badge_bg.setBrush(QBrush(QColor("#FF4444") if not ocr_ok else QColor("#FFA500")))
+            badge_bg.setPen(QPen(QColor("#000000"), 1))
+            badge_bg.setOpacity(0.92)
+            self._scene.addItem(badge_bg)
+            badge_text.setPos(bx + 2, by + 2)
+            self._scene.addItem(badge_text)
+            return
 
         font = QFont("Consolas", 9, QFont.Bold)
         for hint_key, elem in self.hint_map.items():
