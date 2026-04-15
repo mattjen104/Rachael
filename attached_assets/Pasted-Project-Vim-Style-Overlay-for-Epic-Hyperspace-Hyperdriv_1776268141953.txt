@@ -1,0 +1,107 @@
+Project: Vim-Style Overlay for Epic Hyperspace (Hyperdrive via Citrix)
+What We're Building
+A transparent always-on-top overlay that runs on a local Windows machine over a Citrix session running Epic Hyperdrive. The overlay adds Vimium-style numbered hints over every clickable text element in Epic, enabling keyboard-driven navigation and forming the foundation for an AI agent that can operate Epic autonomously.
+Deployment Context
+
+Epic runs as Hyperdrive (Chromium-based) served via Citrix
+Local machine receives a pixel stream only — no DOM access
+Overlay must work purely from screenshots (vision-only)
+All processing must run locally — no cloud APIs, HIPAA compliance required
+OCR accuracy is good because Hyperdrive/Chromium renders crisp, consistent text
+
+Core Architecture
+1. Screenshot Citrix window (mss or pyautogui)
+2. OCR with bounding boxes (PaddleOCR or Tesseract, runs locally)
+3. Number hints sequentially over detected text elements
+4. Draw hints on transparent always-on-top overlay (PyQt5)
+5. User/agent types a number → click fires at that element's center
+6. Screenshot again → verify state changed → repeat
+Overlay Window (PyQt5)
+pythonwindow.setWindowFlags(
+    Qt.WindowStaysOnTopHint |
+    Qt.FramelessWindowHint |
+    Qt.Tool
+)
+window.setAttribute(Qt.WA_TranslucentBackground)
+# Match position/size of Citrix window exactly
+Two Modes
+Mode 1 — Navigation (normal use)
+
+Hotkey triggers hint display
+Numbered hints appear over all OCR-detected text
+Type a number → click fires → element + coordinates logged to knowledge base
+Every confirmed click builds the knowledge base passively
+
+Mode 2 — Correction (manual)
+
+Grid overlay appears (e.g. 50×30 cells) as coordinate reference
+User can resize/add/delete bounding boxes on misdetected elements
+Changes saved to knowledge base as corrections
+
+Element Data Model
+json{
+  "screen": "medication_order_entry",
+  "elements": [
+    {
+      "id": "accept_btn",
+      "ocr_text": "Accept",
+      "bbox_relative": [0.832, 0.500, 0.896, 0.514],
+      "type": "button",
+      "confirmed_count": 47,
+      "present_on": ["medication_order_entry", "order_signing"]
+    }
+  ]
+}
+Critical: store all coordinates as relative (% of screen), never absolute pixels. This handles resolution changes and window resizing automatically. Anchor to nearby text when possible for extra robustness.
+Confidence System
+StateMeaningAgent uses it?Seen onceOCR detected, unconfirmedNoConfirmedUser activated via hintYesReliableConfirmed 5+ timesYes, preferredNamedUser gave semantic labelYes, always
+Knowledge Base Builds Passively
+Every time a hint is activated, the element is logged. After normal use, you accumulate a reliable map of Epic's interface with zero explicit annotation effort. Failures during agent runs trigger a screenshot capture that can be reviewed and corrected in Mode 2.
+Screen Fingerprinting
+pythondef fingerprint_screen(elements):
+    stable = [e.text for e in elements
+              if e.text in KNOWN_LABELS and not looks_like_phi(e.text)]
+    return hash(frozenset(stable))
+Automatically identifies which Epic screen is active without manual labeling.
+Action Space (for AI agent)
+pythonclick_hint(number)           # click numbered element
+type_into(number, text)      # click field then type
+click_grid(row, col)         # coordinate fallback for unlabeled elements
+scroll(direction, region)
+read(region)                 # OCR a region and return text
+screenshot_and_verify()      # confirm action had effect
+Semantic Vocabulary Layer (on top of numbered hints)
+Known stable elements get fixed shortcuts regardless of their hint number:
+'a'   → Accept (appears on many screens)
+Esc   → Cancel
+'m'   → Medications tab
+'o'   → Orders tab
+'/'   → Search field
+F2-F9 → Epic's existing function key shortcuts (preserve these)
+Numbered hints are ephemeral (valid for current screen only). Semantic labels are permanent.
+Tech Stack
+Screenshot:    mss (fast) or pyautogui
+OCR:           PaddleOCR (better accuracy) or Tesseract — both run fully local
+Overlay UI:    PyQt5 (transparent always-on-top window)
+Click exec:    pyautogui
+Storage:       SQLite (annotations + knowledge base)
+Backend API:   FastAPI (optional, for correction mode web UI)
+What We Deliberately Decided NOT to Do
+
+No Label Studio — unnecessary since Epic's structure is already known
+No cloud OCR — PHI risk
+No DOM access — unavailable through Citrix
+No absolute pixel coordinates — fragile across resolutions
+No full screen mapping upfront — map only workflows you actually use
+
+Key Design Principles
+
+Text is the semantic layer — nearly every clickable thing in Epic has a text label. OCR + bounding boxes is the primary abstraction, not a fallback.
+Relative coordinates only — bbox = [x%, y%, w%, h%] survives any resolution change
+Build knowledge base through use — passive logging during normal operation, no explicit annotation phase
+Numbered hints for agent, semantic labels for humans — both layers coexist
+Verify after every action — never assume a click worked; screenshot and confirm state changed
+Grid is the escape hatch — covers icons and anything OCR misses, not the primary mechanism
+
+
+Note for Replit: This is a Windows desktop app (PyQt5 overlay). The Citrix window is just a regular window from the local OS perspective — no special Citrix API needed. Start with screenshot → OCR → draw numbered boxes → click on keypress. That core loop is the whole system.
