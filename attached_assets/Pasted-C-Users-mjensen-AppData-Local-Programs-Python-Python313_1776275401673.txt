@@ -1,0 +1,77 @@
+C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.2) doesn't match a supported version!
+  warnings.warn(
+  [input] Low-level keyboard available (backend: sendinput)
+  [config] Loading C:\Users\mjensen\Downloads\.env
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+[overlay] Launched OCR overlay (pid 1064)
+[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+  [always-on] Global input listeners started (focus-aware dispatch)
+  [label] Screen labeler thread started
+  [always-on] Started capture: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote (key=hyperspace__exe_lung_txp__sup_environment__matthew_e_jensen, sid=aon_1776275274_4563, input=full)
+  [always-on] Started capture: tools/epic_agent.py - iCloud Sync Manager - Replit - Google Chrome (key=toolsepic_agentpy_-_icloud_sync_manager_-_replit_-_google_ch, sid=aon_1776275274_5819, input=full)
+C:\Users\mjensen\Downloads\epic_agent (61).py:1603: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  pixels = list(small.getdata())
+[ocr] Auto-detected Epic window: 'tools/epic_agent.py - iCloud Sync Manager - Replit - Google Chrome'
+[ocr] Starting overlay over: 'tools/epic_agent.py - iCloud Sync Manager - Replit - Google Chrome'
+[ocr] F1=toggle hints  F2=correction mode  Esc=cancel
+C:\Users\mjensen\Downloads\epic_agent (61).py:1616: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+C:\Users\mjensen\Downloads\epic_agent (61).py:1617: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+[overlay] Running. F1=toggle hints, F2=correction mode, Esc=cancel
+  [label] ffc78485c707.. unrecognized: Okay, let's analyze the image and determine the screen label
+  [label] ffef85858707.. = Agent Console [none]
+  [label] ffc704858747.. unrecognized: Okay, let's analyze the image and identify the Epic Hyperspa
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0433 (thresh=0.005)
+  [aon-diff] toolsepic_agentpy_-_icloud_syn: diff=0.0423 (thresh=0.005)
+  [label] ffc704858747.. = epic_agent.py [none]
+  [label] ffc70485c547.. unrecognized: Based on the image and following the provided reference, her
+  [label] ffc70485c747.. unrecognized: Okay, let's analyze the image based on the provided referenc
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [label] ffc704c5c547.. unrecognized: Okay, let's analyze the provided image based on the instruct
+  [label] ffc704c5c747.. = epic_agent.py iCloud Sync Manager [none]
+  [label] ffc704e5c747.. unrecognized: Okay, let's analyze the provided image and determine the scr
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0398 (thresh=0.005)
+  [label] ffc704e5c547.. = epic_agent.py [none]
+  [aon-flush-dbg] toolsepic_agentpy_-_icloud_s: 5 fps, 4 trans
+  [aon-flush-resp] resp=None body=N/A
+  [always-on] Stopped capture: tools/epic_agent.py - iCloud Sync Manager - Replit - Google Chrome (4 transitions)
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 87n/153e
+  [label] 00ffffffffff.. = My Dashboards [none]
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [label] 00fffefefefe.. = My Dashboards [none]
+  [label] 00fffffffefe.. = My Dashboards [none]
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0504 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [label] 000f07070707.. = Clinical Content Review [none]
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 87n/153e
+  [label] 007cffffffff.. = Slicer Dicer Help [none/ephemeral]
+  [label] 007fffffffff.. = IP Project Team Build Homepage [none]
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0064 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.2578 (thresh=0.005)
+  [label] 000f07060606.. = Clinical Content Review [none]
+  [label] 020707070787.. = TXP Staff Dashboard [none]
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0308 (thresh=0.005)
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 88n/154e
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.2197 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0001 (thresh=0.005)
+  [label] fff378781849.. = epic_agent.py [none]
