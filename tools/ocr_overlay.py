@@ -269,7 +269,8 @@ def scan_window(window_title: str, with_activity_tabs: bool = False) -> list[Ocr
     return elements
 
 
-def _classify_layer(cx: int, cy: int, win_w: int, win_h: int) -> str:
+def _classify_layer(cx: int, cy: int, win_w: int, win_h: int,
+                    has_activity_tabs: bool = False) -> str:
     """Classify a pixel coordinate into the appropriate LAYER_BANDS layer."""
     if cy >= win_h - 25:
         return "bottom_bar"
@@ -280,6 +281,8 @@ def _classify_layer(cx: int, cy: int, win_w: int, win_h: int) -> str:
     if cy < 67:
         return "workspace_tabs"
     if cy < 95:
+        if has_activity_tabs and cy < 89:
+            return "activity_tabs"
         return "breadcrumb"
     if cx < 130:
         return "sidebar"
@@ -340,10 +343,15 @@ def tab_walk_scan(
 ) -> list[OcrElement]:
     """Discover interactive fields by Tab-walking and pixel-diffing the highlight.
 
-    Uses a three-frame strategy: each Tab's screenshot is diffed against a STABLE
-    BASELINE (pre-Tab screenshot), so only the NEW highlight region appears in the
-    diff — the old highlight's disappearance is not visible because the baseline
-    predates it.
+    Sends Tab keystrokes to Epic and detects the focus highlight change via
+    consecutive-frame pixel diff. Multiple diff regions are produced (old highlight
+    disappears, new highlight appears); `_pick_new_bbox` selects the region NOT
+    matching any previously known position, isolating the newly focused field.
+
+    Cycle detection: the walk stops when the current highlight center is within
+    ±10px of the FIRST discovered element's center (after at least 3 steps), or
+    after 3 consecutive revisits of quantized visited positions, or after
+    `max_steps`.
 
     Args:
         window_title: Epic window title substring.
@@ -379,17 +387,22 @@ def tab_walk_scan(
         win.activate()
     except Exception:
         pass
-    time.sleep(0.15)
+    time.sleep(0.1)
+    try:
+        pyautogui.click(win_left + win_w // 2, win_top + 12)
+        time.sleep(0.15)
+    except Exception:
+        pass
 
     ocr = _get_ocr()
 
     elements: list[OcrElement] = []
     visited: set = set()
+    first_center = None
     no_change_streak = 0
     revisit_count = 0
 
     def _ocr_crop(frame, x1, y1, x2, y2):
-        """OCR a small crop and return the text label."""
         if ocr is None:
             return ""
         pad = 8
@@ -414,8 +427,7 @@ def tab_walk_scan(
         return ""
 
     def _pick_new_bbox(bboxes, known_positions):
-        """From a list of diff bboxes, pick the one NOT matching any known position.
-        This isolates the NEW highlight from the old highlight's disappearance."""
+        """From diff bboxes, pick the one NOT matching any known position."""
         if not bboxes:
             return None
         if len(bboxes) == 1:
@@ -433,8 +445,7 @@ def tab_walk_scan(
         return bboxes[0]
 
     with mss.mss() as sct:
-        baseline = _capture_window(sct, region)
-        prev_frame = baseline
+        prev_frame = _capture_window(sct, region)
         known_centers: list[tuple] = []
 
         for step in range(max_steps):
@@ -467,6 +478,13 @@ def tab_walk_scan(
             cx = (x1 + x2) // 2
             cy = (y1 + y2) // 2
 
+            if first_center is not None and step > 2:
+                fx, fy = first_center
+                if abs(cx - fx) <= 10 and abs(cy - fy) <= 10:
+                    print(f"[tab-walk] Cycle complete at step {step} — "
+                          f"returned to first field ({fx},{fy})")
+                    break
+
             qpos = _quantize_pos(cx, cy)
             if qpos in visited:
                 revisit_count += 1
@@ -478,6 +496,9 @@ def tab_walk_scan(
                 continue
             revisit_count = 0
             visited.add(qpos)
+
+            if first_center is None:
+                first_center = (cx, cy)
 
             label = _ocr_crop(curr_frame, x1, y1, x2, y2)
             if not label:
@@ -1065,12 +1086,9 @@ class OverlayWindow:
         self._scene.addItem(badge_text)
 
     def _update_scan_badge(self, count: int):
-        """Dispatch a progress badge update to the Qt main thread."""
-        dq = getattr(self, '_dispatch_q', None)
-        if dq is not None:
-            def _badge():
-                self._show_scanning_badge(msg=f"Scanning… {count} fields")
-            dq.put(_badge)
+        """Log progress to console (overlay is hidden during tab-walk to avoid
+        polluting pixel diffs, so badge updates go to stdout instead)."""
+        print(f"[overlay] Scanning… {count} fields found so far")
 
     def _refresh_bg(self):
         """Tab-walk scan on a background thread; dispatch _redraw to Qt main thread."""
