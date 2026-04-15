@@ -854,6 +854,42 @@ export async function registerRoutes(
     res.json(result);
   });
 
+  // OCR overlay click reporting — receives confirmed element clicks from the local overlay
+  app.post("/api/epic/ocr/click", async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const { fingerprint, windowTitle, element } = req.body as {
+      fingerprint?: string;
+      windowTitle?: string;
+      element?: { text: string; layer: string; rel_x: number; rel_y: number; rel_w?: number; rel_h?: number; hint?: string };
+    };
+    if (!fingerprint || !element) return res.status(400).json({ error: "Missing fingerprint or element" });
+
+    // Derive window key from title the same way the agent does
+    const rawWinKey = (windowTitle || "hyperspace").replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 60).trim().replace(/\s+/g, "_").toLowerCase();
+    const treeConfigKey = `session_tree_${rawWinKey}`;
+
+    try {
+      const treeCfg = await storage.getAgentConfig(treeConfigKey);
+      if (treeCfg?.value) {
+        const tree = JSON.parse(treeCfg.value) as { nodes: Record<string, any>; edges: any[]; mergedSessions: string[]; patterns: any[] };
+        if (tree.nodes[fingerprint]) {
+          if (!tree.nodes[fingerprint].ocrLayers) tree.nodes[fingerprint].ocrLayers = {};
+          const layer = element.layer || "workspace";
+          const existing: string[] = tree.nodes[fingerprint].ocrLayers[layer] || [];
+          if (!existing.includes(element.text)) existing.push(element.text);
+          tree.nodes[fingerprint].ocrLayers[layer] = existing.slice(-30); // cap per layer
+          await storage.setAgentConfig(treeConfigKey, JSON.stringify(tree));
+        }
+      }
+    } catch (e: any) {
+      console.error(`[ocr/click] ${e.message}`);
+    }
+    res.json({ ok: true });
+  });
+
   app.get("/api/epic/agent/status", (_req, res) => {
     const stale = Date.now() - (epicAgentStatus.lastSeen || 0) > 60000;
     res.json({

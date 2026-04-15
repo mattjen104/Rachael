@@ -8904,6 +8904,20 @@ def execute_command(cmd):
             execute_record_session_stop(cmd)
         elif cmd_type == "record_session_status":
             execute_record_session_status(cmd)
+        elif cmd_type == "ocr_view":
+            try:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                from ocr_overlay import execute_ocr_view
+                execute_ocr_view(cmd)
+            except ImportError as e:
+                post_result(cmd.get("id", "unknown"), "error", error=f"ocr_overlay not available: {e}")
+        elif cmd_type == "ocr_do":
+            try:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                from ocr_overlay import execute_ocr_do
+                execute_ocr_do(cmd)
+            except ImportError as e:
+                post_result(cmd.get("id", "unknown"), "error", error=f"ocr_overlay not available: {e}")
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except pyautogui.FailSafeException:

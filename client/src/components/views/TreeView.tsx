@@ -504,6 +504,20 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                 if (visits > 0) {
                   nodes.push({ type: "bridge-info", label: `${indent}  ${visits} visits  fp:${fp.slice(0, 12)}`, actionCmd: "" });
                 }
+                // OCR layer summary — shown when overlay has confirmed elements for this screen
+                if (node.ocrLayers && typeof node.ocrLayers === "object") {
+                  const SIGIL: Record<string, string> = {
+                    shortcut_toolbar: "T", workspace_tabs: "W", activity_tabs: "A",
+                    breadcrumb: "B", sidebar: "S", workspace: "*", bottom_bar: "_",
+                  };
+                  const ocrParts = Object.entries(node.ocrLayers as Record<string, string[]>)
+                    .filter(([, items]) => Array.isArray(items) && items.length > 0)
+                    .map(([layer, items]) => `[${SIGIL[layer] || layer[0]}]${(items as string[]).length}`)
+                    .join(" ");
+                  if (ocrParts) {
+                    nodes.push({ type: "bridge-info", label: `${indent}  ocr: ${ocrParts}`, actionCmd: `epic ocr SUP view` });
+                  }
+                }
 
                 for (const e of inEdges.slice(0, 5)) {
                   const fromNode = wNodes.find((n: any) => n.fingerprint === e.from);

@@ -4171,7 +4171,7 @@ ${fullHtml}`;
     return fail(`Unknown subcommand: ${sub}. Try: record start | record stop | record status`);
   });
 
-  registerCommand("epic", "Epic Hyperspace activity tools", "epic [view|do|screen|fields|menu|search|go|activities|navigate|screenshot|click|status|setup|uia] <env> [target]", async (args) => {
+  registerCommand("epic", "Epic Hyperspace activity tools", "epic [view|do|ocr|screen|fields|menu|search|go|activities|navigate|screenshot|click|status|setup|uia] <env> [target]", async (args) => {
     const nl = String.fromCharCode(10);
     const EPIC_ENVS = new Set(["SUP", "POC", "TST", "PRD", "BLD", "REL", "DEM", "MST"]);
 
@@ -5396,6 +5396,139 @@ ${fullHtml}`;
       } catch (e: any) {
         return fail(`[epic] ${e.message}`);
       }
+    }
+
+    if (args[0] === "ocr") {
+      const firstArg = (args[1] || "").toUpperCase();
+      const hasEnv = EPIC_ENVS.has(firstArg);
+      const env = hasEnv ? firstArg : "SUP";
+      const restArgs = hasEnv ? args.slice(2) : args.slice(1);
+      const action = (restArgs[0] || "view").toLowerCase();
+      const hint = (restArgs[1] || "").toLowerCase();
+
+      // OCR correct — local overlay only, no server round-trip needed
+      if (action === "correct") {
+        return ok(
+          `=== EPIC OCR CORRECTION MODE: ${env} ===${nl}` +
+          `Run on your local machine:${nl}${nl}` +
+          `  python tools/ocr_overlay.py --correct [--window "${env}"]${nl}${nl}` +
+          `Controls in correction mode:${nl}` +
+          `  F2           — toggle correction grid on/off${nl}` +
+          `  Click box    — select an element to edit or delete${nl}` +
+          `  Drag new box — draw a bounding box for a missed element${nl}` +
+          `  Layer bands  — shown as color zones (gold=toolbar, blue=tabs, etc.)${nl}` +
+          `  Esc          — cancel selection${nl}${nl}` +
+          `Corrections are saved immediately to ocr_kb.sqlite3 at named confidence.`
+        );
+      }
+
+      if (action === "view") {
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "ocr_view", env }),
+          });
+          const sendData = await resp.json() as any;
+          if (!sendData.ok) return fail("[epic ocr] Failed to send ocr_view command");
+          const cmdId = sendData.commandId;
+
+          let result: any = null;
+          for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+            const pollData = await poll.json() as any;
+            if (pollData.status && pollData.status !== "pending") { result = pollData; break; }
+          }
+
+          if (!result) return fail("[epic ocr] OCR view timed out (30s). Is the desktop agent running?");
+          if (result.status === "error") return fail(`[epic ocr] ${result.error || "OCR view failed"}`);
+
+          const d = result.data || {};
+          const layerSummary: Record<string, string[]> = d.layerSummary || {};
+          const fp = (d.fingerprint || "").slice(0, 12);
+          const activity = d.activity || "";
+          const elementCount = d.elementCount || 0;
+          const elements: any[] = d.elements || [];
+
+          const LAYER_SIGILS: Record<string, string> = {
+            shortcut_toolbar: "[T]",
+            workspace_tabs:   "[W]",
+            activity_tabs:    "[A]",
+            breadcrumb:       "[B]",
+            sidebar:          "[S]",
+            workspace:        "[*]",
+            bottom_bar:       "[_]",
+          };
+
+          const lines: string[] = [];
+          lines.push(`=== EPIC OCR VIEW: ${env} ===`);
+          if (activity) lines.push(`Activity: ${activity}`);
+          lines.push(`Fingerprint: ${fp}  Elements: ${elementCount}`);
+          lines.push("");
+
+          // Layer-grouped hint display
+          const byLayer: Record<string, Array<{ hint: string; text: string }>> = {};
+          for (const e of elements) {
+            byLayer[e.layer] = byLayer[e.layer] || [];
+            byLayer[e.layer].push({ hint: e.hint, text: e.text });
+          }
+          const layerOrder = ["shortcut_toolbar","workspace_tabs","activity_tabs","breadcrumb","sidebar","workspace","bottom_bar"];
+          for (const layer of layerOrder) {
+            const items = byLayer[layer];
+            if (!items?.length) continue;
+            lines.push(`${LAYER_SIGILS[layer] || "[ ]"} ${layer.replace(/_/g, " ").toUpperCase()}`);
+            for (const item of items) {
+              lines.push(`  [${item.hint}] ${item.text}`);
+            }
+            lines.push("");
+          }
+          lines.push(`Interact: epic ocr ${env} do <hint>`);
+          lines.push(`Correct:  epic ocr ${env} correct`);
+          return ok(lines.join(nl));
+        } catch (e: any) {
+          return fail(`[epic ocr] ${e.message}`);
+        }
+      }
+
+      if (action === "do") {
+        if (!hint) return fail(`[epic ocr] Usage: epic ocr [env] do <hint>${nl}Run 'epic ocr view' first to see available hints.`);
+        try {
+          const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "ocr_do", env, hint }),
+          });
+          const sendData = await resp.json() as any;
+          if (!sendData.ok) return fail("[epic ocr] Failed to send ocr_do command");
+          const cmdId = sendData.commandId;
+
+          let result: any = null;
+          for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            const poll = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+            const pollData = await poll.json() as any;
+            if (pollData.status && pollData.status !== "pending") { result = pollData; break; }
+          }
+
+          if (!result) return fail("[epic ocr] Action timed out (30s). Is the desktop agent running?");
+          if (result.status === "error") return fail(`[epic ocr] ${result.error || "OCR click failed"}`);
+
+          const d = result.data || {};
+          const lines: string[] = [];
+          lines.push(`=== EPIC OCR DO: ${env} [${hint}] ===`);
+          lines.push(`Clicked: ${d.clicked || "?"} (${d.layer || "?"})`);
+          lines.push(`Position: (${d.abs_cx || 0}, ${d.abs_cy || 0})`);
+          lines.push(`Screen fp: ${(d.fingerprint || "").slice(0, 12)}`);
+          lines.push("");
+          lines.push(`Next: epic ocr ${env} view`);
+          return ok(lines.join(nl));
+        } catch (e: any) {
+          return fail(`[epic ocr] ${e.message}`);
+        }
+      }
+
+      return fail(`[epic ocr] Unknown action '${action}'. Use: epic ocr [env] view | do <hint> | correct`);
     }
 
     if (args[0] === "menu") {
