@@ -269,6 +269,213 @@ def scan_window(window_title: str, with_activity_tabs: bool = False) -> list[Ocr
     return elements
 
 
+def _classify_layer(cx: int, cy: int, win_w: int, win_h: int) -> str:
+    """Classify a pixel coordinate into the appropriate LAYER_BANDS layer."""
+    if cy >= win_h - 25:
+        return "bottom_bar"
+    if cy < 25:
+        return "title_bar"
+    if cy < 45:
+        return "shortcut_toolbar"
+    if cy < 67:
+        return "workspace_tabs"
+    if cy < 95:
+        return "breadcrumb"
+    if cx < 130:
+        return "sidebar"
+    return "workspace"
+
+
+def _capture_window(sct, region: dict):
+    """Grab a screenshot and return as numpy BGR array."""
+    import numpy as np
+    shot = sct.grab(region)
+    arr = np.array(shot)[:, :, :3]
+    return arr
+
+
+def _find_diff_bbox(prev_frame, curr_frame, threshold: int = 30, min_area: int = 50):
+    """Pixel-diff two BGR frames; return the largest changed bounding box or None.
+
+    Returns (x1, y1, x2, y2) of the largest contiguous changed region,
+    or None if the change is too small / noisy.
+    """
+    import numpy as np
+    diff = np.abs(curr_frame.astype(np.int16) - prev_frame.astype(np.int16))
+    mask = np.any(diff > threshold, axis=2).astype(np.uint8)
+
+    changed = np.where(mask)
+    if len(changed[0]) < min_area:
+        return None
+
+    try:
+        import cv2
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        largest = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest)
+        if w * h < min_area:
+            return None
+        return (x, y, x + w, y + h)
+    except ImportError:
+        y_min, y_max = int(changed[0].min()), int(changed[0].max())
+        x_min, x_max = int(changed[1].min()), int(changed[1].max())
+        if (x_max - x_min) * (y_max - y_min) < min_area:
+            return None
+        return (x_min, y_min, x_max, y_max)
+
+
+def tab_walk_scan(
+    window_title: str,
+    max_steps: int = 300,
+    tab_delay: float = 0.18,
+    progress_cb=None,
+) -> list[OcrElement]:
+    """Discover interactive fields by Tab-walking and pixel-diffing the highlight.
+
+    Instead of full-screen OCR, this sends Tab keystrokes to Epic and detects
+    the focus highlight via pixel diff. Each highlighted region is OCR'd
+    individually for the label text.
+
+    Args:
+        window_title: Epic window title substring.
+        max_steps: Maximum Tab presses before giving up.
+        tab_delay: Seconds to wait after each Tab for Citrix render.
+        progress_cb: Optional callback(count) called every 10 elements found.
+
+    Returns:
+        List of OcrElement with pixel-perfect bounding boxes.
+    """
+    try:
+        import mss
+        import numpy as np
+        import pyautogui
+        import pygetwindow as gw
+    except ImportError as e:
+        print(f"[tab-walk] Missing dependency: {e}")
+        return []
+
+    wins = [w for w in gw.getAllWindows()
+            if window_title.lower() in (w.title or "").lower() and w.width > 100]
+    if not wins:
+        print(f"[tab-walk] Window not found: {window_title}")
+        return []
+    win = wins[0]
+    win_left, win_top, win_w, win_h = win.left, win.top, win.width, win.height
+    region = {"left": win_left, "top": win_top, "width": win_w, "height": win_h}
+
+    pyautogui.PAUSE = 0.02
+
+    try:
+        win.activate()
+    except Exception:
+        pass
+    time.sleep(0.15)
+
+    ocr = _get_ocr()
+
+    elements: list[OcrElement] = []
+    first_bbox_center = None
+    no_change_streak = 0
+
+    with mss.mss() as sct:
+        prev_frame = _capture_window(sct, region)
+
+        for step in range(max_steps):
+            pyautogui.press('tab')
+            time.sleep(tab_delay)
+
+            curr_frame = _capture_window(sct, region)
+            bbox = _find_diff_bbox(prev_frame, curr_frame, threshold=30, min_area=50)
+
+            if bbox is None:
+                no_change_streak += 1
+                if no_change_streak > 5:
+                    print(f"[tab-walk] No changes for 5 Tabs — stopping at step {step}")
+                    break
+                prev_frame = curr_frame
+                continue
+            no_change_streak = 0
+
+            x1, y1, x2, y2 = bbox
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+
+            if first_bbox_center is not None:
+                fx, fy = first_bbox_center
+                if abs(cx - fx) < 15 and abs(cy - fy) < 15 and step > 2:
+                    print(f"[tab-walk] Cycle detected at step {step} — back to first field")
+                    break
+
+            if first_bbox_center is None:
+                first_bbox_center = (cx, cy)
+
+            skip = False
+            for existing in elements:
+                ex = int(existing.rel_x * win_w)
+                ey = int(existing.rel_y * win_h)
+                if abs(cx - ex) < 10 and abs(cy - ey) < 10:
+                    skip = True
+                    break
+            if skip:
+                prev_frame = curr_frame
+                continue
+
+            label = ""
+            if ocr is not None:
+                pad = 8
+                crop_y1 = max(0, y1 - pad)
+                crop_y2 = min(win_h, y2 + pad)
+                crop_x1 = max(0, x1 - pad)
+                crop_x2 = min(win_w, x2 + pad)
+                crop = curr_frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                if crop.size > 0:
+                    try:
+                        result = ocr.ocr(crop, cls=False)
+                    except Exception:
+                        try:
+                            result = ocr.ocr(crop)
+                        except Exception:
+                            result = None
+                    if result and result[0]:
+                        texts = [line[1][0].strip() for line in result[0]
+                                 if line[1][0].strip() and line[1][1] > 0.4]
+                        label = " ".join(texts)
+
+            if not label:
+                label = f"field_{step}"
+
+            layer = _classify_layer(cx, cy, win_w, win_h)
+
+            elements.append(OcrElement(
+                text=label,
+                layer=layer,
+                rel_x=cx / win_w,
+                rel_y=cy / win_h,
+                rel_w=(x2 - x1) / win_w,
+                rel_h=(y2 - y1) / win_h,
+                confidence=1.0,
+                abs_cx=win_left + cx,
+                abs_cy=win_top + cy,
+            ))
+
+            if progress_cb and len(elements) % 10 == 0:
+                progress_cb(len(elements))
+
+            print(f"[tab-walk] #{len(elements)}: '{label}' @ ({cx},{cy}) layer={layer}")
+            prev_frame = curr_frame
+
+    try:
+        pyautogui.press('escape')
+        time.sleep(0.1)
+    except Exception:
+        pass
+
+    print(f"[tab-walk] Walk complete: {len(elements)} fields found")
+    return elements
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3 — SQLite Knowledge Base
 # ─────────────────────────────────────────────────────────────────────────────
@@ -793,8 +1000,8 @@ class OverlayWindow:
         except Exception:
             return None
 
-    def _show_scanning_badge(self):
-        """Paint a blue 'Scanning…' badge immediately so the user gets feedback."""
+    def _show_scanning_badge(self, msg: str = "Scanning…"):
+        """Paint a blue badge with a message so the user gets feedback."""
         if self._scene is None:
             return
         from PyQt5.QtWidgets import QGraphicsTextItem, QGraphicsRectItem
@@ -803,7 +1010,6 @@ class OverlayWindow:
         if not win:
             return
         self._scene.clear()
-        msg = "Scanning…"
         badge_font = QFont("Consolas", 10, QFont.Bold)
         badge_text = QGraphicsTextItem(f" {msg} ")
         badge_text.setFont(badge_font)
@@ -820,17 +1026,38 @@ class OverlayWindow:
         badge_text.setPos(bx + 2, by + 2)
         self._scene.addItem(badge_text)
 
+    def _update_scan_badge(self, count: int):
+        """Dispatch a progress badge update to the Qt main thread."""
+        dq = getattr(self, '_dispatch_q', None)
+        if dq is not None:
+            def _badge():
+                self._show_scanning_badge(msg=f"Scanning… {count} fields")
+            dq.put(_badge)
+
     def _refresh_bg(self):
-        """Run the full OCR scan on a background thread; dispatch _redraw to Qt main thread."""
+        """Tab-walk scan on a background thread; dispatch _redraw to Qt main thread."""
         try:
             win = self._find_epic_window()
             if not win:
                 print(f"[overlay] Epic window not found: {self.win_title!r} — is Hyperspace open?")
                 return
-            print(f"[overlay] Scanning window: {win.title!r} ({win.width}x{win.height})")
-            has_activity_tabs = self._check_activity_tabs()
-            elements = scan_window(self.win_title, with_activity_tabs=has_activity_tabs)
-            print(f"[overlay] Scan complete: {len(elements)} elements found")
+            print(f"[overlay] Tab-walk scanning: {win.title!r} ({win.width}x{win.height})")
+
+            dq = getattr(self, '_dispatch_q', None)
+            if dq is not None and self._window:
+                dq.put(lambda: self._window.hide())
+                time.sleep(0.1)
+
+            elements = tab_walk_scan(
+                self.win_title,
+                max_steps=300,
+                tab_delay=0.18,
+                progress_cb=self._update_scan_badge,
+            )
+            print(f"[overlay] Tab-walk complete: {len(elements)} elements found")
+
+            if dq is not None and self._window:
+                dq.put(lambda: self._window.show())
 
             fp = compute_screen_fp(elements)
             phash = _compute_window_phash(self.win_title)
@@ -893,8 +1120,11 @@ class OverlayWindow:
                     getattr(self, '_start_suppress_listener', lambda: None)()
         except Exception as ex:
             print(f"[overlay] Scan error: {ex}")
+            import traceback; traceback.print_exc()
             dq = getattr(self, '_dispatch_q', None)
             if dq is not None:
+                if self._window:
+                    dq.put(lambda: self._window.show())
                 dq.put(self._redraw)
 
     def refresh(self):
