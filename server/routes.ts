@@ -1373,6 +1373,15 @@ export async function registerRoutes(
             }
           }
         }
+        // Merge OCR KB layer summary from heartbeat (populated by local overlay, PHI-safe)
+        if (info.ocrKbSummary?.layerSummary && typeof info.ocrKbSummary.layerSummary === "object") {
+          if (!tree.nodes[fp].ocrLayers) tree.nodes[fp].ocrLayers = {};
+          for (const [layer, texts] of Object.entries(info.ocrKbSummary.layerSummary as Record<string, string[]>)) {
+            const existing: string[] = tree.nodes[fp].ocrLayers[layer] || [];
+            const merged = [...new Set([...existing, ...(texts as string[])])].slice(0, 30);
+            tree.nodes[fp].ocrLayers[layer] = merged;
+          }
+        }
       }
     }
 

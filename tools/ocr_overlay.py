@@ -352,7 +352,7 @@ def promote_element(conn, elem_id: int, label: str = None):
     """Promote an element's confidence tier after a confirmed click."""
     now = time.time()
     row = conn.execute(
-        "SELECT confidence, click_count, semantic FROM elements WHERE id=?", (elem_id,)
+        "SELECT text, confidence, click_count, semantic FROM elements WHERE id=?", (elem_id,)
     ).fetchone()
     if not row:
         return
@@ -364,8 +364,11 @@ def promote_element(conn, elem_id: int, label: str = None):
             tier_idx = CONFIDENCE_TIERS.index("reliable")
         elif count == 1 and current == "seen":
             tier_idx = CONFIDENCE_TIERS.index("confirmed")
-    new_confidence = label and "named" or CONFIDENCE_TIERS[tier_idx]
+    new_confidence = "named" if label else CONFIDENCE_TIERS[tier_idx]
     semantic = label if label else row["semantic"]
+    # Auto-assign semantic from DEFAULT_SEMANTICS when element first reaches reliable/named
+    if not semantic and new_confidence in ("reliable", "named"):
+        semantic = DEFAULT_SEMANTICS.get(row["text"])
     conn.execute(
         "UPDATE elements SET click_count=?, confidence=?, semantic=?, updated_at=? WHERE id=?",
         (count, new_confidence, semantic, now, elem_id)
@@ -522,6 +525,13 @@ class OverlayWindow:
         self._app = None
         self._window = None
         self._scene = None
+
+        # Correction mode state
+        self._corr_selected: Optional[dict] = None     # currently selected KB element
+        self._corr_drawing: bool = False               # True while rubber-band drawing
+        self._corr_drag_start: Optional[tuple] = None  # (scene_x, scene_y) drag start
+        self._corr_new_rect: Optional[tuple] = None    # (x, y, w, h) in scene coords
+        self._QInputDialog = None                      # set during run() when Qt is available
 
     def _find_epic_window(self):
         try:
@@ -728,17 +738,46 @@ class OverlayWindow:
     def run(self):
         """Start the Qt event loop with the overlay window."""
         try:
-            from PyQt5.QtWidgets import QApplication, QGraphicsView, QGraphicsScene
+            from PyQt5.QtWidgets import QApplication, QGraphicsView, QGraphicsScene, QInputDialog
             from PyQt5.QtCore import Qt, QTimer
             from PyQt5.QtGui import QColor
         except ImportError:
             print("[overlay] PyQt5 not installed — pip install PyQt5")
             return
 
+        self._QInputDialog = QInputDialog
+        overlay_ref = self  # closure ref for CorrectionView
+
+        class CorrectionView(QGraphicsView):
+            """QGraphicsView subclass that routes mouse events to correction mode handlers."""
+            def mousePressEvent(self, event):
+                if overlay_ref.correction_mode:
+                    pos = self.mapToScene(event.pos())
+                    overlay_ref.correction_press(
+                        pos.x(), pos.y(),
+                        right_button=(event.button() == Qt.RightButton)
+                    )
+                else:
+                    super().mousePressEvent(event)
+
+            def mouseMoveEvent(self, event):
+                if overlay_ref.correction_mode and event.buttons():
+                    pos = self.mapToScene(event.pos())
+                    overlay_ref.correction_move(pos.x(), pos.y())
+                else:
+                    super().mouseMoveEvent(event)
+
+            def mouseReleaseEvent(self, event):
+                if overlay_ref.correction_mode:
+                    pos = self.mapToScene(event.pos())
+                    overlay_ref.correction_release(pos.x(), pos.y())
+                else:
+                    super().mouseReleaseEvent(event)
+
         self._app = QApplication.instance() or QApplication(sys.argv)
 
         self._scene = QGraphicsScene()
-        self._window = QGraphicsView(self._scene)
+        self._window = CorrectionView(self._scene)
         self._window.setWindowFlags(
             Qt.WindowStaysOnTopHint |
             Qt.FramelessWindowHint |
@@ -835,8 +874,128 @@ class OverlayWindow:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 7 — Correction Mode
+# SECTION 7 — Correction Mode (grid, mouse interaction, element editing)
 # ─────────────────────────────────────────────────────────────────────────────
+
+    def _classify_layer_by_pos(self, scene_x: float, scene_y: float) -> str:
+        """Map scene coords to the nearest Epic layer name using fixed pixel bands."""
+        win = self._find_epic_window()
+        wh = win.height if win else 1080
+        ww = win.width if win else 1920
+        y = scene_y
+        from_bottom = wh - y
+        if y < 25:                                          return "title_bar"
+        if y < 45:                                          return "shortcut_toolbar"
+        if y < 67:                                          return "workspace_tabs"
+        if y < 95:                                          return "breadcrumb"
+        if from_bottom < 25:                                return "bottom_bar"
+        if scene_x < 130:                                   return "sidebar"
+        return "workspace"
+
+    def _correction_hit_test(self, sx: float, sy: float) -> Optional[dict]:
+        """Return the KB element whose bounding box contains scene point (sx, sy), or None."""
+        win = self._find_epic_window()
+        if not win:
+            return None
+        ww, wh = win.width, win.height
+        fp = compute_screen_fp(self.elements)
+        for r in get_reliable_elements(self.conn, fp):
+            cx = r["rel_x"] * ww
+            cy = r["rel_y"] * wh
+            hw = max(r["rel_w"] * ww / 2, 14)
+            hh = max(r["rel_h"] * wh / 2, 9)
+            if abs(sx - cx) <= hw and abs(sy - cy) <= hh:
+                return dict(r)
+        return None
+
+    def _corr_delete_element(self, elem_id: int):
+        """Delete an element from the KB and refresh the correction grid."""
+        row = self.conn.execute("SELECT text FROM elements WHERE id=?", (elem_id,)).fetchone()
+        self.conn.execute("DELETE FROM elements WHERE id=?", (elem_id,))
+        self.conn.commit()
+        print(f"[correction] Deleted element id={elem_id} ({row['text'] if row else '?'})")
+        self._draw_correction_grid()
+
+    def correction_press(self, sx: float, sy: float, right_button: bool = False):
+        """Handle a mouse press event in correction mode (called from CorrectionView)."""
+        if right_button:
+            hit = self._correction_hit_test(sx, sy)
+            if hit:
+                self._corr_delete_element(hit["id"])
+            return
+        hit = self._correction_hit_test(sx, sy)
+        if hit:
+            self._corr_selected = hit
+            self._corr_drawing = False
+        else:
+            self._corr_selected = None
+            self._corr_drawing = True
+        self._corr_drag_start = (sx, sy)
+        self._corr_new_rect = None
+        self._draw_correction_grid()
+
+    def correction_move(self, sx: float, sy: float):
+        """Handle mouse drag in correction mode — draw new box or move existing element."""
+        if self._corr_drawing and self._corr_drag_start:
+            x1, y1 = self._corr_drag_start
+            self._corr_new_rect = (min(x1, sx), min(y1, sy), abs(sx - x1), abs(sy - y1))
+            self._draw_correction_grid()
+        elif self._corr_selected and self._corr_drag_start:
+            win = self._find_epic_window()
+            if not win:
+                return
+            dx = (sx - self._corr_drag_start[0]) / win.width
+            dy = (sy - self._corr_drag_start[1]) / win.height
+            self._corr_selected["rel_x"] = max(0.0, min(1.0, self._corr_selected["rel_x"] + dx))
+            self._corr_selected["rel_y"] = max(0.0, min(1.0, self._corr_selected["rel_y"] + dy))
+            self._corr_drag_start = (sx, sy)
+            self._draw_correction_grid()
+
+    def correction_release(self, sx: float, sy: float):
+        """Handle mouse release in correction mode — save changes to KB."""
+        if self._corr_drawing and self._corr_new_rect:
+            x, y, w, h = self._corr_new_rect
+            if w < 8 or h < 8:
+                self._corr_drawing = False
+                self._corr_new_rect = None
+                self._draw_correction_grid()
+                return
+            win = self._find_epic_window()
+            if not win:
+                return
+            ww, wh = win.width, win.height
+            rel_x = (x + w / 2) / ww
+            rel_y = (y + h / 2) / wh
+            rel_w = w / ww
+            rel_h = h / wh
+            layer = self._classify_layer_by_pos(x, y)
+            if self._QInputDialog and self._window:
+                text, ok = self._QInputDialog.getText(
+                    self._window, "New Element",
+                    f"Label for this element\n(layer: {layer.replace('_', ' ')}):"
+                )
+            else:
+                text, ok = input(f"Label for new element in {layer}: "), True
+            if ok and str(text).strip():
+                fp = compute_screen_fp(self.elements)
+                save_correction(self.conn, str(text).strip(), layer, rel_x, rel_y, rel_w, rel_h, fp)
+                print(f"[correction] Added '{text}' in {layer} at ({rel_x:.3f},{rel_y:.3f})")
+            self._corr_drawing = False
+            self._corr_new_rect = None
+
+        elif self._corr_selected and self._corr_drag_start:
+            elem = self._corr_selected
+            now = time.time()
+            self.conn.execute(
+                "UPDATE elements SET rel_x=?, rel_y=?, updated_at=? WHERE id=?",
+                (elem["rel_x"], elem["rel_y"], now, elem["id"])
+            )
+            self.conn.commit()
+            print(f"[correction] Moved '{elem['text']}' → ({elem['rel_x']:.3f},{elem['rel_y']:.3f})")
+            self._corr_selected = None
+            self._corr_drag_start = None
+
+        self._draw_correction_grid()
 
     def _draw_correction_grid(self):
         """Draw Epic layer bands as colored zones + existing element boxes."""
@@ -880,26 +1039,61 @@ class OverlayWindow:
         # Draw existing elements as labeled boxes
         fp = compute_screen_fp(self.elements)
         reliable = get_reliable_elements(self.conn, fp)
+        selected_id = self._corr_selected.get("id") if self._corr_selected else None
         for r in reliable:
             rx = int(r["rel_x"] * ww)
             ry = int(r["rel_y"] * wh)
             rw = max(int(r["rel_w"] * ww), 20)
             rh = max(int(r["rel_h"] * wh), 12)
+            is_selected = selected_id is not None and r["id"] == selected_id
             color_hex = LAYER_COLORS.get(r["layer"], "#FFFFFF")
             c = QColor(color_hex)
             c.setAlpha(160)
             box = QGraphicsRectItem(rx - rw // 2, ry - rh // 2, rw, rh)
             box.setBrush(QBrush(c))
-            pen_color = QColor("#00FF00") if r["is_correction"] else QColor("#FFFFFF")
-            box.setPen(QPen(pen_color, 1))
+            if is_selected:
+                box.setPen(QPen(QColor("#FF4400"), 2))  # orange-red for selected
+            elif r["is_correction"]:
+                box.setPen(QPen(QColor("#00FF00"), 1))  # green for corrections
+            else:
+                box.setPen(QPen(QColor("#FFFFFF"), 1))
             box.setOpacity(0.75)
             self._scene.addItem(box)
             conf_marker = {"seen": "·", "confirmed": "○", "reliable": "●", "named": "★"}.get(r["confidence"], "?")
-            txt = QGraphicsTextItem(f"{conf_marker}{r['text'][:12]}")
+            sem = f"[{r['semantic']}]" if r["semantic"] else ""
+            txt = QGraphicsTextItem(f"{conf_marker}{r['text'][:12]}{sem}")
             txt.setFont(QFont("Consolas", 6))
             txt.setDefaultTextColor(QColor("#000000"))
             txt.setPos(rx - rw // 2 + 1, ry - rh // 2)
             self._scene.addItem(txt)
+
+        # Rubber-band rect (new box being drawn)
+        if self._corr_new_rect:
+            rx2, ry2, rw2, rh2 = self._corr_new_rect
+            layer = self._classify_layer_by_pos(rx2, ry2)
+            rubber = QGraphicsRectItem(rx2, ry2, rw2, rh2)
+            rubber.setPen(QPen(QColor("#00FF88"), 2))
+            rubber.setBrush(QBrush(QColor(0, 255, 136, 35)))
+            self._scene.addItem(rubber)
+            lbl2 = QGraphicsTextItem(f"+ new [{layer.replace('_', ' ')}]")
+            lbl2.setFont(QFont("Consolas", 7))
+            lbl2.setDefaultTextColor(QColor("#00FF88"))
+            lbl2.setPos(rx2 + 2, ry2 + 1)
+            self._scene.addItem(lbl2)
+
+        # Status line
+        status_parts = ["F2=exit correction"]
+        if self._corr_selected:
+            status_parts.insert(0, f"Selected: '{self._corr_selected.get('text', '?')}' | drag=move | right-click=delete")
+        elif self._corr_drawing and self._corr_new_rect:
+            status_parts.insert(0, "Release to label new element")
+        else:
+            status_parts.insert(0, "Click=select | Drag empty area=new box | Right-click=delete")
+        status = QGraphicsTextItem("  ".join(status_parts))
+        status.setFont(QFont("Consolas", 7))
+        status.setDefaultTextColor(QColor(255, 255, 100, 220))
+        status.setPos(4, wh - 20)
+        self._scene.addItem(status)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1124,11 +1318,38 @@ def get_ocr_elements_for_heartbeat(window_title: str) -> dict:
         return {}
 
 
+def get_ocr_kb_summary(fp: str) -> dict:
+    """
+    Read accumulated OCR element layer summary for a fingerprint from the KB.
+    Does NOT run OCR — reads only from the local SQLite knowledge base.
+    Safe to call frequently from the heartbeat loop.
+    """
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT layer, text, confidence FROM elements "
+            "WHERE confidence IN ('confirmed','reliable','named') AND screen_fps LIKE ?",
+            (f"%{fp}%",)
+        ).fetchall()
+        layer_summary: dict[str, list[str]] = {}
+        for r in rows:
+            if not _looks_like_phi(r["text"]):
+                layer_summary.setdefault(r["layer"], []).append(r["text"])
+        return {
+            "fingerprint": fp,
+            "layerSummary": layer_summary,
+            "elementCount": len(rows),
+        } if rows else {}
+    except Exception:
+        return {}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 10 — CLI entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
+    global BRIDGE_URL, BRIDGE_TOKEN  # declare before any reference to these names
     parser = argparse.ArgumentParser(description="OCR Vimium overlay for Epic Hyperspace")
     parser.add_argument("--window", default="",
                         help="Window title substring to find Epic (default: auto-detect)")
@@ -1149,8 +1370,6 @@ def main():
     parser.add_argument("--bridge-url", default=BRIDGE_URL)
     parser.add_argument("--bridge-token", default=BRIDGE_TOKEN)
     args = parser.parse_args()
-
-    global BRIDGE_URL, BRIDGE_TOKEN
     BRIDGE_URL = args.bridge_url
     BRIDGE_TOKEN = args.bridge_token
 

@@ -2815,6 +2815,17 @@ def _drain_all_stream_data():
 
         if not transitions and not fingerprints:
             continue
+
+        # Attach any accumulated OCR KB layer summaries to fingerprint data
+        try:
+            import ocr_overlay as _ocr_mod
+            for _fp_key in fingerprints:
+                _summary = _ocr_mod.get_ocr_kb_summary(_fp_key)
+                if _summary:
+                    fingerprints[_fp_key]["ocrKbSummary"] = _summary
+        except (ImportError, Exception):
+            pass
+
         stream_data.append({
             "windowKey": cap["window_key"],
             "windowTitle": cap["window_title"],
