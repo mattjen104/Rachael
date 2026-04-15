@@ -777,8 +777,106 @@ class OverlayWindow:
         except Exception:
             return None
 
+    def _show_scanning_badge(self):
+        """Paint a blue 'Scanning…' badge immediately so the user gets feedback."""
+        if self._scene is None:
+            return
+        from PyQt5.QtWidgets import QGraphicsTextItem, QGraphicsRectItem
+        from PyQt5.QtGui import QColor, QFont, QPen, QBrush
+        win = self._find_epic_window()
+        if not win:
+            return
+        self._scene.clear()
+        msg = "Scanning…"
+        badge_font = QFont("Consolas", 10, QFont.Bold)
+        badge_text = QGraphicsTextItem(f" {msg} ")
+        badge_text.setFont(badge_font)
+        badge_text.setDefaultTextColor(QColor("#000000"))
+        bw = len(msg) * 8 + 20
+        bh = 22
+        bx = win.width - bw - 10
+        by = 10
+        badge_bg = QGraphicsRectItem(bx, by, bw, bh)
+        badge_bg.setBrush(QBrush(QColor("#00AAFF")))
+        badge_bg.setPen(QPen(QColor("#000000"), 1))
+        badge_bg.setOpacity(0.92)
+        self._scene.addItem(badge_bg)
+        badge_text.setPos(bx + 2, by + 2)
+        self._scene.addItem(badge_text)
+
+    def _refresh_bg(self):
+        """Run the full OCR scan on a background thread; dispatch _redraw to Qt main thread."""
+        try:
+            win = self._find_epic_window()
+            if not win:
+                print(f"[overlay] Epic window not found: {self.win_title!r} — is Hyperspace open?")
+                return
+            print(f"[overlay] Scanning window: {win.title!r} ({win.width}x{win.height})")
+            has_activity_tabs = self._check_activity_tabs()
+            elements = scan_window(self.win_title, with_activity_tabs=has_activity_tabs)
+            print(f"[overlay] Scan complete: {len(elements)} elements found")
+
+            fp = compute_screen_fp(elements)
+            phash = _compute_window_phash(self.win_title)
+            save_screen_fp(self.conn, fp, elements)
+            for e in elements:
+                upsert_element(self.conn, e, fp)
+            save_fp_bridge(self.conn, phash, fp)
+            self._current_phash = phash
+
+            # Merge in reliable KB elements
+            reliable = get_reliable_elements(self.conn, fp)
+            seen_set = {(e.text, e.layer) for e in elements}
+            for r in reliable:
+                if (r["text"], r["layer"]) not in seen_set:
+                    win_obj = self._find_epic_window()
+                    if win_obj:
+                        elements.append(OcrElement(
+                            text=r["text"], layer=r["layer"],
+                            rel_x=r["rel_x"], rel_y=r["rel_y"],
+                            rel_w=r["rel_w"], rel_h=r["rel_h"],
+                            confidence=0.99,
+                            abs_cx=win_obj.left + int(r["rel_x"] * win_obj.width),
+                            abs_cy=win_obj.top + int(r["rel_y"] * win_obj.height),
+                        ))
+
+            # Build hint map (pure Python — safe on background thread)
+            sem_map = get_semantic_map(self.conn)
+            reserved_keys = set(sem_map.values())
+            candidates = generate_hint_keys(len(elements) + len(reserved_keys) + 10)
+            positional_keys = [k for k in candidates if k not in reserved_keys]
+            hint_map: dict = {}
+            for e in elements:
+                sem = sem_map.get(e.text)
+                if sem and sem not in hint_map:
+                    hint_map[sem] = e
+            ki = 0
+            for e in elements:
+                if any(hint_map.get(k) is e for k in hint_map):
+                    continue
+                while ki < len(positional_keys) and positional_keys[ki] in hint_map:
+                    ki += 1
+                if ki < len(positional_keys):
+                    hint_map[positional_keys[ki]] = e
+                    ki += 1
+
+            print(f"[overlay] {len(elements)} elements, fp={fp[:8]}")
+            # Commit results and schedule Qt redraw on the main thread
+            self.elements = elements
+            self.hint_map = hint_map
+            dq = getattr(self, '_dispatch_q', None)
+            if dq is not None:
+                dq.put(self._redraw)
+            else:
+                self._redraw()
+        except Exception as ex:
+            print(f"[overlay] Scan error: {ex}")
+            dq = getattr(self, '_dispatch_q', None)
+            if dq is not None:
+                dq.put(self._redraw)
+
     def refresh(self):
-        """Re-scan and update hints on the overlay."""
+        """Re-scan synchronously (used by correction mode / external callers)."""
         win = self._find_epic_window()
         if not win:
             print(f"[overlay] Epic window not found: {self.win_title!r} — is Hyperspace open?")
@@ -794,12 +892,9 @@ class OverlayWindow:
         save_screen_fp(self.conn, fp, self.elements)
         for e in self.elements:
             upsert_element(self.conn, e, fp)
-        # Bridge pHash (navigation tree key) ↔ OCR text fp (KB key)
         save_fp_bridge(self.conn, self._current_phash, fp)
 
-        # Merge in reliable KB elements for this screen
         reliable = get_reliable_elements(self.conn, fp)
-        reliable_set = {(r["text"], r["layer"]) for r in reliable}
         seen_set = {(e.text, e.layer) for e in self.elements}
         for r in reliable:
             if (r["text"], r["layer"]) not in seen_set:
@@ -814,23 +909,17 @@ class OverlayWindow:
                         abs_cy=win_obj.top + int(r["rel_y"] * win_obj.height),
                     ))
 
-        # Build collision-free hint map:
-        # 1. Load semantic map from KB (user-learned) merged with DEFAULT_SEMANTICS
-        # 2. Reserve semantic keys so positional keys never collide with them
-        sem_map = get_semantic_map(self.conn)   # text -> shortcut key (KB + defaults)
+        sem_map = get_semantic_map(self.conn)
         reserved_keys = set(sem_map.values())
-        # Generate enough candidates then strip reserved keys for positional use
         candidates = generate_hint_keys(len(self.elements) + len(reserved_keys) + 10)
         positional_keys = [k for k in candidates if k not in reserved_keys]
 
         self.hint_map = {}
-        # First pass: assign semantic shortcuts (exact matches from KB/defaults)
         for e in self.elements:
             sem = sem_map.get(e.text)
             if sem and sem not in self.hint_map:
                 self.hint_map[sem] = e
 
-        # Second pass: positional hints for everything without a semantic shortcut
         ki = 0
         for e in self.elements:
             if any(self.hint_map.get(k) is e for k in self.hint_map):
@@ -1213,7 +1302,10 @@ class OverlayWindow:
     def toggle_hints(self):
         self.visible = not self.visible
         if self.visible:
-            self.refresh()
+            # Show feedback badge immediately (Qt main thread is free)
+            self._show_scanning_badge()
+            # Run OCR scan on a background thread so Qt stays responsive
+            threading.Thread(target=self._refresh_bg, daemon=True).start()
             # Start suppressing listener so hint keys don't reach Citrix/Epic
             getattr(self, '_start_suppress_listener', lambda: None)()
         else:
