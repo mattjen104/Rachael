@@ -1,0 +1,77 @@
+C:\Rachael>git pull
+remote: Enumerating objects: 12, done.
+remote: Counting objects: 100% (12/12), done.
+remote: Compressing objects: 100% (3/3), done.
+remote: Total 8 (delta 5), reused 8 (delta 5), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 3.94 KiB | 74.00 KiB/s, done.
+From https://github.com/mattjen104/Rachael
+   141b1b3..00dc21b  main       -> origin/main
+Updating 141b1b3..00dc21b
+Fast-forward
+ ...cmdexe-pytho-diff-0-0000-thre_1776278219425.txt | 133 +++++++++++++++++++++
+ tools/ocr_overlay.py                               |  23 ++++
+ 2 files changed, 156 insertions(+)
+ create mode 100644 attached_assets/Pasted--aon-diff-cwindowssystem32cmdexe-pytho-diff-0-0000-thre_1776278219425.txt
+
+C:\Rachael>python tools\epic_agent.py
+C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.2) doesn't match a supported version!
+  warnings.warn(
+  [input] Low-level keyboard available (backend: sendinput)
+  [config] Loading C:\Rachael\tools\.env
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+[overlay] Launched OCR overlay (pid 23760)
+[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+C:\Rachael\tools\epic_agent.py:1603: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  pixels = list(small.getdata())
+  [always-on] Global input listeners started (focus-aware dispatch)
+  [label] Screen labeler thread started
+  [always-on] Started capture: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote (key=hyperspace__exe_lung_txp__sup_environment__matthew_e_jensen, sid=aon_1776278540_3418, input=full)
+  [always-on] Started capture: C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (key=cwindowssystem32cmdexe_-_python__toolsepic_agentpy, sid=aon_1776278540_1039, input=full)
+[ocr] Auto-detected Epic window: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Starting overlay over: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Ctrl+Shift+H=toggle hints  Ctrl+Shift+C=correction mode  Esc=cancel
+C:\Rachael\tools\epic_agent.py:1616: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+C:\Rachael\tools\epic_agent.py:1617: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+[overlay] Hotkeys registered via Win32: ctrl+shift+h = hints, ctrl+shift+c = correction
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [label] API 401 for c0c0e0e0c0e0.. : User not found.
+  [label] API 401 for 01c1c0c0c0c0.. : User not found.
+  [label] API 401 for c0e0e0c0c0e0.. : User not found.
+  [label] API 401 for fefcfefcfefe.. : User not found.
+  [label] API 401 for 007fffffffff.. : User not found.
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [label] API 401 for fcfcfefcfefe.. : User not found.
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0001 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 124n/213e
+  [heartbeat] tree updated cwindowssystem32cmdexe_-_pyt: 51n/54e
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0001 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0001 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0010 (thresh=0.005)
+  [label] API 401 for fefcfcfcfcfc.. : User not found.
+  [label] API 401 for e0e0f8e0f0f0.. : User not found.
+  [label] API 401 for 00f8f0f8f8f0.. : User not found.
