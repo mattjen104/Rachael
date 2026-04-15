@@ -1,0 +1,147 @@
+r] Auto-detected Epic window: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Starting overlay over: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Ctrl+Shift+H=toggle hints  Ctrl+Shift+C=correction mode  Esc=cancel
+C:\Rachael\tools\epic_agent.py:1616: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+C:\Rachael\tools\epic_agent.py:1617: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [label] API 401 for c0d0f0e0c0e0.. : Missing Authentication header
+  [label] API 401 for 000f0f0f0fff.. : Missing Authentication header
+  [label] API 401 for 80f0e0c080fd.. : Missing Authentication header
+  [label] API 401 for 007fffffffff.. : Missing Authentication header
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-flush-dbg] cwindowssystem32cmdexe_-_pyt: 2 fps, 1 trans
+  [aon-flush-resp] resp=None body=N/A
+  [always-on] Stopped capture: C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (1 transitions)
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 92n/160e
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.2744 (thresh=0.005)
+  [always-on] Started capture: Select C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (key=select_cwindowssystem32cmdexe_-_python__toolsepic_agentpy, sid=aon_1776275717_9975, input=full)
+  [aon-diff] select_cwindowssystem32cmdexe_: diff=0.0018 (thresh=0.005)
+  [label] API 401 for a08181818181.. : Missing Authentication header
+  [label] API 401 for 00000000ffff.. : Missing Authentication header
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 92n/160e
+  [heartbeat] tree updated select_cwindowssystem32cmdex: 4n/3e
+  [label] API 401 for 000000ffffff.. : Missing Authentication header
+  [label] API 401 for 00fffffffffe.. : Missing Authentication header
+  [label] API 401 for 00ff7f3f2fff.. : Missing Authentication header
+  [always-on] Started capture: C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (key=cwindowssystem32cmdexe_-_python__toolsepic_agentpy, sid=aon_1776275749_1912, input=full)
+  [aon-flush-dbg] select_cwindowssystem32cmdex: 0 fps, 0 trans
+  [always-on] Stopped capture: Select C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (3 transitions)
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 93n/162e
+  [label] API 401 for e0f8f0f0f8f0.. : Missing Authentication header
+  [label] API 401 for e0f8f0f8f8f0.. : Missing Authentication header
+  [label] API 401 for e0f8f0f8f0f0.. : Missing Authentication header
+  [label] API 401 for f0f0f0f8f0f0.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0001 (thresh=0.005)
+  [label] API 401 for f0f0f8f8f0f0.. : Missing Authentication header
+  [label] API 401 for f0f0f8f0f0f0.. : Missing Authentication header
+  [label] API 401 for e0f0f8f0f0f0.. : Missing Authentication header
+  [label] API 401 for e0f8f8f0f0f0.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.1008 (thresh=0.005)
+  [label] API 401 for e0f8f0f0f0f0.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0001 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0003 (thresh=0.005)
+  [heartbeat] tree updated cwindowssystem32cmdexe_-_pyt: 3n/4e
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0058 (thresh=0.005)
+  [label] API 401 for ff00e1f081c1.. : Missing Authentication header
+  [label] API 401 for ffdcc000fcf8.. : Missing Authentication header
+  [label] API 401 for ffdce000fcfc.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0071 (thresh=0.005)
+  [label] API 401 for ffd8e000fcfc.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [label] API 401 for ffe0a0e0e084.. : Missing Authentication header
+  [label] API 401 for ffe0e0c080f4.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0585 (thresh=0.005)
+  [label] API 401 for ffe2a0e0e082.. : Missing Authentication header
+  [label] API 401 for ff07fd808187.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [heartbeat] tree updated cwindowssystem32cmdexe_-_pyt: 9n/10e
+  [label] API 401 for e0f8f0f8f0f8.. : Missing Authentication header
+  [label] API 401 for f0f8f8f8f0f8.. : Missing Authentication header
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0781 (thresh=0.005)
+  [label] API 401 for f0f8f8f0f0f8.. : Missing Authentication header
+
+Agent stopped.
+[overlay] Overlay closed.
+
+C:\Rachael>set OPENROUTER_API_KEY=your-key-here
+
+C:\Rachael>set BRIDGE_TOKEN=46c6eeeb-8404-40cb-9b09-fb379ab4d3c6
+
+C:\Rachael>set OPENROUTER_API_KEY=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
+
+C:\Rachael>set BRIDGE_TOKEN=46c6eeeb-8404-40cb-9b09-fb379ab4d3c6
+
+C:\Rachael>python tools\epic_agent.py
+C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.2) doesn't match a supported version!
+  warnings.warn(
+  [input] Low-level keyboard available (backend: sendinput)
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+[overlay] Launched OCR overlay (pid 9180)
+[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+C:\Rachael\tools\epic_agent.py:1603: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  pixels = list(small.getdata())
+  [always-on] Global input listeners started (focus-aware dispatch)
+  [label] Screen labeler thread started
+  [always-on] Started capture: C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (key=cwindowssystem32cmdexe_-_python__toolsepic_agentpy, sid=aon_1776275870_8110, input=full)
+  [always-on] Started capture: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote (key=hyperspace__exe_lung_txp__sup_environment__matthew_e_jensen, sid=aon_1776275870_7003, input=full)
+[ocr] Using default window title: 'Hyperspace'
+[ocr] Starting overlay over: 'Hyperspace'
+[ocr] Ctrl+Shift+H=toggle hints  Ctrl+Shift+C=correction mode  Esc=cancel
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+C:\Rachael\tools\epic_agent.py:1616: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+C:\Rachael\tools\epic_agent.py:1617: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+  [label] f0fdf0e0f0e0.. = Epic Desktop Agent [none]
+  [label] c0f0e0e0e0f0.. unrecognized: Based on the image and the instructions, here's the analysis
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.9855 (thresh=0.005)
+  [label] c0e080e0f9f8.. unrecognized: LABEL: Unknown Screen
+CONTEXT: none
+EPHEMERAL: false
+ACTIVIT
+  [label] c0c0c0f0f9f8.. = Epic Desktop Agent [none]
+  [label] e1c080e0f1f8.. = Epic Desktop Agent [none]
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [label] 00ffffffffff.. = My Dashboards [none]
+  [label] 00b9999b9999.. = Integrated and Clinical Tools [none]
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0003 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0018 (thresh=0.005)
+  [label] e0f1f8e1f080.. unrecognized: Based on the image and the instructions, here's the analysis
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0001 (thresh=0.005)
+  [label] 00e0e1e1e1f1.. = My Dashboards [none]
+  [label] e0f0e0e0c080.. unrecognized: Okay, let's analyze the provided image and apply the instruc
+  [heartbeat] tree updated cwindowssystem32cmdexe_-_pyt: 18n/18e
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 94n/163e
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0362 (thresh=0.005)
+  [label] e0f8e1f080e0.. unrecognized: Based on the provided information and following the identifi
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.9839 (thresh=0.005)
+  [label] e0e1e080e0f0.. unrecognized: Based on the image and the instructions provided, here's the
+  [label] e0e1f080f0f8.. unrecognized: Based on the OCR and the instructions, here's the analysis:
+
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0008 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.6214 (thresh=0.005)
+  [label] 0000f0f0f0f0.. = Clinical Content [none]
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.6306 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0008 (thresh=0.005)
