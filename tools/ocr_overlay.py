@@ -1090,8 +1090,8 @@ class OverlayWindow:
         """Flash a progress badge briefly during tab-walk.
 
         The overlay is hidden during the walk to keep pixel diffs clean.
-        We briefly show it, update the badge, then hide it again. The brief
-        flash (~50ms) doesn't affect the next diff because we wait tab_delay
+        We briefly show it, update the badge, then hide it again after 80ms.
+        The brief flash doesn't affect the next diff because we wait tab_delay
         after each Tab before the next screenshot.
         """
         dq = getattr(self, '_dispatch_q', None)
@@ -1100,7 +1100,7 @@ class OverlayWindow:
                 self._window.show()
                 self._show_scanning_badge(msg=f"Scanning… {count} fields")
                 from PyQt5.QtCore import QTimer
-                QTimer.singleShot(80, lambda: self._window.hide() if not self.visible else None)
+                QTimer.singleShot(80, lambda: self._window.hide())
             dq.put(_flash_badge)
         print(f"[overlay] Scanning… {count} fields found so far")
 
