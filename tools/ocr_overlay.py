@@ -1051,30 +1051,36 @@ class OverlayWindow:
             ok1 = bool(_u32.RegisterHotKey(None, HK_HINTS,   hint_w32, hint_vk))
             ok2 = bool(_u32.RegisterHotKey(None, HK_CORRECT, corr_w32, corr_vk))
 
-            if not ok1:
-                print(f"[overlay] WARNING: could not register {self._hint_key_name} "
-                      f"(already in use?). Try --hint-key with a different combo.")
-            if not ok2:
-                print(f"[overlay] WARNING: could not register {self._correct_key_name} "
-                      f"(already in use?). Try --correct-key with a different combo.")
+            if ok1 and ok2:
+                # Both registered — start the Win32 message loop
+                def _win32_msg_loop():
+                    msg = ctypes.wintypes.MSG()
+                    while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+                        if msg.message == WM_HOTKEY:
+                            if msg.wParam == HK_HINTS:
+                                _dispatch(self.toggle_hints)
+                            elif msg.wParam == HK_CORRECT:
+                                _dispatch(self.toggle_correction)
+                    _u32.UnregisterHotKey(None, HK_HINTS)
+                    _u32.UnregisterHotKey(None, HK_CORRECT)
 
-            def _win32_msg_loop():
-                msg = ctypes.wintypes.MSG()
-                while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-                    if msg.message == WM_HOTKEY:
-                        if msg.wParam == HK_HINTS:
-                            _dispatch(self.toggle_hints)
-                        elif msg.wParam == HK_CORRECT:
-                            _dispatch(self.toggle_correction)
-                _u32.UnregisterHotKey(None, HK_HINTS)
-                _u32.UnregisterHotKey(None, HK_CORRECT)
-
-            _w32_thread = threading.Thread(target=_win32_msg_loop, daemon=True)
-            _w32_thread.start()
-            _win32_ok = True
-            print(f"[overlay] Hotkeys registered via Win32: "
-                  f"{self._hint_key_name} = hints, "
-                  f"{self._correct_key_name} = correction")
+                _w32_thread = threading.Thread(target=_win32_msg_loop, daemon=True)
+                _w32_thread.start()
+                _win32_ok = True
+                print(f"[overlay] Hotkeys registered via Win32: "
+                      f"{self._hint_key_name} = hints, "
+                      f"{self._correct_key_name} = correction")
+            else:
+                # At least one failed — unregister whichever succeeded and fall through
+                if ok1: _u32.UnregisterHotKey(None, HK_HINTS)
+                if ok2: _u32.UnregisterHotKey(None, HK_CORRECT)
+                if not ok1:
+                    print(f"[overlay] WARNING: Win32 could not register {self._hint_key_name} "
+                          f"(key already in use?). Try --hint-key with a different combo.")
+                if not ok2:
+                    print(f"[overlay] WARNING: Win32 could not register {self._correct_key_name} "
+                          f"(key already in use?). Try --correct-key with a different combo.")
+                print("[overlay] Falling back to pynput listener for toggle hotkeys.")
 
         except Exception as _e:
             pass  # non-Windows or ctypes unavailable — fall through to pynput
