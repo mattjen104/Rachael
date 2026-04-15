@@ -8948,6 +8948,32 @@ def list_windows():
     return envs
 
 
+def _start_ocr_overlay(bridge_url: str, bridge_token: str):
+    """
+    Launch ocr_overlay.py as a subprocess.  Returns the Popen object or None.
+    The subprocess runs the PyQt5 event loop in its own process so it doesn't
+    interfere with the agent's main loop.
+    """
+    import subprocess
+    overlay_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ocr_overlay.py")
+    if not os.path.exists(overlay_path):
+        print("[overlay] ocr_overlay.py not found — skipping overlay launch")
+        return None
+    cmd = [
+        sys.executable, overlay_path,
+        "--bridge-url", bridge_url,
+        "--bridge-token", bridge_token,
+    ]
+    try:
+        proc = subprocess.Popen(cmd)
+        print(f"[overlay] Launched OCR overlay (pid {proc.pid})")
+        print("[overlay]   F1 = toggle hints   F2 = correction mode")
+        return proc
+    except Exception as e:
+        print(f"[overlay] Could not launch overlay: {e}")
+        return None
+
+
 def main():
     print("=" * 50)
     print("  Epic Desktop Agent")
@@ -8963,6 +8989,15 @@ def main():
         print()
 
     register_global_hotkeys()
+
+    # ── OCR overlay auto-launch ───────────────────────────────────────────────
+    # Pass --no-overlay on the command line to skip.
+    _run_overlay = "--no-overlay" not in sys.argv
+    _overlay_proc = None
+    _overlay_last_restart = 0.0
+    if _run_overlay:
+        _overlay_proc = _start_ocr_overlay(ORGCLOUD_URL, BRIDGE_TOKEN)
+    # ─────────────────────────────────────────────────────────────────────────
 
     windows = list_windows()
     if windows:
@@ -9000,10 +9035,20 @@ def main():
             recording_capture_tick()
             _audio_watchdog_tick()
 
+            # Watchdog: restart overlay if it crashed (max once every 30s)
+            if _run_overlay and _overlay_proc is not None:
+                if _overlay_proc.poll() is not None and now - _overlay_last_restart > 30:
+                    print(f"[overlay] Overlay exited (code {_overlay_proc.returncode}) — restarting…")
+                    _overlay_proc = _start_ocr_overlay(ORGCLOUD_URL, BRIDGE_TOKEN)
+                    _overlay_last_restart = now
+
             time.sleep(POLL_INTERVAL)
 
         except KeyboardInterrupt:
             print("\nAgent stopped.")
+            if _overlay_proc and _overlay_proc.poll() is None:
+                _overlay_proc.terminate()
+                print("[overlay] Overlay closed.")
             break
         except pyautogui.FailSafeException:
             print("\n[FAILSAFE] Mouse moved to corner — agent paused for 10s. Move mouse away from corner to resume.")
