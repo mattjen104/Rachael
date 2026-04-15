@@ -496,11 +496,16 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
               const ctxTag = ctxIcon(ctx);
               const outEdges = wEdges.filter((e: any) => e.from === fp);
               const inEdges = wEdges.filter((e: any) => e.to === fp);
+              // Derive env from the window key (e.g. "session_tree_hyperspace_sup" → "SUP")
+              const wKeyEnv = (() => {
+                const m = wKey.match(/\b(sup|poc|tst|prd|bld|rel|dem|mst)\b/i);
+                return m ? m[1].toUpperCase() : "SUP";
+              })();
 
               nodes.push({ type: "section", label: `${indent}${displayLabel}${ctxTag}`, key: nodeKey, count: visits });
               if (expanded.has(nodeKey)) {
                 const goTitle = label.replace(/[;&|"`$\\]/g, "");
-                nodes.push({ type: "bridge-info", label: `${indent}  >> Go here`, actionCmd: `epic go SUP "${goTitle}"` });
+                nodes.push({ type: "bridge-info", label: `${indent}  >> Go here`, actionCmd: `epic go ${wKeyEnv} "${goTitle}"` });
                 if (visits > 0) {
                   nodes.push({ type: "bridge-info", label: `${indent}  ${visits} visits  fp:${fp.slice(0, 12)}`, actionCmd: "" });
                 }
@@ -515,7 +520,7 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
                     .map(([layer, items]) => `[${SIGIL[layer] || layer[0]}]${(items as string[]).length}`)
                     .join(" ");
                   if (ocrParts) {
-                    nodes.push({ type: "bridge-info", label: `${indent}  ocr: ${ocrParts}`, actionCmd: `epic ocr SUP view` });
+                    nodes.push({ type: "bridge-info", label: `${indent}  ocr: ${ocrParts}`, actionCmd: `epic ocr ${wKeyEnv} view` });
                   }
                 }
 

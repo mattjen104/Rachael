@@ -376,6 +376,23 @@ def promote_element(conn, elem_id: int, label: str = None):
     conn.commit()
 
 
+def get_semantic_map(conn) -> dict[str, str]:
+    """
+    Return a text → shortcut-key mapping from the KB (confirmed+ elements with semantic set).
+    This loads user-learned semantics across sessions, not just the hardcoded DEFAULT_SEMANTICS.
+    """
+    rows = conn.execute(
+        "SELECT text, semantic FROM elements WHERE semantic IS NOT NULL AND semantic != '' "
+        "AND confidence IN ('confirmed','reliable','named')"
+    ).fetchall()
+    result = {r["text"]: r["semantic"] for r in rows}
+    # Fill in defaults for anything not in KB yet
+    for text, key in DEFAULT_SEMANTICS.items():
+        if text not in result:
+            result[text] = key
+    return result
+
+
 def get_reliable_elements(conn, screen_fp: str, layer: str = None) -> list[dict]:
     """Return reliable/confirmed elements for a screen, optionally filtered by layer."""
     query = "SELECT * FROM elements WHERE confidence IN ('confirmed','reliable','named')"
@@ -531,6 +548,7 @@ class OverlayWindow:
         self._corr_drawing: bool = False               # True while rubber-band drawing
         self._corr_drag_start: Optional[tuple] = None  # (scene_x, scene_y) drag start
         self._corr_new_rect: Optional[tuple] = None    # (x, y, w, h) in scene coords
+        self._corr_resize_mode: bool = False           # True when resizing (vs moving) selected
         self._QInputDialog = None                      # set during run() when Qt is available
 
     def _find_epic_window(self):
@@ -574,28 +592,31 @@ class OverlayWindow:
                         abs_cy=win_obj.top + int(r["rel_y"] * win_obj.height),
                     ))
 
-        # Assign hints, semantic shortcuts get their fixed key
-        keys = generate_hint_keys(len(self.elements))
+        # Build collision-free hint map:
+        # 1. Load semantic map from KB (user-learned) merged with DEFAULT_SEMANTICS
+        # 2. Reserve semantic keys so positional keys never collide with them
+        sem_map = get_semantic_map(self.conn)   # text -> shortcut key (KB + defaults)
+        reserved_keys = set(sem_map.values())
+        # Generate enough candidates then strip reserved keys for positional use
+        candidates = generate_hint_keys(len(self.elements) + len(reserved_keys) + 10)
+        positional_keys = [k for k in candidates if k not in reserved_keys]
+
         self.hint_map = {}
-        semantic_used = {}
-
-        # First pass: assign semantic shortcuts
+        # First pass: assign semantic shortcuts (exact matches from KB/defaults)
         for e in self.elements:
-            sem = DEFAULT_SEMANTICS.get(e.text)
-            if sem and sem not in semantic_used:
+            sem = sem_map.get(e.text)
+            if sem and sem not in self.hint_map:
                 self.hint_map[sem] = e
-                semantic_used[sem] = True
 
-        # Second pass: assign numbered keys to the rest
+        # Second pass: positional hints for everything without a semantic shortcut
         ki = 0
         for e in self.elements:
-            sem = DEFAULT_SEMANTICS.get(e.text)
-            if sem and sem in self.hint_map and self.hint_map[sem] is e:
+            if any(self.hint_map.get(k) is e for k in self.hint_map):
                 continue
-            while ki < len(keys) and keys[ki] in self.hint_map:
+            while ki < len(positional_keys) and positional_keys[ki] in self.hint_map:
                 ki += 1
-            if ki < len(keys):
-                self.hint_map[keys[ki]] = e
+            if ki < len(positional_keys):
+                self.hint_map[positional_keys[ki]] = e
                 ki += 1
 
         print(f"[overlay] {len(self.elements)} elements, fp={fp[:8]}")
@@ -924,7 +945,24 @@ class OverlayWindow:
                 self._corr_delete_element(hit["id"])
             return
         hit = self._correction_hit_test(sx, sy)
+        self._corr_resize_mode = False
         if hit:
+            # If the hit box is already selected, check if user clicked near its
+            # bottom-right corner (within 14px of each edge) → enter resize mode
+            if self._corr_selected and hit["id"] == self._corr_selected.get("id"):
+                win = self._find_epic_window()
+                if win:
+                    cx = hit["rel_x"] * win.width
+                    cy = hit["rel_y"] * win.height
+                    hw = max(hit["rel_w"] * win.width / 2, 14)
+                    hh = max(hit["rel_h"] * win.height / 2, 9)
+                    near_right  = abs(sx - (cx + hw)) < 14
+                    near_bottom = abs(sy - (cy + hh)) < 14
+                    if near_right or near_bottom:
+                        self._corr_resize_mode = True
+                        self._corr_drag_start = (sx, sy)
+                        self._draw_correction_grid()
+                        return
             self._corr_selected = hit
             self._corr_drawing = False
         else:
@@ -935,8 +973,19 @@ class OverlayWindow:
         self._draw_correction_grid()
 
     def correction_move(self, sx: float, sy: float):
-        """Handle mouse drag in correction mode — draw new box or move existing element."""
-        if self._corr_drawing and self._corr_drag_start:
+        """Handle mouse drag in correction mode — draw new box, move, or resize an element."""
+        if self._corr_resize_mode and self._corr_selected and self._corr_drag_start:
+            win = self._find_epic_window()
+            if not win:
+                return
+            dx = (sx - self._corr_drag_start[0]) / win.width
+            dy = (sy - self._corr_drag_start[1]) / win.height
+            # Growing by the delta in each axis (×2 because rel_w/h span full width/height)
+            self._corr_selected["rel_w"] = max(0.015, self._corr_selected.get("rel_w", 0.05) + dx * 2)
+            self._corr_selected["rel_h"] = max(0.008, self._corr_selected.get("rel_h", 0.02) + dy * 2)
+            self._corr_drag_start = (sx, sy)
+            self._draw_correction_grid()
+        elif self._corr_drawing and self._corr_drag_start:
             x1, y1 = self._corr_drag_start
             self._corr_new_rect = (min(x1, sx), min(y1, sy), abs(sx - x1), abs(sy - y1))
             self._draw_correction_grid()
@@ -953,6 +1002,23 @@ class OverlayWindow:
 
     def correction_release(self, sx: float, sy: float):
         """Handle mouse release in correction mode — save changes to KB."""
+        if self._corr_resize_mode and self._corr_selected:
+            elem = self._corr_selected
+            now = time.time()
+            self.conn.execute(
+                "UPDATE elements SET rel_w=?, rel_h=?, updated_at=? WHERE id=?",
+                (max(0.015, elem.get("rel_w", 0.05)),
+                 max(0.008, elem.get("rel_h", 0.02)),
+                 now, elem["id"])
+            )
+            self.conn.commit()
+            print(f"[correction] Resized '{elem['text']}' → w={elem.get('rel_w', 0.05):.3f} h={elem.get('rel_h', 0.02):.3f}")
+            self._corr_resize_mode = False
+            self._corr_selected = None
+            self._corr_drag_start = None
+            self._draw_correction_grid()
+            return
+
         if self._corr_drawing and self._corr_new_rect:
             x, y, w, h = self._corr_new_rect
             if w < 8 or h < 8:
@@ -987,8 +1053,10 @@ class OverlayWindow:
             elem = self._corr_selected
             now = time.time()
             self.conn.execute(
-                "UPDATE elements SET rel_x=?, rel_y=?, updated_at=? WHERE id=?",
-                (elem["rel_x"], elem["rel_y"], now, elem["id"])
+                "UPDATE elements SET rel_x=?, rel_y=?, rel_w=?, rel_h=?, updated_at=? WHERE id=?",
+                (elem["rel_x"], elem["rel_y"],
+                 elem.get("rel_w", 0.05), elem.get("rel_h", 0.02),
+                 now, elem["id"])
             )
             self.conn.commit()
             print(f"[correction] Moved '{elem['text']}' → ({elem['rel_x']:.3f},{elem['rel_y']:.3f})")
@@ -1066,6 +1134,12 @@ class OverlayWindow:
             txt.setDefaultTextColor(QColor("#000000"))
             txt.setPos(rx - rw // 2 + 1, ry - rh // 2)
             self._scene.addItem(txt)
+            # Resize handle: small orange square at bottom-right corner of selected box
+            if is_selected:
+                handle = QGraphicsRectItem(rx + rw // 2 - 8, ry + rh // 2 - 8, 8, 8)
+                handle.setBrush(QBrush(QColor("#FF4400")))
+                handle.setPen(QPen(QColor("#FFFFFF"), 1))
+                self._scene.addItem(handle)
 
         # Rubber-band rect (new box being drawn)
         if self._corr_new_rect:
@@ -1083,8 +1157,10 @@ class OverlayWindow:
 
         # Status line
         status_parts = ["F2=exit correction"]
-        if self._corr_selected:
-            status_parts.insert(0, f"Selected: '{self._corr_selected.get('text', '?')}' | drag=move | right-click=delete")
+        if self._corr_resize_mode and self._corr_selected:
+            status_parts.insert(0, f"RESIZE '{self._corr_selected.get('text', '?')}' | drag=change size | release=save")
+        elif self._corr_selected:
+            status_parts.insert(0, f"Selected: '{self._corr_selected.get('text', '?')}' | drag=move | click corner-handle=resize | right-click=delete")
         elif self._corr_drawing and self._corr_new_rect:
             status_parts.insert(0, "Release to label new element")
         else:
@@ -1194,35 +1270,49 @@ def execute_ocr_view(cmd: dict):
     for e in elements:
         upsert_element(conn, e, fp)
 
-    keys = generate_hint_keys(len(elements))
-    hint_map = {}
-    for k, e in zip(keys, elements):
-        sem = DEFAULT_SEMANTICS.get(e.text)
-        actual_key = sem if sem else k
-        hint_map[actual_key] = {
-            "text": e.text,
-            "layer": e.layer,
-            "rel_x": e.rel_x,
-            "rel_y": e.rel_y,
-            "abs_cx": e.abs_cx,
-            "abs_cy": e.abs_cy,
-        }
+    # Collision-proof hint map: KB semantics get reserved keys; positional keys never clash
+    sem_map = get_semantic_map(conn)   # text → shortcut key (KB + defaults)
+    reserved_keys = set(sem_map.values())
+    candidates = generate_hint_keys(len(elements) + len(reserved_keys) + 10)
+    positional_keys = [k for k in candidates if k not in reserved_keys]
+
+    hint_map: dict = {}
+    # First pass: semantic shortcuts from KB
+    for e in elements:
+        sem = sem_map.get(e.text)
+        if sem and sem not in hint_map:
+            hint_map[sem] = e
+    # Second pass: positional keys for remaining elements
+    ki = 0
+    for e in elements:
+        if any(hint_map.get(k) is e for k in hint_map):
+            continue
+        while ki < len(positional_keys) and positional_keys[ki] in hint_map:
+            ki += 1
+        if ki < len(positional_keys):
+            hint_map[positional_keys[ki]] = e
+            ki += 1
 
     # Build structured layer summary
     layer_summary: dict[str, list[str]] = {}
     for e in elements:
         layer_summary.setdefault(e.layer, []).append(e.text)
 
+    serialized_map = {k: {"text": e.text, "layer": e.layer,
+                          "rel_x": e.rel_x, "rel_y": e.rel_y,
+                          "abs_cx": e.abs_cx, "abs_cy": e.abs_cy}
+                      for k, e in hint_map.items()}
+
     post_result(command_id, "complete", data={
         "fingerprint": fp,
         "activity": get_activity_for_fp(conn, fp),
         "elementCount": len(elements),
-        "hintMap": hint_map,
+        "hintMap": serialized_map,
         "layerSummary": layer_summary,
         "elements": [
             {"hint": k, "text": e.text, "layer": e.layer,
              "rel_x": round(e.rel_x, 3), "rel_y": round(e.rel_y, 3)}
-            for k, e in zip(keys, elements)
+            for k, e in hint_map.items()
         ],
     })
     print(f"  [ocr-view] {len(elements)} elements, fp={fp[:8]}, env={env}")
@@ -1255,13 +1345,31 @@ def execute_ocr_do(cmd: dict):
         return
 
     fp = compute_screen_fp(elements)
-    keys = generate_hint_keys(len(elements))
-    hint_map = {k: e for k, e in zip(keys, elements)}
-    # Overlay semantic shortcuts
+    conn2 = _db_connect()
+    _seed_universal_elements(conn2)
     for e in elements:
-        sem = DEFAULT_SEMANTICS.get(e.text)
-        if sem:
+        upsert_element(conn2, e, fp)
+
+    # Collision-proof hint map using KB semantics (same logic as execute_ocr_view)
+    sem_map2 = get_semantic_map(conn2)
+    reserved2 = set(sem_map2.values())
+    cands2 = generate_hint_keys(len(elements) + len(reserved2) + 10)
+    pos_keys2 = [k for k in cands2 if k not in reserved2]
+
+    hint_map: dict[str, OcrElement] = {}
+    for e in elements:
+        sem = sem_map2.get(e.text)
+        if sem and sem not in hint_map:
             hint_map[sem] = e
+    ki2 = 0
+    for e in elements:
+        if any(hint_map.get(k) is e for k in hint_map):
+            continue
+        while ki2 < len(pos_keys2) and pos_keys2[ki2] in hint_map:
+            ki2 += 1
+        if ki2 < len(pos_keys2):
+            hint_map[pos_keys2[ki2]] = e
+            ki2 += 1
 
     elem = hint_map.get(hint)
     if not elem:
@@ -1278,12 +1386,11 @@ def execute_ocr_do(cmd: dict):
         post_result(command_id, "error", error=f"Click failed: {e}")
         return
 
-    conn = _db_connect()
-    existing = conn.execute(
+    existing = conn2.execute(
         "SELECT id FROM elements WHERE text=? AND layer=?", (elem.text, elem.layer)
     ).fetchone()
     if existing:
-        promote_element(conn, existing["id"])
+        promote_element(conn2, existing["id"])
 
     post_result(command_id, "complete", data={
         "clicked": elem.text,
