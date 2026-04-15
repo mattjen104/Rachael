@@ -101,8 +101,7 @@ def _get_ocr():
                 try:
                     from paddleocr import PaddleOCR
                     _attempts = [
-                        {"use_gpu": False, "use_angle_cls": False, "show_log": False, "lang": "en"},
-                        {"use_gpu": False, "lang": "en"},
+                        {"lang": "en", "show_log": False},
                         {"lang": "en"},
                         {},
                     ]
@@ -221,9 +220,16 @@ def scan_window(window_title: str, with_activity_tabs: bool = False) -> list[Ocr
 
         try:
             result = ocr.ocr(band, cls=False)
-        except Exception as e:
-            print(f"[ocr] OCR error on layer {layer_name}: {e}")
-            continue
+        except (TypeError, Exception) as e:
+            if "cls" in str(e).lower() or "argument" in str(e).lower():
+                try:
+                    result = ocr.ocr(band)
+                except Exception as e2:
+                    print(f"[ocr] OCR error on layer {layer_name}: {e2}")
+                    continue
+            else:
+                print(f"[ocr] OCR error on layer {layer_name}: {e}")
+                continue
 
         if not result or not result[0]:
             continue
