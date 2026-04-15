@@ -388,12 +388,14 @@ def tab_walk_scan(
         win.activate()
     except Exception:
         pass
-    time.sleep(0.1)
-    try:
-        pyautogui.click(win_left + win_w // 2, win_top + 12)
-        time.sleep(0.15)
-    except Exception:
-        pass
+    time.sleep(0.2)
+
+    pyautogui.press('escape')
+    time.sleep(0.15)
+    pyautogui.press('escape')
+    time.sleep(0.15)
+
+    print(f"[tab-walk] Window rect: left={win_left} top={win_top} w={win_w} h={win_h}")
 
     ocr = _get_ocr()
 
@@ -523,7 +525,8 @@ def tab_walk_scan(
             if progress_cb and len(elements) % 10 == 0:
                 progress_cb(len(elements))
 
-            print(f"[tab-walk] #{len(elements)}: '{label}' @ ({cx},{cy}) layer={layer}")
+            print(f"[tab-walk] #{len(elements)}: '{label}' @ ({cx},{cy}) "
+                  f"bbox=({x1},{y1},{x2},{y2}) {(x2-x1)}x{(y2-y1)}px layer={layer}")
             prev_frame = curr_frame
 
     try:
@@ -1109,7 +1112,7 @@ class OverlayWindow:
             dq = getattr(self, '_dispatch_q', None)
             if dq is not None and self._window:
                 dq.put(lambda: self._window.hide())
-                time.sleep(0.1)
+                time.sleep(0.3)
 
             elements = tab_walk_scan(
                 self.win_title,
