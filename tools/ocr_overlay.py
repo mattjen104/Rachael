@@ -874,33 +874,80 @@ class OverlayWindow:
             self._scene.setSceneRect(0, 0, win.width, win.height)
         self._window.show()
 
-        # Setup global hotkey listener
+        # ── Hotkey listener setup ─────────────────────────────────────────────
+        # Two separate pynput listeners:
+        #   1. hotkey_listener (suppress=False) — always running; handles F1/F2 only.
+        #   2. hint_listener  (suppress=True)  — started when hints become visible so
+        #      typed hint chars are consumed here and do NOT reach the Citrix/Epic app.
+        # All Qt object access (QGraphicsScene etc.) is routed through QTimer.singleShot(0,…)
+        # so it always executes on the Qt main thread.
+        self._suppress_listener = None
+        self._suppress_lock = threading.Lock()
+
         try:
             from pynput import keyboard as pk
 
-            def on_press(key):
-                try:
-                    k = key.char if hasattr(key, 'char') and key.char else None
-                except Exception:
-                    k = None
+            def _dispatch(fn):
+                """Schedule fn() on the Qt main thread (thread-safe from any thread)."""
+                QTimer.singleShot(0, fn)
 
+            def _stop_suppress_listener():
+                with self._suppress_lock:
+                    if self._suppress_listener:
+                        try:
+                            self._suppress_listener.stop()
+                        except Exception:
+                            pass
+                        self._suppress_listener = None
+
+            def _start_suppress_listener():
+                """Start a suppressing listener so hint keys don't reach the Epic app."""
+                with self._suppress_lock:
+                    if self._suppress_listener and getattr(self._suppress_listener, 'running', False):
+                        return
+
+                    def on_hint_press(key):
+                        try:
+                            k = key.char if hasattr(key, 'char') and key.char else None
+                        except Exception:
+                            k = None
+                        if key == pk.Key.esc:
+                            def _esc():
+                                self.current_input = ""
+                                self.visible = False
+                                _stop_suppress_listener()
+                                self._redraw()
+                            _dispatch(_esc)
+                        elif key == pk.Key.backspace:
+                            def _bs():
+                                self.current_input = self.current_input[:-1]
+                                self._redraw()
+                            _dispatch(_bs)
+                        elif k:
+                            def _char(c=k):
+                                self.current_input += c
+                                self._schedule_input_fire()
+                            _dispatch(_char)
+
+                    sl = pk.Listener(on_press=on_hint_press, suppress=True)
+                    sl.daemon = True
+                    sl.start()
+                    self._suppress_listener = sl
+
+            # Store helpers on self so toggle_hints can access them
+            self._start_suppress_listener = _start_suppress_listener
+            self._stop_suppress_listener = _stop_suppress_listener
+
+            # Non-suppressing listener: F1 / F2 only (never leaks to Epic)
+            def on_hotkey(key):
                 if key == pk.Key.f1:
-                    self.toggle_hints()
+                    _dispatch(self.toggle_hints)
                 elif key == pk.Key.f2:
-                    self.toggle_correction()
-                elif key == pk.Key.esc:
-                    self.current_input = ""
-                    self.visible = False
-                    self._redraw()
-                elif key == pk.Key.backspace:
-                    self.current_input = self.current_input[:-1]
-                elif k and self.visible:
-                    self.current_input += k
-                    self._schedule_input_fire()
+                    _dispatch(self.toggle_correction)
 
-            listener = pk.Listener(on_press=on_press, suppress=False)
-            listener.daemon = True
-            listener.start()
+            hotkey_listener = pk.Listener(on_press=on_hotkey, suppress=False)
+            hotkey_listener.daemon = True
+            hotkey_listener.start()
         except ImportError:
             print("[overlay] pynput not installed — hotkeys disabled (pip install pynput)")
 
@@ -922,8 +969,12 @@ class OverlayWindow:
         self.visible = not self.visible
         if self.visible:
             self.refresh()
+            # Start suppressing listener so hint keys don't reach Citrix/Epic
+            getattr(self, '_start_suppress_listener', lambda: None)()
         else:
             self._scene and self._scene.clear()
+            # Stop suppressing — normal keyboard input returns to Epic
+            getattr(self, '_stop_suppress_listener', lambda: None)()
         print(f"[overlay] Hints {'visible' if self.visible else 'hidden'}")
 
     def toggle_correction(self):
@@ -940,7 +991,16 @@ class OverlayWindow:
                 self._pending_input_timer.cancel()
             except Exception:
                 pass
-        self._pending_input_timer = threading.Timer(0.6, self._try_fire_input)
+        # Timer fires on a background thread; use QTimer.singleShot(0, …) to
+        # marshal _try_fire_input back onto the Qt main thread before touching any Qt objects.
+        try:
+            from PyQt5.QtCore import QTimer as _QTimer
+            self._pending_input_timer = threading.Timer(
+                0.6, lambda: _QTimer.singleShot(0, self._try_fire_input)
+            )
+        except ImportError:
+            self._pending_input_timer = threading.Timer(0.6, self._try_fire_input)
+        self._pending_input_timer.daemon = True
         self._pending_input_timer.start()
 
     def _try_fire_input(self):

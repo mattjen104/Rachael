@@ -497,9 +497,14 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
               const outEdges = wEdges.filter((e: any) => e.from === fp);
               const inEdges = wEdges.filter((e: any) => e.to === fp);
               // Derive env from the window key (e.g. "session_tree_hyperspace_sup" → "SUP")
+              // Split by _ or - because \b word boundary is adjacent to _ (also a word char)
+              // so /\bsup\b/ would not match inside "hyperspace_sup".
               const wKeyEnv = (() => {
-                const m = wKey.match(/\b(sup|poc|tst|prd|bld|rel|dem|mst)\b/i);
-                return m ? m[1].toUpperCase() : "SUP";
+                const tokens = wKey.split(/[_\-]+/);
+                const envTok = tokens.find((t: string) =>
+                  /^(sup|poc|tst|prd|bld|rel|dem|mst)$/i.test(t)
+                );
+                return envTok ? envTok.toUpperCase() : "SUP";
               })();
 
               nodes.push({ type: "section", label: `${indent}${displayLabel}${ctxTag}`, key: nodeKey, count: visits });
