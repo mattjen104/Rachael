@@ -609,8 +609,16 @@ def _hotkey_matches(mods_held: set, key, mods_wanted: frozenset, trigger: str) -
             elif "cmd" in s or "super" in s:     norm.add("cmd")
         if norm != set(mods_wanted):
             return False
-        # Match trigger: single char
+        # Match trigger: single char.
+        # IMPORTANT: when Ctrl is held, pynput sets key.char to the ASCII control
+        # character (e.g. Ctrl+H → '\x08', Ctrl+C → '\x03') rather than the letter.
+        # We therefore check key.vk (Windows virtual-key code) as the primary source
+        # and only fall back to key.char when vk is unavailable.
         if len(trigger) == 1:
+            # VK-based match (reliable under Ctrl/Shift): ord('A')..ord('Z') = 65..90
+            if hasattr(key, 'vk') and key.vk is not None:
+                return key.vk == ord(trigger.upper())
+            # Fallback for platforms without vk
             return hasattr(key, 'char') and key.char and key.char.lower() == trigger
         # Match trigger: named key (f9, scroll_lock, pause …)
         try:
@@ -679,11 +687,13 @@ class OverlayWindow:
         """Re-scan and update hints on the overlay."""
         win = self._find_epic_window()
         if not win:
-            print(f"[overlay] Epic window not found: {self.win_title}")
+            print(f"[overlay] Epic window not found: {self.win_title!r} — is Hyperspace open?")
             return
 
+        print(f"[overlay] Scanning window: {win.title!r} ({win.width}x{win.height})")
         has_activity_tabs = self._check_activity_tabs()
         self.elements = scan_window(self.win_title, with_activity_tabs=has_activity_tabs)
+        print(f"[overlay] Scan complete: {len(self.elements)} elements found")
 
         fp = compute_screen_fp(self.elements)
         self._current_phash = _compute_window_phash(self.win_title)
