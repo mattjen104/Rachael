@@ -111,7 +111,7 @@ def _get_ocr():
                             _ocr_engine = PaddleOCR(**_kw)
                             print(f"[ocr] PaddleOCR initialized (kwargs={list(_kw.keys())})")
                             break
-                        except TypeError as _te:
+                        except Exception as _te:
                             print(f"[ocr] PaddleOCR rejected {_kw}: {_te}")
                             continue
                     else:
