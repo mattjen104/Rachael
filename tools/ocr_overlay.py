@@ -946,21 +946,20 @@ class OverlayWindow:
         self._window.show()
 
         # ── Hotkey listener setup ─────────────────────────────────────────────
-        # Two separate pynput listeners:
-        #   1. hotkey_listener (suppress=False) — always running; handles toggle combos only.
-        #   2. hint_listener  (suppress=True)  — started when hints become visible so
-        #      typed hint chars are consumed here and do NOT reach the Citrix/Epic app.
-        # All Qt object access (QGraphicsScene etc.) is routed through QTimer.singleShot(0,…)
-        # so it always executes on the Qt main thread.
+        # _dispatch: marshal any fn() onto the Qt main thread (safe from any thread).
+        def _dispatch(fn):
+            QTimer.singleShot(0, fn)
+
+        # ── 1. Suppressing hint-char listener (pynput) ────────────────────────
+        # Active only while hints are visible; consumes typed hint chars so they
+        # do NOT reach the Citrix/Epic app.
         self._suppress_listener = None
         self._suppress_lock = threading.Lock()
+        self._start_suppress_listener = lambda: None
+        self._stop_suppress_listener  = lambda: None
 
         try:
             from pynput import keyboard as pk
-
-            def _dispatch(fn):
-                """Schedule fn() on the Qt main thread (thread-safe from any thread)."""
-                QTimer.singleShot(0, fn)
 
             def _stop_suppress_listener():
                 with self._suppress_lock:
@@ -1005,48 +1004,119 @@ class OverlayWindow:
                     sl.start()
                     self._suppress_listener = sl
 
-            # Store helpers on self so toggle_hints can access them
             self._start_suppress_listener = _start_suppress_listener
-            self._stop_suppress_listener = _stop_suppress_listener
+            self._stop_suppress_listener  = _stop_suppress_listener
 
-            # Non-suppressing listener: tracks modifier state and fires on full combo match.
-            # Uses on_press + on_release so Ctrl+Shift+H works reliably without
-            # interfering with any Epic key bindings.
-            _mods_held: set = set()
-            _mods_lock = threading.Lock()
-
-            def on_hotkey_press(key):
-                with _mods_lock:
-                    # Track held modifiers
-                    try:
-                        if key in (pk.Key.ctrl_l, pk.Key.ctrl_r, pk.Key.ctrl):
-                            _mods_held.add(key)
-                        elif key in (pk.Key.shift, pk.Key.shift_l, pk.Key.shift_r):
-                            _mods_held.add(key)
-                        elif key in (pk.Key.alt_l, pk.Key.alt_r, pk.Key.alt_gr, pk.Key.alt):
-                            _mods_held.add(key)
-                        elif key in (pk.Key.cmd, pk.Key.cmd_l, pk.Key.cmd_r):
-                            _mods_held.add(key)
-                    except Exception:
-                        pass
-                    held_snapshot = set(_mods_held)
-
-                if _hotkey_matches(held_snapshot, key, self._hint_mods, self._hint_trigger):
-                    _dispatch(self.toggle_hints)
-                elif _hotkey_matches(held_snapshot, key, self._correct_mods, self._correct_trigger):
-                    _dispatch(self.toggle_correction)
-
-            def on_hotkey_release(key):
-                with _mods_lock:
-                    _mods_held.discard(key)
-
-            hotkey_listener = pk.Listener(on_press=on_hotkey_press,
-                                          on_release=on_hotkey_release,
-                                          suppress=False)
-            hotkey_listener.daemon = True
-            hotkey_listener.start()
         except ImportError:
-            print("[overlay] pynput not installed — hotkeys disabled (pip install pynput)")
+            print("[overlay] pynput not installed — hint key input disabled (pip install pynput)")
+
+        # ── 2. Toggle hotkeys: Win32 RegisterHotKey (works through Citrix) ────
+        # Win32 RegisterHotKey fires a WM_HOTKEY message regardless of which window
+        # has focus — including Citrix full-screen sessions that intercept pynput's
+        # low-level hook.  This is the same mechanism epic_agent uses for Alt+C/X/S/A.
+        #
+        # Fall back to a pynput non-suppressing listener on non-Windows.
+        _win32_ok = False
+        try:
+            import ctypes.wintypes
+            _u32 = ctypes.windll.user32
+
+            MOD_CTRL     = 0x0002
+            MOD_SHIFT    = 0x0004
+            MOD_NOREPEAT = 0x4000
+            WM_HOTKEY    = 0x0312
+            HK_HINTS     = 10   # IDs 10/11 — won't collide with agent (separate process)
+            HK_CORRECT   = 11
+
+            # Named-key VK table for non-letter triggers
+            _VK_NAMED = {
+                "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
+                "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
+                "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
+                "pause": 0x13, "scroll_lock": 0x91,
+            }
+
+            def _combo_to_win32(mods_frozenset, trigger):
+                vk = (_VK_NAMED.get(trigger)
+                      if trigger in _VK_NAMED
+                      else (ord(trigger.upper()) if len(trigger) == 1 else 0))
+                w32 = MOD_NOREPEAT
+                if "ctrl"  in mods_frozenset: w32 |= MOD_CTRL
+                if "shift" in mods_frozenset: w32 |= MOD_SHIFT
+                return vk, w32
+
+            hint_vk,  hint_w32  = _combo_to_win32(self._hint_mods,    self._hint_trigger)
+            corr_vk,  corr_w32  = _combo_to_win32(self._correct_mods, self._correct_trigger)
+
+            ok1 = bool(_u32.RegisterHotKey(None, HK_HINTS,   hint_w32, hint_vk))
+            ok2 = bool(_u32.RegisterHotKey(None, HK_CORRECT, corr_w32, corr_vk))
+
+            if not ok1:
+                print(f"[overlay] WARNING: could not register {self._hint_key_name} "
+                      f"(already in use?). Try --hint-key with a different combo.")
+            if not ok2:
+                print(f"[overlay] WARNING: could not register {self._correct_key_name} "
+                      f"(already in use?). Try --correct-key with a different combo.")
+
+            def _win32_msg_loop():
+                msg = ctypes.wintypes.MSG()
+                while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+                    if msg.message == WM_HOTKEY:
+                        if msg.wParam == HK_HINTS:
+                            _dispatch(self.toggle_hints)
+                        elif msg.wParam == HK_CORRECT:
+                            _dispatch(self.toggle_correction)
+                _u32.UnregisterHotKey(None, HK_HINTS)
+                _u32.UnregisterHotKey(None, HK_CORRECT)
+
+            _w32_thread = threading.Thread(target=_win32_msg_loop, daemon=True)
+            _w32_thread.start()
+            _win32_ok = True
+            print(f"[overlay] Hotkeys registered via Win32: "
+                  f"{self._hint_key_name} = hints, "
+                  f"{self._correct_key_name} = correction")
+
+        except Exception as _e:
+            pass  # non-Windows or ctypes unavailable — fall through to pynput
+
+        if not _win32_ok:
+            # Pynput fallback: modifier-tracking non-suppressing listener
+            print("[overlay] Win32 hotkeys unavailable — using pynput listener (may not work in Citrix)")
+            try:
+                from pynput import keyboard as pk
+                _mods_held: set = set()
+                _mods_lock = threading.Lock()
+
+                def on_hotkey_press(key):
+                    with _mods_lock:
+                        try:
+                            if key in (pk.Key.ctrl_l, pk.Key.ctrl_r, pk.Key.ctrl):
+                                _mods_held.add(key)
+                            elif key in (pk.Key.shift, pk.Key.shift_l, pk.Key.shift_r):
+                                _mods_held.add(key)
+                            elif key in (pk.Key.alt_l, pk.Key.alt_r, pk.Key.alt_gr, pk.Key.alt):
+                                _mods_held.add(key)
+                            elif key in (pk.Key.cmd, pk.Key.cmd_l, pk.Key.cmd_r):
+                                _mods_held.add(key)
+                        except Exception:
+                            pass
+                        held = set(_mods_held)
+                    if _hotkey_matches(held, key, self._hint_mods, self._hint_trigger):
+                        _dispatch(self.toggle_hints)
+                    elif _hotkey_matches(held, key, self._correct_mods, self._correct_trigger):
+                        _dispatch(self.toggle_correction)
+
+                def on_hotkey_release(key):
+                    with _mods_lock:
+                        _mods_held.discard(key)
+
+                _hl = pk.Listener(on_press=on_hotkey_press,
+                                  on_release=on_hotkey_release,
+                                  suppress=False)
+                _hl.daemon = True
+                _hl.start()
+            except ImportError:
+                print("[overlay] pynput not installed — toggle hotkeys disabled (pip install pynput)")
 
         # Timer to track and reposition the overlay to Epic window
         def reposition():
