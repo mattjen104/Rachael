@@ -1,0 +1,28 @@
+  p1 = list(img1.convert("L").getdata())
+C:\Rachael\tools\epic_agent.py:1617: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0009 (thresh=0.005)
+  [label] c1e1c0e0e0c0.. unrecognized: Based on the reference information provided and the OCR outp
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0022 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0407 (thresh=0.005)
+  [label] c1e1e0e0c0ff.. = Terminal Console [none]
+  [label] e1c180f9f1e1.. unrecognized: Okay, let's analyze the image based on the instructions and
+  [label] 007fffffffff.. = My Dashboards [none]
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0510 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0206 (thresh=0.005)
+  [label] 00fefefefefe.. = Clinical Content Tools [none]
+  [label] 8180f8f0e0e0.. = Hyperspace main window [none]
+  [label] 00f0f0f0f0f8.. = My Dashboards [none/My Dashboards]
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [label] 8180fde0e0e0.. unrecognized: Based on the image and following the priority order for iden
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 116n/197e
+  [heartbeat] tree updated cwindowssystem32cmdexe_-_pyt: 43n/47e
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.7137 (thresh=0.005)
+  [label] c18080fde0e0.. unrecognized: Here's the breakdown of the screen and the corresponding lab
+  [label] a18181818181.. unrecognized: The provided image appears to show a blank screen, likely a
+  [label] f1f1f8f88000.. = Terminal Console [none]
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0210 (thresh=0.005)
+  [label] e1e1f8f8f000.. = Terminal Console [none]
+  [label] 00c0d7d5ddd5.. = Epic Menu [none/ephemeral]
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.2766 (thresh=0.005)
