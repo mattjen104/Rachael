@@ -1,0 +1,61 @@
+ Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+[overlay] Launched OCR overlay (pid 20608)
+[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode
+Detected Hyperspace windows:
+  SUP: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+  [always-on] Global input listeners started (focus-aware dispatch)
+  [label] Screen labeler thread started
+  [always-on] Started capture: Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\Remote (key=hyperspace__exe_lung_txp__sup_environment__matthew_e_jensen, sid=aon_1776281807_8646, input=full)
+  [always-on] Started capture: C:\WINDOWS\system32\cmd.exe - python  tools\epic_agent.py (key=cwindowssystem32cmdexe_-_python__toolsepic_agentpy, sid=aon_1776281807_1654, input=full)
+c:\Rachael\tools\epic_agent.py:1603: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  pixels = list(small.getdata())
+[ocr] Auto-detected Epic window: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Starting overlay over: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote'
+[ocr] Ctrl+Shift+H=toggle hints  Ctrl+Shift+C=correction mode  Esc=cancel
+  [label] API 401 for e0e0c0e0e0c0.. : User not found.
+  [label] API 401 for 00c1c1c1c1c1.. : User not found.
+c:\Rachael\tools\epic_agent.py:1616: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p1 = list(img1.convert("L").getdata())
+c:\Rachael\tools\epic_agent.py:1617: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  p2 = list(img2.convert("L").getdata())
+[overlay] Hotkeys registered via Win32: ctrl+shift+h = hints, ctrl+shift+c = correction
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+  [label] API 401 for 80e0e0c0f8ff.. : User not found.
+  [label] API 401 for 006777337377.. : User not found.
+  [label] API 401 for 00ffffffffff.. : User not found.
+[overlay] Hints visible
+[overlay] Scanning window: 'Hyperspace – EXE LUNG TXP – SUP Environment – MATTHEW E JENSEN - \\\\Remote' (3313x1440)
+C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.2) doesn't match a supported version!
+  warnings.warn(
+Checking connectivity to the model hosters, this may take a while. To bypass this check, set `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` to `True`.
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0005 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0005 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0000 (thresh=0.005)
+[overlay] Scan error: Unknown argument: use_gpu
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0000 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.0016 (thresh=0.005)
+  [heartbeat] tree updated hyperspace__exe_lung_txp__su: 155n/261e
+  [heartbeat] tree updated cwindowssystem32cmdexe_-_pyt: 136n/173e
+  [aon-diff] hyperspace__exe_lung_txp__sup_: diff=0.0022 (thresh=0.005)
+  [aon-diff] cwindowssystem32cmdexe_-_pytho: diff=0.9844 (thresh=0.005)
+  [label] API 401 for e0e0e0e180f8.. : User not found.
+  [label] API 401 for e0e0e0cfd0f8.. : User not found.
+  [label] API 401 for 00c3c3c3c3c3.. : User not found.
+  [label] API 401 for e0e0e180f8f0.. : User not found.
+  [label] API 401 for 00ffe1e1e1e1.. : User not found.
