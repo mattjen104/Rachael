@@ -1718,10 +1718,16 @@ def main():
     if not win_title:
         try:
             import pygetwindow as gw
-            epic_keywords = ["hyperspace", "epic", "hyperdrive", "haiku", "canto"]
+            epic_keywords = ["hyperspace", "hyperdrive", "haiku", "canto"]
+            browser_noise = ["chrome", "firefox", "edge", "brave", "safari",
+                             "replit", "github", ".py -", ".ts -", "visual studio"]
             for w in gw.getAllWindows():
                 t = (w.title or "").lower()
-                if any(k in t for k in epic_keywords) and w.width > 200:
+                if w.width < 400:
+                    continue
+                if any(b in t for b in browser_noise):
+                    continue
+                if any(k in t for k in epic_keywords):
                     win_title = w.title
                     print(f"[ocr] Auto-detected Epic window: {win_title!r}")
                     break
