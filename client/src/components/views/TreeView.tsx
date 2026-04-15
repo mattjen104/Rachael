@@ -555,12 +555,17 @@ export default function TreeView({ onNavigate, onRunCommand, onEditItem }: TreeV
             if (pinned.length > 0) {
               nodes.push({ type: "section", label: `    Shortcuts`, key: pinnedKey, count: pinned.length });
               if (expanded.has(pinnedKey)) {
+                const pinnedEnv = (() => {
+                  const toks = wKey.split(/[_\-]+/);
+                  const et = toks.find((t: string) => /^(sup|poc|tst|prd|bld|rel|dem|mst)$/i.test(t));
+                  return et ? et.toUpperCase() : "SUP";
+                })();
                 for (const n of pinned) {
                   const label = getNodeLabel(n).slice(0, 35);
                   const goTitle = label.replace(/[;&|"`$\\]/g, "");
                   const ctx = n.context;
                   const ctxTag = ctx?.contextLevel === "patient" ? " [patient]" : ctx?.contextLevel === "encounter" ? " [encounter]" : "";
-                  nodes.push({ type: "bridge-info", label: `      >> ${label}${ctxTag}`, actionCmd: `epic go SUP "${goTitle}"` });
+                  nodes.push({ type: "bridge-info", label: `      >> ${label}${ctxTag}`, actionCmd: `epic go ${pinnedEnv} "${goTitle}"` });
                 }
               }
             }

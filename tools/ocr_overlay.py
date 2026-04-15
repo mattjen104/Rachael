@@ -67,7 +67,7 @@ DEFAULT_SEMANTICS = {
     "Accept":   "a",
     "Cancel":   "c",
     "Sign":     "s",
-    "Log Out":  "L",
+    "Log Out":  "l",   # lowercase — CLI lowercases all hint input before dispatch
 }
 
 # PHI patterns to exclude from fingerprinting
@@ -386,13 +386,16 @@ def get_semantic_map(conn) -> dict[str, str]:
     """
     Return a text → shortcut-key mapping from the KB (confirmed+ elements with semantic set).
     This loads user-learned semantics across sessions, not just the hardcoded DEFAULT_SEMANTICS.
+    All shortcut keys are normalized to lowercase so they match the CLI which calls
+    hint.toLowerCase() before dispatching (cli-engine.ts line ~5407).
     """
     rows = conn.execute(
         "SELECT text, semantic FROM elements WHERE semantic IS NOT NULL AND semantic != '' "
         "AND confidence IN ('confirmed','reliable','named')"
     ).fetchall()
-    result = {r["text"]: r["semantic"] for r in rows}
-    # Fill in defaults for anything not in KB yet
+    # Normalize semantic keys to lowercase for consistent CLI dispatch
+    result = {r["text"]: r["semantic"].lower() for r in rows}
+    # Fill in defaults for anything not in KB yet (DEFAULT_SEMANTICS already all lowercase)
     for text, key in DEFAULT_SEMANTICS.items():
         if text not in result:
             result[text] = key
