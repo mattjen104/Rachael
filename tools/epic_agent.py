@@ -9203,10 +9203,14 @@ def main():
             if now - last_heartbeat > heartbeat_interval:
                 windows = list_windows()
                 window_titles = list(windows.values()) if windows else []
-                try:
-                    _always_on_heartbeat_tick(window_titles)
-                except Exception as e:
-                    print(f"  [always-on] tick error: {e}")
+                # Always-on screenshot capture is OFF by default — it ate disk
+                # without producing useful output. Re-enable explicitly with
+                # EPIC_ALWAYS_ON_SCREENSHOTS=1 if you ever want it back.
+                if os.environ.get("EPIC_ALWAYS_ON_SCREENSHOTS", "").lower() in ("1", "true", "yes", "on"):
+                    try:
+                        _always_on_heartbeat_tick(window_titles)
+                    except Exception as e:
+                        print(f"  [always-on] tick error: {e}")
                 send_heartbeat(list(windows.keys()))
                 last_heartbeat = now
 
