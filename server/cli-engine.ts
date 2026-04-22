@@ -4342,6 +4342,73 @@ ${fullHtml}`;
         return fail(`[epic] ${e.message}`);
       }
     }
+    if (args[0] === "boot") {
+      // Alias: delegate to top-level `boot` command, forwarding any flags.
+      const rest = args.slice(1).map(a => /\s/.test(a) ? `"${a}"` : a).join(" ");
+      const r = await executeChainRaw(`boot ${rest}`.trim());
+      return r;
+    }
+    if (args[0] === "discover") {
+      // Trigger Hyperdrive grammar discovery (tab-walk + per-field probe).
+      const env = (args[1] || "SUP").toUpperCase();
+      if (!EPIC_ENVS.has(env)) return fail(`[epic] unknown env: ${env}`);
+      const probe = !args.includes("--no-probe");
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+          body: JSON.stringify({ type: "discover_grammar", env, probe_options: probe }),
+        });
+        const data: any = resp.ok ? await resp.json() : { ok: false };
+        if (!data.ok || !data.commandId) return fail(`[epic] discover queue failed`);
+        const start = Date.now();
+        while (Date.now() - start < 180_000) {
+          await new Promise(r => setTimeout(r, 1500));
+          const rResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${data.commandId}`);
+          const rData: any = rResp.ok ? await rResp.json() : {};
+          if (rData.status === "complete") {
+            const d = rData.data || {};
+            return ok(`epic discover ${env}: ${d.fields ?? 0} fields, ${d.options ?? 0} with options, fp=${(d.fp || "").substring(0, 12)} phash=${(d.phash || "").substring(0, 8)}`);
+          }
+          if (rData.status === "error") return fail(`[epic] discover failed: ${rData.error || "unknown"}`);
+        }
+        return fail(`[epic] discover timeout`);
+      } catch (e: any) {
+        return fail(`[epic] discover error: ${e.message}`);
+      }
+    }
+    if (args[0] === "smoke") {
+      const env = (args[1] || "SUP").toUpperCase();
+      const lines: string[] = [`=== EPIC SMOKE TEST (${env}) ===`, ""];
+      const bs = await executeChainRaw("boot --status");
+      lines.push("--- boot status ---", bs.stdout.split("\n").slice(0, 10).join("\n"), "");
+      const ds = await executeChainRaw(`epic discover ${env}`);
+      lines.push("--- discover ---", ds.stdout, "");
+      const ka = await executeChainRaw("epic keepalive status");
+      lines.push("--- keepalive ---", ka.stdout);
+      return ok(lines.join(nl));
+    }
+    if (args[0] === "keepalive") {
+      const sub = args[1] || "status";
+      const action = sub === "on" ? "keepalive_start" : sub === "off" ? "keepalive_stop" : null;
+      if (!action) {
+        const cfg = await storage.getAgentConfig("epic_keepalive");
+        return ok(`Epic in-session keepalive: ${cfg?.value === "on" ? "ON" : "OFF"}${nl}Usage: epic keepalive on|off`);
+      }
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+          body: JSON.stringify({ type: action }),
+        });
+        const data: any = resp.ok ? await resp.json() : { ok: false };
+        if (!data.ok) return fail(`[epic] keepalive request failed`);
+        await storage.setAgentConfig("epic_keepalive", sub === "on" ? "on" : "off", "epic");
+        return ok(`Epic in-session keepalive: ${sub === "on" ? "ENABLED" : "DISABLED"}`);
+      } catch (e: any) {
+        return fail(`[epic] keepalive error: ${e.message}`);
+      }
+    }
     if (args[0] === "status") {
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/status`);

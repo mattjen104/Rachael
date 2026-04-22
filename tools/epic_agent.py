@@ -8842,9 +8842,166 @@ def execute_check_windows(cmd):
     post_result(command_id, "complete", data={"found": found, "title": title})
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# In-session keep-alive (Hyperdrive + Text)
+# Sends a benign Shift keypress to each tracked Citrix session every N
+# minutes, but ONLY if the user has been idle ≥ IDLE_GATE_S AND no agent
+# action is currently in flight. This prevents Citrix idle disconnect
+# without stealing focus or interfering with real work.
+# ───────────────────────────────────────────────────────────────────────────
+
+_keepalive_thread = None
+_keepalive_stop_event = None
+_keepalive_lock = threading.Lock()
+_action_in_flight = threading.Event()  # set/cleared by execute_command wrapper
+
+KEEPALIVE_INTERVAL_S = 240   # 4 minutes — well under typical Citrix 10-15min timeout
+KEEPALIVE_IDLE_GATE_S = 60   # only tick if user has been idle ≥ 60s
+
+
+def _user_idle_seconds():
+    """Return seconds since last user input via Win32 GetLastInputInfo.
+    Returns 0.0 on non-Windows or any error (= 'never idle' fail-safe)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(lii)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            return 0.0
+        tick = ctypes.windll.kernel32.GetTickCount()
+        return max(0.0, (tick - lii.dwTime) / 1000.0)
+    except Exception:
+        return 0.0
+
+
+def _keepalive_tick(envs=("SUP", "POC", "TST"), clients=("hyperspace", "text")):
+    """One keep-alive cycle: send Shift to each tracked window. Returns
+    list of (env, client, status) for logging."""
+    results = []
+    for env in envs:
+        for client in clients:
+            try:
+                w = find_window(env, client=client)
+            except Exception:
+                w = None
+            if not w:
+                continue
+            try:
+                # Save current foreground so we don't steal focus visibly.
+                # We send a single Shift keypress directly to the target hwnd
+                # via PostMessage (no SetForegroundWindow → no focus steal).
+                import ctypes
+                hwnd = getattr(w, "_hWnd", None) or getattr(w, "hwnd", None)
+                if not hwnd:
+                    continue
+                WM_KEYDOWN = 0x0100
+                WM_KEYUP = 0x0101
+                VK_SHIFT = 0x10
+                ctypes.windll.user32.PostMessageW(int(hwnd), WM_KEYDOWN, VK_SHIFT, 0)
+                time.sleep(0.05)
+                ctypes.windll.user32.PostMessageW(int(hwnd), WM_KEYUP, VK_SHIFT, 0)
+                results.append((env, client, "tick"))
+            except Exception as e:
+                results.append((env, client, f"err:{type(e).__name__}"))
+    return results
+
+
+def _keepalive_loop(stop_event):
+    print("[keepalive] thread started")
+    next_tick = time.time() + KEEPALIVE_INTERVAL_S
+    while not stop_event.is_set():
+        if stop_event.wait(timeout=5):
+            break
+        if time.time() < next_tick:
+            continue
+        # Gates: skip if user is active OR an agent action is in flight.
+        idle = _user_idle_seconds()
+        if idle < KEEPALIVE_IDLE_GATE_S:
+            print(f"[keepalive] skip — user active (idle={idle:.0f}s < {KEEPALIVE_IDLE_GATE_S}s)")
+            next_tick = time.time() + 30  # re-check soon
+            continue
+        if _action_in_flight.is_set():
+            print("[keepalive] skip — agent action in flight")
+            next_tick = time.time() + 30
+            continue
+        results = _keepalive_tick()
+        if results:
+            print(f"[keepalive] {len(results)} windows: " + ", ".join(f"{e}/{c}={s}" for e,c,s in results))
+        else:
+            print("[keepalive] no Hyperdrive/Text windows found")
+        next_tick = time.time() + KEEPALIVE_INTERVAL_S
+    print("[keepalive] thread stopped")
+
+
+def execute_keepalive_start(cmd):
+    global _keepalive_thread, _keepalive_stop_event
+    command_id = cmd.get("id", "unknown")
+    with _keepalive_lock:
+        if _keepalive_thread and _keepalive_thread.is_alive():
+            post_result(command_id, "complete", data={"running": True, "already": True})
+            return
+        _keepalive_stop_event = threading.Event()
+        _keepalive_thread = threading.Thread(
+            target=_keepalive_loop, args=(_keepalive_stop_event,),
+            name="epic-keepalive", daemon=True,
+        )
+        _keepalive_thread.start()
+    post_result(command_id, "complete", data={"running": True, "interval_s": KEEPALIVE_INTERVAL_S})
+
+
+def execute_keepalive_stop(cmd):
+    global _keepalive_thread, _keepalive_stop_event
+    command_id = cmd.get("id", "unknown")
+    with _keepalive_lock:
+        if _keepalive_stop_event:
+            _keepalive_stop_event.set()
+        _keepalive_thread = None
+        _keepalive_stop_event = None
+    post_result(command_id, "complete", data={"running": False})
+
+
+def execute_discover_grammar(cmd):
+    """Run the Hyperdrive grammar discoverer (tab-walk + per-field probe)
+    and persist results into the local OCR KB sqlite (keyed by pHash)."""
+    command_id = cmd.get("id", "unknown")
+    env = (cmd.get("env") or "SUP").upper()
+    probe_options = bool(cmd.get("probe_options", True))
+    window = find_window(env, client="hyperspace")
+    if not window:
+        post_result(command_id, "error", error=f"No {env} Hyperspace window found")
+        return
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from ocr_overlay import discover_grammar
+    except Exception as e:
+        post_result(command_id, "error", error=f"ocr_overlay import failed: {e}")
+        return
+    _action_in_flight.set()
+    try:
+        result = discover_grammar(window.title, probe_options=probe_options)
+    finally:
+        _action_in_flight.clear()
+    post_result(command_id, "complete", data=result)
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
+
+    # Mark agent action in flight so the keep-alive thread skips this tick.
+    # Lightweight commands (status, snapshot, check, keepalive_*) don't move
+    # focus or send keystrokes, so they don't need the gate.
+    _LIGHTWEIGHT = {"check_windows", "snapshot_windows", "detect_new_window",
+                    "audio_status", "record_session_status", "keepalive_start",
+                    "keepalive_stop"}
+    gate = cmd_type not in _LIGHTWEIGHT
+    if gate:
+        _action_in_flight.set()
 
     try:
         if cmd_type == "navigate":
@@ -8929,6 +9086,12 @@ def execute_command(cmd):
                 execute_ocr_do(cmd)
             except ImportError as e:
                 post_result(cmd.get("id", "unknown"), "error", error=f"ocr_overlay not available: {e}")
+        elif cmd_type == "keepalive_start":
+            execute_keepalive_start(cmd)
+        elif cmd_type == "keepalive_stop":
+            execute_keepalive_stop(cmd)
+        elif cmd_type == "discover_grammar":
+            execute_discover_grammar(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except pyautogui.FailSafeException:
@@ -8937,6 +9100,9 @@ def execute_command(cmd):
         print(f"  [error] {e}")
         traceback.print_exc()
         post_result(cmd.get("id", "unknown"), "error", error=str(e))
+    finally:
+        if gate:
+            _action_in_flight.clear()
 
 
 def list_windows():

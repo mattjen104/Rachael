@@ -133,6 +133,7 @@ class OcrElement:
     confidence: float = 0.0
     abs_cx: int = 0  # absolute screen center x (for clicking)
     abs_cy: int = 0  # absolute screen center y
+    options: list = None  # dropdown options if probed; None = not probed
 
 
 def _looks_like_phi(text: str) -> bool:
@@ -341,6 +342,7 @@ def tab_walk_scan(
     progress_cb=None,
     cancel_flag=None,
     has_activity_tabs: bool = False,
+    probe_options: bool = False,
 ) -> list[OcrElement]:
     """Discover interactive fields by Tab-walking and pixel-diffing the highlight.
 
@@ -522,6 +524,18 @@ def tab_walk_scan(
                 abs_cy=win_top + cy,
             ))
 
+            # Probe dropdown options while focus is confirmed on this field.
+            # Done inline (single walk) to guarantee element-to-options mapping.
+            if probe_options:
+                try:
+                    opts = _probe_field_options(region, ocr)
+                    if opts:
+                        elements[-1].options = opts
+                        # Re-baseline prev_frame: Escape may have repainted.
+                        curr_frame = _capture_window(sct, region)
+                except Exception as _pe:
+                    print(f"[tab-walk] probe failed at #{len(elements)}: {_pe}")
+
             if progress_cb and len(elements) % 10 == 0:
                 progress_cb(len(elements))
 
@@ -537,6 +551,132 @@ def tab_walk_scan(
 
     print(f"[tab-walk] Walk complete: {len(elements)} fields found")
     return elements
+
+
+def _probe_field_options(window_region, ocr, max_options: int = 20) -> list[str]:
+    """After a Tab-walk has settled on a field, attempt Alt+Down to open
+    a dropdown and OCR any newly-appeared region. Returns the list of
+    discovered option strings (empty if not a dropdown).
+
+    Closes the dropdown with Escape on completion.
+    """
+    try:
+        import mss
+        import pyautogui
+    except ImportError:
+        return []
+    if ocr is None:
+        return []
+
+    pad_y = 4
+    region_below = {
+        "left": window_region["left"],
+        "top": window_region["top"] + pad_y,
+        "width": window_region["width"],
+        "height": window_region["height"],
+    }
+    try:
+        with mss.mss() as sct:
+            before = _capture_window(sct, region_below)
+            pyautogui.hotkey('alt', 'down')
+            time.sleep(0.35)
+            after = _capture_window(sct, region_below)
+    except Exception:
+        return []
+
+    bboxes = _find_diff_bboxes(before, after, threshold=25, min_area=200)
+    if not bboxes:
+        try:
+            pyautogui.press('escape')
+            time.sleep(0.1)
+        except Exception:
+            pass
+        return []
+
+    # Pick the largest diff bbox = likely the dropdown panel
+    bboxes.sort(key=lambda b: (b[2]-b[0]) * (b[3]-b[1]), reverse=True)
+    x1, y1, x2, y2 = bboxes[0]
+    crop = after[y1:y2, x1:x2]
+    options: list[str] = []
+    if crop.size > 0:
+        try:
+            result = ocr.ocr(crop, cls=False)
+        except Exception:
+            try:
+                result = ocr.ocr(crop)
+            except Exception:
+                result = None
+        if result and result[0]:
+            for line in result[0]:
+                txt = (line[1][0] or "").strip()
+                conf = line[1][1] if len(line[1]) > 1 else 0
+                if txt and conf > 0.5 and 1 <= len(txt) <= 80:
+                    options.append(txt)
+                if len(options) >= max_options:
+                    break
+
+    try:
+        pyautogui.press('escape')
+        time.sleep(0.1)
+    except Exception:
+        pass
+    return options
+
+
+def discover_grammar(window_title: str, probe_options: bool = True,
+                     max_steps: int = 300) -> dict:
+    """Run a full Hyperdrive grammar discovery pass on the given window:
+    (1) tab_walk_scan to enumerate fields,
+    (2) per-field Alt+Down probe to discover dropdown options (best-effort),
+    (3) compute screen pHash + OCR fingerprint,
+    (4) persist everything into the local sqlite KB.
+
+    Returns a summary dict suitable for `post_result(... data=...)`.
+    """
+    has_activity_tabs = False
+    try:
+        import pygetwindow as gw
+        wins = [w for w in gw.getAllWindows()
+                if window_title.lower() in (w.title or "").lower() and w.width > 100]
+        if not wins:
+            return {"error": "window not found", "window": window_title, "fields": 0}
+        win = wins[0]
+        window_region = {"left": win.left, "top": win.top,
+                         "width": win.width, "height": win.height}
+    except Exception as e:
+        return {"error": f"window probe failed: {e}", "fields": 0}
+
+    elements = tab_walk_scan(
+        window_title, max_steps=max_steps, tab_delay=0.18,
+        has_activity_tabs=has_activity_tabs,
+        probe_options=probe_options,
+    )
+    if not elements:
+        return {"window": window_title, "fields": 0, "options": 0, "fp": "", "phash": ""}
+
+    fp = compute_screen_fp(elements)
+    phash = _compute_window_phash(window_title)
+
+    options_count = 0
+    conn = _db_connect()
+    try:
+        save_screen_fp(conn, fp, elements)
+        save_fp_bridge(conn, phash, fp)
+        for e in elements:
+            elem_id = upsert_element(conn, e, fp)
+            if e.options:
+                set_element_options(conn, elem_id, e.options)
+                options_count += 1
+    finally:
+        conn.close()
+
+    return {
+        "window": window_title,
+        "fields": len(elements),
+        "options": options_count,
+        "fp": fp,
+        "phash": phash,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -587,8 +727,44 @@ def _db_connect():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # Additive migration: 'options' column on elements stores
+    # JSON-encoded list of dropdown values discovered via Alt+Down probing.
+    try:
+        conn.execute("ALTER TABLE elements ADD COLUMN options TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     return conn
+
+
+def get_elements_by_phash(conn, phash_fp: str) -> list:
+    """Fast lookup: pHash → cached elements (joined via fp_bridge → elements.screen_fps).
+    Used by the overlay's fast-path render to skip tab-walk on familiar screens."""
+    if not phash_fp or phash_fp == "0":
+        return []
+    bridge = conn.execute(
+        "SELECT ocr_fp FROM fp_bridge WHERE phash_fp=?", (phash_fp,)
+    ).fetchone()
+    if not bridge:
+        return []
+    ocr_fp = bridge["ocr_fp"]
+    rows = conn.execute(
+        "SELECT * FROM elements WHERE confidence IN ('confirmed','reliable','named') "
+        "AND (screen_fps LIKE ? OR is_correction=1)",
+        (f'%{ocr_fp}%',)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_element_options(conn, elem_id: int, options: list[str]):
+    """Store discovered dropdown options on an element row."""
+    if not options:
+        return
+    conn.execute(
+        "UPDATE elements SET options=?, updated_at=? WHERE id=?",
+        (json.dumps(options), time.time(), elem_id),
+    )
+    conn.commit()
 
 
 def _seed_universal_elements(conn):
@@ -1096,7 +1272,14 @@ class OverlayWindow:
         print(f"[overlay] Scanning… {count} fields found so far")
 
     def _refresh_bg(self):
-        """Tab-walk scan on a background thread; dispatch _redraw to Qt main thread."""
+        """Tab-walk scan on a background thread; dispatch _redraw to Qt main thread.
+
+        FAST PATH: before tab-walking (which takes seconds), compute the window
+        pHash and look up cached elements. If we have ≥3 reliable cached
+        elements for this screen, build a hint map immediately and dispatch a
+        redraw so the user sees overlay hints in <100ms. We then proceed to
+        run the live tab-walk in the background to refresh the cache.
+        """
         scan_id = getattr(self, '_scan_id', 0) + 1
         self._scan_id = scan_id
         cancel = threading.Event()
@@ -1106,6 +1289,50 @@ class OverlayWindow:
             if not win:
                 print(f"[overlay] Epic window not found: {self.win_title!r} — is Hyperspace open?")
                 return
+
+            # ── FAST PATH: cached render from pHash ──────────────────────────
+            try:
+                phash_now = _compute_window_phash(self.win_title)
+                cached = get_elements_by_phash(self.conn, phash_now) if phash_now and phash_now != "0" else []
+                if len(cached) >= 3:
+                    cached_elems: list[OcrElement] = []
+                    for r in cached:
+                        cached_elems.append(OcrElement(
+                            text=r["text"], layer=r["layer"],
+                            rel_x=r["rel_x"], rel_y=r["rel_y"],
+                            rel_w=r["rel_w"], rel_h=r["rel_h"],
+                            confidence=0.99,
+                            abs_cx=win.left + int(r["rel_x"] * win.width),
+                            abs_cy=win.top + int(r["rel_y"] * win.height),
+                        ))
+                    sem_map_fast = get_semantic_map(self.conn)
+                    reserved_fast = set(sem_map_fast.values())
+                    cand_fast = generate_hint_keys(len(cached_elems) + len(reserved_fast) + 10)
+                    pos_fast = [k for k in cand_fast if k not in reserved_fast]
+                    hint_fast: dict = {}
+                    for e in cached_elems:
+                        sem = sem_map_fast.get(e.text)
+                        if sem and sem not in hint_fast:
+                            hint_fast[sem] = e
+                    ki = 0
+                    for e in cached_elems:
+                        if any(hint_fast.get(k) is e for k in hint_fast):
+                            continue
+                        while ki < len(pos_fast) and pos_fast[ki] in hint_fast:
+                            ki += 1
+                        if ki < len(pos_fast):
+                            hint_fast[pos_fast[ki]] = e
+                            ki += 1
+                    self.elements = cached_elems
+                    self.hint_map = hint_fast
+                    self._current_phash = phash_now
+                    dq_fast = getattr(self, '_dispatch_q', None)
+                    if dq_fast is not None:
+                        dq_fast.put(self._redraw)
+                    print(f"[overlay] FAST-PATH render: {len(cached_elems)} cached elements (phash={phash_now[:8]})")
+            except Exception as _e:
+                print(f"[overlay] fast-path skipped: {_e}")
+
             print(f"[overlay] Tab-walk scanning: {win.title!r} ({win.width}x{win.height})")
             has_activity_tabs = self._check_activity_tabs()
 
