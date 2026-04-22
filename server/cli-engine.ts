@@ -8523,6 +8523,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     steps.push({
       name: "Citrix Keepalive",
       run: async () => {
+        if (!isExtensionConnected()) return "SKIPPED (Chrome extension bridge offline — portal pinger needs the browser)";
         await storage.setAgentConfig("citrix_keepalive", "true", "citrix");
         startCitrixKeepalive();
         return "enabled (10m interval)";

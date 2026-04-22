@@ -823,7 +823,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold, windowKey, targetTitle, alternateEdges, probe_options, probeOptions, max_activities, maxActivities, max_steps, maxSteps } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold, windowKey, targetTitle, alternateEdges, probe_options, probeOptions, max_activities, maxActivities, max_steps, maxSteps, app: appArg } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, unknown> = { id, type, env: env || "SUP" };
@@ -848,6 +848,7 @@ export async function registerRoutes(
     if (windowKey) cmd.windowKey = windowKey;
     if (targetTitle) cmd.targetTitle = targetTitle;
     if (alternateEdges) cmd.alternateEdges = alternateEdges;
+    if (appArg) cmd.app = appArg;
     // discover_grammar params (snake_case is the agent-side name)
     const _probe = probe_options ?? probeOptions;
     if (_probe !== undefined) cmd.probe_options = _probe;
