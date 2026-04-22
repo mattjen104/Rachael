@@ -8931,6 +8931,33 @@ def _keepalive_session_loop(env: str, client: str, stop_event):
     print(f"[keepalive] {name} thread stopped")
 
 
+def execute_citrix_launch(cmd):
+    """Launch a Citrix-published app directly via SelfService.exe (no browser).
+    Used by 'epic boot' when the Chrome extension bridge is offline so launches
+    can still happen from the Windows desktop."""
+    import subprocess
+    command_id = cmd.get("id", "unknown")
+    app_name = cmd.get("app", "")
+    if not app_name:
+        post_result(command_id, "error", error="missing 'app'")
+        return
+    candidates = [
+        r"C:\Program Files (x86)\Citrix\ICA Client\SelfServicePlugin\SelfService.exe",
+        r"C:\Program Files\Citrix\ICA Client\SelfServicePlugin\SelfService.exe",
+    ]
+    exe = next((p for p in candidates if os.path.exists(p)), None)
+    if not exe:
+        post_result(command_id, "error",
+                    error="SelfService.exe not found (Citrix Workspace App not installed?)")
+        return
+    try:
+        subprocess.Popen([exe, "-launch", app_name], shell=False)
+        post_result(command_id, "complete",
+                    data={"launched": app_name, "via": "SelfService.exe"})
+    except Exception as e:
+        post_result(command_id, "error", error=f"SelfService.exe launch failed: {e}")
+
+
 def execute_keepalive_start(cmd):
     global _keepalive_threads, _keepalive_stop_event
     command_id = cmd.get("id", "unknown")
@@ -9102,6 +9129,8 @@ def execute_command(cmd):
                 execute_ocr_do(cmd)
             except ImportError as e:
                 post_result(cmd.get("id", "unknown"), "error", error=f"ocr_overlay not available: {e}")
+        elif cmd_type == "citrix_launch":
+            execute_citrix_launch(cmd)
         elif cmd_type == "keepalive_start":
             execute_keepalive_start(cmd)
         elif cmd_type == "keepalive_stop":

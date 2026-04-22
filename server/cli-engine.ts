@@ -7992,6 +7992,31 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       }
     };
 
+    const sendAgentCitrixLaunch = async (appName: string): Promise<string> => {
+      try {
+        const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+          body: JSON.stringify({ type: "citrix_launch", app: appName }),
+        });
+        const data = resp.ok ? await resp.json() as { ok?: boolean; commandId?: string } : { ok: false };
+        if (!data.ok || !data.commandId) return "agent queue failed";
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < 20000) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          try {
+            const rResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/result/${data.commandId}`);
+            const rData = rResp.ok ? await rResp.json() as { status?: string; error?: string } : {};
+            if (rData.status === "complete") return "ok";
+            if (rData.status === "error") return `agent launch failed: ${(rData.error || "unknown").substring(0, 80)}`;
+          } catch {}
+        }
+        return "agent launch timeout";
+      } catch (e: any) {
+        return `agent launch error: ${e.message?.substring(0, 40) || "unknown"}`;
+      }
+    };
+
     const sendAgentLogin = async (env: string, client: string, username: string, password: string, hwnd?: number | null): Promise<string> => {
       try {
         const payload: Record<string, any> = { type: "login", env, client, credentials: { username, password } };
@@ -8178,7 +8203,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           const epicUser = await getSecret("epic_username");
           const epicPass = await getSecret("epic_password");
           if (!epicUser || !epicPass) return "SKIPPED (credentials not configured)";
-          if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
+          if (!isExtensionConnected()) return "SKIPPED (Chrome extension bridge offline — open the browser with the Rachael extension installed)";
           const { submitJob, waitForResult } = await import("./bridge-queue");
           try {
             const jobId = submitJob("dom", "https://cwp.ucsd.edu", "boot-cwp-login", {
@@ -8322,12 +8347,10 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               }
             }
 
-            // Citrix launch needs Chrome extension. Skip launch only if the window
-            // isn't already open AND the extension is offline. If the agent has
-            // already detected the window, the extension isn't needed.
-            if (!windowAlreadyExists && !isExtensionConnected()) {
-              if (!agentUp) return "SKIPPED (Chrome extension and epic_agent both offline)";
-              return "SKIPPED (Chrome extension offline — needed to launch Citrix; agent sees no existing window)";
+            // Launch path: Chrome extension (browser → CWP storefront) preferred;
+            // fall back to epic_agent SelfService.exe direct launch if extension is offline.
+            if (!windowAlreadyExists && !isExtensionConnected() && !agentUp) {
+              return "SKIPPED (Chrome extension bridge and epic_agent bridge both offline)";
             }
 
             let detectedHwnd: number | null = null;
@@ -8336,7 +8359,9 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (agentUp) snapshotOk = await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
-              const launchResult = await launchCitrixApp(group.hyperdrive!.app, group.portal);
+              const launchResult = isExtensionConnected()
+                ? await launchCitrixApp(group.hyperdrive!.app, group.portal)
+                : await sendAgentCitrixLaunch(group.hyperdrive!.app);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
               if (agentUp && snapshotOk) {
@@ -8393,11 +8418,9 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               }
             }
 
-            // Citrix launch needs Chrome extension. Skip launch only if window
-            // isn't already open AND extension is offline.
-            if (!textWindowExists && !isExtensionConnected()) {
-              if (!agentUp) return "SKIPPED (Chrome extension and epic_agent both offline)";
-              return "SKIPPED (Chrome extension offline — needed to launch Citrix; agent sees no existing window)";
+            // Launch path: Chrome extension preferred; fall back to agent SelfService.exe.
+            if (!textWindowExists && !isExtensionConnected() && !agentUp) {
+              return "SKIPPED (Chrome extension bridge and epic_agent bridge both offline)";
             }
 
             let textDetectedHwnd: number | null = null;
@@ -8406,7 +8429,9 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (agentUp) textSnapshotOk = await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
-              const launchResult = await launchCitrixApp(group.text!.app, group.portal);
+              const launchResult = isExtensionConnected()
+                ? await launchCitrixApp(group.text!.app, group.portal)
+                : await sendAgentCitrixLaunch(group.text!.app);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
               if (agentUp && textSnapshotOk) {
@@ -8452,7 +8477,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           const persisted = await storage.getOutlookEmails({ limit: 50 });
           const unread = persisted.filter(e => e.unread).length;
           if (persisted.length > 0) return `offline — ${persisted.length} emails in DB (${unread} unread)`;
-          return "SKIPPED (bridge not connected, no persisted data)";
+          return "SKIPPED (Chrome extension bridge offline, no persisted data)";
         }
         const lastSync = await storage.getOutlookSyncTimestamp();
         const isFirstSync = !lastSync;
@@ -8472,7 +8497,7 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
         if (!isExtensionConnected()) {
           const persisted = await storage.getSnowTickets({ limit: 200 });
           if (persisted.length > 0) return `offline — ${persisted.length} tickets in DB`;
-          return "SKIPPED (bridge not connected, no persisted data)";
+          return "SKIPPED (Chrome extension bridge offline, no persisted data)";
         }
         const lastSync = await storage.getSnowSyncTimestamp();
         const isFirstSync = !lastSync;
@@ -8509,19 +8534,20 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
     steps.push({
       name: "Epic In-Session Keepalive",
       run: async () => {
+        if (!isEpicAgentConnected()) return "SKIPPED (epic_agent bridge offline — start tools/epic_agent.py on the Windows desktop)";
         try {
           const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
             body: JSON.stringify({ type: "keepalive_start" }),
           });
-          if (!resp.ok) return "skipped (agent offline)";
+          if (!resp.ok) return "SKIPPED (epic_agent rejected request)";
           const data: any = await resp.json();
-          if (!data.ok) return "skipped (agent rejected)";
+          if (!data.ok) return "SKIPPED (epic_agent rejected request)";
           await storage.setAgentConfig("epic_keepalive", "on", "epic");
           return "enabled (4m cadence, idle-gated)";
         } catch (e: any) {
-          return `skipped (${(e.message || "unknown").substring(0, 40)})`;
+          return `SKIPPED (epic_agent error: ${(e.message || "unknown").substring(0, 40)})`;
         }
       },
     });
