@@ -758,6 +758,10 @@ export async function registerRoutes(
       windows: req.body.windows || [],
       capture: req.body.capture || null,
     };
+    try {
+      const { recordEpicAgentHeartbeat } = await import("./bridge-queue");
+      recordEpicAgentHeartbeat({ version: req.body?.version });
+    } catch {}
 
     const streamResults: any[] = [];
     if (Array.isArray(req.body.streamData)) {
@@ -908,10 +912,10 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
-  app.get("/api/epic/agent/status", (_req, res) => {
-    const stale = Date.now() - (epicAgentStatus.lastSeen || 0) > 60000;
+  app.get("/api/epic/agent/status", async (_req, res) => {
+    const { isEpicAgentConnected } = await import("./bridge-queue");
     res.json({
-      connected: epicAgentStatus.connected && !stale,
+      connected: isEpicAgentConnected(),
       lastSeen: epicAgentStatus.lastSeen,
       windows: epicAgentStatus.windows || [],
       capture: epicAgentStatus.capture || null,

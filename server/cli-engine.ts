@@ -7892,11 +7892,12 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
 
   registerCommand("boot", "Morning startup sequence", "boot [--status|--skip-login]", async (args) => {
     const nl = String.fromCharCode(10);
-    const { isExtensionConnected } = await import("./bridge-queue");
+    const { isExtensionConnected, isEpicAgentConnected } = await import("./bridge-queue");
     const { getSecret } = await import("./secrets");
 
     if (args[0] === "--status" || args[0] === "status") {
       const bridgeConnected = isExtensionConnected();
+      const agentConnected = isEpicAgentConnected();
       const epicUser = await getSecret("epic_username");
       const lastLogin = await storage.getAgentConfig("boot_last_login");
       const lastOutlook = await storage.getAgentConfig("outlook_last_sync");
@@ -7946,7 +7947,8 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       const lines = [
         "=== BOOT STATUS ===",
         "",
-        `  Bridge:          ${bridgeConnected ? "CONNECTED" : "OFFLINE"}`,
+        `  Chrome bridge:   ${bridgeConnected ? "CONNECTED" : "OFFLINE"}  (used by: CWP launch, Outlook, SNOW, Citrix portal keepalive)`,
+        `  Agent bridge:    ${agentConnected ? "CONNECTED" : "OFFLINE"}  (used by: Hyperdrive/Text login, OCR, Epic in-session keepalive)`,
         `  Epic Credentials: ${epicUser ? "configured" : "NOT SET"}`,
         `  Last Login:      ${ageStr(lastLogin?.value)}`,
         `  Last Workspace:  ${ageStr(lastWorkspace?.value)}`,
@@ -8310,7 +8312,6 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           run: async () => {
             if (await checkAbort()) return "aborted";
             if (loginEverFailed) return "skipped (prior login failed)";
-            if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
             const agentUp = await checkAgentConnected();
             let windowAlreadyExists = false;
@@ -8319,6 +8320,14 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (windowAlreadyExists) {
                 emitEvent("cli", `${group.hyperdrive!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
               }
+            }
+
+            // Citrix launch needs Chrome extension. Skip launch only if the window
+            // isn't already open AND the extension is offline. If the agent has
+            // already detected the window, the extension isn't needed.
+            if (!windowAlreadyExists && !isExtensionConnected()) {
+              if (!agentUp) return "SKIPPED (Chrome extension and epic_agent both offline)";
+              return "SKIPPED (Chrome extension offline — needed to launch Citrix; agent sees no existing window)";
             }
 
             let detectedHwnd: number | null = null;
@@ -8374,7 +8383,6 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (await checkAbort()) return "aborted";
             if (loginEverFailed) return "skipped (prior login failed)";
             if (group.hyperdrive && !envHyperdriveOk) return `skipped (${env} Hyperdrive login not confirmed)`;
-            if (!isExtensionConnected()) return "SKIPPED (bridge not connected)";
 
             const agentUp = await checkAgentConnected();
             let textWindowExists = false;
@@ -8383,6 +8391,13 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
               if (textWindowExists) {
                 emitEvent("cli", `${group.text!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
               }
+            }
+
+            // Citrix launch needs Chrome extension. Skip launch only if window
+            // isn't already open AND extension is offline.
+            if (!textWindowExists && !isExtensionConnected()) {
+              if (!agentUp) return "SKIPPED (Chrome extension and epic_agent both offline)";
+              return "SKIPPED (Chrome extension offline — needed to launch Citrix; agent sees no existing window)";
             }
 
             let textDetectedHwnd: number | null = null;
