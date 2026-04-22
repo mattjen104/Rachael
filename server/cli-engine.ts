@@ -7982,16 +7982,6 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       return v?.value === "true";
     };
 
-    const checkAgentConnected = async (): Promise<boolean> => {
-      try {
-        const statusResp = await fetch(`http://localhost:${agentPort}/api/epic/agent/status`);
-        const statusData = statusResp.ok ? await statusResp.json() as { connected?: boolean } : { connected: false };
-        return !!statusData.connected;
-      } catch {
-        return false;
-      }
-    };
-
     const sendAgentCitrixLaunch = async (appName: string): Promise<string> => {
       try {
         const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {

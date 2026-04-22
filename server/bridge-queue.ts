@@ -109,13 +109,11 @@ export function isExtensionConnected(): boolean {
 }
 
 let epicAgentLastHeartbeat: number | null = null;
-let epicAgentVersion: string | null = null;
 const EPIC_AGENT_STALE_MS = 60_000;
 
 export function recordEpicAgentHeartbeat(meta?: { version?: string }): void {
   const wasConnected = isEpicAgentConnected();
   epicAgentLastHeartbeat = Date.now();
-  if (meta?.version) epicAgentVersion = meta.version;
   if (!wasConnected) {
     emitEvent("bridge", `Epic agent bridge connected${meta?.version ? ` (v${meta.version})` : ""}`, "info");
   }
