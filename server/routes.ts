@@ -914,9 +914,10 @@ export async function registerRoutes(
   });
 
   app.get("/api/epic/agent/status", async (_req, res) => {
-    const { isEpicAgentConnected } = await import("./bridge-queue");
+    const { getEpicAgentStatus } = await import("./bridge-queue");
+    const status = getEpicAgentStatus();
     res.json({
-      connected: isEpicAgentConnected(),
+      connected: status.connected,
       lastSeen: epicAgentStatus.lastSeen,
       windows: epicAgentStatus.windows || [],
       capture: epicAgentStatus.capture || null,

@@ -128,6 +128,27 @@ export function getEpicAgentLastSeen(): number | null {
   return epicAgentLastHeartbeat;
 }
 
+// Canonical payload for the Epic agent bridge status. The
+// `/api/epic/agent/status` route returns this (merged with route-local fields
+// like `windows` and `capture`), so tests and the route both go through the
+// same predicate and `connected` cannot drift apart from `isEpicAgentConnected()`.
+export function getEpicAgentStatus(): { connected: boolean; lastSeen: number | null } {
+  return { connected: isEpicAgentConnected(), lastSeen: epicAgentLastHeartbeat };
+}
+
+// Test-only: deterministically set bridge connected states. The "ON" branch
+// stamps the heartbeat to "now"; "OFF" clears it so the staleness check fails.
+// Kept here (not in a test util) so production gating code and the test agree
+// on a single source of truth.
+export function __setBridgeStatesForTest(states: { extension?: boolean; epicAgent?: boolean }): void {
+  if (states.extension !== undefined) {
+    extensionLastHeartbeat = states.extension ? Date.now() : null;
+  }
+  if (states.epicAgent !== undefined) {
+    epicAgentLastHeartbeat = states.epicAgent ? Date.now() : null;
+  }
+}
+
 export function submitJob(
   type: "fetch" | "dom",
   url: string,

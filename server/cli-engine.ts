@@ -8387,13 +8387,16 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
           name: group.text.app,
           run: async () => {
             if (await checkAbort()) return "aborted";
-            if (loginEverFailed) return "skipped (prior login failed)";
-            if (group.hyperdrive && !envHyperdriveOk) return `skipped (${env} Hyperdrive login not confirmed)`;
 
+            // Bridge check first so the SKIP message names the actual missing
+            // bridge (epic_agent) rather than the downstream Hyperdrive cascade.
             // Text Access launch + login both require the epic_agent bridge.
             if (!isEpicAgentConnected()) {
               return "SKIPPED (epic_agent bridge offline — start tools/epic_agent.py on the Windows desktop)";
             }
+
+            if (loginEverFailed) return "skipped (prior login failed)";
+            if (group.hyperdrive && !envHyperdriveOk) return `skipped (${env} Hyperdrive login not confirmed)`;
 
             const textWindowExists = await checkAgentWindowExists(env, "text");
             if (textWindowExists) {
