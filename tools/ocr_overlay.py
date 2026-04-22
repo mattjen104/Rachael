@@ -1750,10 +1750,29 @@ class OverlayWindow:
 
             fp = compute_screen_fp(elements)
             phash = _compute_window_phash(self.win_title)
-            save_screen_fp(self.conn, fp, elements)
-            for e in elements:
-                upsert_element(self.conn, e, fp)
-            save_fp_bridge(self.conn, phash, fp)
+            # HIPAA gate (live fallback path): refuse to persist OCR text
+            # when the active window is a patient-chart context, and drop any
+            # element whose text trips the PHI heuristic. Keeps the in-memory
+            # `elements` for the current overlay render but blocks writes to
+            # disk so PHI never enters the abstraction.
+            chart_screen = _is_chart_screen(self.win_title)
+            if chart_screen:
+                print("[overlay] PHI gate: chart screen detected, "
+                      "skipping persistence of live tab-walk results")
+            else:
+                safe = []
+                for e in elements:
+                    if _looks_like_phi(e.text or ""):
+                        continue
+                    if e.options:
+                        e.options = [o for o in e.options
+                                     if not _looks_like_phi(o)]
+                    safe.append(e)
+                if safe:
+                    save_screen_fp(self.conn, fp, safe)
+                    for e in safe:
+                        upsert_element(self.conn, e, fp)
+                    save_fp_bridge(self.conn, phash, fp)
             self._current_phash = phash
 
             reliable = get_reliable_elements(self.conn, fp)
@@ -1829,10 +1848,23 @@ class OverlayWindow:
 
         fp = compute_screen_fp(self.elements)
         self._current_phash = _compute_window_phash(self.win_title)
-        save_screen_fp(self.conn, fp, self.elements)
-        for e in self.elements:
-            upsert_element(self.conn, e, fp)
-        save_fp_bridge(self.conn, self._current_phash, fp)
+        # HIPAA gate (sync refresh path): same posture as _refresh_bg —
+        # refuse to persist on chart screens; drop PHI-bearing rows.
+        if _is_chart_screen(self.win_title):
+            print("[overlay] PHI gate: chart screen — skipping refresh persistence")
+        else:
+            safe = []
+            for e in self.elements:
+                if _looks_like_phi(e.text or ""):
+                    continue
+                if e.options:
+                    e.options = [o for o in e.options if not _looks_like_phi(o)]
+                safe.append(e)
+            if safe:
+                save_screen_fp(self.conn, fp, safe)
+                for e in safe:
+                    upsert_element(self.conn, e, fp)
+                save_fp_bridge(self.conn, self._current_phash, fp)
 
         reliable = get_reliable_elements(self.conn, fp)
         seen_set = {(e.text, e.layer) for e in self.elements}

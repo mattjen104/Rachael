@@ -4365,9 +4365,9 @@ ${fullHtml}`;
         const tag = `[epic boot] dual-session: SUP Hyperdrive + SUP Text${nl}`;
         return { ...r, stdout: tag + (r.stdout || "") };
       } finally {
-        if (prior?.value !== undefined) {
-          await storage.setAgentConfig(wsKey, prior.value, "epic");
-        }
+        // Always restore: if there was no prior value, clear the override
+        // by writing an empty string (boot will then use DEFAULT_WS).
+        await storage.setAgentConfig(wsKey, prior?.value ?? "", "epic");
       }
     }
     if (args[0] === "discover") {
