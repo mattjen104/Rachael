@@ -939,6 +939,18 @@ export async function registerRoutes(
   // `epic discover`. Schema: see EpicGrammarActivity / EpicGrammarField in shared/schema.ts.
   const _grammarHandler = async (req: any, res: any) => {
     try {
+      // Defense-in-depth: this endpoint serves OCR-derived field text +
+      // option lists. The global middleware already restricts it to loopback,
+      // but enforce it again here in case middleware ordering changes or
+      // OPENCLAW_API_KEY is unset in some deployments.
+      const _ip = req.ip || "";
+      const _isLocal = _ip === "127.0.0.1" || _ip === "::1" || _ip === "::ffff:127.0.0.1";
+      if (!_isLocal) {
+        const _auth = req.headers.authorization;
+        if (!_auth || !validateBridgeToken(String(_auth).replace("Bearer ", ""))) {
+          return res.status(401).json({ error: "Unauthorized (loopback or bridge token required)" });
+        }
+      }
       const path = await import("node:path");
       const fs = await import("node:fs");
       const Database = (await import("better-sqlite3")).default;

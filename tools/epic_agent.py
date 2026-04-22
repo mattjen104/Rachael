@@ -8978,6 +8978,15 @@ def execute_discover_grammar(cmd):
     command_id = cmd.get("id", "unknown")
     env = (cmd.get("env") or "SUP").upper()
     probe_options = bool(cmd.get("probe_options", True))
+    # CLI/API-tunable crawl bounds (forwarded by /api/epic/agent/send).
+    # Defaults match discover_grammar() signature when omitted.
+    kwargs = {"probe_options": probe_options}
+    if "max_activities" in cmd and cmd["max_activities"] is not None:
+        try: kwargs["max_activities"] = int(cmd["max_activities"])
+        except Exception: pass
+    if "max_steps" in cmd and cmd["max_steps"] is not None:
+        try: kwargs["max_steps"] = int(cmd["max_steps"])
+        except Exception: pass
     window = find_window(env, client="hyperspace")
     if not window:
         post_result(command_id, "error", error=f"No {env} Hyperspace window found")
@@ -8990,7 +8999,7 @@ def execute_discover_grammar(cmd):
         return
     _action_in_flight.set()
     try:
-        result = discover_grammar(window.title, probe_options=probe_options)
+        result = discover_grammar(window.title, **kwargs)
     finally:
         _action_in_flight.clear()
     post_result(command_id, "complete", data=result)
