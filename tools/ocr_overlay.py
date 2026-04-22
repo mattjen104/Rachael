@@ -135,6 +135,7 @@ class OcrElement:
     abs_cy: int = 0  # absolute screen center y
     options: list = None  # dropdown options if probed; None = not probed
     arrow_behavior: dict = None  # {behavior, region:[x,y,w,h]} or None
+    tab_index: int = -1  # focus order within the activity (0 = first Tab stop)
 
 
 def _looks_like_phi(text: str) -> bool:
@@ -523,6 +524,7 @@ def tab_walk_scan(
                 confidence=1.0,
                 abs_cx=win_left + cx,
                 abs_cy=win_top + cy,
+                tab_index=len(elements),  # focus order: 0,1,2,…
             ))
 
             # Probe field behavior while focus is confirmed on this field.
@@ -858,6 +860,14 @@ def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -
                     options_count += 1
             if e.arrow_behavior:
                 set_element_arrow_behavior(conn, elem_id, e.arrow_behavior)
+            # Persist focus order so navigation grammar can be replayed.
+            try:
+                conn.execute(
+                    "UPDATE elements SET tab_index=?, updated_at=? WHERE id=?",
+                    (int(e.tab_index), time.time(), elem_id),
+                )
+            except Exception:
+                pass
         conn.commit()
     finally:
         conn.close()
@@ -868,7 +878,7 @@ def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -
 
 def discover_grammar(window_title: str, probe_options: bool = True,
                      max_steps: int = 300, crawl_activities: bool = True,
-                     max_activities: int = 12) -> dict:
+                     max_activities: int = 200) -> dict:
     """Full Hyperdrive grammar discovery:
     (1) optionally crawl activities via Ctrl+Space (Epic activity navigator),
     (2) per activity: tab_walk_scan + per-field Alt+Down option probe,
@@ -1011,6 +1021,12 @@ def _db_connect():
     # results — JSON dict {behavior:item|macro|dropdown|none, region:[x,y,w,h]}.
     try:
         conn.execute("ALTER TABLE elements ADD COLUMN arrow_behavior TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
+    # Additive migration: 'tab_index' stores focus order within an activity
+    # (0 = first Tab stop). Enables deterministic navigation grammar replay.
+    try:
+        conn.execute("ALTER TABLE elements ADD COLUMN tab_index INTEGER DEFAULT -1")
     except sqlite3.OperationalError:
         pass
     conn.commit()
@@ -1556,9 +1572,11 @@ class OverlayWindow:
 
         FAST PATH: before tab-walking (which takes seconds), compute the window
         pHash and look up cached elements. If we have ≥3 reliable cached
-        elements for this screen, build a hint map immediately and dispatch a
-        redraw so the user sees overlay hints in <100ms. We then proceed to
-        run the live tab-walk in the background to refresh the cache.
+        elements for this screen, build a hint map immediately, dispatch a
+        redraw so the user sees overlay hints in <100ms, and SKIP the live
+        tab-walk (strict known-fingerprint behavior — the cached grammar is
+        the source of truth). Live tab-walk runs only when the pHash is
+        unknown or the cache is too sparse.
         """
         scan_id = getattr(self, '_scan_id', 0) + 1
         self._scan_id = scan_id

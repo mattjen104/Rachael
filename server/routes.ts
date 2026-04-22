@@ -942,7 +942,7 @@ export async function registerRoutes(
         const phash = req.params.phash;
         if (!phash) {
           const rows = db.prepare(
-            "SELECT phash_fp AS phash, ocr_fp AS fp, created_at FROM fp_bridge ORDER BY created_at DESC LIMIT 200"
+            "SELECT phash_fp AS phash, ocr_fp AS fp, updated_at FROM fp_bridge ORDER BY updated_at DESC LIMIT 200"
           ).all();
           return res.json({ activities: rows });
         }
@@ -953,9 +953,10 @@ export async function registerRoutes(
         const fps = `%${bridge.ocr_fp}%`;
         const fields = db.prepare(
           "SELECT id, text, layer, rel_x, rel_y, rel_w, rel_h, confidence, semantic, " +
-          "options, arrow_behavior, click_count FROM elements " +
+          "options, arrow_behavior, tab_index, click_count FROM elements " +
           "WHERE confidence IN ('confirmed','reliable','named') " +
-          "AND (screen_fps LIKE ? OR is_correction=1)"
+          "AND (screen_fps LIKE ? OR is_correction=1) " +
+          "ORDER BY CASE WHEN tab_index >= 0 THEN tab_index ELSE 9999 END ASC"
         ).all(fps).map((r: any) => ({
           ...r,
           options: r.options ? JSON.parse(r.options) : null,
