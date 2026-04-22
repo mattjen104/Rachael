@@ -55,7 +55,7 @@ app.get("/api/auth/check", (_req: Request, res: Response) => {
 });
 
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (!req.path.startsWith("/api") || req.path === "/api/auth/check" || req.path === "/api/cockpit/events" || req.path.startsWith("/api/bridge/") || req.path.startsWith("/api/epic/agent/") || req.path.startsWith("/api/epic/record/") || req.path.startsWith("/api/epic/activities") || req.path.startsWith("/api/epic/tree") || req.path.startsWith("/api/secrets/form/") || req.path === "/api/secrets/submit") return next();
+  if (!req.path.startsWith("/api") || req.path === "/api/auth/check" || req.path === "/api/cockpit/events" || req.path.startsWith("/api/bridge/") || req.path.startsWith("/api/epic/agent/") || req.path.startsWith("/api/epic/record/") || req.path.startsWith("/api/epic/activities") || req.path.startsWith("/api/epic/tree") || req.path.startsWith("/api/epic/grammar") || req.path.startsWith("/api/secrets/form/") || req.path === "/api/secrets/submit") return next();
 
   if (!API_KEY) {
     const writeMethods = ["POST", "PUT", "PATCH", "DELETE"];

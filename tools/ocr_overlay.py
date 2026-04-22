@@ -711,10 +711,42 @@ def set_element_arrow_behavior(conn, elem_id: int, arrow: dict):
         pass
 
 
-def _enumerate_activities_via_menu(window_title: str, max_items: int = 40) -> list[str]:
-    """Open Epic's activity navigator (Ctrl+Space), OCR the visible menu, and
-    return the activity names. Deterministic & exhaustive within visible menu;
-    callers iterate the returned list to visit each activity by name."""
+def _ocr_menu_panel(frame_before, frame_after) -> list[str]:
+    """OCR the largest 'newly appeared' region between two frames; return
+    confidence-filtered, PHI-filtered text lines (one per visible row)."""
+    bboxes = _find_diff_bboxes(frame_before, frame_after, threshold=20, min_area=400)
+    if not bboxes:
+        return []
+    bboxes.sort(key=lambda b: (b[2]-b[0]) * (b[3]-b[1]), reverse=True)
+    x1, y1, x2, y2 = bboxes[0]
+    crop = frame_after[y1:y2, x1:x2]
+    if crop.size == 0:
+        return []
+    ocr = _get_ocr()
+    if ocr is None:
+        return []
+    try:
+        result = ocr.ocr(crop, cls=False)
+    except Exception:
+        try:
+            result = ocr.ocr(crop)
+        except Exception:
+            return []
+    out: list[str] = []
+    if result and result[0]:
+        for line in result[0]:
+            txt = (line[1][0] or "").strip()
+            conf = line[1][1] if len(line[1]) > 1 else 0
+            if txt and conf > 0.55 and 2 <= len(txt) <= 60 and not _looks_like_phi(txt):
+                out.append(txt)
+    return out
+
+
+def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
+                                   max_pages: int = 25) -> list[str]:
+    """Open Epic's activity navigator (Ctrl+Space) and exhaustively enumerate
+    activity names by paging the menu with PageDown until no new entries appear
+    for two consecutive pages. Deterministic upper bound via max_pages."""
     try:
         import mss
         import pyautogui
@@ -728,48 +760,43 @@ def _enumerate_activities_via_menu(window_title: str, max_items: int = 40) -> li
     win = wins[0]
     region = {"left": win.left, "top": win.top,
               "width": win.width, "height": win.height}
-    ocr = _get_ocr()
-    if ocr is None:
+    if _get_ocr() is None:
         return []
+
+    names: list[str] = []
+    seen: set = set()
     try:
         with mss.mss() as sct:
             before = _capture_window(sct, region)
             pyautogui.hotkey('ctrl', 'space')
             time.sleep(0.5)
             after = _capture_window(sct, region)
-    except Exception:
-        return []
-
-    bboxes = _find_diff_bboxes(before, after, threshold=20, min_area=400)
-    if not bboxes:
-        try:
-            pyautogui.press('escape'); time.sleep(0.1)
-        except Exception:
-            pass
-        return []
-    bboxes.sort(key=lambda b: (b[2]-b[0]) * (b[3]-b[1]), reverse=True)
-    x1, y1, x2, y2 = bboxes[0]
-    crop = after[y1:y2, x1:x2]
-    names: list[str] = []
-    seen: set = set()
-    if crop.size > 0:
-        try:
-            result = ocr.ocr(crop, cls=False)
-        except Exception:
-            try:
-                result = ocr.ocr(crop)
-            except Exception:
-                result = None
-        if result and result[0]:
-            for line in result[0]:
-                txt = (line[1][0] or "").strip()
-                conf = line[1][1] if len(line[1]) > 1 else 0
-                if (txt and conf > 0.55 and 2 <= len(txt) <= 60
-                        and not _looks_like_phi(txt) and txt not in seen):
-                    seen.add(txt)
-                    names.append(txt)
+            stable_baseline = before
+            consecutive_no_new = 0
+            for page in range(max_pages):
+                page_lines = _ocr_menu_panel(stable_baseline, after)
+                added_this_page = 0
+                for txt in page_lines:
+                    if txt not in seen:
+                        seen.add(txt)
+                        names.append(txt)
+                        added_this_page += 1
+                        if len(names) >= max_items:
+                            break
                 if len(names) >= max_items:
                     break
+                if added_this_page == 0:
+                    consecutive_no_new += 1
+                    if consecutive_no_new >= 2:
+                        break
+                else:
+                    consecutive_no_new = 0
+                # Page the menu and re-capture.
+                pyautogui.press('pagedown')
+                time.sleep(0.25)
+                after = _capture_window(sct, region)
+    except Exception:
+        pass
     try:
         pyautogui.press('escape'); time.sleep(0.15)
     except Exception:
@@ -1544,9 +1571,22 @@ class OverlayWindow:
                 return
 
             # ── FAST PATH: cached render from pHash ──────────────────────────
+            # Canonical contract: consume GET /api/epic/grammar/:phash if the
+            # local server is reachable; fall back to direct sqlite read
+            # when offline (e.g. server down / unit tests).
             try:
                 phash_now = _compute_window_phash(self.win_title)
-                cached = get_elements_by_phash(self.conn, phash_now) if phash_now and phash_now != "0" else []
+                cached = []
+                if phash_now and phash_now != "0":
+                    try:
+                        import urllib.request, json as _json
+                        url = f"http://127.0.0.1:5000/api/epic/grammar/{phash_now}"
+                        with urllib.request.urlopen(url, timeout=0.4) as resp:
+                            payload = _json.loads(resp.read().decode("utf-8"))
+                            cached = payload.get("fields", []) or []
+                    except Exception:
+                        # Server unreachable → local fallback
+                        cached = get_elements_by_phash(self.conn, phash_now)
                 if len(cached) >= 3:
                     cached_elems: list[OcrElement] = []
                     for r in cached:
