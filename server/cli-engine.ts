@@ -8338,33 +8338,26 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (await checkAbort()) return "aborted";
             if (loginEverFailed) return "skipped (prior login failed)";
 
-            const agentUp = await checkAgentConnected();
-            let windowAlreadyExists = false;
-            if (agentUp) {
-              windowAlreadyExists = await checkAgentWindowExists(env, "hyperspace");
-              if (windowAlreadyExists) {
-                emitEvent("cli", `${group.hyperdrive!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
-              }
+            // Hyperdrive launch + login both require the epic_agent bridge
+            // (agent uses SelfService.exe to launch and drives the login form).
+            if (!isEpicAgentConnected()) {
+              return "SKIPPED (epic_agent bridge offline — start tools/epic_agent.py on the Windows desktop)";
             }
 
-            // Launch path: Chrome extension (browser → CWP storefront) preferred;
-            // fall back to epic_agent SelfService.exe direct launch if extension is offline.
-            if (!windowAlreadyExists && !isExtensionConnected() && !agentUp) {
-              return "SKIPPED (Chrome extension bridge and epic_agent bridge both offline)";
+            const windowAlreadyExists = await checkAgentWindowExists(env, "hyperspace");
+            if (windowAlreadyExists) {
+              emitEvent("cli", `${group.hyperdrive!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
             }
 
             let detectedHwnd: number | null = null;
             if (!windowAlreadyExists) {
-              let snapshotOk = false;
-              if (agentUp) snapshotOk = await sendAgentSnapshot();
+              const snapshotOk = await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
-              const launchResult = isExtensionConnected()
-                ? await launchCitrixApp(group.hyperdrive!.app, group.portal)
-                : await sendAgentCitrixLaunch(group.hyperdrive!.app);
+              const launchResult = await sendAgentCitrixLaunch(group.hyperdrive!.app);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
-              if (agentUp && snapshotOk) {
+              if (snapshotOk) {
                 emitEvent("cli", `Waiting for ${group.hyperdrive!.app} window...`, "info", { metadata: { command: "boot" } });
                 const newWin = await pollForNewWindow(env, 45000);
                 if (newWin.hwnd) {
@@ -8380,8 +8373,6 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (await checkAbort()) return "launched (aborted before login)";
 
             if (!skipLogin && epicUser && epicPass) {
-              if (!agentUp) return "launched (agent not connected)";
-
               emitEvent("cli", `Logging into ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
               const loginResult = await sendAgentLogin(env, "hyperspace", epicUser, epicPass, detectedHwnd);
               await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
@@ -8409,32 +8400,25 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (loginEverFailed) return "skipped (prior login failed)";
             if (group.hyperdrive && !envHyperdriveOk) return `skipped (${env} Hyperdrive login not confirmed)`;
 
-            const agentUp = await checkAgentConnected();
-            let textWindowExists = false;
-            if (agentUp) {
-              textWindowExists = await checkAgentWindowExists(env, "text");
-              if (textWindowExists) {
-                emitEvent("cli", `${group.text!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
-              }
+            // Text Access launch + login both require the epic_agent bridge.
+            if (!isEpicAgentConnected()) {
+              return "SKIPPED (epic_agent bridge offline — start tools/epic_agent.py on the Windows desktop)";
             }
 
-            // Launch path: Chrome extension preferred; fall back to agent SelfService.exe.
-            if (!textWindowExists && !isExtensionConnected() && !agentUp) {
-              return "SKIPPED (Chrome extension bridge and epic_agent bridge both offline)";
+            const textWindowExists = await checkAgentWindowExists(env, "text");
+            if (textWindowExists) {
+              emitEvent("cli", `${group.text!.app} window already open — skipping Citrix launch`, "info", { metadata: { command: "boot" } });
             }
 
             let textDetectedHwnd: number | null = null;
             if (!textWindowExists) {
-              let textSnapshotOk = false;
-              if (agentUp) textSnapshotOk = await sendAgentSnapshot();
+              const textSnapshotOk = await sendAgentSnapshot();
 
               emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
-              const launchResult = isExtensionConnected()
-                ? await launchCitrixApp(group.text!.app, group.portal)
-                : await sendAgentCitrixLaunch(group.text!.app);
+              const launchResult = await sendAgentCitrixLaunch(group.text!.app);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
-              if (agentUp && textSnapshotOk) {
+              if (textSnapshotOk) {
                 emitEvent("cli", `Waiting for ${group.text!.app} window...`, "info", { metadata: { command: "boot" } });
                 const newWin = await pollForNewWindow(env, 45000);
                 if (newWin.hwnd) {
@@ -8450,8 +8434,6 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (await checkAbort()) return "launched (aborted before login)";
 
             if (!skipLogin && epicUser && epicPass) {
-              if (!agentUp) return "launched (agent not connected)";
-
               emitEvent("cli", `Logging into ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
               const loginResult = await sendAgentLogin(env, "text", epicUser, epicPass, textDetectedHwnd);
               await storage.setAgentConfig("boot_last_workspace", new Date().toISOString(), "boot");
