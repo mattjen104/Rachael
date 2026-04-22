@@ -8413,6 +8413,28 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
       },
     });
 
+    // In-session keep-alive for Hyperdrive + Text (idle-gated, no focus steal).
+    // Auto-started after boot so dual sessions stay logged in.
+    steps.push({
+      name: "Epic In-Session Keepalive",
+      run: async () => {
+        try {
+          const resp = await fetch(`http://localhost:${agentPort}/api/epic/agent/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
+            body: JSON.stringify({ type: "keepalive_start" }),
+          });
+          if (!resp.ok) return "skipped (agent offline)";
+          const data: any = await resp.json();
+          if (!data.ok) return "skipped (agent rejected)";
+          await storage.setAgentConfig("epic_keepalive", "on", "epic");
+          return "enabled (4m cadence, idle-gated)";
+        } catch (e: any) {
+          return `skipped (${(e.message || "unknown").substring(0, 40)})`;
+        }
+      },
+    });
+
     const keepaliveWasRunning = citrixKeepaliveTimer !== null;
     if (keepaliveWasRunning) stopCitrixKeepalive();
     const lines = ["=== MORNING BOOT ===", ""];

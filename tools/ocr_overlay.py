@@ -553,6 +553,18 @@ def tab_walk_scan(
     return elements
 
 
+def _is_chart_screen(window_title: str) -> bool:
+    """Detect Hyperdrive patient-chart contexts where OCR persistence is unsafe.
+    We refuse to persist any OCR text from these screens (HIPAA gate)."""
+    if not window_title:
+        return False
+    t = window_title.lower()
+    chart_markers = ("chart review", "patient station", "snapshot",
+                     "results review", "synopsis", "mar", "encounter",
+                     " - in basket", "story board", "storyboard")
+    return any(m in t for m in chart_markers)
+
+
 def _probe_field_options(window_region, ocr, max_options: int = 20) -> list[str]:
     """After a Tab-walk has settled on a field, attempt Alt+Down to open
     a dropdown and OCR any newly-appeared region. Returns the list of
@@ -610,7 +622,8 @@ def _probe_field_options(window_region, ocr, max_options: int = 20) -> list[str]
             for line in result[0]:
                 txt = (line[1][0] or "").strip()
                 conf = line[1][1] if len(line[1]) > 1 else 0
-                if txt and conf > 0.5 and 1 <= len(txt) <= 80:
+                # HIPAA: drop any candidate that matches PHI patterns
+                if txt and conf > 0.5 and 1 <= len(txt) <= 80 and not _looks_like_phi(txt):
                     options.append(txt)
                 if len(options) >= max_options:
                     break
@@ -623,59 +636,148 @@ def _probe_field_options(window_region, ocr, max_options: int = 20) -> list[str]
     return options
 
 
-def discover_grammar(window_title: str, probe_options: bool = True,
-                     max_steps: int = 300) -> dict:
-    """Run a full Hyperdrive grammar discovery pass on the given window:
-    (1) tab_walk_scan to enumerate fields,
-    (2) per-field Alt+Down probe to discover dropdown options (best-effort),
-    (3) compute screen pHash + OCR fingerprint,
-    (4) persist everything into the local sqlite KB.
+def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -> dict:
+    """Tab-walk + (optional) arrow probe a SINGLE activity screen, then persist
+    elements keyed by the screen's pHash. HIPAA: refuses to persist anything
+    if the window title matches a chart-context marker.
 
-    Returns a summary dict suitable for `post_result(... data=...)`.
+    Returns: {fields, options, fp, phash, skipped_reason?}
     """
-    has_activity_tabs = False
-    try:
-        import pygetwindow as gw
-        wins = [w for w in gw.getAllWindows()
-                if window_title.lower() in (w.title or "").lower() and w.width > 100]
-        if not wins:
-            return {"error": "window not found", "window": window_title, "fields": 0}
-        win = wins[0]
-        window_region = {"left": win.left, "top": win.top,
-                         "width": win.width, "height": win.height}
-    except Exception as e:
-        return {"error": f"window probe failed: {e}", "fields": 0}
+    if _is_chart_screen(window_title):
+        return {"fields": 0, "options": 0, "fp": "", "phash": "",
+                "skipped_reason": "chart_screen_phi_gate"}
 
     elements = tab_walk_scan(
         window_title, max_steps=max_steps, tab_delay=0.18,
-        has_activity_tabs=has_activity_tabs,
+        has_activity_tabs=False,
         probe_options=probe_options,
     )
     if not elements:
-        return {"window": window_title, "fields": 0, "options": 0, "fp": "", "phash": ""}
+        return {"fields": 0, "options": 0, "fp": "", "phash": ""}
 
-    fp = compute_screen_fp(elements)
+    # Strip any individual element labels that match PHI before persistence.
+    safe_elements = [e for e in elements if not _looks_like_phi(e.text or "")]
+    if not safe_elements:
+        return {"fields": 0, "options": 0, "fp": "", "phash": "",
+                "skipped_reason": "all_labels_phi"}
+
+    fp = compute_screen_fp(safe_elements)
     phash = _compute_window_phash(window_title)
-
     options_count = 0
+
     conn = _db_connect()
     try:
-        save_screen_fp(conn, fp, elements)
+        save_screen_fp(conn, fp, safe_elements)
         save_fp_bridge(conn, phash, fp)
-        for e in elements:
+        for e in safe_elements:
             elem_id = upsert_element(conn, e, fp)
+            # Discover writes at 'confirmed' so the overlay fast-path can
+            # consume them on the very next visit (read filter is
+            # IN ('confirmed','reliable','named')).
+            try:
+                conn.execute(
+                    "UPDATE elements SET confidence='confirmed', updated_at=? "
+                    "WHERE id=? AND confidence='seen'",
+                    (time.time(), elem_id),
+                )
+            except Exception:
+                pass
             if e.options:
-                set_element_options(conn, elem_id, e.options)
-                options_count += 1
+                # Re-filter PHI on options just before persistence (defense in depth).
+                clean_opts = [o for o in e.options if not _looks_like_phi(o)]
+                if clean_opts:
+                    set_element_options(conn, elem_id, clean_opts)
+                    options_count += 1
+        conn.commit()
     finally:
         conn.close()
 
+    return {"fields": len(safe_elements), "options": options_count,
+            "fp": fp, "phash": phash}
+
+
+def discover_grammar(window_title: str, probe_options: bool = True,
+                     max_steps: int = 300, crawl_activities: bool = True,
+                     max_activities: int = 12) -> dict:
+    """Full Hyperdrive grammar discovery:
+    (1) optionally crawl activities via Ctrl+Space (Epic activity navigator),
+    (2) per activity: tab_walk_scan + per-field Alt+Down option probe,
+    (3) per activity: persist a separate grammar model keyed by that screen's pHash,
+    (4) HIPAA gate: refuse to persist on chart-context screens; drop PHI tokens.
+
+    Returns aggregated summary dict.
+    """
+    try:
+        import pygetwindow as gw
+        import pyautogui
+    except ImportError as e:
+        return {"error": f"missing dependency: {e}", "activities": []}
+
+    def _find_win():
+        wins = [w for w in gw.getAllWindows()
+                if window_title.lower() in (w.title or "").lower() and w.width > 100]
+        return wins[0] if wins else None
+
+    win = _find_win()
+    if not win:
+        return {"error": "window not found", "window": window_title, "activities": []}
+    try:
+        win.activate()
+    except Exception:
+        pass
+    time.sleep(0.25)
+
+    activities: list[dict] = []
+    seen_phashes: set = set()
+
+    # Always scan the current activity first (no nav).
+    first = _scan_one_activity(win.title or window_title, probe_options, max_steps)
+    if first.get("phash"):
+        seen_phashes.add(first["phash"])
+    activities.append({"activity_index": 0, "title": win.title, **first})
+
+    if crawl_activities:
+        consecutive_dupes = 0
+        for idx in range(1, max_activities + 1):
+            try:
+                # Ctrl+Space opens Epic's activity search/navigator;
+                # Down + Enter selects next activity. If your build maps
+                # activity-next to a different chord, override here.
+                pyautogui.hotkey('ctrl', 'space')
+                time.sleep(0.4)
+                pyautogui.press('down')
+                time.sleep(0.1)
+                pyautogui.press('enter')
+                time.sleep(0.8)  # wait for activity to load
+            except Exception as ne:
+                activities.append({"activity_index": idx, "error": f"nav failed: {ne}"})
+                break
+
+            cur_win = _find_win()
+            cur_title = (cur_win.title if cur_win else window_title) or window_title
+            phash_now = _compute_window_phash(cur_title)
+            if phash_now and phash_now in seen_phashes:
+                consecutive_dupes += 1
+                activities.append({"activity_index": idx, "title": cur_title,
+                                   "skipped_reason": "duplicate_phash"})
+                if consecutive_dupes >= 2:
+                    break
+                continue
+            consecutive_dupes = 0
+
+            res = _scan_one_activity(cur_title, probe_options, max_steps)
+            if res.get("phash"):
+                seen_phashes.add(res["phash"])
+            activities.append({"activity_index": idx, "title": cur_title, **res})
+
+    total_fields = sum(a.get("fields", 0) for a in activities)
+    total_options = sum(a.get("options", 0) for a in activities)
     return {
         "window": window_title,
-        "fields": len(elements),
-        "options": options_count,
-        "fp": fp,
-        "phash": phash,
+        "activities": activities,
+        "activity_count": len([a for a in activities if a.get("fields", 0) > 0]),
+        "fields": total_fields,
+        "options": total_options,
     }
 
 
@@ -1329,7 +1431,9 @@ class OverlayWindow:
                     dq_fast = getattr(self, '_dispatch_q', None)
                     if dq_fast is not None:
                         dq_fast.put(self._redraw)
-                    print(f"[overlay] FAST-PATH render: {len(cached_elems)} cached elements (phash={phash_now[:8]})")
+                    print(f"[overlay] FAST-PATH render: {len(cached_elems)} cached elements "
+                          f"(phash={phash_now[:8]}) — skipping live tab-walk")
+                    return  # Strict: known fingerprint → no live scan needed
             except Exception as _e:
                 print(f"[overlay] fast-path skipped: {_e}")
 
