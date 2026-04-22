@@ -4372,9 +4372,42 @@ ${fullHtml}`;
     }
     if (args[0] === "discover") {
       // Trigger Hyperdrive grammar discovery (tab-walk + per-field probe).
+      // Default is FIRE-AND-FORGET: queue the job, return commandId immediately,
+      // and let the agent crawl as long as it needs (Hyperdrive crawls can take
+      // many minutes). Use `epic discover --status <id>` to poll, or
+      // `epic discover <env> --wait [seconds]` to block.
+      if (args[1] === "--status" || args[1] === "status") {
+        const cmdId = args[2];
+        if (!cmdId) return fail(`[epic] Usage: epic discover --status <commandId>`);
+        try {
+          const rResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${cmdId}`);
+          const rData: any = rResp.ok ? await rResp.json() : {};
+          if (rData.status === "complete") {
+            const d = rData.data || {};
+            const acts = Array.isArray(d.activities) ? d.activities : [];
+            const actLines = acts.slice(0, 12).map((a: any) =>
+              `  [${a.activity_index ?? "?"}] ${(a.name || a.title || "").substring(0, 40)}: ` +
+              (a.skipped_reason ? `skipped (${a.skipped_reason})`
+                : a.error ? `err (${String(a.error).substring(0, 40)})`
+                : `${a.fields ?? 0} fields, ${a.options ?? 0} opts, phash=${(a.phash || "").substring(0, 8)}`));
+            return ok([
+              `discover ${cmdId}: ${d.activity_count ?? 0} activities, ${d.fields ?? 0} fields, ${d.options ?? 0} options`,
+              ...actLines,
+            ].join(nl));
+          }
+          if (rData.status === "error") return fail(`[epic] discover failed: ${rData.error || "unknown"}`);
+          return ok(`discover ${cmdId}: ${rData.status || "queued"} (poll again with: epic discover --status ${cmdId})`);
+        } catch (e: any) {
+          return fail(`[epic] status error: ${e.message}`);
+        }
+      }
       const env = (args[1] || "SUP").toUpperCase();
       if (!EPIC_ENVS.has(env)) return fail(`[epic] unknown env: ${env}`);
       const probe = !args.includes("--no-probe");
+      const waitIdx = args.indexOf("--wait");
+      const waitSecs = waitIdx >= 0
+        ? Math.max(60, parseInt(args[waitIdx + 1] || "1800", 10) || 1800)
+        : 0;
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
           method: "POST",
@@ -4383,8 +4416,16 @@ ${fullHtml}`;
         });
         const data: any = resp.ok ? await resp.json() : { ok: false };
         if (!data.ok || !data.commandId) return fail(`[epic] discover queue failed`);
+        if (waitSecs === 0) {
+          return ok(
+            `epic discover ${env} queued (id=${data.commandId}).${nl}` +
+            `Poll with: epic discover --status ${data.commandId}${nl}` +
+            `Or block with: epic discover ${env} --wait <seconds>`
+          );
+        }
         const start = Date.now();
-        while (Date.now() - start < 180_000) {
+        const deadline = start + waitSecs * 1000;
+        while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 1500));
           const rResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${data.commandId}`);
           const rData: any = rResp.ok ? await rResp.json() : {};
@@ -4395,8 +4436,7 @@ ${fullHtml}`;
               `  [${a.activity_index ?? "?"}] ${(a.name || a.title || "").substring(0, 40)}: ` +
               (a.skipped_reason ? `skipped (${a.skipped_reason})`
                 : a.error ? `err (${String(a.error).substring(0, 40)})`
-                : `${a.fields ?? 0} fields, ${a.options ?? 0} opts, phash=${(a.phash || "").substring(0, 8)}`)
-            );
+                : `${a.fields ?? 0} fields, ${a.options ?? 0} opts, phash=${(a.phash || "").substring(0, 8)}`));
             return ok([
               `epic discover ${env}: ${d.activity_count ?? 0} activities, ` +
                 `${d.fields ?? 0} fields total, ${d.options ?? 0} with options`,
@@ -4405,7 +4445,10 @@ ${fullHtml}`;
           }
           if (rData.status === "error") return fail(`[epic] discover failed: ${rData.error || "unknown"}`);
         }
-        return fail(`[epic] discover timeout`);
+        return ok(
+          `epic discover ${env} still running after ${waitSecs}s (id=${data.commandId}).${nl}` +
+          `Continue polling with: epic discover --status ${data.commandId}`
+        );
       } catch (e: any) {
         return fail(`[epic] discover error: ${e.message}`);
       }

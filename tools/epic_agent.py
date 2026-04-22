@@ -8850,7 +8850,7 @@ def execute_check_windows(cmd):
 # without stealing focus or interfering with real work.
 # ───────────────────────────────────────────────────────────────────────────
 
-_keepalive_thread = None
+_keepalive_threads: dict = {}  # (env, client) -> Thread
 _keepalive_stop_event = None
 _keepalive_lock = threading.Lock()
 _action_in_flight = threading.Event()  # set/cleared by execute_command wrapper
@@ -8879,88 +8879,95 @@ def _user_idle_seconds():
         return 0.0
 
 
-def _keepalive_tick(envs=("SUP", "POC", "TST"), clients=("hyperspace", "text")):
-    """One keep-alive cycle: send Shift to each tracked window. Returns
-    list of (env, client, status) for logging."""
-    results = []
-    for env in envs:
-        for client in clients:
-            try:
-                w = find_window(env, client=client)
-            except Exception:
-                w = None
-            if not w:
-                continue
-            try:
-                # Save current foreground so we don't steal focus visibly.
-                # We send a single Shift keypress directly to the target hwnd
-                # via PostMessage (no SetForegroundWindow → no focus steal).
-                import ctypes
-                hwnd = getattr(w, "_hWnd", None) or getattr(w, "hwnd", None)
-                if not hwnd:
-                    continue
-                WM_KEYDOWN = 0x0100
-                WM_KEYUP = 0x0101
-                VK_SHIFT = 0x10
-                ctypes.windll.user32.PostMessageW(int(hwnd), WM_KEYDOWN, VK_SHIFT, 0)
-                time.sleep(0.05)
-                ctypes.windll.user32.PostMessageW(int(hwnd), WM_KEYUP, VK_SHIFT, 0)
-                results.append((env, client, "tick"))
-            except Exception as e:
-                results.append((env, client, f"err:{type(e).__name__}"))
-    return results
+def _keepalive_send_shift(env: str, client: str) -> str:
+    """Send one benign Shift keystroke to (env, client) window via
+    PostMessageW (no focus steal). Returns 'tick' | 'no-window' | 'err:*'."""
+    try:
+        try:
+            w = find_window(env, client=client)
+        except Exception:
+            w = None
+        if not w:
+            return "no-window"
+        import ctypes
+        hwnd = getattr(w, "_hWnd", None) or getattr(w, "hwnd", None)
+        if not hwnd:
+            return "no-hwnd"
+        WM_KEYDOWN = 0x0100
+        WM_KEYUP = 0x0101
+        VK_SHIFT = 0x10
+        ctypes.windll.user32.PostMessageW(int(hwnd), WM_KEYDOWN, VK_SHIFT, 0)
+        time.sleep(0.05)
+        ctypes.windll.user32.PostMessageW(int(hwnd), WM_KEYUP, VK_SHIFT, 0)
+        return "tick"
+    except Exception as e:
+        return f"err:{type(e).__name__}"
 
 
-def _keepalive_loop(stop_event):
-    print("[keepalive] thread started")
+def _keepalive_session_loop(env: str, client: str, stop_event):
+    """Per-session keep-alive loop. One thread per (env, client) so
+    Hyperdrive and Text are pinged independently — a stuck Hyperdrive
+    PostMessage cannot delay the Text session ping (or vice versa)."""
+    name = f"{env}/{client}"
+    print(f"[keepalive] {name} thread started")
     next_tick = time.time() + KEEPALIVE_INTERVAL_S
     while not stop_event.is_set():
         if stop_event.wait(timeout=5):
             break
         if time.time() < next_tick:
             continue
-        # Gates: skip if user is active OR an agent action is in flight.
         idle = _user_idle_seconds()
         if idle < KEEPALIVE_IDLE_GATE_S:
-            print(f"[keepalive] skip — user active (idle={idle:.0f}s < {KEEPALIVE_IDLE_GATE_S}s)")
-            next_tick = time.time() + 30  # re-check soon
-            continue
-        if _action_in_flight.is_set():
-            print("[keepalive] skip — agent action in flight")
+            print(f"[keepalive] {name} skip — user active (idle={idle:.0f}s)")
             next_tick = time.time() + 30
             continue
-        results = _keepalive_tick()
-        if results:
-            print(f"[keepalive] {len(results)} windows: " + ", ".join(f"{e}/{c}={s}" for e,c,s in results))
-        else:
-            print("[keepalive] no Hyperdrive/Text windows found")
+        if _action_in_flight.is_set():
+            print(f"[keepalive] {name} skip — agent action in flight")
+            next_tick = time.time() + 30
+            continue
+        status = _keepalive_send_shift(env, client)
+        print(f"[keepalive] {name} = {status}")
         next_tick = time.time() + KEEPALIVE_INTERVAL_S
-    print("[keepalive] thread stopped")
+    print(f"[keepalive] {name} thread stopped")
 
 
 def execute_keepalive_start(cmd):
-    global _keepalive_thread, _keepalive_stop_event
+    global _keepalive_threads, _keepalive_stop_event
     command_id = cmd.get("id", "unknown")
+    sessions = [(env, client)
+                for env in ("SUP", "POC", "TST")
+                for client in ("hyperspace", "text")]
+    started = []
     with _keepalive_lock:
-        if _keepalive_thread and _keepalive_thread.is_alive():
-            post_result(command_id, "complete", data={"running": True, "already": True})
-            return
-        _keepalive_stop_event = threading.Event()
-        _keepalive_thread = threading.Thread(
-            target=_keepalive_loop, args=(_keepalive_stop_event,),
-            name="epic-keepalive", daemon=True,
-        )
-        _keepalive_thread.start()
-    post_result(command_id, "complete", data={"running": True, "interval_s": KEEPALIVE_INTERVAL_S})
+        if _keepalive_stop_event is None or _keepalive_stop_event.is_set():
+            _keepalive_stop_event = threading.Event()
+        for env, client in sessions:
+            key = (env, client)
+            t = _keepalive_threads.get(key)
+            if t and t.is_alive():
+                continue
+            th = threading.Thread(
+                target=_keepalive_session_loop,
+                args=(env, client, _keepalive_stop_event),
+                name=f"epic-keepalive-{env}-{client}", daemon=True,
+            )
+            _keepalive_threads[key] = th
+            th.start()
+            started.append(f"{env}/{client}")
+    post_result(command_id, "complete", data={
+        "running": True, "interval_s": KEEPALIVE_INTERVAL_S,
+        "threads_started": started,
+        "thread_count": sum(1 for t in _keepalive_threads.values() if t.is_alive()),
+    })
 
 
 def execute_keepalive_stop(cmd):
-    global _keepalive_thread, _keepalive_stop_event
+    global _keepalive_threads, _keepalive_stop_event
     command_id = cmd.get("id", "unknown")
     with _keepalive_lock:
         if _keepalive_stop_event:
             _keepalive_stop_event.set()
-        _keepalive_thread = None
+        _keepalive_threads = {}
         _keepalive_stop_event = None
     post_result(command_id, "complete", data={"running": False})
 
