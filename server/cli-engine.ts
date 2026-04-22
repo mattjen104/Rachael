@@ -4343,10 +4343,32 @@ ${fullHtml}`;
       }
     }
     if (args[0] === "boot") {
-      // Alias: delegate to top-level `boot` command, forwarding any flags.
-      const rest = args.slice(1).map(a => /\s/.test(a) ? `"${a}"` : a).join(" ");
-      const r = await executeChainRaw(`boot ${rest}`.trim());
-      return r;
+      // Deterministic SUP dual-session orchestrator: launch + login
+      // SUP Hyperdrive AND SUP Text via UCSD CWP, regardless of the broader
+      // workspace_apps config. Pass-through flags (--status, --skip-login,
+      // --stop) are honored. Restores the prior workspace_apps after boot.
+      if (args[1] === "--status" || args[1] === "status" ||
+          args[1] === "--stop" || args[1] === "stop") {
+        const r = await executeChainRaw(`boot ${args[1]}`);
+        return r;
+      }
+      const wsKey = "citrix_workspace_apps";
+      const prior = await storage.getAgentConfig(wsKey);
+      const SUP_DUAL = JSON.stringify([
+        { app: "SUP Hyperdrive",  portal: "UCSD CWP" },
+        { app: "SUP Text Access", portal: "UCSD CWP" },
+      ]);
+      try {
+        await storage.setAgentConfig(wsKey, SUP_DUAL, "epic");
+        const rest = args.slice(1).map(a => /\s/.test(a) ? `"${a}"` : a).join(" ");
+        const r = await executeChainRaw(`boot ${rest}`.trim());
+        const tag = `[epic boot] dual-session: SUP Hyperdrive + SUP Text${nl}`;
+        return { ...r, stdout: tag + (r.stdout || "") };
+      } finally {
+        if (prior?.value !== undefined) {
+          await storage.setAgentConfig(wsKey, prior.value, "epic");
+        }
+      }
     }
     if (args[0] === "discover") {
       // Trigger Hyperdrive grammar discovery (tab-walk + per-field probe).

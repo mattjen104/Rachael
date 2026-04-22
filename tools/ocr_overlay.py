@@ -557,13 +557,69 @@ def tab_walk_scan(
                   f"bbox=({x1},{y1},{x2},{y2}) {(x2-x1)}x{(y2-y1)}px layer={layer}")
             prev_frame = curr_frame
 
+    # Reverse pass (Shift+Tab) to discover any fields the forward walk missed.
+    # Some Hyperdrive activities have asymmetric focus chains (e.g. dialog
+    # buttons reachable only by reverse-tab from a sentinel). We walk back up
+    # to len(elements)+12 steps and append any newly discovered field
+    # positions to the focus order. Existing positions are skipped.
+    try:
+        with mss.mss() as sct:
+            prev_frame_r = _capture_window(sct, region)
+            reverse_steps = max(12, len(elements) + 8)
+            no_change_streak_r = 0
+            for rstep in range(reverse_steps):
+                if cancel_flag and cancel_flag.is_set():
+                    break
+                pyautogui.hotkey('shift', 'tab')
+                time.sleep(tab_delay)
+                curr_frame_r = _capture_window(sct, region)
+                bboxes_r = _find_diff_bboxes(prev_frame_r, curr_frame_r,
+                                             threshold=30, min_area=50)
+                if not bboxes_r:
+                    no_change_streak_r += 1
+                    if no_change_streak_r > 4:
+                        break
+                    prev_frame_r = curr_frame_r
+                    continue
+                no_change_streak_r = 0
+                bbox_r = _pick_new_bbox(bboxes_r, known_centers)
+                if bbox_r is None:
+                    prev_frame_r = curr_frame_r
+                    continue
+                xr1, yr1, xr2, yr2 = bbox_r
+                cxr = (xr1 + xr2) // 2
+                cyr = (yr1 + yr2) // 2
+                qpos_r = _quantize_pos(cxr, cyr)
+                if qpos_r in visited:
+                    prev_frame_r = curr_frame_r
+                    continue
+                visited.add(qpos_r)
+                known_centers.append((cxr, cyr))
+                label_r = _ocr_crop(curr_frame_r, xr1, yr1, xr2, yr2) or f"rfield_{rstep}"
+                layer_r = _classify_layer(cxr, cyr, win_w, win_h,
+                                          has_activity_tabs=has_activity_tabs)
+                elements.append(OcrElement(
+                    text=label_r, layer=layer_r,
+                    rel_x=cxr / win_w, rel_y=cyr / win_h,
+                    rel_w=(xr2 - xr1) / win_w, rel_h=(yr2 - yr1) / win_h,
+                    confidence=1.0,
+                    abs_cx=win_left + cxr, abs_cy=win_top + cyr,
+                    tab_index=len(elements),  # appended at end of focus order
+                ))
+                print(f"[tab-walk] reverse #{len(elements)}: '{label_r}' "
+                      f"@ ({cxr},{cyr}) layer={layer_r}")
+                prev_frame_r = curr_frame_r
+    except Exception as _re:
+        print(f"[tab-walk] reverse pass aborted: {_re}")
+
     try:
         pyautogui.press('escape')
         time.sleep(0.1)
     except Exception:
         pass
 
-    print(f"[tab-walk] Walk complete: {len(elements)} fields found")
+    print(f"[tab-walk] Walk complete: {len(elements)} fields found "
+          f"(forward + reverse)")
     return elements
 
 
@@ -1605,7 +1661,11 @@ class OverlayWindow:
                     except Exception:
                         # Server unreachable → local fallback
                         cached = get_elements_by_phash(self.conn, phash_now)
-                if len(cached) >= 3:
+                # Strict contract: ANY cached fields for a recognized pHash
+                # mean this is a known screen — render from stored grammar
+                # and skip live OCR. Sparse grammars are still authoritative
+                # (e.g. simple modal/dialog screens with 1–2 fields).
+                if len(cached) >= 1:
                     cached_elems: list[OcrElement] = []
                     for r in cached:
                         cached_elems.append(OcrElement(
