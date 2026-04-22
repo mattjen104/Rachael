@@ -4368,7 +4368,18 @@ ${fullHtml}`;
           const rData: any = rResp.ok ? await rResp.json() : {};
           if (rData.status === "complete") {
             const d = rData.data || {};
-            return ok(`epic discover ${env}: ${d.fields ?? 0} fields, ${d.options ?? 0} with options, fp=${(d.fp || "").substring(0, 12)} phash=${(d.phash || "").substring(0, 8)}`);
+            const acts = Array.isArray(d.activities) ? d.activities : [];
+            const actLines = acts.slice(0, 12).map((a: any) =>
+              `  [${a.activity_index ?? "?"}] ${(a.name || a.title || "").substring(0, 40)}: ` +
+              (a.skipped_reason ? `skipped (${a.skipped_reason})`
+                : a.error ? `err (${String(a.error).substring(0, 40)})`
+                : `${a.fields ?? 0} fields, ${a.options ?? 0} opts, phash=${(a.phash || "").substring(0, 8)}`)
+            );
+            return ok([
+              `epic discover ${env}: ${d.activity_count ?? 0} activities, ` +
+                `${d.fields ?? 0} fields total, ${d.options ?? 0} with options`,
+              ...actLines,
+            ].join(nl));
           }
           if (rData.status === "error") return fail(`[epic] discover failed: ${rData.error || "unknown"}`);
         }

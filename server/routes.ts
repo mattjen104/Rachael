@@ -927,6 +927,51 @@ export async function registerRoutes(
     res.json({ screenshots: screenshots.slice(0, 10) });
   });
 
+  // Canonical grammar read API: returns persisted activities/fields keyed by pHash.
+  // Reads directly from the local sqlite KB (tools/ocr_kb.sqlite3) populated by
+  // `epic discover`. Schema: see EpicGrammarActivity / EpicGrammarField in shared/schema.ts.
+  const _grammarHandler = async (req: any, res: any) => {
+    try {
+      const path = await import("node:path");
+      const fs = await import("node:fs");
+      const Database = (await import("better-sqlite3")).default;
+      const dbPath = path.resolve(process.cwd(), "tools", "ocr_kb.sqlite3");
+      if (!fs.existsSync(dbPath)) return res.json({ phash: req.params.phash || null, fields: [] });
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const phash = req.params.phash;
+        if (!phash) {
+          const rows = db.prepare(
+            "SELECT phash_fp AS phash, ocr_fp AS fp, created_at FROM fp_bridge ORDER BY created_at DESC LIMIT 200"
+          ).all();
+          return res.json({ activities: rows });
+        }
+        const bridge: any = db.prepare(
+          "SELECT ocr_fp FROM fp_bridge WHERE phash_fp=?"
+        ).get(phash);
+        if (!bridge) return res.json({ phash, fields: [] });
+        const fps = `%${bridge.ocr_fp}%`;
+        const fields = db.prepare(
+          "SELECT id, text, layer, rel_x, rel_y, rel_w, rel_h, confidence, semantic, " +
+          "options, arrow_behavior, click_count FROM elements " +
+          "WHERE confidence IN ('confirmed','reliable','named') " +
+          "AND (screen_fps LIKE ? OR is_correction=1)"
+        ).all(fps).map((r: any) => ({
+          ...r,
+          options: r.options ? JSON.parse(r.options) : null,
+          arrow_behavior: r.arrow_behavior ? JSON.parse(r.arrow_behavior) : null,
+        }));
+        return res.json({ phash, ocr_fp: bridge.ocr_fp, fields });
+      } finally {
+        db.close();
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  };
+  app.get("/api/epic/grammar", _grammarHandler);
+  app.get("/api/epic/grammar/:phash", _grammarHandler);
+
   app.get("/api/epic/agent/screenshot/:id", (req, res) => {
     const result = epicResults.get(req.params.id);
     if (!result?.screenshot) return res.status(404).json({ error: "Not found" });

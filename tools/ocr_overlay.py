@@ -134,6 +134,7 @@ class OcrElement:
     abs_cx: int = 0  # absolute screen center x (for clicking)
     abs_cy: int = 0  # absolute screen center y
     options: list = None  # dropdown options if probed; None = not probed
+    arrow_behavior: dict = None  # {behavior, region:[x,y,w,h]} or None
 
 
 def _looks_like_phi(text: str) -> bool:
@@ -524,17 +525,28 @@ def tab_walk_scan(
                 abs_cy=win_top + cy,
             ))
 
-            # Probe dropdown options while focus is confirmed on this field.
-            # Done inline (single walk) to guarantee element-to-options mapping.
+            # Probe field behavior while focus is confirmed on this field.
+            # Done inline (single walk) to guarantee element-to-grammar mapping.
             if probe_options:
+                # Arrow-key behavior probe (cheap, non-destructive: Down then Up).
                 try:
-                    opts = _probe_field_options(region, ocr)
-                    if opts:
-                        elements[-1].options = opts
-                        # Re-baseline prev_frame: Escape may have repainted.
+                    arrow = _probe_arrow_behavior(region, (x1, y1, x2, y2))
+                    if arrow and arrow.get("behavior") not in (None, "unknown"):
+                        elements[-1].arrow_behavior = arrow
                         curr_frame = _capture_window(sct, region)
-                except Exception as _pe:
-                    print(f"[tab-walk] probe failed at #{len(elements)}: {_pe}")
+                except Exception as _ae:
+                    print(f"[tab-walk] arrow probe failed at #{len(elements)}: {_ae}")
+                # Dropdown options probe (Alt+Down). Skip if arrow probe already
+                # classified the field as 'item' or 'macro' (not a dropdown).
+                ab = (elements[-1].arrow_behavior or {}).get("behavior")
+                if ab in (None, "dropdown", "none"):
+                    try:
+                        opts = _probe_field_options(region, ocr)
+                        if opts:
+                            elements[-1].options = opts
+                            curr_frame = _capture_window(sct, region)
+                    except Exception as _pe:
+                        print(f"[tab-walk] options probe failed at #{len(elements)}: {_pe}")
 
             if progress_cb and len(elements) % 10 == 0:
                 progress_cb(len(elements))
@@ -636,6 +648,135 @@ def _probe_field_options(window_region, ocr, max_options: int = 20) -> list[str]
     return options
 
 
+def _probe_arrow_behavior(window_region, field_bbox) -> dict:
+    """After Tab settles on a field, send Down once and classify the response:
+      - "dropdown": a NEW region appears below the field (handled by Alt+Down already)
+      - "item":     small caret/text change inside the field bbox (single-item move)
+      - "macro":    larger change spanning beyond the field (page/macro move)
+      - "none":     no change at all (read-only or boundary)
+    Returns {behavior, region:[x,y,w,h]} where region is the bounded change map.
+    """
+    try:
+        import mss
+        import pyautogui
+    except ImportError:
+        return {"behavior": "unknown", "region": []}
+    try:
+        with mss.mss() as sct:
+            before = _capture_window(sct, window_region)
+            pyautogui.press('down')
+            time.sleep(0.2)
+            after = _capture_window(sct, window_region)
+            # Reverse with Up to leave focus undisturbed for next Tab.
+            pyautogui.press('up')
+            time.sleep(0.1)
+    except Exception:
+        return {"behavior": "unknown", "region": []}
+
+    bboxes = _find_diff_bboxes(before, after, threshold=25, min_area=80)
+    if not bboxes:
+        return {"behavior": "none", "region": []}
+
+    # Pick the largest diff
+    bboxes.sort(key=lambda b: (b[2]-b[0]) * (b[3]-b[1]), reverse=True)
+    x1, y1, x2, y2 = bboxes[0]
+    region = [int(x1), int(y1), int(x2 - x1), int(y2 - y1)]
+    diff_area = (x2 - x1) * (y2 - y1)
+
+    fx1, fy1, fx2, fy2 = field_bbox
+    field_area = max(1, (fx2 - fx1) * (fy2 - fy1))
+    contained = (x1 >= fx1 - 4 and y1 >= fy1 - 4 and
+                 x2 <= fx2 + 4 and y2 <= fy2 + 4)
+
+    if contained and diff_area <= field_area * 1.2:
+        behavior = "item"
+    elif y1 > fy2 - 4:
+        behavior = "dropdown"
+    else:
+        behavior = "macro"
+    return {"behavior": behavior, "region": region}
+
+
+def set_element_arrow_behavior(conn, elem_id: int, arrow: dict):
+    """Persist arrow-key probe result on an element row."""
+    if not arrow:
+        return
+    try:
+        conn.execute(
+            "UPDATE elements SET arrow_behavior=?, updated_at=? WHERE id=?",
+            (json.dumps(arrow), time.time(), elem_id),
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
+def _enumerate_activities_via_menu(window_title: str, max_items: int = 40) -> list[str]:
+    """Open Epic's activity navigator (Ctrl+Space), OCR the visible menu, and
+    return the activity names. Deterministic & exhaustive within visible menu;
+    callers iterate the returned list to visit each activity by name."""
+    try:
+        import mss
+        import pyautogui
+        import pygetwindow as gw
+    except ImportError:
+        return []
+    wins = [w for w in gw.getAllWindows()
+            if window_title.lower() in (w.title or "").lower() and w.width > 100]
+    if not wins:
+        return []
+    win = wins[0]
+    region = {"left": win.left, "top": win.top,
+              "width": win.width, "height": win.height}
+    ocr = _get_ocr()
+    if ocr is None:
+        return []
+    try:
+        with mss.mss() as sct:
+            before = _capture_window(sct, region)
+            pyautogui.hotkey('ctrl', 'space')
+            time.sleep(0.5)
+            after = _capture_window(sct, region)
+    except Exception:
+        return []
+
+    bboxes = _find_diff_bboxes(before, after, threshold=20, min_area=400)
+    if not bboxes:
+        try:
+            pyautogui.press('escape'); time.sleep(0.1)
+        except Exception:
+            pass
+        return []
+    bboxes.sort(key=lambda b: (b[2]-b[0]) * (b[3]-b[1]), reverse=True)
+    x1, y1, x2, y2 = bboxes[0]
+    crop = after[y1:y2, x1:x2]
+    names: list[str] = []
+    seen: set = set()
+    if crop.size > 0:
+        try:
+            result = ocr.ocr(crop, cls=False)
+        except Exception:
+            try:
+                result = ocr.ocr(crop)
+            except Exception:
+                result = None
+        if result and result[0]:
+            for line in result[0]:
+                txt = (line[1][0] or "").strip()
+                conf = line[1][1] if len(line[1]) > 1 else 0
+                if (txt and conf > 0.55 and 2 <= len(txt) <= 60
+                        and not _looks_like_phi(txt) and txt not in seen):
+                    seen.add(txt)
+                    names.append(txt)
+                if len(names) >= max_items:
+                    break
+    try:
+        pyautogui.press('escape'); time.sleep(0.15)
+    except Exception:
+        pass
+    return names
+
+
 def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -> dict:
     """Tab-walk + (optional) arrow probe a SINGLE activity screen, then persist
     elements keyed by the screen's pHash. HIPAA: refuses to persist anything
@@ -688,6 +829,8 @@ def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -
                 if clean_opts:
                     set_element_options(conn, elem_id, clean_opts)
                     options_count += 1
+            if e.arrow_behavior:
+                set_element_arrow_behavior(conn, elem_id, e.arrow_behavior)
         conn.commit()
     finally:
         conn.close()
@@ -737,38 +880,40 @@ def discover_grammar(window_title: str, probe_options: bool = True,
     activities.append({"activity_index": 0, "title": win.title, **first})
 
     if crawl_activities:
-        consecutive_dupes = 0
-        for idx in range(1, max_activities + 1):
+        # Deterministic exhaustive enumeration: open Epic's activity navigator
+        # (Ctrl+Space), OCR the menu to learn the full activity list, then
+        # iterate each by typing its name + Enter. Bounded by the menu contents,
+        # not by a guessed step count.
+        activity_names = _enumerate_activities_via_menu(window_title,
+                                                       max_items=max_activities)
+        for idx, name in enumerate(activity_names, start=1):
             try:
-                # Ctrl+Space opens Epic's activity search/navigator;
-                # Down + Enter selects next activity. If your build maps
-                # activity-next to a different chord, override here.
                 pyautogui.hotkey('ctrl', 'space')
                 time.sleep(0.4)
-                pyautogui.press('down')
-                time.sleep(0.1)
+                # Type the activity name to filter, then Enter to select.
+                pyautogui.typewrite(name, interval=0.02)
+                time.sleep(0.25)
                 pyautogui.press('enter')
-                time.sleep(0.8)  # wait for activity to load
+                time.sleep(0.9)
             except Exception as ne:
-                activities.append({"activity_index": idx, "error": f"nav failed: {ne}"})
-                break
+                activities.append({"activity_index": idx, "name": name,
+                                   "error": f"nav failed: {ne}"})
+                continue
 
             cur_win = _find_win()
             cur_title = (cur_win.title if cur_win else window_title) or window_title
             phash_now = _compute_window_phash(cur_title)
             if phash_now and phash_now in seen_phashes:
-                consecutive_dupes += 1
-                activities.append({"activity_index": idx, "title": cur_title,
+                activities.append({"activity_index": idx, "name": name,
+                                   "title": cur_title,
                                    "skipped_reason": "duplicate_phash"})
-                if consecutive_dupes >= 2:
-                    break
                 continue
-            consecutive_dupes = 0
 
             res = _scan_one_activity(cur_title, probe_options, max_steps)
             if res.get("phash"):
                 seen_phashes.add(res["phash"])
-            activities.append({"activity_index": idx, "title": cur_title, **res})
+            activities.append({"activity_index": idx, "name": name,
+                               "title": cur_title, **res})
 
     total_fields = sum(a.get("fields", 0) for a in activities)
     total_options = sum(a.get("options", 0) for a in activities)
@@ -835,6 +980,12 @@ def _db_connect():
         conn.execute("ALTER TABLE elements ADD COLUMN options TEXT DEFAULT NULL")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Additive migration: 'arrow_behavior' stores per-field arrow-key probe
+    # results — JSON dict {behavior:item|macro|dropdown|none, region:[x,y,w,h]}.
+    try:
+        conn.execute("ALTER TABLE elements ADD COLUMN arrow_behavior TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     return conn
 

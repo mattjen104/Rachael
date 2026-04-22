@@ -781,3 +781,44 @@ export const insertSnowTicketSchema = z.object({
 });
 export type InsertSnowTicket = z.infer<typeof insertSnowTicketSchema>;
 export type SnowTicket = typeof snowTickets.$inferSelect;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Epic Hyperdrive grammar (canonical abstraction contract)
+// Discovered/persisted by `epic discover`; consumed via GET /api/epic/grammar/:phash
+// ────────────────────────────────────────────────────────────────────────────
+
+export type EpicArrowBehavior = "item" | "macro" | "dropdown" | "none" | "unknown";
+
+export interface EpicGrammarField {
+  id: number;
+  text: string;
+  layer: string;
+  rel_x: number;  // center x as fraction of window width
+  rel_y: number;  // center y as fraction of window height
+  rel_w: number;
+  rel_h: number;
+  confidence: "seen" | "confirmed" | "reliable" | "named";
+  semantic: string | null;
+  options: string[] | null;       // dropdown values (Alt+Down probe)
+  arrow_behavior: {               // arrow-key probe result
+    behavior: EpicArrowBehavior;
+    region: [number, number, number, number]; // [x,y,w,h] of bounded change region
+  } | null;
+  click_count: number;
+}
+
+export interface EpicGrammarActivity {
+  phash: string;        // window perceptual hash
+  fp: string;           // OCR-derived screen fingerprint
+  created_at?: number;
+}
+
+export interface EpicGrammarResponse {
+  phash: string;
+  ocr_fp?: string;
+  fields: EpicGrammarField[];
+}
+
+export interface EpicGrammarIndexResponse {
+  activities: EpicGrammarActivity[];
+}
