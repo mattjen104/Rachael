@@ -4483,10 +4483,27 @@ ${fullHtml}`;
         }
         const start = Date.now();
         const deadline = start + waitSecs * 1000;
+        const stageLog: string[] = [];
+        let lastStage: string | undefined;
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 1500));
           const rResp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/result/${data.commandId}`);
           const rData: any = rResp.ok ? await rResp.json() : {};
+          // Capture stage transitions during the wait so the final summary
+          // (or timeout message) shows what discover was doing, mirroring
+          // what `epic discover --status` would have shown live.
+          if (rData.status === "running" && rData.stage && rData.stage !== lastStage) {
+            const sd = rData.data || {};
+            const extras: string[] = [];
+            if (sd.activity_index !== undefined) extras.push(`activity=${sd.activity_index}`);
+            if (sd.activity_name) extras.push(`'${String(sd.activity_name).substring(0, 30)}'`);
+            if (sd.index != null && sd.total != null) extras.push(`${sd.index}/${sd.total}`);
+            if (sd.count !== undefined) extras.push(`fields=${sd.count}`);
+            if (sd.seconds !== undefined) extras.push(`${sd.seconds}s`);
+            const tail = extras.length ? ` (${extras.join(", ")})` : "";
+            stageLog.push(`  [+${Math.round((Date.now() - start) / 1000)}s] ${rData.stage}${tail}`);
+            lastStage = rData.stage;
+          }
           if (rData.status === "complete") {
             const d = rData.data || {};
             const acts = Array.isArray(d.activities) ? d.activities : [];
@@ -4495,16 +4512,21 @@ ${fullHtml}`;
               (a.skipped_reason ? `skipped (${a.skipped_reason})`
                 : a.error ? `err (${String(a.error).substring(0, 40)})`
                 : `${a.fields ?? 0} fields, ${a.options ?? 0} opts, phash=${(a.phash || "").substring(0, 8)}`));
-            return ok([
+            const out = [
               `epic discover ${env}: ${d.activity_count ?? 0} activities, ` +
                 `${d.fields ?? 0} fields total, ${d.options ?? 0} with options`,
               ...actLines,
-            ].join(nl));
+            ];
+            if (stageLog.length) out.push("--- stages ---", ...stageLog);
+            return ok(out.join(nl));
           }
           if (rData.status === "error") return fail(`[epic] discover failed: ${rData.error || "unknown"}`);
         }
+        const lastLine = stageLog.length
+          ? `${nl}Last stage: ${stageLog[stageLog.length - 1].trim()}`
+          : "";
         return ok(
-          `epic discover ${env} still running after ${waitSecs}s (id=${data.commandId}).${nl}` +
+          `epic discover ${env} still running after ${waitSecs}s (id=${data.commandId}).${lastLine}${nl}` +
           `Continue polling with: epic discover --status ${data.commandId}`
         );
       } catch (e: any) {
