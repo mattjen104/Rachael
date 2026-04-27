@@ -374,13 +374,13 @@ def tab_walk_scan(
         import pyautogui
         import pygetwindow as gw
     except ImportError as e:
-        print(f"[tab-walk] Missing dependency: {e}")
+        print(f"[tab-walk] Missing dependency: {e}", flush=True)
         return []
 
     wins = [w for w in gw.getAllWindows()
             if window_title.lower() in (w.title or "").lower() and w.width > 100]
     if not wins:
-        print(f"[tab-walk] Window not found: {window_title}")
+        print(f"[tab-walk] Window not found: {window_title}", flush=True)
         return []
     win = wins[0]
     win_left, win_top, win_w, win_h = win.left, win.top, win.width, win.height
@@ -399,7 +399,7 @@ def tab_walk_scan(
     pyautogui.press('escape')
     time.sleep(0.15)
 
-    print(f"[tab-walk] Window rect: left={win_left} top={win_top} w={win_w} h={win_h}")
+    print(f"[tab-walk] Window rect: left={win_left} top={win_top} w={win_w} h={win_h}", flush=True)
 
     ocr = _get_ocr()
 
@@ -457,7 +457,7 @@ def tab_walk_scan(
 
         for step in range(max_steps):
             if cancel_flag and cancel_flag.is_set():
-                print(f"[tab-walk] Cancelled at step {step}")
+                print(f"[tab-walk] Cancelled at step {step}", flush=True)
                 break
 
             pyautogui.press('tab')
@@ -470,7 +470,7 @@ def tab_walk_scan(
             if not bboxes:
                 no_change_streak += 1
                 if no_change_streak > 5:
-                    print(f"[tab-walk] No changes for 5 Tabs — stopping at step {step}")
+                    print(f"[tab-walk] No changes for 5 Tabs — stopping at step {step}", flush=True)
                     break
                 prev_frame = curr_frame
                 continue
@@ -489,7 +489,7 @@ def tab_walk_scan(
                 fx, fy = first_center
                 if abs(cx - fx) <= 10 and abs(cy - fy) <= 10:
                     print(f"[tab-walk] Cycle complete at step {step} — "
-                          f"returned to first field ({fx},{fy})")
+                          f"returned to first field ({fx},{fy})", flush=True)
                     break
 
             qpos = _quantize_pos(cx, cy)
@@ -497,7 +497,7 @@ def tab_walk_scan(
                 revisit_count += 1
                 if revisit_count >= 3:
                     print(f"[tab-walk] Cycle detected at step {step} — "
-                          f"{revisit_count} revisits of known positions")
+                          f"{revisit_count} revisits of known positions", flush=True)
                     break
                 prev_frame = curr_frame
                 continue
@@ -537,7 +537,7 @@ def tab_walk_scan(
                         elements[-1].arrow_behavior = arrow
                         curr_frame = _capture_window(sct, region)
                 except Exception as _ae:
-                    print(f"[tab-walk] arrow probe failed at #{len(elements)}: {_ae}")
+                    print(f"[tab-walk] arrow probe failed at #{len(elements, flush=True)}: {_ae}", flush=True)
                 # Dropdown options probe (Alt+Down). Skip if arrow probe already
                 # classified the field as 'item' or 'macro' (not a dropdown).
                 ab = (elements[-1].arrow_behavior or {}).get("behavior")
@@ -548,7 +548,7 @@ def tab_walk_scan(
                             elements[-1].options = opts
                             curr_frame = _capture_window(sct, region)
                     except Exception as _pe:
-                        print(f"[tab-walk] options probe failed at #{len(elements)}: {_pe}")
+                        print(f"[tab-walk] options probe failed at #{len(elements, flush=True)}: {_pe}", flush=True)
 
             if progress_cb and len(elements) % 10 == 0:
                 # progress_cb may be either the legacy single-arg callback
@@ -565,7 +565,7 @@ def tab_walk_scan(
                 except Exception:
                     pass
 
-            print(f"[tab-walk] #{len(elements)}: '{label}' @ ({cx},{cy}) "
+            print(f"[tab-walk] #{len(elements, flush=True)}: '{label}' @ ({cx},{cy}) "
                   f"bbox=({x1},{y1},{x2},{y2}) {(x2-x1)}x{(y2-y1)}px layer={layer}",
                   flush=True)
             prev_frame = curr_frame
@@ -619,11 +619,11 @@ def tab_walk_scan(
                     abs_cx=win_left + cxr, abs_cy=win_top + cyr,
                     tab_index=len(elements),  # appended at end of focus order
                 ))
-                print(f"[tab-walk] reverse #{len(elements)}: '{label_r}' "
+                print(f"[tab-walk] reverse #{len(elements, flush=True)}: '{label_r}' "
                       f"@ ({cxr},{cyr}) layer={layer_r}")
                 prev_frame_r = curr_frame_r
     except Exception as _re:
-        print(f"[tab-walk] reverse pass aborted: {_re}")
+        print(f"[tab-walk] reverse pass aborted: {_re}", flush=True)
 
     try:
         pyautogui.press('escape')
@@ -631,7 +631,7 @@ def tab_walk_scan(
     except Exception:
         pass
 
-    print(f"[tab-walk] Walk complete: {len(elements)} fields found "
+    print(f"[tab-walk] Walk complete: {len(elements, flush=True)} fields found "
           f"(forward + reverse)")
     return elements
 
@@ -838,7 +838,7 @@ def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
     if progress_cb:
         try: progress_cb("enumerating_activities", None)
         except Exception: pass
-    print(f"[discover] enumerating activities via Ctrl+Space menu (max {max_items})...", flush=True)
+    print(f"[discover] enumerating activities via Ctrl+Space menu (max {max_items}, flush=True)...", flush=True)
 
     names: list[str] = []
     seen: set = set()
@@ -878,7 +878,7 @@ def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
         pyautogui.press('escape'); time.sleep(0.15)
     except Exception:
         pass
-    print(f"[discover] enumerated {len(names)} activities", flush=True)
+    print(f"[discover] enumerated {len(names, flush=True)} activities", flush=True)
     if progress_cb:
         # 'total' aligns with the scanning_activity stage; the CLI formatter
         # renders index/total when present. We don't yet have an index here, so
@@ -1043,7 +1043,7 @@ def discover_grammar(window_title: str, probe_options: bool = False,
         t.start()
         t.join(timeout=activity_timeout)
         if t.is_alive():
-            print(f"[discover] watchdog: activity {idx} ({scan_title!r}) "
+            print(f"[discover] watchdog: activity {idx} ({scan_title!r}, flush=True) "
                   f"exceeded {activity_timeout}s — cancelling", flush=True)
             cancel.set()
             t.join(timeout=5.0)  # graceful exit grace period
@@ -1124,7 +1124,8 @@ def discover_grammar(window_title: str, probe_options: bool = False,
                           "fields": total_fields, "options": total_options})
         except Exception: pass
     print(f"[discover] complete: {activity_count} activities, "
-          f"{total_fields} fields, {total_options} with options", flush=True)
+          f"{total_fields} fields, {total_options} with options",
+          flush=True)
     return {
         "window": window_title,
         "activities": activities,

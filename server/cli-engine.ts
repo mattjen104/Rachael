@@ -4404,7 +4404,7 @@ ${fullHtml}`;
             const extras: string[] = [];
             if (sd.activity_index !== undefined) extras.push(`activity=${sd.activity_index}`);
             if (sd.activity_name) extras.push(`'${String(sd.activity_name).substring(0, 30)}'`);
-            if (sd.index !== undefined && sd.total !== undefined) extras.push(`${sd.index}/${sd.total}`);
+            if (sd.index != null && sd.total != null) extras.push(`${sd.index}/${sd.total}`);
             if (sd.count !== undefined) extras.push(`fields=${sd.count}`);
             if (sd.seconds !== undefined) extras.push(`${sd.seconds}s`);
             const tail = extras.length ? ` (${extras.join(", ")})` : "";
