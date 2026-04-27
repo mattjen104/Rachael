@@ -8405,6 +8405,30 @@ def _send_alt_o():
     _keybd_event_key(0x12, up=True)
 
 
+def _send_enter():
+    _keybd_event_key(0x0D, up=False)
+    time.sleep(0.02)
+    _keybd_event_key(0x0D, up=True)
+
+
+def _submit_login_step(window, label, step_name, timeout):
+    """Try Enter first (works on Hyperspace 2025+ where the Log In button has
+    no Alt accelerator and the focused field's default action submits). If the
+    screen doesn't change, fall back to Alt+O (the legacy 'Log _O_n' / OK
+    accelerator used by older Hyperspace builds)."""
+    activate_window(window)
+    time.sleep(0.1)
+    print(f"  [login] {label}: {step_name} — sending Enter")
+    _send_enter()
+    if _wait_for_screen_change(window, timeout=timeout, poll_interval=0.3):
+        return True
+    activate_window(window)
+    time.sleep(0.1)
+    print(f"  [login] {label}: {step_name} — no change after Enter, falling back to Alt+O")
+    _send_alt_o()
+    return _wait_for_screen_change(window, timeout=timeout, poll_interval=0.3)
+
+
 def _adaptive_type_text_no_verify(window, text, field_description, proven_method=None):
     methods = _build_type_methods(window)
 
@@ -8574,23 +8598,13 @@ def _login_hyperspace_window(window, label, username, password):
             return False, "all input methods failed for password"
         time.sleep(0.1)
 
-        activate_window(window)
-        time.sleep(0.1)
-        print(f"  [login] {label}: sending Alt+O (login submit)")
-        _send_alt_o()
-        _wait_for_screen_change(window, timeout=5.0, poll_interval=0.3)
-
-        activate_window(window)
-        time.sleep(0.1)
-        print(f"  [login] {label}: sending Alt+O (department continue)")
-        _send_alt_o()
-        _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
-
-        activate_window(window)
-        time.sleep(0.1)
-        print(f"  [login] {label}: sending Alt+O (message continue)")
-        _send_alt_o()
-        _wait_for_screen_change(window, timeout=3.0, poll_interval=0.3)
+        # Hyperspace 2025+ "Log In" button has no Alt-key accelerator, so the
+        # legacy Alt+O no longer submits. Try Enter first (default action on
+        # the focused password field), fall back to Alt+O for older builds
+        # and the Epic OK-style continue dialogs.
+        _submit_login_step(window, label, "login submit", timeout=5.0)
+        _submit_login_step(window, label, "department continue", timeout=3.0)
+        _submit_login_step(window, label, "message continue", timeout=3.0)
 
         return _verify_login_result(window, method, pw_method)
 
