@@ -1,0 +1,140 @@
+C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.2) doesn't match a supported version!
+  warnings.warn(
+  [input] Low-level keyboard available (backend: sendinput)
+  [config] Loading C:\Rachael\tools\.env
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+[overlay] Launched OCR overlay (pid 14760)
+[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode
+No Hyperspace windows detected yet (will keep checking)
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+[ocr] Using default window title: 'Hyperspace'
+[ocr] Starting overlay over: 'Hyperspace'
+[ocr] Ctrl+Shift+H=toggle hints  Ctrl+Shift+C=correction mode  Esc=cancel
+[overlay] Hotkeys registered via Win32: ctrl+shift+h = hints, ctrl+shift+c = correction
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+
+>> Command: check_windows (id: epic-1777312329949-zx24uq)
+  [check] SUP hyperspace: not found. Windows with 'SUP': []
+
+>> Command: snapshot_windows (id: epic-1777312331973-dj3l3g)
+  [snapshot] Captured 17 windows
+
+>> Command: detect_new_window (id: epic-1777312364274-uupz85)
+  [error] Error code from Windows: 1400 - Invalid window handle.
+Traceback (most recent call last):
+  File "C:\Rachael\tools\epic_agent.py", line 9158, in execute_command
+    execute_detect_new_window(cmd)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Rachael\tools\epic_agent.py", line 8725, in execute_detect_new_window
+    "width": w.width,
+             ^^^^^^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\__init__.py", line 285, in width
+    return self._rect.width
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pyrect\__init__.py", line 916, in width
+    self.onRead(WIDTH)
+    ~~~~~~~~~~~^^^^^^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\__init__.py", line 54, in _onRead
+    r = self._getWindowRect()
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\_pygetwindow_win.py", line 199, in _getWindowRect
+    _raiseWithLastError()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\_pygetwindow_win.py", line 99, in _raiseWithLastError
+    raise PyGetWindowException('Error code from Windows: %s - %s' % (errorCode, _formatMessage(errorCode)))
+pygetwindow.PyGetWindowException: Error code from Windows: 1400 - Invalid window handle.
+
+>> Command: detect_new_window (id: epic-1777312370833-wd0h7e)
+  [detect] No new windows found. Current: 17, Snapshot: 17
+
+>> Command: detect_new_window (id: epic-1777312375367-ig8n35)
+  [detect] No new windows found. Current: 17, Snapshot: 17
+
+>> Command: detect_new_window (id: epic-1777312378391-ioaa2p)
+  [detect] No new windows found. Current: 17, Snapshot: 17
+
+>> Command: detect_new_window (id: epic-1777312381413-abl9mj)
+  [detect] No new windows found. Current: 17, Snapshot: 17
+
+>> Command: detect_new_window (id: epic-1777312384940-kuyjrp)
+  [detect] No new windows found. Current: 17, Snapshot: 17
+
+>> Command: detect_new_window (id: epic-1777312387970-s3tgmh)
+  [detect] New window: 'Hyperdrive - \\Remote' (hwnd=527860, class=hyperspace)
+
+>> Command: login (id: epic-1777312390002-wn46na)
+  [login] Checking SUP hyperspace: Hyperspace – SUP Environment - \\Remote (already_open=True, hwnd=none)
+  [uia] No visible Edit controls found — window is past login screen
+  [login] SUP hyperspace: already logged in (app controls detected via UIA, no login fields)
+  [login] SUP hyperspace: already logged in
+  [login] Done: 1 windows
+
+>> Command: check_windows (id: epic-1777312395025-k9qdf5)
+  [check] SUP text: not found. Windows with 'SUP': ['Hyperspace – SUP Environment - \\\\Remote']
+
+>> Command: snapshot_windows (id: epic-1777312397041-3qlff2)
+  [snapshot] Captured 18 windows
+
+>> Command: detect_new_window (id: epic-1777312424414-xb0ai5)
+  [error] Error code from Windows: 1400 - Invalid window handle.
+Traceback (most recent call last):
+  File "C:\Rachael\tools\epic_agent.py", line 9158, in execute_command
+    execute_detect_new_window(cmd)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Rachael\tools\epic_agent.py", line 8725, in execute_detect_new_window
+    "width": w.width,
+             ^^^^^^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\__init__.py", line 285, in width
+    return self._rect.width
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pyrect\__init__.py", line 916, in width
+    self.onRead(WIDTH)
+    ~~~~~~~~~~~^^^^^^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\__init__.py", line 54, in _onRead
+    r = self._getWindowRect()
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\_pygetwindow_win.py", line 199, in _getWindowRect
+    _raiseWithLastError()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\pygetwindow\_pygetwindow_win.py", line 99, in _raiseWithLastError
+    raise PyGetWindowException('Error code from Windows: %s - %s' % (errorCode, _formatMessage(errorCode)))
+pygetwindow.PyGetWindowException: Error code from Windows: 1400 - Invalid window handle.
+
+>> Command: detect_new_window (id: epic-1777312430964-gxne94)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312437521-bwunm4)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312442567-6gvkek)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312445594-b6ezny)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312448618-vocarp)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312452147-f5s6qo)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312455178-5sr5gw)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312458198-x9teth)
+  [detect] No new windows found. Current: 18, Snapshot: 18
+
+>> Command: detect_new_window (id: epic-1777312461218-kgpyya)
+  [detect] No new windows found. Current: 18, Snapshot: 18

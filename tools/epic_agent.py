@@ -8474,8 +8474,28 @@ def _is_window_past_login_uia(window):
             except Exception:
                 continue
         if len(visible_edits) == 0:
-            print(f"  [uia] No visible Edit controls found — window is past login screen")
-            return "LOGGED_IN"
+            # Could be (a) past login OR (b) freshly-launched window where the
+            # login form hasn't rendered yet. Differentiate by checking for
+            # app chrome (MenuBar/ToolBar/etc). Without app chrome AND without
+            # Edit controls, the window is still loading — return UNKNOWN so
+            # the caller can retry instead of treating it as logged-in.
+            app_control_types = frozenset(["MenuBar", "ToolBar", "StatusBar", "TabControl", "DataGrid", "TreeView"])
+            has_app_controls = False
+            try:
+                for child in target.descendants(depth=2):
+                    try:
+                        if (child.element_info.control_type or "") in app_control_types:
+                            has_app_controls = True
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            if has_app_controls:
+                print(f"  [uia] No Edit controls + app chrome present — past login screen")
+                return "LOGGED_IN"
+            print(f"  [uia] No Edit controls and no app chrome — window still loading, will retry")
+            return "UNKNOWN"
         if len(visible_edits) <= 2:
             app_control_types = frozenset(["MenuBar", "ToolBar", "StatusBar", "TabControl", "DataGrid", "TreeView"])
             has_app_controls = False
@@ -8508,12 +8528,28 @@ def _login_hyperspace_window(window, label, username, password):
         activate_window(window)
         time.sleep(0.15)
 
-        uia_state = _is_window_past_login_uia(window)
+        # Wait for the window to settle: a freshly-launched Hyperspace can take
+        # several seconds to render its login form. Retry UIA inspection a few
+        # times before deciding so we don't false-positive "already logged in"
+        # against an empty, still-loading window.
+        uia_state = "UNKNOWN"
+        for attempt in range(1, 7):  # ~6 * 1.5s = 9s max
+            uia_state = _is_window_past_login_uia(window)
+            if uia_state in ("LOGGED_IN", "LOGIN_SCREEN"):
+                break
+            print(f"  [login] {label}: UIA state UNKNOWN (attempt {attempt}/6) — waiting for window to render...")
+            time.sleep(1.5)
+            try:
+                activate_window(window)
+            except Exception:
+                pass
         if uia_state == "LOGGED_IN":
             print(f"  [login] {label}: already logged in (app controls detected via UIA, no login fields)")
             return True, "already logged in"
         elif uia_state == "LOGIN_SCREEN":
             print(f"  [login] {label}: login screen detected via UIA, proceeding with credentials")
+        else:
+            print(f"  [login] {label}: UIA state still UNKNOWN after retries — proceeding with credentials anyway")
 
         if _uia_focus_input_field(window):
             time.sleep(0.1)
@@ -8712,23 +8748,52 @@ def execute_detect_new_window(cmd):
     command_id = cmd.get("id", "unknown")
     env_hint = cmd.get("env", "").upper()
     new_windows = []
-    for w in gw.getAllWindows():
-        hwnd = getattr(w, '_hWnd', None)
-        title = w.title or ""
-        if hwnd and title.strip() and hwnd not in _window_snapshot:
-            if w.width > 50 and w.height > 50:
-                classification = _classify_window_uia(hwnd)
-                new_windows.append({
-                    "hwnd": hwnd,
-                    "title": title,
-                    "classification": classification,
-                    "width": w.width,
-                    "height": w.height,
-                })
-                print(f"  [detect] New window: '{title}' (hwnd={hwnd}, class={classification})")
+    # Snapshot the window list once, then probe each defensively. Windows can
+    # close mid-iteration, which makes pygetwindow raise PyGetWindowException
+    # (Win32 error 1400 — Invalid window handle). Catching per-window means
+    # one closing window can't crash the whole detection.
+    try:
+        candidates = list(gw.getAllWindows())
+    except Exception as e:
+        print(f"  [detect] getAllWindows failed: {e!r}")
+        candidates = []
+    skipped_stale = 0
+    for w in candidates:
+        try:
+            hwnd = getattr(w, '_hWnd', None)
+            title = w.title or ""
+            if not (hwnd and title.strip() and hwnd not in _window_snapshot):
+                continue
+            width = w.width
+            height = w.height
+            if width <= 50 or height <= 50:
+                continue
+            classification = _classify_window_uia(hwnd)
+            new_windows.append({
+                "hwnd": hwnd,
+                "title": title,
+                "classification": classification,
+                "width": width,
+                "height": height,
+            })
+            print(f"  [detect] New window: '{title}' (hwnd={hwnd}, class={classification})")
+        except Exception as e:
+            skipped_stale += 1
+            print(f"  [detect] Skipped stale window: {e!r}")
+            continue
     if not new_windows:
-        all_current = [(getattr(w, '_hWnd', None), w.title) for w in gw.getAllWindows() if w.title and w.title.strip()]
-        print(f"  [detect] No new windows found. Current: {len(all_current)}, Snapshot: {len(_window_snapshot)}")
+        try:
+            all_current = []
+            for w in gw.getAllWindows():
+                try:
+                    if w.title and w.title.strip():
+                        all_current.append((getattr(w, '_hWnd', None), w.title))
+                except Exception:
+                    continue
+            note = f", skipped_stale={skipped_stale}" if skipped_stale else ""
+            print(f"  [detect] No new windows found. Current: {len(all_current)}, Snapshot: {len(_window_snapshot)}{note}")
+        except Exception:
+            print(f"  [detect] No new windows found. (window enumeration partially failed)")
     best = None
     if env_hint and new_windows:
         for nw in new_windows:
