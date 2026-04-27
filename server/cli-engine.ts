@@ -4429,7 +4429,10 @@ ${fullHtml}`;
           `'loading_ocr' until the model is in memory, then real per-activity progress.`
         );
       }
-      const env = (args[1] || "SUP").toUpperCase();
+      // Allow flags before env (e.g. `epic discover --full`); the first
+      // non-flag positional arg is treated as env, defaulting to SUP.
+      const envArg = args.slice(1).find(a => !a.startsWith("--") && a !== "-h");
+      const env = (envArg || "SUP").toUpperCase();
       if (!EPIC_ENVS.has(env)) return fail(`[epic] unknown env: ${env}`);
       // Scope flags. Defaults are minimal (current activity, no probe) so the
       // first run completes in 10-60s; --full / --probe opt into the slow
