@@ -8961,18 +8961,50 @@ def execute_citrix_launch(cmd):
     print(f"  [citrix_launch] Resolved exe: {exe}")
     print(f"  [citrix_launch] App: {app_name!r}")
 
+    # SelfService.exe -qlaunch / -launch is a thin dispatcher: on success it
+    # forks the actual app launch and exits very quickly (typically << 1s)
+    # with returncode 0. On a bad app name it exits quickly with non-zero.
+    # Wait briefly to catch that exit so we can detect failure deterministically;
+    # if it's still alive after the wait, the launch is in flight (success).
+    EXIT_WAIT_S = 3.0
     attempts = []
     for flag in ("-qlaunch", "-launch"):
         argv = [exe, flag, app_name]
         try:
-            proc = subprocess.Popen(argv, shell=False)
+            proc = subprocess.Popen(
+                argv, shell=False,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
             print(f"  [citrix_launch] Spawned with {flag}: pid={proc.pid}")
-            attempts.append({"flag": flag, "pid": proc.pid, "ok": True})
-            post_result(command_id, "complete",
-                        data={"launched": app_name, "via": "SelfService.exe",
-                              "exe": exe, "flag": flag, "pid": proc.pid,
-                              "attempts": attempts})
-            return
+            try:
+                rc = proc.wait(timeout=EXIT_WAIT_S)
+                stderr_bytes = b""
+                try:
+                    _, stderr_bytes = proc.communicate(timeout=1.0)
+                except Exception:
+                    pass
+                stderr_text = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()
+                if rc == 0:
+                    print(f"  [citrix_launch] {flag} OK: exited rc=0 (launch dispatched)")
+                    attempts.append({"flag": flag, "pid": proc.pid, "returncode": 0, "ok": True})
+                    post_result(command_id, "complete",
+                                data={"launched": app_name, "via": "SelfService.exe",
+                                      "exe": exe, "flag": flag, "pid": proc.pid,
+                                      "returncode": 0, "attempts": attempts})
+                    return
+                print(f"  [citrix_launch] {flag} FAILED: rc={rc}  stderr={stderr_text!r}")
+                attempts.append({"flag": flag, "pid": proc.pid, "returncode": rc,
+                                 "stderr": stderr_text, "ok": False})
+                continue
+            except subprocess.TimeoutExpired:
+                # Still running after EXIT_WAIT_S — treat as success (launch in flight).
+                print(f"  [citrix_launch] {flag} OK: still running after {EXIT_WAIT_S}s (launch in flight)")
+                attempts.append({"flag": flag, "pid": proc.pid, "returncode": None, "ok": True})
+                post_result(command_id, "complete",
+                            data={"launched": app_name, "via": "SelfService.exe",
+                                  "exe": exe, "flag": flag, "pid": proc.pid,
+                                  "returncode": None, "attempts": attempts})
+                return
         except Exception as e:
             print(f"  [citrix_launch] {flag} FAILED: {e!r}  argv={argv}")
             attempts.append({"flag": flag, "ok": False, "error": repr(e)})
