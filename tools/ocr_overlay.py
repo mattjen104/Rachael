@@ -537,7 +537,7 @@ def tab_walk_scan(
                         elements[-1].arrow_behavior = arrow
                         curr_frame = _capture_window(sct, region)
                 except Exception as _ae:
-                    print(f"[tab-walk] arrow probe failed at #{len(elements, flush=True)}: {_ae}", flush=True)
+                    print(f"[tab-walk] arrow probe failed at #{len(elements)}: {_ae}", flush=True)
                 # Dropdown options probe (Alt+Down). Skip if arrow probe already
                 # classified the field as 'item' or 'macro' (not a dropdown).
                 ab = (elements[-1].arrow_behavior or {}).get("behavior")
@@ -548,7 +548,7 @@ def tab_walk_scan(
                             elements[-1].options = opts
                             curr_frame = _capture_window(sct, region)
                     except Exception as _pe:
-                        print(f"[tab-walk] options probe failed at #{len(elements, flush=True)}: {_pe}", flush=True)
+                        print(f"[tab-walk] options probe failed at #{len(elements)}: {_pe}", flush=True)
 
             if progress_cb and len(elements) % 10 == 0:
                 # progress_cb may be either the legacy single-arg callback
@@ -565,7 +565,7 @@ def tab_walk_scan(
                 except Exception:
                     pass
 
-            print(f"[tab-walk] #{len(elements, flush=True)}: '{label}' @ ({cx},{cy}) "
+            print(f"[tab-walk] #{len(elements)}: '{label}' @ ({cx},{cy}) "
                   f"bbox=({x1},{y1},{x2},{y2}) {(x2-x1)}x{(y2-y1)}px layer={layer}",
                   flush=True)
             prev_frame = curr_frame
@@ -619,8 +619,8 @@ def tab_walk_scan(
                     abs_cx=win_left + cxr, abs_cy=win_top + cyr,
                     tab_index=len(elements),  # appended at end of focus order
                 ))
-                print(f"[tab-walk] reverse #{len(elements, flush=True)}: '{label_r}' "
-                      f"@ ({cxr},{cyr}) layer={layer_r}")
+                print(f"[tab-walk] reverse #{len(elements)}: '{label_r}' "
+                      f"@ ({cxr},{cyr}) layer={layer_r}", flush=True)
                 prev_frame_r = curr_frame_r
     except Exception as _re:
         print(f"[tab-walk] reverse pass aborted: {_re}", flush=True)
@@ -631,8 +631,8 @@ def tab_walk_scan(
     except Exception:
         pass
 
-    print(f"[tab-walk] Walk complete: {len(elements, flush=True)} fields found "
-          f"(forward + reverse)")
+    print(f"[tab-walk] Walk complete: {len(elements)} fields found "
+          f"(forward + reverse)", flush=True)
     return elements
 
 
@@ -838,7 +838,7 @@ def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
     if progress_cb:
         try: progress_cb("enumerating_activities", None)
         except Exception: pass
-    print(f"[discover] enumerating activities via Ctrl+Space menu (max {max_items}, flush=True)...", flush=True)
+    print(f"[discover] enumerating activities via Ctrl+Space menu (max {max_items})...", flush=True)
 
     names: list[str] = []
     seen: set = set()
@@ -878,7 +878,7 @@ def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
         pyautogui.press('escape'); time.sleep(0.15)
     except Exception:
         pass
-    print(f"[discover] enumerated {len(names, flush=True)} activities", flush=True)
+    print(f"[discover] enumerated {len(names)} activities", flush=True)
     if progress_cb:
         # 'total' aligns with the scanning_activity stage; the CLI formatter
         # renders index/total when present. We don't yet have an index here, so
@@ -1043,7 +1043,7 @@ def discover_grammar(window_title: str, probe_options: bool = False,
         t.start()
         t.join(timeout=activity_timeout)
         if t.is_alive():
-            print(f"[discover] watchdog: activity {idx} ({scan_title!r}, flush=True) "
+            print(f"[discover] watchdog: activity {idx} ({scan_title!r}) "
                   f"exceeded {activity_timeout}s — cancelling", flush=True)
             cancel.set()
             t.join(timeout=5.0)  # graceful exit grace period
