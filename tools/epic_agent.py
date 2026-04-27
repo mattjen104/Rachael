@@ -8449,17 +8449,24 @@ def _normalize_focus(window):
         print(f"  [login] focus normalize skipped: {e}")
 
 
-def _refresh_window(window):
+def _refresh_window(window, label="window"):
     """Re-resolve the window object via its HWND so subsequent screen-change
     polls use a current bbox. Returns the refreshed window, or the original
-    if HWND is unknown / re-find fails."""
+    if HWND is unknown / re-find fails. Logs a warning when re-find fails
+    (other than the no-HWND case, which is silent)."""
     try:
         hwnd = getattr(window, '_hWnd', None) or getattr(window, 'hwnd', None)
         if not hwnd:
             return window
         fresh = find_window_by_hwnd(hwnd)
-        return fresh or window
-    except Exception:
+        if fresh:
+            return fresh
+        print(f"  [refresh] {label}: HWND rebind returned None for hwnd={hwnd}; "
+              f"continuing with original window object")
+        return window
+    except Exception as e:
+        print(f"  [refresh] {label}: HWND rebind raised {type(e).__name__}: "
+              f"{str(e)[:80]}; continuing with original window object")
         return window
 
 
@@ -8713,10 +8720,22 @@ def _login_hyperspace_window(window, label, username, password):
         ok_msg, key_msg = _submit_login_step(
             window, label, "message continue",
             timeout=3.0, alt_fallbacks=["o", "c"])
+
+        # Compose a per-step descriptor that surfaces both the key that was
+        # tried last AND whether the screen actually advanced. The final
+        # success/failure verdict is still _verify_login_result; this log
+        # is purely diagnostic so a failed boot can be debugged step-by-step.
+        def _step_desc(ok, key):
+            if ok and key:
+                return f"{key} -> advanced"
+            if not ok and key:
+                return f"{key} -> no visible change (may be benign for absent dialog)"
+            return "no-change"
+
         print(f"  [login] {label}: submit summary — "
-              f"login={key_login or 'no-change'}, "
-              f"department={key_dept or 'no-change'}, "
-              f"message={key_msg or 'no-change'}")
+              f"login={_step_desc(ok_login, key_login)}; "
+              f"department={_step_desc(ok_dept, key_dept)}; "
+              f"message={_step_desc(ok_msg, key_msg)}")
 
         return _verify_login_result(window, method, pw_method)
 
