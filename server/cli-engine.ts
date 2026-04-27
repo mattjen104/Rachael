@@ -4430,8 +4430,20 @@ ${fullHtml}`;
         );
       }
       // Allow flags before env (e.g. `epic discover --full`); the first
-      // non-flag positional arg is treated as env, defaulting to SUP.
-      const envArg = args.slice(1).find(a => !a.startsWith("--") && a !== "-h");
+      // non-flag positional arg is treated as env, defaulting to SUP. Skip
+      // values consumed by flags that take an argument (e.g. `--wait 120`).
+      const FLAGS_WITH_VALUE = new Set(["--wait", "--status"]);
+      let envArg: string | undefined;
+      for (let i = 1; i < args.length; i++) {
+        const a = args[i];
+        if (a === "-h") continue;
+        if (a.startsWith("--")) {
+          if (FLAGS_WITH_VALUE.has(a)) i += 1; // skip the flag's value
+          continue;
+        }
+        envArg = a;
+        break;
+      }
       const env = (envArg || "SUP").toUpperCase();
       if (!EPIC_ENVS.has(env)) return fail(`[epic] unknown env: ${env}`);
       // Scope flags. Defaults are minimal (current activity, no probe) so the
