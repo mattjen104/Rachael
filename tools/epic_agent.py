@@ -9307,6 +9307,12 @@ def execute_discover_grammar(cmd):
     probe_options = bool(cmd.get("probe_options", False))
     crawl_activities = bool(cmd.get("crawl_activities", False))
     activity_timeout = float(cmd.get("activity_timeout", 120))
+    # Echo immediately so the agent shell shows progress within ~100ms instead
+    # of looking hung while find_window/import/OCR init runs.
+    print(f"  [discover] starting (env={env}, crawl={crawl_activities}, "
+          f"probe={probe_options}, timeout={activity_timeout}s)", flush=True)
+    post_progress(command_id, "starting",
+                  data={"env": env, "crawl": crawl_activities, "probe": probe_options})
     kwargs = {
         "probe_options": probe_options,
         "crawl_activities": crawl_activities,
@@ -9319,15 +9325,23 @@ def execute_discover_grammar(cmd):
         try: kwargs["max_steps"] = int(cmd["max_steps"])
         except Exception: pass
 
+    print(f"  [discover] locating {env} Hyperspace window...", flush=True)
     window = find_window(env, client="hyperspace")
     if not window:
-        post_result(command_id, "error", error=f"No {env} Hyperspace window found")
+        msg = f"No {env} Hyperspace window found"
+        print(f"  [discover] ERROR: {msg}", flush=True)
+        post_result(command_id, "error", error=msg)
         return
+    print(f"  [discover] window found: {window.title!r}", flush=True)
+
+    print(f"  [discover] importing ocr_overlay module...", flush=True)
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from ocr_overlay import discover_grammar, _get_ocr
     except Exception as e:
-        post_result(command_id, "error", error=f"ocr_overlay import failed: {e}")
+        msg = f"ocr_overlay import failed: {e}"
+        print(f"  [discover] ERROR: {msg}", flush=True)
+        post_result(command_id, "error", error=msg)
         return
 
     # Pre-warm OCR with a visible message. PaddleOCR cold-load is 30-90s of
