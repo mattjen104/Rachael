@@ -1,0 +1,77 @@
+C:\Users\mjensen\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.2) doesn't match a supported version!
+  warnings.warn(
+  [input] Low-level keyboard available (backend: sendinput)
+  [config] Loading C:\Rachael\tools\.env
+==================================================
+  Epic Desktop Agent
+==================================================
+  OrgCloud: http://146.190.33.157:5000
+  Model:    anthropic/claude-sonnet-4
+  Poll:     every 3s
+
+  [hotkey] WARNING: Ctrl+Shift+Esc could not be registered (may be in use by another app)
+  [hotkey] Global hotkeys registered: Alt+C, Alt+X, Alt+S, Alt+A
+    Alt+C = Capture  |  Alt+X = Command (M-x)
+    Alt+S = Search   |  Alt+A = Agenda
+    Ctrl+Shift+Esc = Kill replay
+[overlay] Launched OCR overlay (pid 4248)
+[overlay]   Ctrl+Shift+H = toggle hints   Ctrl+Shift+C = correction mode
+No Hyperspace windows detected yet (will keep checking)
+
+Agent running. Waiting for commands from OrgCloud...
+Press Ctrl+C to stop.
+
+[ocr] Using default window title: 'Hyperspace'
+[ocr] Starting overlay over: 'Hyperspace'
+[ocr] Ctrl+Shift+H=toggle hints  Ctrl+Shift+C=correction mode  Esc=cancel
+[overlay] Hotkeys registered via Win32: ctrl+shift+h = hints, ctrl+shift+c = correction
+[overlay] Running. Ctrl+Shift+H=toggle hints, Ctrl+Shift+C=correction mode, Esc=cancel
+
+>> Command: check_windows (id: epic-1777311478245-ydjq8t)
+  [check] SUP hyperspace: not found. Windows with 'SUP': []
+
+>> Command: snapshot_windows (id: epic-1777311481278-awtnzm)
+  [snapshot] Captured 16 windows
+
+>> Command: citrix_launch (id: epic-1777311483815-dek65h)
+
+>> Command: detect_new_window (id: epic-1777311488349-e8b2qx)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311491879-qih8ak)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311494916-q4wem6)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311497935-093h3l)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311500959-b10wc2)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311504484-no9tde)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311507504-9myrwa)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311510527-9ja8bp)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311513550-nxcyeq)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311518589-uapid9)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311521615-7ky0tt)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311524636-g5s3bf)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311527665-n7lnzz)
+  [detect] No new windows found. Current: 16, Snapshot: 16
+
+>> Command: detect_new_window (id: epic-1777311531195-1lbjcx)
