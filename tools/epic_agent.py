@@ -2890,6 +2890,34 @@ def post_result(command_id, status, screenshot_b64=None, data=None, error=None):
         print(f"  Failed to post result for {command_id}")
 
 
+def post_progress(command_id, stage, data=None):
+    """Post an interim 'running' status with a stage label so callers polling
+    /api/epic/agent/result/<id> see real progress instead of 'queued' until the
+    very end. Best-effort: bridge failures are logged but never raised — the
+    discover run must not crash because the droplet is briefly unreachable."""
+    body = {
+        "commandId": command_id,
+        "status": "running",
+        "stage": stage,
+    }
+    if data is not None:
+        body["data"] = data
+    try:
+        resp = _bridge_request(
+            "post", "/api/epic/agent/results", "progress",
+            timeout=10, max_retries=1,
+            headers={
+                "Authorization": f"Bearer {BRIDGE_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+        if not resp:
+            print(f"  [progress] Failed to post progress for {command_id} stage={stage}", flush=True)
+    except Exception as e:
+        print(f"  [progress] Exception posting progress: {e}", flush=True)
+
+
 def execute_navigate(cmd):
     env = cmd.get("env", "SUP")
     target = cmd.get("target", "")
@@ -9266,32 +9294,69 @@ def execute_keepalive_stop(cmd):
 
 def execute_discover_grammar(cmd):
     """Run the Hyperdrive grammar discoverer (tab-walk + per-field probe)
-    and persist results into the local OCR KB sqlite (keyed by pHash)."""
+    and persist results into the local OCR KB sqlite (keyed by pHash).
+
+    Defaults are deliberately small: current-activity-only, no option probing.
+    Callers opt into the full crawl via crawl_activities=True / probe_options=True.
+    Progress is streamed to the bridge via post_progress() so `epic discover
+    --status <id>` shows real stages instead of 'queued' until the very end.
+    """
     command_id = cmd.get("id", "unknown")
     env = (cmd.get("env") or "SUP").upper()
-    probe_options = bool(cmd.get("probe_options", True))
-    # CLI/API-tunable crawl bounds (forwarded by /api/epic/agent/send).
-    # Defaults match discover_grammar() signature when omitted.
-    kwargs = {"probe_options": probe_options}
+    # First-run safe defaults: only the current activity, no per-field probing.
+    probe_options = bool(cmd.get("probe_options", False))
+    crawl_activities = bool(cmd.get("crawl_activities", False))
+    activity_timeout = float(cmd.get("activity_timeout", 120))
+    kwargs = {
+        "probe_options": probe_options,
+        "crawl_activities": crawl_activities,
+        "activity_timeout": activity_timeout,
+    }
     if "max_activities" in cmd and cmd["max_activities"] is not None:
         try: kwargs["max_activities"] = int(cmd["max_activities"])
         except Exception: pass
     if "max_steps" in cmd and cmd["max_steps"] is not None:
         try: kwargs["max_steps"] = int(cmd["max_steps"])
         except Exception: pass
+
     window = find_window(env, client="hyperspace")
     if not window:
         post_result(command_id, "error", error=f"No {env} Hyperspace window found")
         return
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from ocr_overlay import discover_grammar
+        from ocr_overlay import discover_grammar, _get_ocr
     except Exception as e:
         post_result(command_id, "error", error=f"ocr_overlay import failed: {e}")
         return
+
+    # Pre-warm OCR with a visible message. PaddleOCR cold-load is 30-90s of
+    # silent CPU work — without this, the agent looks hung on first run.
+    print(f"  [discover] loading OCR engine (first run takes ~30-60s)...", flush=True)
+    post_progress(command_id, "loading_ocr")
+    _ocr_t0 = time.time()
+    try:
+        engine = _get_ocr()
+    except Exception as e:
+        post_result(command_id, "error", error=f"OCR init failed: {e}")
+        return
+    if engine is None:
+        post_result(command_id, "error",
+                    error="OCR engine unavailable (install: pip install paddlepaddle paddleocr)")
+        return
+    _ocr_dt = time.time() - _ocr_t0
+    print(f"  [discover] OCR ready in {_ocr_dt:.1f}s", flush=True)
+    post_progress(command_id, "ocr_ready", data={"seconds": round(_ocr_dt, 1)})
+
+    def _progress(stage, data=None):
+        try:
+            post_progress(command_id, stage, data=data)
+        except Exception:
+            pass
+
     _action_in_flight.set()
     try:
-        result = discover_grammar(window.title, **kwargs)
+        result = discover_grammar(window.title, progress_cb=_progress, **kwargs)
     finally:
         _action_in_flight.clear()
     post_result(command_id, "complete", data=result)

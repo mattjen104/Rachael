@@ -551,10 +551,23 @@ def tab_walk_scan(
                         print(f"[tab-walk] options probe failed at #{len(elements)}: {_pe}")
 
             if progress_cb and len(elements) % 10 == 0:
-                progress_cb(len(elements))
+                # progress_cb may be either the legacy single-arg callback
+                # (count) used by overlay code paths, or the two-arg
+                # (stage, data) callback used by discover_grammar. Try the
+                # richer signature first, fall back to the legacy form.
+                try:
+                    progress_cb("tab_walk", {"count": len(elements)})
+                except TypeError:
+                    try:
+                        progress_cb(len(elements))
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
 
             print(f"[tab-walk] #{len(elements)}: '{label}' @ ({cx},{cy}) "
-                  f"bbox=({x1},{y1},{x2},{y2}) {(x2-x1)}x{(y2-y1)}px layer={layer}")
+                  f"bbox=({x1},{y1},{x2},{y2}) {(x2-x1)}x{(y2-y1)}px layer={layer}",
+                  flush=True)
             prev_frame = curr_frame
 
     # Reverse pass (Shift+Tab) to discover any fields the forward walk missed.
@@ -801,7 +814,8 @@ def _ocr_menu_panel(frame_before, frame_after) -> list[str]:
 
 
 def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
-                                   max_pages: int = 25) -> list[str]:
+                                   max_pages: int = 25,
+                                   progress_cb=None) -> list[str]:
     """Open Epic's activity navigator (Ctrl+Space) and exhaustively enumerate
     activity names by paging the menu with PageDown until no new entries appear
     for two consecutive pages. Deterministic upper bound via max_pages."""
@@ -820,6 +834,11 @@ def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
               "width": win.width, "height": win.height}
     if _get_ocr() is None:
         return []
+
+    if progress_cb:
+        try: progress_cb("enumerating_activities", None)
+        except Exception: pass
+    print(f"[discover] enumerating activities via Ctrl+Space menu (max {max_items})...", flush=True)
 
     names: list[str] = []
     seen: set = set()
@@ -859,10 +878,19 @@ def _enumerate_activities_via_menu(window_title: str, max_items: int = 200,
         pyautogui.press('escape'); time.sleep(0.15)
     except Exception:
         pass
+    print(f"[discover] enumerated {len(names)} activities", flush=True)
+    if progress_cb:
+        # 'total' aligns with the scanning_activity stage; the CLI formatter
+        # renders index/total when present. We don't yet have an index here, so
+        # this stage just signals enumeration finished with the discovered count.
+        try: progress_cb("activities_enumerated",
+                         {"total": len(names), "activity_count": len(names)})
+        except Exception: pass
     return names
 
 
-def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -> dict:
+def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int,
+                       progress_cb=None, cancel_flag=None) -> dict:
     """Tab-walk + (optional) arrow probe a SINGLE activity screen, then persist
     elements keyed by the screen's pHash. HIPAA: refuses to persist anything
     if the window title matches a chart-context marker.
@@ -877,6 +905,8 @@ def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -
         window_title, max_steps=max_steps, tab_delay=0.18,
         has_activity_tabs=False,
         probe_options=probe_options,
+        progress_cb=progress_cb,
+        cancel_flag=cancel_flag,
     )
     if not elements:
         return {"fields": 0, "options": 0, "fp": "", "phash": ""}
@@ -932,14 +962,23 @@ def _scan_one_activity(window_title: str, probe_options: bool, max_steps: int) -
             "fp": fp, "phash": phash}
 
 
-def discover_grammar(window_title: str, probe_options: bool = True,
-                     max_steps: int = 300, crawl_activities: bool = True,
-                     max_activities: int = 200) -> dict:
-    """Full Hyperdrive grammar discovery:
-    (1) optionally crawl activities via Ctrl+Space (Epic activity navigator),
-    (2) per activity: tab_walk_scan + per-field Alt+Down option probe,
-    (3) per activity: persist a separate grammar model keyed by that screen's pHash,
-    (4) HIPAA gate: refuse to persist on chart-context screens; drop PHI tokens.
+def discover_grammar(window_title: str, probe_options: bool = False,
+                     max_steps: int = 300, crawl_activities: bool = False,
+                     max_activities: int = 200, progress_cb=None,
+                     activity_timeout: float = 120.0) -> dict:
+    """Hyperdrive grammar discovery:
+    (1) always scan the current activity first (no nav).
+    (2) if crawl_activities=True: open Ctrl+Space (Epic activity navigator),
+        OCR the menu to enumerate, then iterate each by typing name+Enter.
+    (3) per activity: tab_walk_scan + (optional) per-field Alt+Down option probe.
+    (4) per activity: persist a separate grammar model keyed by that screen's pHash.
+    (5) HIPAA gate: refuse to persist on chart-context screens; drop PHI tokens.
+    (6) Per-activity watchdog (default 120s): if an activity exceeds the budget,
+        the cancel_flag is set, the worker is given a brief grace period, and the
+        crawl moves on with error="watchdog_timeout".
+
+    Defaults are deliberately small (current activity only, no probing) so a
+    first run completes in 10-60s. Power users opt into the full crawl.
 
     Returns aggregated summary dict.
     """
@@ -963,11 +1002,71 @@ def discover_grammar(window_title: str, probe_options: bool = True,
         pass
     time.sleep(0.25)
 
+    if progress_cb:
+        try: progress_cb("window_activated", {"title": win.title or window_title})
+        except Exception: pass
+    print(f"[discover] window activated: {win.title}", flush=True)
+
     activities: list[dict] = []
     seen_phashes: set = set()
 
-    # Always scan the current activity first (no nav).
-    first = _scan_one_activity(win.title or window_title, probe_options, max_steps)
+    def _run_activity_with_watchdog(idx: int, name: str | None, scan_title: str) -> dict:
+        """Run _scan_one_activity in a worker thread with a watchdog timer.
+        On timeout: set cancel_flag, wait briefly for graceful exit, return
+        {error: "watchdog_timeout"}."""
+        cancel = threading.Event()
+        result_box: dict = {}
+        err_box: dict = {}
+
+        def _worker():
+            try:
+                # Inner progress wrapper prefixes the activity index so the
+                # tab-walk's per-N-elements callback is attributable.
+                def _act_progress(stage, data=None):
+                    if progress_cb:
+                        try:
+                            d2 = dict(data or {})
+                            d2.setdefault("activity_index", idx)
+                            if name is not None:
+                                d2.setdefault("activity_name", name)
+                            progress_cb(stage, d2)
+                        except Exception:
+                            pass
+                result_box["res"] = _scan_one_activity(
+                    scan_title, probe_options, max_steps,
+                    progress_cb=_act_progress, cancel_flag=cancel,
+                )
+            except Exception as we:
+                err_box["err"] = str(we)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        t.join(timeout=activity_timeout)
+        if t.is_alive():
+            print(f"[discover] watchdog: activity {idx} ({scan_title!r}) "
+                  f"exceeded {activity_timeout}s — cancelling", flush=True)
+            cancel.set()
+            t.join(timeout=5.0)  # graceful exit grace period
+            if progress_cb:
+                try: progress_cb("activity_timeout",
+                                 {"activity_index": idx, "activity_name": name,
+                                  "seconds": activity_timeout})
+                except Exception: pass
+            return {"error": "watchdog_timeout"}
+        if "err" in err_box:
+            return {"error": f"scan exception: {err_box['err']}"}
+        return result_box.get("res", {})
+
+    # Stage: scanning_activity 1/N for the current screen.
+    if progress_cb:
+        try: progress_cb("scanning_activity",
+                         {"index": 0, "total": 1 if not crawl_activities else None,
+                          "activity_name": win.title or window_title})
+        except Exception: pass
+    print(f"[discover] scanning current activity: {win.title!r}", flush=True)
+
+    # Always scan the current activity first (no nav). Subject to watchdog.
+    first = _run_activity_with_watchdog(0, None, win.title or window_title)
     if first.get("phash"):
         seen_phashes.add(first["phash"])
     activities.append({"activity_index": 0, "title": win.title, **first})
@@ -977,9 +1076,17 @@ def discover_grammar(window_title: str, probe_options: bool = True,
         # (Ctrl+Space), OCR the menu to learn the full activity list, then
         # iterate each by typing its name + Enter. Bounded by the menu contents,
         # not by a guessed step count.
-        activity_names = _enumerate_activities_via_menu(window_title,
-                                                       max_items=max_activities)
+        activity_names = _enumerate_activities_via_menu(
+            window_title, max_items=max_activities, progress_cb=progress_cb,
+        )
+        total_n = len(activity_names)
         for idx, name in enumerate(activity_names, start=1):
+            if progress_cb:
+                try: progress_cb("scanning_activity",
+                                 {"index": idx, "total": total_n,
+                                  "activity_name": name})
+                except Exception: pass
+            print(f"[discover] activity {idx}/{total_n}: {name!r}", flush=True)
             try:
                 pyautogui.hotkey('ctrl', 'space')
                 time.sleep(0.4)
@@ -1002,7 +1109,7 @@ def discover_grammar(window_title: str, probe_options: bool = True,
                                    "skipped_reason": "duplicate_phash"})
                 continue
 
-            res = _scan_one_activity(cur_title, probe_options, max_steps)
+            res = _run_activity_with_watchdog(idx, name, cur_title)
             if res.get("phash"):
                 seen_phashes.add(res["phash"])
             activities.append({"activity_index": idx, "name": name,
@@ -1010,10 +1117,18 @@ def discover_grammar(window_title: str, probe_options: bool = True,
 
     total_fields = sum(a.get("fields", 0) for a in activities)
     total_options = sum(a.get("options", 0) for a in activities)
+    activity_count = len([a for a in activities if a.get("fields", 0) > 0])
+    if progress_cb:
+        try: progress_cb("complete",
+                         {"activity_count": activity_count,
+                          "fields": total_fields, "options": total_options})
+        except Exception: pass
+    print(f"[discover] complete: {activity_count} activities, "
+          f"{total_fields} fields, {total_options} with options", flush=True)
     return {
         "window": window_title,
         "activities": activities,
-        "activity_count": len([a for a in activities if a.get("fields", 0) > 0]),
+        "activity_count": activity_count,
         "fields": total_fields,
         "options": total_options,
     }

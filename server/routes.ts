@@ -784,10 +784,11 @@ export async function registerRoutes(
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const { commandId, status, screenshot, data, error } = req.body;
+    const { commandId, status, screenshot, data, error, stage } = req.body;
     epicResults.set(commandId, {
       commandId,
       status,
+      stage: stage || null,
       screenshot: screenshot || null,
       data: data || null,
       error: error || null,
@@ -823,7 +824,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
-    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold, windowKey, targetTitle, alternateEdges, probe_options, probeOptions, max_activities, maxActivities, max_steps, maxSteps, app: appArg } = req.body;
+    const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold, windowKey, targetTitle, alternateEdges, probe_options, probeOptions, max_activities, maxActivities, max_steps, maxSteps, crawl_activities, crawlActivities, activity_timeout, activityTimeout, app: appArg } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const cmd: Record<string, unknown> = { id, type, env: env || "SUP" };
@@ -856,6 +857,10 @@ export async function registerRoutes(
     if (_maxAct !== undefined) cmd.max_activities = _maxAct;
     const _maxSteps = max_steps ?? maxSteps;
     if (_maxSteps !== undefined) cmd.max_steps = _maxSteps;
+    const _crawl = crawl_activities ?? crawlActivities;
+    if (_crawl !== undefined) cmd.crawl_activities = _crawl;
+    const _actTimeout = activity_timeout ?? activityTimeout;
+    if (_actTimeout !== undefined) cmd.activity_timeout = _actTimeout;
     epicCommandQueue.push(cmd);
     res.json({ ok: true, commandId: id });
   });

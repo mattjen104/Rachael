@@ -4373,8 +4373,10 @@ ${fullHtml}`;
     if (args[0] === "discover") {
       // Trigger Hyperdrive grammar discovery (tab-walk + per-field probe).
       // Default is FIRE-AND-FORGET: queue the job, return commandId immediately,
-      // and let the agent crawl as long as it needs (Hyperdrive crawls can take
-      // many minutes). Use `epic discover --status <id>` to poll, or
+      // and let the agent crawl as long as it needs. Default scope is
+      // current-activity-only (10-60s); use --full to crawl every activity and
+      // --probe to per-field option-probe (much slower).
+      // Use `epic discover --status <id>` to poll, or
       // `epic discover <env> --wait [seconds]` to block.
       if (args[1] === "--status" || args[1] === "status") {
         const cmdId = args[2];
@@ -4396,6 +4398,18 @@ ${fullHtml}`;
             ].join(nl));
           }
           if (rData.status === "error") return fail(`[epic] discover failed: ${rData.error || "unknown"}`);
+          if (rData.status === "running" && rData.stage) {
+            // Compose a compact summary from progress data when available.
+            const sd = rData.data || {};
+            const extras: string[] = [];
+            if (sd.activity_index !== undefined) extras.push(`activity=${sd.activity_index}`);
+            if (sd.activity_name) extras.push(`'${String(sd.activity_name).substring(0, 30)}'`);
+            if (sd.index !== undefined && sd.total !== undefined) extras.push(`${sd.index}/${sd.total}`);
+            if (sd.count !== undefined) extras.push(`fields=${sd.count}`);
+            if (sd.seconds !== undefined) extras.push(`${sd.seconds}s`);
+            const tail = extras.length ? ` (${extras.join(", ")})` : "";
+            return ok(`discover ${cmdId}: running — ${rData.stage}${tail}`);
+          }
           return ok(`discover ${cmdId}: ${rData.status || "queued"} (poll again with: epic discover --status ${cmdId})`);
         } catch (e: any) {
           return fail(`[epic] status error: ${e.message}`);
@@ -4403,22 +4417,37 @@ ${fullHtml}`;
       }
       const env = (args[1] || "SUP").toUpperCase();
       if (!EPIC_ENVS.has(env)) return fail(`[epic] unknown env: ${env}`);
-      const probe = !args.includes("--no-probe");
+      // Scope flags. Defaults are minimal (current activity, no probe) so the
+      // first run completes in 10-60s; --full / --probe opt into the slow
+      // exhaustive crawl. --no-probe is kept as a no-op alias for the default.
+      const fullCrawl = args.includes("--full");
+      const probe = args.includes("--probe");
+      // --no-probe is now redundant (default-off) but accepted for back-compat.
       const waitIdx = args.indexOf("--wait");
       const waitSecs = waitIdx >= 0
         ? Math.max(60, parseInt(args[waitIdx + 1] || "1800", 10) || 1800)
         : 0;
+      const scopeLabel = fullCrawl
+        ? (probe ? "full crawl with option probing"
+                 : "full crawl (no option probing)")
+        : (probe ? "current-activity-only with option probing"
+                 : "current-activity-only");
       try {
         const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/epic/agent/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.BRIDGE_TOKEN || ""}` },
-          body: JSON.stringify({ type: "discover_grammar", env, probe_options: probe }),
+          body: JSON.stringify({
+            type: "discover_grammar", env,
+            probe_options: probe,
+            crawl_activities: fullCrawl,
+          }),
         });
         const data: any = resp.ok ? await resp.json() : { ok: false };
         if (!data.ok || !data.commandId) return fail(`[epic] discover queue failed`);
         if (waitSecs === 0) {
           return ok(
-            `epic discover ${env} queued (id=${data.commandId}).${nl}` +
+            `epic discover ${env} queued (id=${data.commandId}, scope: ${scopeLabel}).${nl}` +
+            `First-run note: PaddleOCR cold-load takes ~30-60s; status will show 'loading_ocr' until ready.${nl}` +
             `Poll with: epic discover --status ${data.commandId}${nl}` +
             `Or block with: epic discover ${env} --wait <seconds>`
           );
