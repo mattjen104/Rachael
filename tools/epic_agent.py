@@ -8411,22 +8411,107 @@ def _send_enter():
     _keybd_event_key(0x0D, up=True)
 
 
-def _submit_login_step(window, label, step_name, timeout):
-    """Try Enter first (works on Hyperspace 2025+ where the Log In button has
-    no Alt accelerator and the focused field's default action submits). If the
-    screen doesn't change, fall back to Alt+O (the legacy 'Log _O_n' / OK
-    accelerator used by older Hyperspace builds)."""
+def _send_alt_letter(letter):
+    """Send Alt+<letter> for any single ASCII letter (case-insensitive).
+    Used for dialog accelerators like Alt+C (Continue), Alt+O (OK)."""
+    if not letter or len(letter) != 1:
+        return
+    vk = ord(letter.upper())  # 'A'..'Z' map directly to VK_A..VK_Z (0x41..0x5A)
+    _keybd_event_key(0x12, up=False)         # Alt down
+    time.sleep(0.02)
+    _keybd_event_key(vk, up=False)
+    time.sleep(0.02)
+    _keybd_event_key(vk, up=True)
+    time.sleep(0.02)
+    _keybd_event_key(0x12, up=True)          # Alt up
+
+
+def _normalize_focus(window):
+    """Send Shift+Tab then Tab — a focus no-op cycle that lands focus on a
+    tabbable control. Useful after a screen transition where focus may have
+    landed on a non-default control that swallows Enter."""
+    try:
+        # Shift down + Tab (back-tab)
+        _keybd_event_key(0x10, up=False)     # Shift down
+        time.sleep(0.02)
+        _keybd_event_key(0x09, up=False)     # Tab down
+        time.sleep(0.02)
+        _keybd_event_key(0x09, up=True)      # Tab up
+        time.sleep(0.02)
+        _keybd_event_key(0x10, up=True)      # Shift up
+        time.sleep(0.05)
+        # Tab forward (lands on the control we likely want)
+        _keybd_event_key(0x09, up=False)
+        time.sleep(0.02)
+        _keybd_event_key(0x09, up=True)
+        time.sleep(0.05)
+    except Exception as e:
+        print(f"  [login] focus normalize skipped: {e}")
+
+
+def _refresh_window(window):
+    """Re-resolve the window object via its HWND so subsequent screen-change
+    polls use a current bbox. Returns the refreshed window, or the original
+    if HWND is unknown / re-find fails."""
+    try:
+        hwnd = getattr(window, '_hWnd', None) or getattr(window, 'hwnd', None)
+        if not hwnd:
+            return window
+        fresh = find_window_by_hwnd(hwnd)
+        return fresh or window
+    except Exception:
+        return window
+
+
+def _submit_login_step(window, label, step_name, timeout,
+                       alt_fallbacks=None, normalize_focus=False):
+    """Advance a Hyperspace login dialog step by trying Enter first, then
+    each Alt+letter accelerator in `alt_fallbacks` until the screen visibly
+    changes or the list is exhausted.
+
+    - Enter: works when the focused control's default action submits (login
+      screen with focus on password field; modern dialogs where the default
+      button is also activated by Enter regardless of focus).
+    - Alt+letter fallbacks: cover the per-dialog cases where the new
+      Hyperspace 2025 UI uses different button accelerators (Continue=Alt+C
+      for the department dialog, OK=Alt+O for older message dialogs, etc.).
+
+    Returns (advanced: bool, key_used: str | None) so the caller can log
+    which key resolved each step.
+    """
+    if alt_fallbacks is None:
+        alt_fallbacks = []
+
+    # Refresh window handle so screen-change polls use the current bbox
+    # (the window may have moved/resized between transitions).
+    window = _refresh_window(window)
     activate_window(window)
     time.sleep(0.1)
+
+    if normalize_focus:
+        print(f"  [login] {label}: {step_name} — normalizing focus (Shift+Tab/Tab)")
+        _normalize_focus(window)
+
     print(f"  [login] {label}: {step_name} — sending Enter")
     _send_enter()
     if _wait_for_screen_change(window, timeout=timeout, poll_interval=0.3):
-        return True
-    activate_window(window)
-    time.sleep(0.1)
-    print(f"  [login] {label}: {step_name} — no change after Enter, falling back to Alt+O")
-    _send_alt_o()
-    return _wait_for_screen_change(window, timeout=timeout, poll_interval=0.3)
+        print(f"  [login] {label}: {step_name} — advanced via Enter")
+        return True, "Enter"
+
+    for letter in alt_fallbacks:
+        window = _refresh_window(window)
+        activate_window(window)
+        time.sleep(0.1)
+        accel = f"Alt+{letter.upper()}"
+        print(f"  [login] {label}: {step_name} — no change, trying {accel}")
+        _send_alt_letter(letter)
+        if _wait_for_screen_change(window, timeout=timeout, poll_interval=0.3):
+            print(f"  [login] {label}: {step_name} — advanced via {accel}")
+            return True, accel
+
+    print(f"  [login] {label}: {step_name} — no key advanced the dialog "
+          f"(tried Enter + {[f'Alt+{l.upper()}' for l in alt_fallbacks]})")
+    return False, None
 
 
 def _adaptive_type_text_no_verify(window, text, field_description, proven_method=None):
@@ -8598,13 +8683,40 @@ def _login_hyperspace_window(window, label, username, password):
             return False, "all input methods failed for password"
         time.sleep(0.1)
 
-        # Hyperspace 2025+ "Log In" button has no Alt-key accelerator, so the
-        # legacy Alt+O no longer submits. Try Enter first (default action on
-        # the focused password field), fall back to Alt+O for older builds
-        # and the Epic OK-style continue dialogs.
-        _submit_login_step(window, label, "login submit", timeout=5.0)
-        _submit_login_step(window, label, "department continue", timeout=3.0)
-        _submit_login_step(window, label, "message continue", timeout=3.0)
+        # Per-dialog submit accelerators for the post-2025 Hyperspace UI.
+        # Strategy: try Enter first (the safest — activates the dialog's
+        # default action when focus is on a text field), then fall back to
+        # explicit Alt+letter accelerators for the button we want.
+        # Alt+letter accelerators are focus-independent: Alt+C activates
+        # "Continue" regardless of which control currently has focus, so
+        # they are safer than focus-shifting tricks.
+        #
+        #   login screen    — Enter on the focused password field submits
+        #                     the new "Log In" button; Alt+O retained as
+        #                     a defensive fallback for legacy "Log _O_n"
+        #                     builds. (No Cancel button on the login form,
+        #                     so neither key can mis-fire to abort.)
+        #   department      — Continue=Alt+C in 2025; Alt+O kept for
+        #                     older "OK"-style builds.
+        #   message dialog  — older OK dialogs use Alt+O; newer agreement
+        #                     screens render Continue (Alt+C).
+        #
+        # We deliberately do NOT use Shift+Tab/Tab focus normalization on
+        # the post-login dialogs: tab-order on the department dialog can
+        # land focus on Cancel, which would make Enter abort the login.
+        ok_login, key_login = _submit_login_step(
+            window, label, "login submit",
+            timeout=5.0, alt_fallbacks=["o"])
+        ok_dept, key_dept = _submit_login_step(
+            window, label, "department continue",
+            timeout=3.0, alt_fallbacks=["c", "o"])
+        ok_msg, key_msg = _submit_login_step(
+            window, label, "message continue",
+            timeout=3.0, alt_fallbacks=["o", "c"])
+        print(f"  [login] {label}: submit summary — "
+              f"login={key_login or 'no-change'}, "
+              f"department={key_dept or 'no-change'}, "
+              f"message={key_msg or 'no-change'}")
 
         return _verify_login_result(window, method, pw_method)
 
