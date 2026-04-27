@@ -8934,11 +8934,17 @@ def _keepalive_session_loop(env: str, client: str, stop_event):
 def execute_citrix_launch(cmd):
     """Launch a Citrix-published app directly via SelfService.exe (no browser).
     Used by 'epic boot' when the Chrome extension bridge is offline so launches
-    can still happen from the Windows desktop."""
+    can still happen from the Windows desktop.
+
+    Tries `-qlaunch "<display name>"` first (the standard flag for launching
+    by published-app display name); falls back to `-launch "<name>"` if the
+    first invocation fails to spawn. Prints diagnostics to console at every
+    step so silent no-ops don't go unnoticed."""
     import subprocess
     command_id = cmd.get("id", "unknown")
     app_name = cmd.get("app", "")
     if not app_name:
+        print("  [citrix_launch] ERROR: missing 'app'")
         post_result(command_id, "error", error="missing 'app'")
         return
     candidates = [
@@ -8947,15 +8953,32 @@ def execute_citrix_launch(cmd):
     ]
     exe = next((p for p in candidates if os.path.exists(p)), None)
     if not exe:
+        print(f"  [citrix_launch] ERROR: SelfService.exe not found in any of: {candidates}")
         post_result(command_id, "error",
-                    error="SelfService.exe not found (Citrix Workspace App not installed?)")
+                    error="SelfService.exe not found (Citrix Workspace App not installed?)",
+                    data={"app": app_name, "candidates": candidates})
         return
-    try:
-        subprocess.Popen([exe, "-launch", app_name], shell=False)
-        post_result(command_id, "complete",
-                    data={"launched": app_name, "via": "SelfService.exe"})
-    except Exception as e:
-        post_result(command_id, "error", error=f"SelfService.exe launch failed: {e}")
+    print(f"  [citrix_launch] Resolved exe: {exe}")
+    print(f"  [citrix_launch] App: {app_name!r}")
+
+    attempts = []
+    for flag in ("-qlaunch", "-launch"):
+        argv = [exe, flag, app_name]
+        try:
+            proc = subprocess.Popen(argv, shell=False)
+            print(f"  [citrix_launch] Spawned with {flag}: pid={proc.pid}")
+            attempts.append({"flag": flag, "pid": proc.pid, "ok": True})
+            post_result(command_id, "complete",
+                        data={"launched": app_name, "via": "SelfService.exe",
+                              "exe": exe, "flag": flag, "pid": proc.pid,
+                              "attempts": attempts})
+            return
+        except Exception as e:
+            print(f"  [citrix_launch] {flag} FAILED: {e!r}  argv={argv}")
+            attempts.append({"flag": flag, "ok": False, "error": repr(e)})
+    post_result(command_id, "error",
+                error=f"SelfService.exe launch failed for all flags ({[a['flag'] for a in attempts]})",
+                data={"app": app_name, "exe": exe, "attempts": attempts})
 
 
 def execute_keepalive_start(cmd):

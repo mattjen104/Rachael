@@ -8343,8 +8343,19 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (!windowAlreadyExists) {
               const snapshotOk = await sendAgentSnapshot();
 
-              emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
-              const launchResult = await sendAgentCitrixLaunch(group.hyperdrive!.app);
+              // Launch path: prefer the proven Chrome-extension portal flow
+              // (CWP storefront → click published-app tile → Citrix Receiver
+              // opens the window). Fall back to the agent's SelfService.exe
+              // launcher only when the Chrome extension is offline.
+              const useExtension = isExtensionConnected();
+              if (!useExtension) {
+                emitEvent("cli", `Launching ${group.hyperdrive!.app} via epic_agent SelfService.exe (Chrome extension offline)...`, "info", { metadata: { command: "boot" } });
+              } else {
+                emitEvent("cli", `Launching ${group.hyperdrive!.app}...`, "info", { metadata: { command: "boot" } });
+              }
+              const launchResult = useExtension
+                ? await launchCitrixApp(group.hyperdrive!.app, group.portal)
+                : await sendAgentCitrixLaunch(group.hyperdrive!.app);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
               if (snapshotOk) {
@@ -8407,8 +8418,15 @@ One lunch should have "isKiddoTrial":true and "bridgeRationale":"..." explaining
             if (!textWindowExists) {
               const textSnapshotOk = await sendAgentSnapshot();
 
-              emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
-              const launchResult = await sendAgentCitrixLaunch(group.text!.app);
+              const useExtension = isExtensionConnected();
+              if (!useExtension) {
+                emitEvent("cli", `Launching ${group.text!.app} via epic_agent SelfService.exe (Chrome extension offline)...`, "info", { metadata: { command: "boot" } });
+              } else {
+                emitEvent("cli", `Launching ${group.text!.app}...`, "info", { metadata: { command: "boot" } });
+              }
+              const launchResult = useExtension
+                ? await launchCitrixApp(group.text!.app, group.portal)
+                : await sendAgentCitrixLaunch(group.text!.app);
               if (launchResult !== "ok") { loginEverFailed = true; return launchResult; }
 
               if (textSnapshotOk) {
