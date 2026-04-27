@@ -1057,10 +1057,12 @@ def discover_grammar(window_title: str, probe_options: bool = False,
             return {"error": f"scan exception: {err_box['err']}"}
         return result_box.get("res", {})
 
-    # Stage: scanning_activity 1/N for the current screen.
+    # Stage: scanning_activity 1/N for the current screen. We use 1-indexed
+    # counters here for user-facing clarity (the watchdog wrapper records the
+    # 0-indexed `activity_index` separately for internal aggregation).
     if progress_cb:
         try: progress_cb("scanning_activity",
-                         {"index": 0, "total": 1 if not crawl_activities else None,
+                         {"index": 1, "total": 1 if not crawl_activities else None,
                           "activity_name": win.title or window_title})
         except Exception: pass
     print(f"[discover] scanning current activity: {win.title!r}", flush=True)
