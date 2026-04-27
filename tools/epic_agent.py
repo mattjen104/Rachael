@@ -9007,7 +9007,7 @@ def execute_citrix_launch(cmd):
                 return
         except Exception as e:
             print(f"  [citrix_launch] {flag} FAILED: {e!r}  argv={argv}")
-            attempts.append({"flag": flag, "ok": False, "error": repr(e)})
+            attempts.append({"flag": flag, "ok": False, "error": repr(e), "argv": argv})
     post_result(command_id, "error",
                 error=f"SelfService.exe launch failed for all flags ({[a['flag'] for a in attempts]})",
                 data={"app": app_name, "exe": exe, "attempts": attempts})
