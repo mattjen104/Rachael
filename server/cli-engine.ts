@@ -4415,6 +4415,20 @@ ${fullHtml}`;
           return fail(`[epic] status error: ${e.message}`);
         }
       }
+      if (args.includes("--help") || args.includes("-h")) {
+        return ok(
+          `Usage: epic discover [<env>] [flags]${nl}` +
+          `  <env>          One of ${[...EPIC_ENVS].join(", ")} (default: SUP)${nl}` +
+          `  --full         Crawl every activity (slow; default is current-activity-only)${nl}` +
+          `  --probe        Probe each field for dropdown options (slow)${nl}` +
+          `  --no-probe     Accepted for back-compat; same as default (probing off)${nl}` +
+          `  --wait <secs>  Block until complete or until <secs> elapse (min 60)${nl}` +
+          `  --status <id>  Show progress/result for a previously queued discover${nl}` +
+          `${nl}` +
+          `First-run note: PaddleOCR cold-load takes ~30-60s. Status will show ` +
+          `'loading_ocr' until the model is in memory, then real per-activity progress.`
+        );
+      }
       const env = (args[1] || "SUP").toUpperCase();
       if (!EPIC_ENVS.has(env)) return fail(`[epic] unknown env: ${env}`);
       // Scope flags. Defaults are minimal (current activity, no probe) so the
