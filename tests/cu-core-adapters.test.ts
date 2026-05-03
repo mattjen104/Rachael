@@ -312,7 +312,16 @@ describe("ComputerUseBus + adapters", () => {
 
   it("runParityGate caps fixtures per surface kind and exercises Citrix variants", async () => {
     const reportDir = path.resolve("tests/__reports__");
-    await fs.rm(reportDir, { recursive: true, force: true });
+    // Wipe contents but preserve `.gitignore` so generated parity JSONs
+    // never sneak back into VCS between test runs.
+    try {
+      for (const entry of await fs.readdir(reportDir)) {
+        if (entry === ".gitignore") continue;
+        await fs.rm(path.join(reportDir, entry), { recursive: true, force: true });
+      }
+    } catch {
+      await fs.mkdir(reportDir, { recursive: true });
+    }
 
     const citrixIo = () => ({
       screenshot: vi.fn(async () => ({ imageRef: "stub" })),

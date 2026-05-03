@@ -1,6 +1,11 @@
 import { randomUUID } from "crypto";
 import { emitEvent } from "./event-bus";
-import type { Action as CuAction, Observation as CuObservation } from "@rachael/cu-core";
+import type {
+  Action as CuAction,
+  Observation as CuObservation,
+  ObservationKind,
+} from "@rachael/cu-core";
+import type { BridgeQueueApi } from "@rachael/cu-core";
 
 const BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu", "pulse.ucsd.edu", ".reddit.com", "reddit.com", ".live.com", "outlook.live.com", ".office.com", "outlook.office.com", "teams.microsoft.com", ".service-now.com"];
 export function isBridgeOnlyDomain(url: string): boolean {
@@ -88,6 +93,28 @@ function _digest(input: string): string {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
+function _latestResultWithDom(): BridgeResult | null {
+  // Walk the in-memory results map for the most recently resolved entry
+  // that originated from a real DOM/Goto job on the extension surface.
+  // Restrict to `source === "extension"` so a concurrent Playwright
+  // workload cannot bleed its DOM into the extension adapter's
+  // standalone `observe(DomSnapshot)` reply. Synthetic `cu-wait-*`
+  // results (Wait stubs that carry `text: "ok"`) are also filtered.
+  let best: BridgeResult | null = null;
+  let bestAt = 0;
+  for (const r of results.values()) {
+    if (typeof r.text !== "string") continue;
+    if (r.source !== "extension") continue;
+    if (!r.text || r.jobId.startsWith("cu-wait-")) continue;
+    const at = r.completedAt ?? 0;
+    if (at >= bestAt) {
+      best = r;
+      bestAt = at;
+    }
+  }
+  return best;
+}
+
 function _resultToDom(result: BridgeResult, surfaceId: string): CuObservation {
   const text = result.text ?? "";
   const obs: CuObservation = {
@@ -103,35 +130,46 @@ function _resultToDom(result: BridgeResult, surfaceId: string): CuObservation {
   return obs;
 }
 
-export function makeExtensionBridgeQueueApi(opts: { surfaceId?: string; submittedBy?: string } = {}) {
+export function makeExtensionBridgeQueueApi(
+  opts: { surfaceId?: string; submittedBy?: string } = {},
+): BridgeQueueApi {
   const surfaceId = opts.surfaceId ?? "browser-extension:default";
   const submittedBy = opts.submittedBy ?? "cu-bus";
   return {
     isAllowed: (url: string) => isBridgeOnlyDomain(url),
     async submit(action: CuAction): Promise<CuObservation | null> {
-      if (action.verb === "Goto") {
-        const jobId = submitJob("dom", action.url, submittedBy);
-        const result = await waitForResult(jobId);
-        if (result.error) throw new Error(result.error);
-        return _resultToDom(result, surfaceId);
-      }
-      if (action.verb === "Wait") {
-        await new Promise((r) => setTimeout(r, action.ms ?? 0));
-        return null;
-      }
-      throw new Error(`Extension bridge does not yet route action verb: ${action.verb}`);
+      // The typed dispatch path: `submitCuAction` stamps the job with the
+      // CuAction so `resolveResult` derives a `cuObservation` automatically.
+      // We just return that observation. Verbs the queue can't route throw,
+      // letting the bus router pick a different surface.
+      const id = submitCuAction(action, submittedBy, surfaceId);
+      const result = await waitForResult(id);
+      if (result.error) throw new Error(result.error);
+      // The resolver attaches a DomSnapshot for Goto and a TextDump
+      // ("ok") for Wait via `submitCuAction`, both already stamped with
+      // the surfaceId we threaded through. Pass through unchanged.
+      // We never return null on the typed path — a synthesized TextDump
+      // is still a valid typed observation for callers who want a
+      // uniform shape.
+      if (!result.cuObservation) return null;
+      return result.cuObservation;
     },
-    async observe(kind: CuObservation["kind"]): Promise<CuObservation> {
+    async observe(kind: ObservationKind): Promise<CuObservation> {
       if (kind !== "DomSnapshot") {
         throw new Error(`Extension bridge live wiring only emits DomSnapshot today (asked: ${kind})`);
       }
-      // Re-fetch the most recently navigated URL would require state we
-      // don't store here; the router supplies a `Goto` first, then calls
-      // `observe`, which we satisfy from the cached result on the next
-      // submitted job. For now, a same-tab `dom` poll is the honest answer.
-      throw new Error(
-        "Extension bridge observe() requires a prior Goto job; smart router should pair them.",
-      );
+      // The most recent extension result with a DomSnapshot derivation is
+      // the honest "current page" answer the queue can give. The router is
+      // expected to pair Goto+observe to make this deterministic, but a
+      // standalone observe() should still return something useful when a
+      // recent navigation exists.
+      const recent = _latestResultWithDom();
+      if (!recent) {
+        throw new Error(
+          "Extension bridge observe(DomSnapshot): no recent dom result available; submit a Goto first",
+        );
+      }
+      return _resultToDom(recent, surfaceId);
     },
   };
 }
@@ -231,7 +269,8 @@ export function submitJob(
   url: string,
   submittedBy: string,
   options?: BridgeJob["options"],
-  maxRetries: number = 2
+  maxRetries: number = 2,
+  cuAction?: CuAction,
 ): string {
   if (!VALID_TYPES.has(type)) throw new Error(`Invalid job type: ${type}`);
 
@@ -244,9 +283,62 @@ export function submitJob(
   }
 
   const id = randomUUID();
-  pendingJobs.push({ id, type, url, options, submittedBy, submittedAt: Date.now(), retryCount: 0, maxRetries });
+  pendingJobs.push({ id, type, url, options, submittedBy, submittedAt: Date.now(), retryCount: 0, maxRetries, cuAction });
+  if (cuAction) cuActionByJob.set(id, cuAction);
   emitEvent("bridge", `Job queued: ${type} ${url}`, "info", { metadata: { jobId: id, submittedBy } });
   return id;
+}
+
+// Side-table mapping jobId → CuAction for jobs that originated from the
+// `ComputerUseBus`. We can't read from the in-memory `pendingJobs` after
+// `claimJobs` empties it, so we keep the action here until `resolveResult`
+// builds the matching `cuObservation`.
+const cuActionByJob = new Map<string, CuAction>();
+// Side-table from the typed action object → its caller-supplied
+// surfaceId; consulted in `resolveResult` when we synthesize
+// `cuObservation.surfaceId` so attribution matches the originator.
+const cuActionSurfaceById = new WeakMap<object, string>();
+
+// Dispatch a typed `Action` through the bridge queue. Today only `Goto`
+// has a natural mapping to the existing extension queue; other verbs throw
+// so the router (or caller) can pick a different surface. The result has
+// `cuObservation` populated by `resolveResult` when `cuAction` is known.
+export function submitCuAction(
+  action: CuAction,
+  submittedBy: string = "cu-bus",
+  surfaceId: string = "browser-extension:default",
+): string {
+  if (action.verb === "Goto") {
+    cuActionSurfaceById.set(action, surfaceId);
+    return submitJob("dom", action.url, submittedBy, undefined, 2, action);
+  }
+  if (action.verb === "Wait") {
+    // `Wait.until` requires a verifier-driven polling loop on a specific
+    // surface, which the bare bridge queue can't do (it has no surface
+    // handle). Reject explicitly so callers route through `bus.act()` on a
+    // surface that supports verifiers, rather than silently completing.
+    if (action.ms === undefined) {
+      throw new Error(
+        "bridge-queue submitCuAction(Wait): only `ms` is supported here; " +
+          "`until` requires a verifier and must be dispatched via bus.act() on a surface",
+      );
+    }
+    // Wait has no underlying job; synthesize a completed result immediately
+    // so callers get a uniform `waitForResult` shape.
+    const id = `cu-wait-${randomUUID().slice(0, 8)}`;
+    cuActionByJob.set(id, action);
+    cuActionSurfaceById.set(action, surfaceId);
+    setTimeout(() => {
+      resolveResult(id, {
+        jobId: id,
+        text: "ok",
+        completedAt: Date.now(),
+        source: "direct",
+      });
+    }, action.ms);
+    return id;
+  }
+  throw new Error(`bridge-queue submitCuAction does not yet route verb: ${action.verb}`);
 }
 
 export function claimJobs(): BridgeJob[] {
@@ -287,6 +379,35 @@ export function resolveResult(jobId: string, result: BridgeResult): void {
     }
   }
   claimedJobs.delete(jobId);
+
+  // If the job was a typed cu-action submission, derive the matching
+  // `cuObservation` from the result so consumers don't have to repeat the
+  // translation. DomSnapshot for Goto, TextDump for Wait/etc.
+  const cuAction = cuActionByJob.get(jobId);
+  if (cuAction) {
+    // Look up the surfaceId the caller stamped at submit time so the
+    // synthesized observation is attributed to the originating adapter
+    // (e.g. `browser-extension:default`) instead of a generic `cu-bus`.
+    const surfaceId = cuActionSurfaceById.get(cuAction) ?? "browser-extension:default";
+    if (!result.cuObservation) {
+      if (cuAction.verb === "Goto") {
+        result.cuObservation = _resultToDom(result, surfaceId);
+      } else {
+        const text = result.text ?? "ok";
+        result.cuObservation = {
+          kind: "TextDump",
+          surfaceId,
+          timestamp: result.completedAt,
+          digest: _digest(text.slice(0, 4096)),
+          text,
+        };
+      }
+    }
+    // Always evict — whether we filled in cuObservation or the producer
+    // already supplied one — so the map cannot grow unbounded.
+    cuActionByJob.delete(jobId);
+    cuActionSurfaceById.delete(cuAction);
+  }
 
   results.set(jobId, result);
   const callbacks = waiters.get(jobId);

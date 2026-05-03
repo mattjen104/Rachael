@@ -121,6 +121,11 @@ app.use((req, res, next) => {
   await registerRoutes(httpServer, app);
   initRuntime();
 
+  // Wire the four cu-core surface adapters onto a process-wide ComputerUseBus.
+  // Idempotent: the call returns the existing bus if already initialized.
+  const { initCuBus } = await import("./cu-bus");
+  initCuBus();
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

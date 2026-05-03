@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { z } from "zod";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -788,9 +789,12 @@ export async function registerRoutes(
     res.json(models);
   });
 
-  const epicCommandQueue: any[] = [];
-  const epicResults = new Map<string, any>();
-  let epicAgentStatus: any = { connected: false, lastSeen: 0, windows: [] };
+  // The epic command queue / results / status used to live as locals here.
+  // They were lifted into `server/epic-agent-bus.ts` so the cu-bus adapters
+  // (`WindowsUiaAdapter`, `CitrixVisionAdapter`) can submit typed commands
+  // without round-tripping through HTTP. The route handlers below preserve
+  // the exact same wire shape — they just delegate to the bus module.
+  const epicAgentBus = await import("./epic-agent-bus");
 
   let epicRecordingState: {
     active: boolean;
@@ -805,7 +809,7 @@ export async function registerRoutes(
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const commands = epicCommandQueue.splice(0);
+    const commands = epicAgentBus.drainCommands();
     res.json({ commands });
   });
 
@@ -814,12 +818,12 @@ export async function registerRoutes(
     if (!auth || !validateBridgeToken(auth.replace("Bearer ", ""))) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    epicAgentStatus = {
+    epicAgentBus.setStatus({
       connected: true,
       lastSeen: Date.now(),
       windows: req.body.windows || [],
       capture: req.body.capture || null,
-    };
+    });
     try {
       const { recordEpicAgentHeartbeat } = await import("./bridge-queue");
       recordEpicAgentHeartbeat({ version: req.body?.version });
@@ -847,7 +851,7 @@ export async function registerRoutes(
       return res.status(401).json({ error: "Unauthorized" });
     }
     const { commandId, status, screenshot, data, error, stage } = req.body;
-    epicResults.set(commandId, {
+    epicAgentBus.setResult({
       commandId,
       status,
       stage: stage || null,
@@ -856,10 +860,6 @@ export async function registerRoutes(
       error: error || null,
       receivedAt: Date.now(),
     });
-    if (epicResults.size > 50) {
-      const oldest = Array.from(epicResults.keys()).slice(0, epicResults.size - 50);
-      for (const k of oldest) epicResults.delete(k);
-    }
     if (status === "complete" && data) {
       if (data.mode === "list" && Array.isArray(data.windows)) {
         uiaWindowListCache = { windows: data.windows, storedAt: Date.now() };
@@ -889,7 +889,7 @@ export async function registerRoutes(
     const { type, env, target, path, client, masterfile, item, steps, depth, query, hint, value, showAll, focus, _activity_label, credentials, window: windowArg, search, title, silenceThreshold, windowKey, targetTitle, alternateEdges, probe_options, probeOptions, max_activities, maxActivities, max_steps, maxSteps, crawl_activities, crawlActivities, activity_timeout, activityTimeout, app: appArg } = req.body;
     if (!type) return res.status(400).json({ error: "Missing type" });
     const id = `epic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const cmd: Record<string, unknown> = { id, type, env: env || "SUP" };
+    const cmd: import("./epic-agent-bus").EpicAgentCommand = { id, type, env: env || "SUP" };
     if (target) cmd.target = target;
     if (path) cmd.path = path;
     if (client) cmd.client = client;
@@ -923,12 +923,12 @@ export async function registerRoutes(
     if (_crawl !== undefined) cmd.crawl_activities = _crawl;
     const _actTimeout = activity_timeout ?? activityTimeout;
     if (_actTimeout !== undefined) cmd.activity_timeout = _actTimeout;
-    epicCommandQueue.push(cmd);
+    epicAgentBus.enqueueCommand(cmd);
     res.json({ ok: true, commandId: id });
   });
 
   app.get("/api/epic/agent/result/:id", (req, res) => {
-    const result = epicResults.get(req.params.id);
+    const result = epicAgentBus.getResult(req.params.id);
     if (!result) return res.json({ status: "pending" });
     res.json(result);
   });
@@ -980,30 +980,114 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  // -------------------------------------------------------------------------
+  // /api/cu/* — the live entrypoint for typed Computer-Use actions.
+  //
+  // These routes are the production path: callers POST a typed `Action`
+  // and a `surfaceId`, the request is dispatched through the process-wide
+  // `ComputerUseBus` (`server/cu-bus.ts`), which in turn routes to one of
+  // the four real adapters (browser-extension, browser-playwright,
+  // windows-uia, citrix-vision). The response carries the `ActResult`
+  // (with any observations the surface produced) verbatim.
+  // -------------------------------------------------------------------------
+  const cuBusModule = await import("./cu-bus");
+  const cuCore = await import("@rachael/cu-core");
+
+  // Auth gate matching the Epic agent routes: localhost is trusted (the
+  // dev/cockpit UI is same-process), all other callers must present a
+  // valid bridge bearer token. These routes can drive real keyboard /
+  // mouse / screen-capture actions on the host, so the same broken-
+  // access-control protections apply.
+  function requireCuAuth(req: import("express").Request, res: import("express").Response): boolean {
+    // Always accept a valid bridge bearer first — works for local dev,
+    // tunnels, and reverse-proxy deployments where `req.ip` cannot be
+    // trusted to indicate a same-host caller.
+    const auth = req.headers.authorization;
+    if (auth && validateBridgeToken(auth.replace("Bearer ", ""))) return true;
+    // Localhost bypass is opt-in. CU routes can drive the keyboard, mouse
+    // and screen-capture, so behind a reverse proxy that forwards
+    // `127.0.0.1` for every request, blanket localhost trust is unsafe.
+    // Operators must set CU_TRUST_LOCALHOST=1 to re-enable it (default
+    // for dev where `server/index.ts` does not set this), otherwise any
+    // call without a token is rejected even from `127.0.0.1`.
+    if (process.env.CU_TRUST_LOCALHOST === "1") {
+      const ip = req.ip || "";
+      if (ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1") return true;
+    }
+    res.status(401).json({ ok: false, error: "Unauthorized" });
+    return false;
+  }
+
+  app.get("/api/cu/surfaces", (req, res) => {
+    if (!requireCuAuth(req, res)) return;
+    res.json({ surfaces: cuBusModule.getCuBus().listSurfaces() });
+  });
+
+  app.post("/api/cu/act", async (req, res) => {
+    if (!requireCuAuth(req, res)) return;
+    const parsed = z
+      .object({
+        surfaceId: z.string().min(1),
+        action: cuCore.ActionSchema,
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: parsed.error.message });
+    }
+    try {
+      const result = await cuBusModule.getCuBus().act(parsed.data.surfaceId, parsed.data.action);
+      res.json({ ok: result.ok, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: String(e?.message ?? e) });
+    }
+  });
+
+  app.post("/api/cu/observe", async (req, res) => {
+    if (!requireCuAuth(req, res)) return;
+    const parsed = z
+      .object({
+        surfaceId: z.string().min(1),
+        kinds: z.array(cuCore.ObservationKindSchema).min(1),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: parsed.error.message });
+    }
+    try {
+      const obs = await cuBusModule
+        .getCuBus()
+        .observe(parsed.data.surfaceId, parsed.data.kinds);
+      res.json({ ok: true, observations: obs });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: String(e?.message ?? e) });
+    }
+  });
+
   app.get("/api/epic/agent/status", async (_req, res) => {
     const { getEpicAgentStatus } = await import("./bridge-queue");
     const status = getEpicAgentStatus();
+    const live = epicAgentBus.getStatus();
     res.json({
       connected: status.connected,
-      lastSeen: epicAgentStatus.lastSeen,
-      windows: epicAgentStatus.windows || [],
-      capture: epicAgentStatus.capture || null,
+      lastSeen: live.lastSeen,
+      windows: live.windows || [],
+      capture: live.capture || null,
     });
   });
 
   app.get("/api/epic/agent/screenshots", (_req, res) => {
     const screenshots: any[] = [];
-    for (const [id, r] of epicResults) {
+    for (const r of epicAgentBus.listResults()) {
       if (r.screenshot) {
         screenshots.push({
-          commandId: id,
+          commandId: r.commandId,
           data: r.data,
           receivedAt: r.receivedAt,
           hasScreenshot: true,
         });
       }
     }
-    screenshots.sort((a, b) => b.receivedAt - a.receivedAt);
+    screenshots.sort((a, b) => (b.receivedAt ?? 0) - (a.receivedAt ?? 0));
     res.json({ screenshots: screenshots.slice(0, 10) });
   });
 
@@ -1066,7 +1150,7 @@ export async function registerRoutes(
   app.get("/api/epic/grammar/:phash", _grammarHandler);
 
   app.get("/api/epic/agent/screenshot/:id", (req, res) => {
-    const result = epicResults.get(req.params.id);
+    const result = epicAgentBus.getResult(req.params.id);
     if (!result?.screenshot) return res.status(404).json({ error: "Not found" });
     const buf = Buffer.from(result.screenshot, "base64");
     res.setHeader("Content-Type", "image/png");
@@ -1197,7 +1281,7 @@ export async function registerRoutes(
     const env = (req.body.env || "SUP").toUpperCase();
     epicRecordingState = { active: true, draining: false, startedAt: Date.now(), env, steps: [] };
     const id = `epic-${Date.now()}-rec-start`;
-    epicCommandQueue.push({ id, type: "record_start", env });
+    epicAgentBus.enqueueCommand({ id, type: "record_start", env });
     res.json({ ok: true, env });
   });
 
@@ -1215,7 +1299,7 @@ export async function registerRoutes(
     epicRecordingState.active = false;
     epicRecordingState.draining = true;
     const id = `epic-${Date.now()}-rec-stop`;
-    epicCommandQueue.push({ id, type: "record_stop" });
+    epicAgentBus.enqueueCommand({ id, type: "record_stop" });
     setTimeout(() => { epicRecordingState.draining = false; }, 10000);
     const steps = [...epicRecordingState.steps];
     res.json({ ok: true, steps });
@@ -1838,7 +1922,7 @@ export async function registerRoutes(
       }
 
       const id = `replay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      epicCommandQueue.push({
+      epicAgentBus.enqueueCommand({
         id,
         type: "nav_replay",
         windowKey: wk,
@@ -2380,7 +2464,7 @@ export async function registerRoutes(
       recordedSessions,
       transitionGraph,
       sessionWindowTrees,
-      captureState: (epicAgentStatus.connected && (Date.now() - (epicAgentStatus.lastSeen || 0) < 60000)) ? (epicAgentStatus.capture || null) : null,
+      captureState: (epicAgentBus.getStatus().connected && (Date.now() - (epicAgentBus.getStatus().lastSeen || 0) < 60000)) ? (epicAgentBus.getStatus().capture || null) : null,
     });
   });
 

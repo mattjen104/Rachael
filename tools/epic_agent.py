@@ -2867,6 +2867,24 @@ def send_heartbeat(windows_found):
         print(f"  [heartbeat] HTTP {resp.status_code}: {resp.text[:200]}")
 
 
+from collections import OrderedDict
+_LAST_POSTED_RESULTS = OrderedDict()
+_LAST_POSTED_RESULTS_CAP = 256
+
+def _last_posted_result(command_id):
+    """Return the most recent result body posted for `command_id`, or None.
+    Used by `execute_cu_action` to forward delegated child outcomes onto
+    the parent `cu_action` correlation id."""
+    return _LAST_POSTED_RESULTS.get(command_id)
+
+def _remember_posted_result(command_id, body):
+    """Insert into the bounded LRU; evict the oldest entry when over cap."""
+    if command_id in _LAST_POSTED_RESULTS:
+        _LAST_POSTED_RESULTS.move_to_end(command_id)
+    _LAST_POSTED_RESULTS[command_id] = body
+    while len(_LAST_POSTED_RESULTS) > _LAST_POSTED_RESULTS_CAP:
+        _LAST_POSTED_RESULTS.popitem(last=False)
+
 def post_result(command_id, status, screenshot_b64=None, data=None, error=None):
     body = {
         "commandId": command_id,
@@ -2878,6 +2896,7 @@ def post_result(command_id, status, screenshot_b64=None, data=None, error=None):
         body["data"] = data
     if error:
         body["error"] = error
+    _remember_posted_result(command_id, {"status": status, "error": error, "data": data})
     resp = _bridge_request(
         "post", "/api/epic/agent/results", "result", timeout=30, max_retries=3,
         headers={
@@ -9376,6 +9395,117 @@ def execute_discover_grammar(cmd):
     post_result(command_id, "complete", data=result)
 
 
+def execute_cu_action(cmd):
+    """Happy path for typed @rachael/cu-core actions arriving on the wire.
+
+    The TS side (`server/cu-bus.ts`) enqueues `{type:"cu_action", action:{...}}`
+    after the bus router decides this is the right surface. We validate the
+    payload against the canonical Zod-generated schema (via `tools/rachael_cu`)
+    so the agent never executes a malformed action, then dispatch verbs we
+    can do safely without UIA targeting: Wait, Type, Key, Scroll. Coords-Click
+    routes through pyautogui as well. Anything else is reported as
+    `unsupported` so the router can pick a different surface.
+
+    The result includes a `TextDump` cuObservation so the bus can populate
+    `BridgeResult.cuObservation` (or the caller can validate it again with
+    `rachael_cu.validate_observation`).
+    """
+    cid = cmd.get("id", "unknown")
+    try:
+        import rachael_cu
+    except Exception as e:
+        post_result(cid, "error", error=f"rachael_cu unavailable: {e}")
+        return
+    raw = cmd.get("action")
+    if not isinstance(raw, dict):
+        post_result(cid, "error", error="cu_action requires `action` dict")
+        return
+    try:
+        action = rachael_cu.validate_action(raw)
+    except Exception as e:
+        post_result(cid, "error", error=f"invalid action: {e}")
+        return
+
+    verb = action.get("verb")
+    # Prefer the explicit `surfaceId` set by the TS-side adapter (see
+    # `server/cu-bus.ts`), so observations from Citrix-routed cu_actions
+    # are not misattributed as windows-uia. Fall back to env-derived id.
+    surface_id = cmd.get("surfaceId") or f"windows-uia:{cmd.get('env', 'SUP')}"
+    try:
+        if verb == "Wait":
+            ms = int(action.get("ms") or 0)
+            if ms > 0:
+                time.sleep(ms / 1000.0)
+        elif verb == "Type":
+            pyautogui.typewrite(str(action.get("text", "")), interval=0.02)
+        elif verb == "Key":
+            chord = str(action.get("chord", ""))
+            keys = [k.strip().lower() for k in chord.split("+") if k.strip()]
+            if len(keys) == 1:
+                pyautogui.press(keys[0])
+            elif len(keys) > 1:
+                pyautogui.hotkey(*keys)
+        elif verb == "Scroll":
+            dy = int(action.get("dy") or 0)
+            if dy:
+                pyautogui.scroll(dy)
+        elif verb == "Click":
+            tgt = action.get("target") or {}
+            tkind = tgt.get("kind")
+            if tkind == "coords":
+                pyautogui.click(int(tgt.get("x", 0)), int(tgt.get("y", 0)))
+            elif tkind == "mark":
+                # Citrix vision surface: a mark is an opaque key the host
+                # SoM detector resolved to coords on the previous screenshot.
+                # We delegate to the existing `click` command path which
+                # already knows how to look up hint→coords for the surface.
+                # The delegated call posts its own result on a child id; we
+                # forward its outcome onto the parent `cu_action` id so the
+                # caller doesn't have to track two correlation ids.
+                mark = str(tgt.get("mark", ""))
+                if not mark:
+                    post_result(cid, "error", error="cu_action Click(mark) requires non-empty `mark`")
+                    return
+                child_id = f"{cid}-mark"
+                try:
+                    execute_command({"id": child_id, "type": "click", "env": cmd.get("env"), "target": mark})
+                except Exception as e:
+                    post_result(cid, "error", error=f"cu_action Click(mark={mark}) failed: {e}")
+                    return
+                # Propagate the child outcome (success or error) to the
+                # parent command id so observers see one deterministic
+                # result for the cu_action submission.
+                child = _last_posted_result(child_id)
+                if child and child.get("status") == "error":
+                    post_result(cid, "error", error=f"cu_action Click(mark={mark}) child error: {child.get('error')}")
+                    return
+            else:
+                post_result(cid, "error", error=f"cu_action Click target kind not supported: {tkind}")
+                return
+        else:
+            post_result(cid, "error", error=f"cu_action verb not implemented: {verb}")
+            return
+    except Exception as e:
+        post_result(cid, "error", error=f"cu_action {verb} failed: {e}")
+        return
+
+    # Build a TextDump observation and validate it against the same schema
+    # the TS side will check on receipt.
+    obs = {
+        "kind": "TextDump",
+        "surfaceId": surface_id,
+        "timestamp": int(time.time() * 1000),
+        "digest": __import__("hashlib").sha256(f"{verb}:{json.dumps(action, sort_keys=True, default=str)}".encode()).hexdigest()[:16],
+        "text": "ok",
+    }
+    try:
+        rachael_cu.validate_observation(obs)
+    except Exception as e:
+        post_result(cid, "error", error=f"observation validation failed: {e}")
+        return
+    post_result(cid, "complete", data={"cuObservation": obs, "verb": verb})
+
+
 def execute_command(cmd):
     cmd_type = cmd.get("type", "")
     print(f"\n>> Command: {cmd_type} (id: {cmd.get('id', '?')})")
@@ -9481,6 +9611,8 @@ def execute_command(cmd):
             execute_keepalive_stop(cmd)
         elif cmd_type == "discover_grammar":
             execute_discover_grammar(cmd)
+        elif cmd_type == "cu_action":
+            execute_cu_action(cmd)
         else:
             post_result(cmd.get("id", "unknown"), "error", error=f"Unknown command type: {cmd_type}")
     except pyautogui.FailSafeException:
