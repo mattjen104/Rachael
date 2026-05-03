@@ -1,0 +1,131 @@
+{
+  "generatedAt": "2026-05-03T09:33:12.731Z",
+  "inhouse": {
+    "totalTasks": 30,
+    "passed": 30,
+    "failed": 0,
+    "passRate": 1,
+    "perSurface": {
+      "browser-tab": {
+        "surfaceKind": "browser-tab",
+        "tasks": 7,
+        "passed": 7,
+        "meanWallMs": 0.42857142857142855,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.00032857142857142856,
+        "observationHits": {
+          "AxTree": 23
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "browser-extension": {
+        "surfaceKind": "browser-extension",
+        "tasks": 3,
+        "passed": 3,
+        "meanWallMs": 1.3333333333333333,
+        "medianWallMs": 1,
+        "meanCostUsd": 0.0004666666666666667,
+        "observationHits": {
+          "AxTree": 14
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "desktop-window": {
+        "surfaceKind": "desktop-window",
+        "tasks": 10,
+        "passed": 10,
+        "meanWallMs": 0,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.00032,
+        "observationHits": {
+          "UiaTree": 32
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "citrix-session": {
+        "surfaceKind": "citrix-session",
+        "tasks": 10,
+        "passed": 10,
+        "meanWallMs": 0.1,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.012,
+        "observationHits": {
+          "SomScreenshot": 24
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      }
+    }
+  },
+  "osworld": {
+    "totalTasks": 10,
+    "passed": 10,
+    "failed": 0,
+    "passRate": 1,
+    "perSurface": {
+      "desktop-window": {
+        "surfaceKind": "desktop-window",
+        "tasks": 9,
+        "passed": 9,
+        "meanWallMs": 0.1111111111111111,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.0003444444444444445,
+        "observationHits": {
+          "UiaTree": 31
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "browser-tab": {
+        "surfaceKind": "browser-tab",
+        "tasks": 1,
+        "passed": 1,
+        "meanWallMs": 0,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.0002,
+        "observationHits": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      }
+    }
+  },
+  "webarena": {
+    "totalTasks": 10,
+    "passed": 10,
+    "failed": 0,
+    "passRate": 1,
+    "perSurface": {
+      "browser-tab": {
+        "surfaceKind": "browser-tab",
+        "tasks": 8,
+        "passed": 8,
+        "meanWallMs": 0,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.000375,
+        "observationHits": {
+          "AxTree": 30
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "browser-extension": {
+        "surfaceKind": "browser-extension",
+        "tasks": 2,
+        "passed": 2,
+        "meanWallMs": 4,
+        "medianWallMs": 4,
+        "meanCostUsd": 0.0005,
+        "observationHits": {
+          "AxTree": 10
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      }
+    }
+  }
+}

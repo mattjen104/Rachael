@@ -1,0 +1,17 @@
+{
+  "_comment": "OSWorld v0.1 desktop-task subset, hand-picked to span Explorer / Office / Chrome / Settings / Code. upstreamTaskId follows the OSWorld test-set directory naming. Reproducing against live OSWorld requires the upstream Docker image; see REPORT.md.",
+  "_source": "https://github.com/xlang-ai/OSWorld",
+  "_subsetSize": 10,
+  "entries": [
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-explorer-create-folder",  "surfaceKind": "desktop-window", "intent": "create a new folder named 'Reports' in Documents",          "expectedCheapestObservation": "UiaTree",       "stepCount": 4, "notes": "Win+E → address bar Documents → right-click → New folder → type name" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-explorer-rename-file",    "surfaceKind": "desktop-window", "intent": "rename README.txt to README.md",                            "expectedCheapestObservation": "UiaTree",       "stepCount": 3, "notes": "select file → F2 → type new name → enter" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-libreoffice-bold-cell",   "surfaceKind": "desktop-window", "intent": "bold cell A1 in spreadsheet",                                "expectedCheapestObservation": "UiaTree",       "stepCount": 3, "notes": "click A1 → Ctrl+B → save" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-libreoffice-insert-row",  "surfaceKind": "desktop-window", "intent": "insert a new row above row 3",                              "expectedCheapestObservation": "UiaTree",       "stepCount": 4, "notes": "right-click row header → Insert Rows Above" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-vscode-cmd-palette",      "surfaceKind": "desktop-window", "intent": "run 'Format Document' via command palette",                  "expectedCheapestObservation": "UiaTree",       "stepCount": 3, "notes": "Ctrl+Shift+P → type → enter" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-settings-toggle-darkmode","surfaceKind": "desktop-window", "intent": "switch system theme to dark",                               "expectedCheapestObservation": "UiaTree",       "stepCount": 4, "notes": "Settings → Personalization → Colors → Dark" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-chrome-extract-title",    "surfaceKind": "browser-tab",    "intent": "navigate to a URL and extract the H1 text",                  "expectedCheapestObservation": "AxTree",        "stepCount": 2, "notes": "address bar → enter → read H1" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-thunderbird-archive",     "surfaceKind": "desktop-window", "intent": "archive the top inbox message in Thunderbird",               "expectedCheapestObservation": "UiaTree",       "stepCount": 3, "notes": "select first message → A → confirm archived count incremented" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-gimp-export-png",         "surfaceKind": "desktop-window", "intent": "export an image as PNG",                                     "expectedCheapestObservation": "RawScreenshot", "stepCount": 5, "notes": "GIMP File > Export As → type filename → click Export → format dialog → confirm — UIA misses on the export-as dialog; tier-miss expected" },
+    { "benchmark": "osworld", "upstreamTaskId": "osworld-terminal-grep-count",     "surfaceKind": "desktop-window", "intent": "count occurrences of TODO across project files",             "expectedCheapestObservation": "TextDump",      "stepCount": 2, "notes": "open terminal → grep -rc TODO ." }
+  ]
+}

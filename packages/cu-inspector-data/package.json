@@ -1,0 +1,31 @@
+{
+  "name": "@rachael/cu-inspector-data",
+  "version": "0.1.0",
+  "description": "Trajectory frame schemas and PHI/PII redaction primitives for the cu-core trajectory inspector. The data contract is open; the React inspector itself is not.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "examples",
+    "README.md",
+    "NON_GOALS.md"
+  ],
+  "keywords": [
+    "computer-use",
+    "trajectory",
+    "redaction",
+    "phi",
+    "agent"
+  ],
+  "peerDependencies": {
+    "zod": "^3.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

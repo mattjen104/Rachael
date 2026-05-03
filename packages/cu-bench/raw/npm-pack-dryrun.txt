@@ -1,0 +1,551 @@
+================ cu-core ================
+[
+  {
+    "id": "@rachael/cu-core@0.1.0",
+    "name": "@rachael/cu-core",
+    "version": "0.1.0",
+    "size": 54324,
+    "unpackedSize": 214994,
+    "shasum": "67d1d7fd7bc3328ecb58064bc7e43c4659f43df3",
+    "integrity": "sha512-n310NJnFfBjHOw9fR4Ef8M4OiJx1pJto3RgaGuRrS8zq6Wx9rsUYI1QGblk3kvq5jSOoLK794i2JwQmcQouS+g==",
+    "filename": "rachael-cu-core-0.1.0.tgz",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 5894,
+        "mode": 420
+      },
+      {
+        "path": "bench/baseline.json",
+        "size": 1859,
+        "mode": 420
+      },
+      {
+        "path": "bench/harness.ts",
+        "size": 5967,
+        "mode": 420
+      },
+      {
+        "path": "bench/README.md",
+        "size": 943,
+        "mode": 420
+      },
+      {
+        "path": "bench/run.ts",
+        "size": 4724,
+        "mode": 420
+      },
+      {
+        "path": "bench/suite.ts",
+        "size": 6482,
+        "mode": 420
+      },
+      {
+        "path": "examples/hello-core.ts",
+        "size": 696,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 407,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/browser-extension/index.ts",
+        "size": 5152,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/browser-playwright/index.ts",
+        "size": 8592,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/capabilities.ts",
+        "size": 3161,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/citrix-vision/index.ts",
+        "size": 9051,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/index.ts",
+        "size": 1181,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/manifest.json",
+        "size": 2095,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/parity-replay.ts",
+        "size": 10307,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/README.md",
+        "size": 1832,
+        "mode": 420
+      },
+      {
+        "path": "src/adapters/windows-uia/index.ts",
+        "size": 7122,
+        "mode": 420
+      },
+      {
+        "path": "src/bus.ts",
+        "size": 4531,
+        "mode": 420
+      },
+      {
+        "path": "src/digest.ts",
+        "size": 641,
+        "mode": 420
+      },
+      {
+        "path": "src/fake-surface.ts",
+        "size": 3820,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 1562,
+        "mode": 420
+      },
+      {
+        "path": "src/python/schema.json",
+        "size": 19832,
+        "mode": 420
+      },
+      {
+        "path": "src/python/schema.py",
+        "size": 3332,
+        "mode": 420
+      },
+      {
+        "path": "src/router/budget.ts",
+        "size": 2510,
+        "mode": 420
+      },
+      {
+        "path": "src/router/index.ts",
+        "size": 975,
+        "mode": 420
+      },
+      {
+        "path": "src/router/recovery.ts",
+        "size": 1371,
+        "mode": 420
+      },
+      {
+        "path": "src/router/router.ts",
+        "size": 24421,
+        "mode": 420
+      },
+      {
+        "path": "src/router/strategy-table.ts",
+        "size": 3517,
+        "mode": 420
+      },
+      {
+        "path": "src/router/task-profile.ts",
+        "size": 2332,
+        "mode": 420
+      },
+      {
+        "path": "src/router/trace.ts",
+        "size": 1739,
+        "mode": 420
+      },
+      {
+        "path": "src/router/verifiers.ts",
+        "size": 4958,
+        "mode": 420
+      },
+      {
+        "path": "src/services/som-detector/client.ts",
+        "size": 2758,
+        "mode": 420
+      },
+      {
+        "path": "src/services/som-detector/service.py",
+        "size": 15572,
+        "mode": 420
+      },
+      {
+        "path": "src/skills/executor.ts",
+        "size": 9473,
+        "mode": 420
+      },
+      {
+        "path": "src/skills/index.ts",
+        "size": 522,
+        "mode": 420
+      },
+      {
+        "path": "src/skills/library.ts",
+        "size": 2620,
+        "mode": 420
+      },
+      {
+        "path": "src/skills/matcher.ts",
+        "size": 6648,
+        "mode": 420
+      },
+      {
+        "path": "src/skills/promotion.ts",
+        "size": 4642,
+        "mode": 420
+      },
+      {
+        "path": "src/skills/seeds.ts",
+        "size": 5143,
+        "mode": 420
+      },
+      {
+        "path": "src/skills/types.ts",
+        "size": 3305,
+        "mode": 420
+      },
+      {
+        "path": "src/types.ts",
+        "size": 13170,
+        "mode": 420
+      },
+      {
+        "path": "tsconfig.json",
+        "size": 135,
+        "mode": 420
+      }
+    ],
+    "entryCount": 42,
+    "bundled": []
+  }
+]
+
+================ cu-browser ================
+[
+  {
+    "id": "@rachael/cu-browser@0.1.0",
+    "name": "@rachael/cu-browser",
+    "version": "0.1.0",
+    "size": 2983,
+    "unpackedSize": 6934,
+    "shasum": "baad96dc5372d4014a58a8fad98c1600e31f39eb",
+    "integrity": "sha512-oKEjJ0X15+SkmByf0JFjR0VDeIQkqen7Sl2jAyRs0GNuUxDAya0dGDIgtgsFV03DXffCyWssKNDuc0TCIeJENg==",
+    "filename": "rachael-cu-browser-0.1.0.tgz",
+    "files": [
+      {
+        "path": "NON_GOALS.md",
+        "size": 1059,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 3170,
+        "mode": 420
+      },
+      {
+        "path": "examples/hello-browser.ts",
+        "size": 1078,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 699,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 928,
+        "mode": 420
+      }
+    ],
+    "entryCount": 5,
+    "bundled": []
+  }
+]
+
+================ cu-windows ================
+[
+  {
+    "id": "@rachael/cu-windows@0.1.0",
+    "name": "@rachael/cu-windows",
+    "version": "0.1.0",
+    "size": 11919,
+    "unpackedSize": 35758,
+    "shasum": "8cc7baadbc609dafd53ac77033dd155826188869",
+    "integrity": "sha512-Zxuu5klS3zYhXfDnf3/D0d1YK5iREFjdmkseeOveHr/lJ8FsaQJn6bszQd3GhSwSwUTlpG95qdZdbFsxcC8oIQ==",
+    "filename": "rachael-cu-windows-0.1.0.tgz",
+    "files": [
+      {
+        "path": "NON_GOALS.md",
+        "size": 1129,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 3909,
+        "mode": 420
+      },
+      {
+        "path": "examples/hello-windows.ts",
+        "size": 1279,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 663,
+        "mode": 420
+      },
+      {
+        "path": "python/pyproject.toml",
+        "size": 1516,
+        "mode": 420
+      },
+      {
+        "path": "python/rachael_cu_windows/__init__.py",
+        "size": 521,
+        "mode": 420
+      },
+      {
+        "path": "python/rachael_cu_windows/schema.py",
+        "size": 3332,
+        "mode": 420
+      },
+      {
+        "path": "python/rachael_cu_windows/som_detector.py",
+        "size": 15572,
+        "mode": 420
+      },
+      {
+        "path": "python/rachael_cu_windows/uia_bridge.py",
+        "size": 5502,
+        "mode": 420
+      },
+      {
+        "path": "python/README.md",
+        "size": 1854,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 481,
+        "mode": 420
+      }
+    ],
+    "entryCount": 11,
+    "bundled": []
+  }
+]
+
+================ cu-router ================
+[
+  {
+    "id": "@rachael/cu-router@0.1.0",
+    "name": "@rachael/cu-router",
+    "version": "0.1.0",
+    "size": 2870,
+    "unpackedSize": 6549,
+    "shasum": "1dfbe7e8e9c97b7f0eda11917fea199039c91e58",
+    "integrity": "sha512-ko/wE1gm6GBZo5HB/KsJR0VSm1fuzl/OjD0ygDOtcIhZ9aW+QzfmPSjWXMbkX4LQSyReKi5Q+CY1u1vTxg0kIA==",
+    "filename": "rachael-cu-router-0.1.0.tgz",
+    "files": [
+      {
+        "path": "NON_GOALS.md",
+        "size": 911,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 2960,
+        "mode": 420
+      },
+      {
+        "path": "examples/hello-router.ts",
+        "size": 892,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 681,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 1105,
+        "mode": 420
+      }
+    ],
+    "entryCount": 5,
+    "bundled": []
+  }
+]
+
+================ cu-skills ================
+[
+  {
+    "id": "@rachael/cu-skills@0.1.0",
+    "name": "@rachael/cu-skills",
+    "version": "0.1.0",
+    "size": 2526,
+    "unpackedSize": 5691,
+    "shasum": "864668d4088eda9882747c49b73f863b121a20ab",
+    "integrity": "sha512-UkiCrQNH6QbwF+E5M7PFeO1EzMgPKrpYZhzachNspL9cQpNxaAhToAlXFZC74ZubvAe4ZsMwST5ElvTty3n8YA==",
+    "filename": "rachael-cu-skills-0.1.0.tgz",
+    "files": [
+      {
+        "path": "NON_GOALS.md",
+        "size": 764,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 2742,
+        "mode": 420
+      },
+      {
+        "path": "examples/hello-skill.ts",
+        "size": 941,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 671,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 573,
+        "mode": 420
+      }
+    ],
+    "entryCount": 5,
+    "bundled": []
+  }
+]
+
+================ cu-inspector-data ================
+[
+  {
+    "id": "@rachael/cu-inspector-data@0.1.0",
+    "name": "@rachael/cu-inspector-data",
+    "version": "0.1.0",
+    "size": 4587,
+    "unpackedSize": 11868,
+    "shasum": "698092ebd6172a046e506dbed01cb8e762fac73c",
+    "integrity": "sha512-s8qRdcGoAyPsLRx9HQY3McZVPSbCTJIGHvuGm1pIkNS+0IVV29gp1oGRHo/PaG0wQVFvma5VINkPC+LuQxbZig==",
+    "filename": "rachael-cu-inspector-data-0.1.0.tgz",
+    "files": [
+      {
+        "path": "NON_GOALS.md",
+        "size": 862,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 2231,
+        "mode": 420
+      },
+      {
+        "path": "examples/redact-frame.ts",
+        "size": 1037,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 660,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 7078,
+        "mode": 420
+      }
+    ],
+    "entryCount": 5,
+    "bundled": []
+  }
+]
+
+================ cu-bench ================
+[
+  {
+    "id": "@rachael/cu-bench@0.1.0",
+    "name": "@rachael/cu-bench",
+    "version": "0.1.0",
+    "size": 13755,
+    "unpackedSize": 68205,
+    "shasum": "2572881583675652845b6bd98475400039d516ea",
+    "integrity": "sha512-jLSEVjcN2oFLvL8Wv+KjY+DWluK//hzI4n8+U4u1Iny9wyCWxd/J4ruKS719Os804hL12WI0dacMIpeJqZq5Qg==",
+    "filename": "rachael-cu-bench-0.1.0.tgz",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 1827,
+        "mode": 420
+      },
+      {
+        "path": "REPORT.md",
+        "size": 7017,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 677,
+        "mode": 420
+      },
+      {
+        "path": "raw/npm-pack-dryrun.txt",
+        "size": 10143,
+        "mode": 420
+      },
+      {
+        "path": "raw/REPORT_NUMBERS.json",
+        "size": 3026,
+        "mode": 420
+      },
+      {
+        "path": "raw/results.json",
+        "size": 24766,
+        "mode": 420
+      },
+      {
+        "path": "src/external-tasks.ts",
+        "size": 1571,
+        "mode": 420
+      },
+      {
+        "path": "src/harness.ts",
+        "size": 5516,
+        "mode": 420
+      },
+      {
+        "path": "src/index.ts",
+        "size": 764,
+        "mode": 420
+      },
+      {
+        "path": "src/suite.ts",
+        "size": 5604,
+        "mode": 420
+      },
+      {
+        "path": "tasks/osworld-subset.json",
+        "size": 3573,
+        "mode": 420
+      },
+      {
+        "path": "tasks/webarena-subset.json",
+        "size": 3721,
+        "mode": 420
+      }
+    ],
+    "entryCount": 12,
+    "bundled": []
+  }
+]
+

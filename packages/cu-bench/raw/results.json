@@ -1,0 +1,1055 @@
+{
+  "inhouse": {
+    "startedAt": 1777800792714,
+    "finishedAt": 1777800792722,
+    "totalTasks": 30,
+    "passed": 30,
+    "failed": 0,
+    "perSurface": {
+      "browser-tab": {
+        "surfaceKind": "browser-tab",
+        "tasks": 7,
+        "passed": 7,
+        "meanWallMs": 0.42857142857142855,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.00032857142857142856,
+        "observationHits": {
+          "AxTree": 23
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "browser-extension": {
+        "surfaceKind": "browser-extension",
+        "tasks": 3,
+        "passed": 3,
+        "meanWallMs": 1.3333333333333333,
+        "medianWallMs": 1,
+        "meanCostUsd": 0.0004666666666666667,
+        "observationHits": {
+          "AxTree": 14
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "desktop-window": {
+        "surfaceKind": "desktop-window",
+        "tasks": 10,
+        "passed": 10,
+        "meanWallMs": 0,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.00032,
+        "observationHits": {
+          "UiaTree": 32
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "citrix-session": {
+        "surfaceKind": "citrix-session",
+        "tasks": 10,
+        "passed": 10,
+        "meanWallMs": 0.1,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.012,
+        "observationHits": {
+          "SomScreenshot": 24
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      }
+    },
+    "results": [
+      {
+        "taskId": "web-01-google-search",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 2,
+        "steps": 4,
+        "observationsByTier": {
+          "AxTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-02-github-pr-comment",
+        "surfaceKind": "browser-extension",
+        "ok": true,
+        "wallMs": 1,
+        "steps": 6,
+        "observationsByTier": {
+          "AxTree": 6
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0006000000000000001,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-03-gmail-archive",
+        "surfaceKind": "browser-extension",
+        "ok": true,
+        "wallMs": 2,
+        "steps": 3,
+        "observationsByTier": {
+          "AxTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-04-jira-status-update",
+        "surfaceKind": "browser-extension",
+        "ok": true,
+        "wallMs": 1,
+        "steps": 5,
+        "observationsByTier": {
+          "AxTree": 5
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-05-notion-checkbox",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-06-stack-overflow-extract",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-07-wikipedia-toc-jump",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "AxTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-08-form-fill-multi",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 7,
+        "observationsByTier": {
+          "AxTree": 7
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0007000000000000001,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-09-shadow-dom-button",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 1,
+        "steps": 2,
+        "observationsByTier": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "web-10-iframe-cookie-banner",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "AxTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "uia-01-explorer-open-folder",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-02-notepad-save",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 5,
+        "observationsByTier": {
+          "UiaTree": 5
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-03-outlook-new-mail",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "UiaTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-04-teams-call-mute",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 1,
+        "observationsByTier": {
+          "UiaTree": 1
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0001,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-05-snip-rect-capture",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "UiaTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-06-control-panel-toggle",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-07-task-manager-end-process",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "UiaTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-08-file-rename",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-09-vscode-cmd-palette",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "uia-10-uia-fallback-coords",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "UiaTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "cv-01-hyperdrive-login",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 1,
+        "observationsByTier": {
+          "SomScreenshot": 1
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-02-hyperdrive-patient-search",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "SomScreenshot": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.02,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-03-hyperdrive-open-chart",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 1,
+        "observationsByTier": {
+          "SomScreenshot": 1
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-04-hyperdrive-vitals-tab",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 1,
+        "observationsByTier": {
+          "SomScreenshot": 1
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-05-hyperdrive-order-set-pick",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "SomScreenshot": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.015,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-06-hyperdrive-allergy-add",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 1,
+        "steps": 5,
+        "observationsByTier": {
+          "SomScreenshot": 5
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.025,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-07-hyperdrive-note-template",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "SomScreenshot": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.015,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-08-hyperdrive-printer-pick",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "SomScreenshot": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.015,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot",
+          "SomScreenshot",
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-09-hyperdrive-modal-dismiss",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 1,
+        "observationsByTier": {
+          "SomScreenshot": 1
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot"
+        ]
+      },
+      {
+        "taskId": "cv-10-hyperdrive-no-marks",
+        "surfaceKind": "citrix-session",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "SomScreenshot": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.01,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "SomScreenshot",
+          "SomScreenshot"
+        ]
+      }
+    ]
+  },
+  "osworld": {
+    "startedAt": 1777800792722,
+    "finishedAt": 1777800792723,
+    "totalTasks": 10,
+    "passed": 10,
+    "failed": 0,
+    "perSurface": {
+      "desktop-window": {
+        "surfaceKind": "desktop-window",
+        "tasks": 9,
+        "passed": 9,
+        "meanWallMs": 0.1111111111111111,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.0003444444444444445,
+        "observationHits": {
+          "UiaTree": 31
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "browser-tab": {
+        "surfaceKind": "browser-tab",
+        "tasks": 1,
+        "passed": 1,
+        "meanWallMs": 0,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.0002,
+        "observationHits": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      }
+    },
+    "results": [
+      {
+        "taskId": "osworld-explorer-create-folder",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "UiaTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-explorer-rename-file",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 1,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-libreoffice-bold-cell",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-libreoffice-insert-row",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "UiaTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-vscode-cmd-palette",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-settings-toggle-darkmode",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "UiaTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-chrome-extract-title",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "osworld-thunderbird-archive",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "UiaTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-gimp-export-png",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 5,
+        "observationsByTier": {
+          "UiaTree": 5
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree",
+          "UiaTree"
+        ]
+      },
+      {
+        "taskId": "osworld-terminal-grep-count",
+        "surfaceKind": "desktop-window",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "UiaTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "UiaTree",
+          "UiaTree"
+        ]
+      }
+    ]
+  },
+  "webarena": {
+    "startedAt": 1777800792723,
+    "finishedAt": 1777800792731,
+    "totalTasks": 10,
+    "passed": 10,
+    "failed": 0,
+    "perSurface": {
+      "browser-tab": {
+        "surfaceKind": "browser-tab",
+        "tasks": 8,
+        "passed": 8,
+        "meanWallMs": 0,
+        "medianWallMs": 0,
+        "meanCostUsd": 0.000375,
+        "observationHits": {
+          "AxTree": 30
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      },
+      "browser-extension": {
+        "surfaceKind": "browser-extension",
+        "tasks": 2,
+        "passed": 2,
+        "meanWallMs": 4,
+        "medianWallMs": 4,
+        "meanCostUsd": 0.0005,
+        "observationHits": {
+          "AxTree": 10
+        },
+        "coordClicks": 0,
+        "tierMissRate": 0
+      }
+    },
+    "results": [
+      {
+        "taskId": "webarena-shopping-search-price",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "AxTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-shopping-add-cart",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "AxTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-gitlab-create-issue",
+        "surfaceKind": "browser-extension",
+        "ok": true,
+        "wallMs": 8,
+        "steps": 5,
+        "observationsByTier": {
+          "AxTree": 5
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-gitlab-comment-pr",
+        "surfaceKind": "browser-extension",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 5,
+        "observationsByTier": {
+          "AxTree": 5
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-reddit-upvote-top-post",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-reddit-subscribe",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 3,
+        "observationsByTier": {
+          "AxTree": 3
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.00030000000000000003,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-cms-create-post",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 6,
+        "observationsByTier": {
+          "AxTree": 6
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0006000000000000001,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-cms-publish-post",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 4,
+        "observationsByTier": {
+          "AxTree": 4
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0004,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-maps-route",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 5,
+        "observationsByTier": {
+          "AxTree": 5
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0005,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree",
+          "AxTree"
+        ]
+      },
+      {
+        "taskId": "webarena-cookie-banner",
+        "surfaceKind": "browser-tab",
+        "ok": true,
+        "wallMs": 0,
+        "steps": 2,
+        "observationsByTier": {
+          "AxTree": 2
+        },
+        "coordClicks": 0,
+        "estimatedCostUsd": 0.0002,
+        "tierMisses": 0,
+        "fallbackChain": [
+          "AxTree",
+          "AxTree"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rachael-cu-windows"
+version = "0.1.0"
+description = "Python sidecar for @rachael/cu-windows: SoM detector + Windows UIA bridge."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Rachael CU contributors" }]
+keywords = ["computer-use", "windows", "uia", "citrix", "set-of-marks", "agent"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.optional-dependencies]
+detector = ["opencv-python>=4.8", "numpy>=1.24"]
+omniparser = ["onnxruntime>=1.16", "opencv-python>=4.8", "numpy>=1.24"]
+uia = ["uiautomation>=2.0; platform_system == 'Windows'"]
+all = [
+  "opencv-python>=4.8",
+  "numpy>=1.24",
+  "onnxruntime>=1.16",
+  "uiautomation>=2.0; platform_system == 'Windows'",
+]
+
+[project.scripts]
+rachael-cu-som = "rachael_cu_windows.som_detector:main"
+rachael-cu-uia = "rachael_cu_windows.uia_bridge:main"
+
+[project.urls]
+Homepage = "https://github.com/rachael/cu"
+Issues = "https://github.com/rachael/cu/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rachael_cu_windows*"]

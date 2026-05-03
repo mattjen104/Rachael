@@ -19,7 +19,12 @@
       "@/*": ["./client/src/*"],
       "@shared/*": ["./shared/*"],
       "@rachael/cu-core": ["./packages/cu-core/src/index.ts"],
-      "@rachael/cu-core/*": ["./packages/cu-core/src/*"]
+      "@rachael/cu-core/*": ["./packages/cu-core/src/*"],
+      "@rachael/cu-browser": ["./packages/cu-browser/src/index.ts"],
+      "@rachael/cu-windows": ["./packages/cu-windows/src/index.ts"],
+      "@rachael/cu-router": ["./packages/cu-router/src/index.ts"],
+      "@rachael/cu-skills": ["./packages/cu-skills/src/index.ts"],
+      "@rachael/cu-inspector-data": ["./packages/cu-inspector-data/src/index.ts"]
     }
   }
 }

@@ -38,6 +38,58 @@ All data lives in Postgres tables:
 - `snow_tickets` — Persisted ServiceNow tickets (number, type, shortDescription, state, priority, assignedTo, assignmentGroup, updatedOn, source, syncedAt)
 - `standup_episodes` / `standup_segments` / `standup_feed_tokens` — Standup.fm personal podcast (episode metadata, per-segment timing/topic/feedback, RSS subscription tokens)
 
+## `@rachael/cu` SDK package layout (Task #98)
+
+OSS extraction lives under `packages/`. Internal Rachael imports of
+`@rachael/cu-core` continue to work — the new packages are publish-ready
+façades during the in-monorepo extraction phase.
+
+| Package | Purpose |
+|---|---|
+| `@rachael/cu-core` | Types, bus, FakeSurface, the canonical adapter & router source. 42 files in dry-run, 215 KB unpacked. |
+| `@rachael/cu-browser` | Re-export of `BrowserPlaywrightAdapter` + `BrowserExtensionAdapter`. 5 files. |
+| `@rachael/cu-windows` | Re-export of `WindowsUiaAdapter` + `CitrixVisionAdapter` + `SomDetectorHttpClient`, plus `python/rachael-cu-windows` (SoM detector + UIA bridge). 11 files. |
+| `@rachael/cu-router` | Re-export of `Router`, `Budget`, recovery, strategies, trace sink. 5 files. |
+| `@rachael/cu-skills` | Re-export of `InMemorySkillLibrary`, `runRecipe`, `matchRecipe`, `SEED_RECIPES`. 5 files. |
+| `@rachael/cu-inspector-data` | Self-contained trajectory schemas + default-on PHI/PII redactor + wireframe SVG renderer. 5 files. |
+| `@rachael/cu-bench` | Public benchmark harness. In-house 30 + OSWorld 10 + WebArena 10 = 50 tasks against a deterministic StubSurface. Self-contained: harness/suite live in cu-bench/src and depend only on the @rachael/cu-core peer. 12 files. |
+
+**Boundary lint.** `scripts/check-package-boundaries.ts` fails on any
+import from `server/`, `client/`, `shared/`, `tools/`, `scripts/`,
+`tests/`, `db/`, `@/`, or `@shared/`, plus any relative import that
+escapes its package directory. No cross-package allowlist remains —
+cu-bench is fully self-contained and pulls types from `@rachael/cu-core`
+via the package name. Currently exits 0.
+
+**Standalone tarball smoke test.** `bash scripts/check-package-smoke.sh`
+packs each TS package, extracts the tarball, links only declared peer
+deps, and imports the entrypoint via tsx. All 7 packages currently
+green. Catches the bug class where a packaged file imports a relative
+path that doesn't exist in the tarball.
+
+**Bench.** `tsx packages/cu-bench/run.ts` writes
+`packages/cu-bench/raw/results.json` and
+`packages/cu-bench/raw/REPORT_NUMBERS.json`. All 50 tasks pass on the
+stub fabric. Production-reflected per-surface tier-mix lives in
+`packages/cu-core/bench/baseline.json` and is what the strategy-table
+change-gate uses.
+
+**Top-level docs.** `SECURITY.md` (cross-links tasks #88 and #89),
+`MOTIVATION.md` (head-to-head vs Anthropic CU / OpenAI CUA / OpenClaw /
+browser-use / Skyvern), `MIGRATION.md` (internal + external paths),
+`RELEASING.md` (npm pack + python -m build dry-run sequence).
+
+**Workspace declaration deferred.** Adding `"workspaces": ["packages/*"]`
+to root `package.json` is blocked (root file is platform-locked). Each
+package still packs cleanly as a standalone (`npm pack --dry-run` output
+captured at `packages/cu-bench/raw/npm-pack-dryrun.txt`); workspace
+linking is a future internal-only concern. Documented in MIGRATION.md.
+
+**tsconfig path aliases.** Added under `compilerOptions.paths`:
+`@rachael/cu-browser`, `@rachael/cu-windows`, `@rachael/cu-router`,
+`@rachael/cu-skills`, `@rachael/cu-inspector-data`. Existing
+`@rachael/cu-core` and `@rachael/cu-core/*` aliases unchanged.
+
 ## Standup.fm — personal daily podcast
 
 `server/standup-engine.ts` turns the existing `standup` CLI brief into a 5-8 min audio episode using the free Edge-TTS pipeline (`server/voice-synth.ts`). `briefToSegments` is a deterministic transformer that splits the brief HTML by `<h2>` topics, expands acronyms (SNOW→ServiceNow, etc.) and emits ordered `ScriptSegment[]`. Each segment is synthesized separately and binary-concatenated into one MP3 (`.briefings/standup-<date>-<kind>.mp3`); per-segment seek timestamps are stored in `standup_segments`.
