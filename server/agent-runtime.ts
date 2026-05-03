@@ -589,6 +589,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
   ps.status = "running";
   ps.error = null;
   const isResume = !!resumeCtx;
+  let okResultRecorded = false;
   emitEvent("agent-runtime", `${isResume ? "Resuming" : "Starting"} program: ${programName}`, "info", { program: programName });
   recordAction(getControlMode(), `program-${isResume ? "resume" : "start"}: ${programName}`, programName, undefined, isResume ? "resumed" : "started");
 
@@ -911,6 +912,7 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
         rawOutput: output.slice(0, 100000),
         status: "ok",
       });
+      okResultRecorded = true;
     } catch (e) {
       console.error("[agent-runtime] Failed to store result:", e);
     }
@@ -971,7 +973,11 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
       console.error("[agent-runtime] Failed evaluate phase:", e);
     }
 
-    await extractRecipeDirectives(output, programName, llmConfig);
+    try {
+      await extractRecipeDirectives(output, programName, llmConfig);
+    } catch (e) {
+      console.error("[agent-runtime] extractRecipeDirectives failed:", e);
+    }
 
     try {
       const sessionData = `Program: ${programName}\nIteration: ${ps.iteration}\nModel: ${modelUsed}\nOutput:\n${output.slice(0, 8000)}`;
@@ -1025,6 +1031,19 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
     await storage.updateProgramLastRun(prog.id, ps.lastRun, nextRun);
 
   } catch (err: any) {
+    if (okResultRecorded) {
+      console.error(`[agent-runtime] Post-completion error for "${programName}" (run already recorded as ok):`, err);
+      emitEvent("agent-runtime", `Post-completion error for "${programName}" (ignored, run was successful): ${(err?.message || String(err)).slice(0, 120)}`, "info", { program: programName });
+      try {
+        const prog = await storage.getProgramByName(programName);
+        if (prog) {
+          const nextRun = parseSchedule(prog.schedule, ps.lastRun || new Date(), prog.cronExpression);
+          ps.nextRun = nextRun;
+          await storage.updateProgramLastRun(prog.id, ps.lastRun || new Date(), nextRun);
+        }
+      } catch {}
+      return;
+    }
     ps.status = "error";
     ps.error = err.message || String(err);
     ps.lastRun = new Date();

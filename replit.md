@@ -11,6 +11,10 @@ Autonomous agent runtime with 30+ CLI programs, self-evolution engine, and CRT p
 
 ## Database Schema (shared/schema.ts)
 
+> ⚠ **Schema changes require `npm run db:push`.** Adding columns or tables to `shared/schema.ts` does *not* automatically update the live database. Run `npm run db:push` after any schema edit and re-verify with `information_schema.columns`. A month of nightly job failures (April 2026) was caused by `agent_memories.subject` / `valid_until` / `qdrant_id` being declared in schema but never pushed.
+
+
+
 All data lives in Postgres tables:
 - `programs` — Autonomous agent programs (code, config, schedule, enabled/disabled)
 - `skills` — Agent skills/toolkits
