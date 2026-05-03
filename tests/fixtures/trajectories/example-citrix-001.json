@@ -1,0 +1,16 @@
+{
+  "id": "example-citrix-001",
+  "surfaceKind": "citrix-session",
+  "recordedAt": 1746230500000,
+  "source": { "note": "Synthetic Citrix trajectory so the SoM/hints-only A/B toggle has something to chew on." },
+  "steps": [
+    {
+      "action": { "verb": "Hint", "hint": "a" },
+      "observationsAfter": []
+    },
+    {
+      "action": { "verb": "Wait", "ms": 0 },
+      "observationsAfter": []
+    }
+  ]
+}

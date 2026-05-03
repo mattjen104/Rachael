@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import {
   ADAPTER_CAPABILITIES,
   BrowserExtensionAdapter,
@@ -285,10 +287,11 @@ describe("ComputerUseBus + adapters", () => {
   });
 
   it("runParityGate replays fixture trajectories from disk", async () => {
-    const trajectories = await loadTrajectories({ limit: 50 });
+    const trajectories = await loadTrajectories({ limit: 50, surfaceKind: "browser-tab" });
     expect(trajectories.length).toBeGreaterThan(0);
     const report = await runParityGate({
       limit: 50,
+      surfaceKind: "browser-tab",
       adapterFor: () =>
         new BrowserPlaywrightAdapter({
           pageId: "p1",
@@ -305,6 +308,125 @@ describe("ComputerUseBus + adapters", () => {
     });
     expect(report.ok).toBe(true);
     expect(report.replayed).toBeGreaterThan(0);
+  });
+
+  it("runParityGate caps fixtures per surface kind and exercises Citrix variants", async () => {
+    const reportDir = path.resolve("tests/__reports__");
+    await fs.rm(reportDir, { recursive: true, force: true });
+
+    const citrixIo = () => ({
+      screenshot: vi.fn(async () => ({ imageRef: "stub" })),
+      click: vi.fn(async () => undefined),
+      hint: vi.fn(async () => undefined),
+      type: vi.fn(async () => undefined),
+      key: vi.fn(async () => undefined),
+    });
+    const hintsOnlyAdapterFor = vi.fn(() =>
+      new CitrixVisionAdapter({
+        io: citrixIo(),
+        hintProvider: { overlay: async () => [] },
+        forceHintsOnly: true,
+      }),
+    );
+
+    const now = 1746230999000;
+    const report = await runParityGate({
+      limitPerSurfaceKind: 50,
+      reportDir,
+      now: () => now,
+      adapterFor: (t) => {
+        if (t.surfaceKind === "citrix-session") {
+          return new CitrixVisionAdapter({
+            io: citrixIo(),
+            somDetector: { detect: async () => [] },
+            hintProvider: { overlay: async () => [] },
+          });
+        }
+        return new BrowserPlaywrightAdapter({
+          pageId: "p1",
+          bridge: {
+            getPageContent: async () => ({ title: "T", url: "u", text: "t", elements: [] }),
+            click: async () => undefined,
+            type: async () => undefined,
+            key: async () => undefined,
+            scroll: async () => undefined,
+            goto: async () => undefined,
+            wait: async () => undefined,
+          },
+        });
+      },
+      variants: [
+        { name: "citrix-hints-only", surfaceKind: "citrix-session", adapterFor: hintsOnlyAdapterFor },
+      ],
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.replayed).toBeGreaterThan(0);
+    // The hints-only variant must have been invoked for every Citrix fixture.
+    const citrixCount = report.reports.filter((r) => r.surfaceKind === "citrix-session" && !r.variant).length;
+    expect(citrixCount).toBeGreaterThan(0);
+    expect(hintsOnlyAdapterFor).toHaveBeenCalledTimes(citrixCount);
+    expect(report.reports.some((r) => r.variant === "citrix-hints-only")).toBe(true);
+
+    // The per-step diff report was written under tests/__reports__/.
+    expect(report.reportPath).toBe(path.join(reportDir, `parity-${now}.json`));
+    const onDisk = JSON.parse(await fs.readFile(report.reportPath!, "utf8"));
+    expect(onDisk.driftThreshold).toBe(0);
+    expect(onDisk.totalDrift).toBe(0);
+    expect(Array.isArray(onDisk.reports)).toBe(true);
+  });
+
+  it("runParityGate fails when primary drift exceeds the threshold", async () => {
+    // Set up a fixture dir with a single trajectory whose recorded
+    // DomSnapshot digest cannot match what the adapter produces.
+    const tmpDir = path.resolve("tests/__reports__/threshold-fixture");
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.mkdir(tmpDir, { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, "drifty.json"),
+      JSON.stringify({
+        id: "drifty",
+        surfaceKind: "browser-tab",
+        recordedAt: 1,
+        steps: [
+          {
+            action: { verb: "Wait", ms: 0 },
+            observationsAfter: [{ kind: "DomSnapshot", digest: "wrong-digest" }],
+          },
+        ],
+      }),
+    );
+
+    const adapterFor = () =>
+      new BrowserPlaywrightAdapter({
+        pageId: "p1",
+        bridge: {
+          getPageContent: async () => ({ title: "T", url: "u", text: "t", elements: [] }),
+          click: async () => undefined,
+          type: async () => undefined,
+          key: async () => undefined,
+          scroll: async () => undefined,
+          goto: async () => undefined,
+          wait: async () => undefined,
+        },
+      });
+
+    const strict = await runParityGate({
+      dir: tmpDir,
+      driftThreshold: 0,
+      adapterFor,
+    });
+    expect(strict.totalDrift).toBe(1);
+    expect(strict.ok).toBe(false);
+    expect(strict.failed).toBe(1);
+
+    const tolerant = await runParityGate({
+      dir: tmpDir,
+      driftThreshold: 5,
+      adapterFor,
+    });
+    expect(tolerant.totalDrift).toBe(1);
+    expect(tolerant.ok).toBe(true);
   });
 
   it("compareTrajectory reports digest drift", async () => {

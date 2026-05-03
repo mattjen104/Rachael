@@ -24,7 +24,9 @@ export type {
   ParityResult,
   ParityGateOptions,
   ParityGateReport,
+  ParityVariant,
   ReplayDrift,
   TrajectoryReport,
+  LoadOptions,
 } from "./adapters/parity-replay";
 export type { FakeSurfaceState } from "./fake-surface";

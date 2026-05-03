@@ -17,8 +17,10 @@ import type { Action, Observation, SurfaceKind } from "../types";
 //   - `loadTrajectories`   — scans the fixture directory and returns up to
 //     `limit` most-recent recordings, optionally filtered by surface kind.
 //   - `runParityGate`      — the high-level harness: loads, replays through
-//     the supplied adapter factory, returns a structured report. This is
-//     called by `scripts/parity-gate.ts` (CI) and by the vitest gate.
+//     the supplied adapter factory (and optional variants for A/B toggles
+//     such as Citrix forceHintsOnly), returns a structured report and
+//     optionally writes a per-step diff file under `tests/__reports__/`.
+//     Called by `scripts/parity-gate.ts` (CI) and by the vitest gate.
 //
 // The harness is intentionally defensive: if no recorded trajectories are
 // present (fresh checkout, no Replit-side dataset mounted), it returns
@@ -57,13 +59,21 @@ export interface ParityResult {
 export interface TrajectoryReport extends ParityResult {
   trajectoryId: string;
   surfaceKind: SurfaceKind;
+  // Set when this report comes from a named variant (e.g. citrix-hints-only).
+  // Variant reports are excluded from the gate's pass/fail threshold by
+  // default — they exist for diagnostics (A/B between SoM and hints-only).
+  variant?: string;
 }
 
 export interface ParityGateReport {
   ok: boolean;
   replayed: number;
   failed: number;
+  totalDrift: number;
+  driftThreshold: number;
   reports: TrajectoryReport[];
+  // Path of the per-step diff file written under reportDir, when set.
+  reportPath?: string;
 }
 
 export async function compareTrajectory(
@@ -128,6 +138,11 @@ export interface LoadOptions {
   dir?: string;
   limit?: number;
   surfaceKind?: SurfaceKind;
+  // When set, overrides `limit`: keep the most-recent N per surfaceKind so
+  // each surface gets the configured-coverage independent of how many
+  // fixtures another surface contributes. Required by task #94 step 6
+  // ("most recent 50 trajectories per surface kind").
+  limitPerSurfaceKind?: number;
 }
 
 export async function loadTrajectories(opts: LoadOptions = {}): Promise<RecordedTrajectory[]> {
@@ -158,7 +173,31 @@ export async function loadTrajectories(opts: LoadOptions = {}): Promise<Recorded
     }
   }
   loaded.sort((a, b) => (b.recordedAt ?? 0) - (a.recordedAt ?? 0));
+
+  if (typeof opts.limitPerSurfaceKind === "number") {
+    const counts: Partial<Record<SurfaceKind, number>> = {};
+    const capped: RecordedTrajectory[] = [];
+    for (const t of loaded) {
+      const c = counts[t.surfaceKind] ?? 0;
+      if (c >= opts.limitPerSurfaceKind) continue;
+      counts[t.surfaceKind] = c + 1;
+      capped.push(t);
+    }
+    return capped;
+  }
+
   return typeof opts.limit === "number" ? loaded.slice(0, opts.limit) : loaded;
+}
+
+// A named alternate adapter wiring for the same trajectory. Lets the gate
+// exercise toggles like Citrix `forceHintsOnly` against the same recorded
+// steps. Variant reports are written alongside the primary report but
+// excluded from the threshold by default (see ParityGateOptions).
+export interface ParityVariant {
+  name: string;
+  adapterFor(trajectory: RecordedTrajectory): Promise<Surface> | Surface;
+  // When set, only trajectories of this kind run under this variant.
+  surfaceKind?: SurfaceKind;
 }
 
 export interface ParityGateOptions extends LoadOptions {
@@ -166,17 +205,82 @@ export interface ParityGateOptions extends LoadOptions {
   // recorded trajectory so production wiring can stub the right page id /
   // env / Citrix session id.
   adapterFor(trajectory: RecordedTrajectory): Promise<Surface> | Surface;
+  // Optional alternate adapter wirings (e.g. Citrix SoM vs hints-only).
+  // Each matching trajectory is replayed once per variant in addition to
+  // the primary `adapterFor` run.
+  variants?: ParityVariant[];
+  // Maximum tolerated drift across primary reports. Variant reports are
+  // not counted toward the threshold (they're informational A/B output).
+  // Default 0 — any drift in a primary trajectory fails the gate.
+  driftThreshold?: number;
+  // When set, the gate writes a JSON report containing every per-step
+  // diff into `${reportDir}/parity-<timestamp>.json`. Required by task
+  // #94 step 6 ("write a per-step diff report to tests/__reports__/").
+  reportDir?: string;
+  // Override timestamp used in the report filename. Test-only.
+  now?: () => number;
+  // When set, the gate also includes variant drift in the threshold
+  // check. Default false: variants are diagnostic.
+  failOnVariantDrift?: boolean;
 }
 
 export async function runParityGate(opts: ParityGateOptions): Promise<ParityGateReport> {
   const trajectories = await loadTrajectories(opts);
   const reports: TrajectoryReport[] = [];
-  let failed = 0;
+
   for (const t of trajectories) {
     const surface = await opts.adapterFor(t);
     const result = await compareTrajectory(surface, t.steps);
-    if (!result.ok) failed++;
     reports.push({ ...result, trajectoryId: t.id, surfaceKind: t.surfaceKind });
+
+    for (const v of opts.variants ?? []) {
+      if (v.surfaceKind && v.surfaceKind !== t.surfaceKind) continue;
+      const variantSurface = await v.adapterFor(t);
+      const variantResult = await compareTrajectory(variantSurface, t.steps);
+      reports.push({
+        ...variantResult,
+        trajectoryId: t.id,
+        surfaceKind: t.surfaceKind,
+        variant: v.name,
+      });
+    }
   }
-  return { ok: failed === 0, replayed: trajectories.length, failed, reports };
+
+  const driftThreshold = opts.driftThreshold ?? 0;
+  const considered = opts.failOnVariantDrift
+    ? reports
+    : reports.filter((r) => !r.variant);
+  const totalDrift = considered.reduce((s, r) => s + r.driftCount, 0);
+  const failed = considered.filter((r) => !r.ok).length;
+  const ok = totalDrift <= driftThreshold;
+
+  let reportPath: string | undefined;
+  if (opts.reportDir) {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    await fs.mkdir(opts.reportDir, { recursive: true });
+    const ts = (opts.now ?? Date.now)();
+    reportPath = path.join(opts.reportDir, `parity-${ts}.json`);
+    const payload = {
+      generatedAt: ts,
+      ok,
+      driftThreshold,
+      totalDrift,
+      replayed: trajectories.length,
+      reportCount: reports.length,
+      failed,
+      reports,
+    };
+    await fs.writeFile(reportPath, JSON.stringify(payload, null, 2), "utf8");
+  }
+
+  return {
+    ok,
+    replayed: trajectories.length,
+    failed,
+    totalDrift,
+    driftThreshold,
+    reports,
+    reportPath,
+  };
 }

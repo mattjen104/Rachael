@@ -13,12 +13,20 @@ import {
 
 // Parity-replay CI gate. Replays recorded trajectories from
 // `tests/fixtures/trajectories/` through the new adapters and exits
-// non-zero on drift.
+// non-zero on drift exceeding `PARITY_DRIFT_THRESHOLD` (default 0).
+//
+// Coverage policy (task #94 step 6):
+//   - Up to 50 most-recent trajectories *per surface kind* are replayed,
+//     so high-volume surfaces don't crowd out the rare ones.
+//   - Citrix trajectories are additionally replayed in `forceHintsOnly`
+//     mode as an A/B variant; that drift is informational and does not
+//     fail the gate by default.
+//   - A per-step diff report is written into `tests/__reports__/`.
 //
 // In CI, the dataset is materialised by the bridge before this script
 // runs. On a fresh checkout the directory contains only the example
-// fixture and the gate exits 0 with `replayed=1`. The CI job asserts a
-// per-surface minimum separately.
+// fixtures and the gate exits 0 with a small `replayed`. The CI job
+// asserts a per-surface minimum separately.
 //
 // The adapters are constructed with the *real* underlying clients only
 // when the corresponding env var is set (BRIDGE_URL, UIA_HOST,
@@ -61,6 +69,16 @@ function stubBrowserBridge(_: StubBridgeOpts) {
   };
 }
 
+function stubCitrixIo() {
+  return {
+    screenshot: async () => ({ imageRef: "stub" }),
+    click: async () => undefined,
+    hint: async () => undefined,
+    type: async () => undefined,
+    key: async () => undefined,
+  };
+}
+
 async function adapterFor(t: RecordedTrajectory): Promise<Surface> {
   switch (t.surfaceKind) {
     case "browser-tab":
@@ -90,14 +108,11 @@ async function adapterFor(t: RecordedTrajectory): Promise<Surface> {
         },
       });
     case "citrix-session":
+      // Primary mode: SoM detector enabled (default production wiring).
       return new CitrixVisionAdapter({
-        io: {
-          screenshot: async () => ({ imageRef: "stub" }),
-          click: async () => undefined,
-          hint: async () => undefined,
-          type: async () => undefined,
-          key: async () => undefined,
-        },
+        io: stubCitrixIo(),
+        somDetector: { detect: async () => [] },
+        hintProvider: { overlay: async () => [] },
       });
     default:
       throw new Error(`No adapter wiring for surfaceKind: ${t.surfaceKind}`);
@@ -105,22 +120,57 @@ async function adapterFor(t: RecordedTrajectory): Promise<Surface> {
 }
 
 async function main() {
-  const report = await runParityGate({ adapterFor, limit: 50 });
+  const rawThreshold = process.env.PARITY_DRIFT_THRESHOLD;
+  const parsedThreshold = rawThreshold === undefined || rawThreshold === ""
+    ? 0
+    : Number(rawThreshold);
+  if (!Number.isFinite(parsedThreshold) || parsedThreshold < 0) {
+    console.error(`Invalid PARITY_DRIFT_THRESHOLD=${rawThreshold!}; expected non-negative number.`);
+    process.exit(2);
+  }
+  const driftThreshold = parsedThreshold;
+  const report = await runParityGate({
+    adapterFor,
+    limitPerSurfaceKind: 50,
+    driftThreshold,
+    reportDir: "tests/__reports__",
+    variants: [
+      {
+        name: "citrix-hints-only",
+        surfaceKind: "citrix-session",
+        adapterFor: () =>
+          new CitrixVisionAdapter({
+            io: stubCitrixIo(),
+            hintProvider: { overlay: async () => [] },
+            forceHintsOnly: true,
+          }),
+      },
+    ],
+  });
+
   const summary = {
     ok: report.ok,
     replayed: report.replayed,
     failed: report.failed,
-    perSurface: report.reports.reduce<Record<string, { ok: number; fail: number }>>((acc, r) => {
-      acc[r.surfaceKind] ||= { ok: 0, fail: 0 };
-      if (r.ok) acc[r.surfaceKind].ok++;
-      else acc[r.surfaceKind].fail++;
-      return acc;
-    }, {}),
+    totalDrift: report.totalDrift,
+    driftThreshold: report.driftThreshold,
+    reportPath: report.reportPath,
+    perSurface: report.reports.reduce<Record<string, { ok: number; fail: number; variant?: string }>>(
+      (acc, r) => {
+        const key = r.variant ? `${r.surfaceKind}#${r.variant}` : r.surfaceKind;
+        acc[key] ||= { ok: 0, fail: 0 };
+        if (r.ok) acc[key].ok++;
+        else acc[key].fail++;
+        return acc;
+      },
+      {},
+    ),
   };
   console.log(JSON.stringify(summary, null, 2));
   if (!report.ok) {
     for (const r of report.reports.filter((x) => !x.ok)) {
-      console.error(`DRIFT ${r.surfaceKind} ${r.trajectoryId}:`);
+      const tag = r.variant ? `${r.surfaceKind}#${r.variant}` : r.surfaceKind;
+      console.error(`DRIFT ${tag} ${r.trajectoryId}:`);
       for (const d of r.drift) console.error(`  step[${d.stepIndex}] ${d.reason}`);
     }
     process.exit(1);
