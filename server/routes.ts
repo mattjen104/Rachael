@@ -2941,6 +2941,83 @@ export async function registerRoutes(
     res.json({ recorded: true });
   });
 
+  // ── Receipts (Task 114) ────────────────────────────────────────────────
+  app.get("/api/receipts", async (req, res) => {
+    const limit = parseInt((req.query.limit as string) || "200", 10);
+    const filters = {
+      programName: (req.query.program as string) || undefined,
+      surface: (req.query.surface as string) || undefined,
+      category: (req.query.category as string) || undefined,
+      feedback: (req.query.feedback as "up" | "down" | "none" | undefined) || undefined,
+      sinceDay: (req.query.sinceDay as string) || undefined,
+      untilDay: (req.query.untilDay as string) || undefined,
+      search: (req.query.search as string) || undefined,
+      limit,
+    };
+    const rows = await storage.listReceipts(filters);
+    res.json(rows);
+  });
+
+  app.get("/api/receipts/summary", async (req, res) => {
+    const day = (req.query.day as string) || new Date().toISOString().slice(0, 10);
+    const summary = await storage.getReceiptDailySummary(day);
+    res.json({ day, ...summary });
+  });
+
+  app.post("/api/receipts/:id/feedback", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    const { feedback } = req.body as { feedback: "up" | "down" | null };
+    if (feedback !== "up" && feedback !== "down" && feedback !== null) {
+      return res.status(400).json({ message: "feedback must be 'up', 'down', or null" });
+    }
+    const { applyReceiptFeedback } = await import("./receipt-ledger");
+    const updated = await applyReceiptFeedback(id, feedback);
+    if (!updated) return res.status(404).json({ message: "Receipt not found" });
+    res.json(updated);
+  });
+
+  app.get("/api/receipts/verify-chain", async (_req, res) => {
+    const { verifyChain } = await import("./receipt-ledger");
+    const result = await verifyChain();
+    res.json(result);
+  });
+
+  app.get("/api/receipts/export.ndjson", async (_req, res) => {
+    const rows = await storage.listReceiptsAsc();
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Content-Disposition", `attachment; filename="receipts-${Date.now()}.ndjson"`);
+    for (const r of rows) res.write(JSON.stringify(r) + "\n");
+    res.end();
+  });
+
+  app.get("/api/receipts/export.csv", async (_req, res) => {
+    const rows = await storage.listReceiptsAsc();
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="receipts-${Date.now()}.csv"`);
+    res.write("id,occurred_at,program,surface,action,target,trajectory_id,status,cost_usd,wall_ms,verifier,feedback,hash\n");
+    const esc = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    for (const r of rows) {
+      res.write([r.id, r.occurredAt.toISOString(), r.programName || "", r.surface, r.actionVerb,
+        r.target || "", r.trajectoryId || "", r.status, r.costUsd, r.wallClockMs,
+        r.verifierScore ?? "", r.feedback ?? "", r.hash].map(esc).join(",") + "\n");
+    }
+    res.end();
+  });
+
+  app.post("/api/receipts/self-review/run", async (_req, res) => {
+    const { runWeeklySelfReview } = await import("./receipt-ledger");
+    try {
+      const result = await runWeeklySelfReview();
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   app.get("/api/audit-log", async (req, res) => {
     const limit = parseInt(req.query.limit as string || "100", 10);
     const actor = req.query.actor as string | undefined;

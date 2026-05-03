@@ -36,9 +36,10 @@ import {
   type DeviceAction, type InsertDeviceAction, deviceActionQueue,
   type RouterTrace, type InsertRouterTrace, routerTraces,
   type TrajectoryBranch, type InsertTrajectoryBranch, trajectoryBranches,
+  type Receipt, type InsertReceipt, receipts,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
+import { eq, desc, and, or, lte, gte, ilike, sql, asc, type SQL } from "drizzle-orm";
 
 export interface IStorage {
   getPrograms(): Promise<Program[]>;
@@ -202,6 +203,45 @@ export interface IStorage {
   getUnconsolidatedObservations(limit?: number): Promise<EvolutionObservation[]>;
   createEvolutionObservation(o: InsertEvolutionObservation): Promise<EvolutionObservation>;
   markObservationConsolidated(id: number): Promise<void>;
+
+  appendReceipt(r: InsertReceipt & { occurredAt?: Date; prevHash: string; hash: string }): Promise<Receipt>;
+  getLastReceipt(): Promise<Receipt | undefined>;
+  getReceipt(id: number): Promise<Receipt | undefined>;
+  listReceipts(filters: {
+    programName?: string;
+    surface?: string;
+    category?: string;
+    feedback?: "up" | "down" | "none";
+    sinceDay?: string;
+    untilDay?: string;
+    search?: string;
+    limit?: number;
+  }): Promise<Receipt[]>;
+  listReceiptsAsc(): Promise<Receipt[]>;
+  setReceiptFeedback(id: number, fb: "up" | "down" | null): Promise<Receipt | undefined>;
+  getReceiptDailyCostUsd(programName: string, day: string): Promise<number>;
+  getReceiptProgramRollup(since: Date): Promise<Array<{
+    programName: string | null;
+    totalCount: number;
+    upCount: number;
+    downCount: number;
+    failedCount: number;
+    totalCostUsd: number;
+  }>>;
+  getReceiptDailySummary(day: string): Promise<{
+    totalCount: number;
+    totalCostUsd: number;
+    bySurface: Array<{ surface: string; count: number }>;
+    upCount: number;
+    downCount: number;
+    blockedCount: number;
+    failedCount: number;
+    ratedPct: number;
+    positivePct: number;
+    biggestCost: { id: number; surface: string; actionVerb: string; target: string | null; costUsd: number } | null;
+    topDownSurface: { surface: string; count: number } | null;
+  }>;
+  findPendingProposalForTarget(targetName: string, source: string): Promise<OpenclawProposal | undefined>;
 
   upsertRouterTrace(t: InsertRouterTrace): Promise<RouterTrace>;
   getRouterTrace(runId: string): Promise<RouterTrace | undefined>;
@@ -978,6 +1018,207 @@ export class DatabaseStorage implements IStorage {
 
   async markObservationConsolidated(id: number): Promise<void> {
     await db.update(evolutionObservations).set({ consolidated: true }).where(eq(evolutionObservations.id, id));
+  }
+
+  async appendReceipt(r: InsertReceipt & { occurredAt?: Date; prevHash: string; hash: string }): Promise<Receipt> {
+    const values: typeof receipts.$inferInsert = {
+      programId: r.programId ?? null,
+      programName: r.programName ?? null,
+      surface: r.surface,
+      actionVerb: r.actionVerb,
+      target: r.target ?? null,
+      targetMeta: (r.targetMeta || {}) as Record<string, unknown>,
+      trajectoryId: r.trajectoryId ?? null,
+      category: r.category ?? null,
+      isObservation: !!r.isObservation,
+      costTokens: (r.costTokens || {}) as Record<string, number>,
+      costUsd: r.costUsd ?? "0",
+      wallClockMs: r.wallClockMs ?? 0,
+      verifierScore: r.verifierScore ?? null,
+      status: r.status ?? "executed",
+      prevHash: r.prevHash,
+      hash: r.hash,
+    };
+    if (r.occurredAt) values.occurredAt = r.occurredAt;
+    const [created] = await db.insert(receipts).values(values).returning();
+    return created;
+  }
+
+  async getLastReceipt(): Promise<Receipt | undefined> {
+    const [row] = await db.select().from(receipts).orderBy(desc(receipts.id)).limit(1);
+    return row;
+  }
+
+  async getReceipt(id: number): Promise<Receipt | undefined> {
+    const [row] = await db.select().from(receipts).where(eq(receipts.id, id));
+    return row;
+  }
+
+  async listReceipts(filters: {
+    programName?: string;
+    surface?: string;
+    category?: string;
+    feedback?: "up" | "down" | "none";
+    sinceDay?: string;
+    untilDay?: string;
+    search?: string;
+    limit?: number;
+  }): Promise<Receipt[]> {
+    const conds: SQL[] = [];
+    if (filters.programName) conds.push(eq(receipts.programName, filters.programName));
+    if (filters.surface) conds.push(eq(receipts.surface, filters.surface));
+    if (filters.category) conds.push(eq(receipts.category, filters.category));
+    if (filters.feedback === "up") conds.push(eq(receipts.feedback, "up"));
+    if (filters.feedback === "down") conds.push(eq(receipts.feedback, "down"));
+    if (filters.feedback === "none") conds.push(sql`${receipts.feedback} IS NULL`);
+    if (filters.sinceDay) conds.push(gte(receipts.occurredAt, new Date(filters.sinceDay + "T00:00:00.000Z")));
+    if (filters.untilDay) conds.push(lte(receipts.occurredAt, new Date(filters.untilDay + "T23:59:59.999Z")));
+    if (filters.search) {
+      const pattern = `%${filters.search}%`;
+      const searchCond = or(
+        ilike(receipts.actionVerb, pattern),
+        ilike(receipts.target, pattern),
+        ilike(receipts.surface, pattern),
+        ilike(receipts.programName, pattern),
+      );
+      if (searchCond) conds.push(searchCond);
+    }
+    const where = conds.length ? and(...conds) : undefined;
+    const rows = await db
+      .select()
+      .from(receipts)
+      .where(where)
+      .orderBy(desc(receipts.occurredAt))
+      .limit(filters.limit ?? 200);
+    return rows;
+  }
+
+  async listReceiptsAsc(): Promise<Receipt[]> {
+    return db.select().from(receipts).orderBy(asc(receipts.id));
+  }
+
+  async setReceiptFeedback(id: number, fb: "up" | "down" | null): Promise<Receipt | undefined> {
+    const [updated] = await db.update(receipts)
+      .set({ feedback: fb, feedbackAt: fb ? new Date() : null })
+      .where(eq(receipts.id, id))
+      .returning();
+    return updated;
+  }
+
+  async getReceiptDailyCostUsd(programName: string, day: string): Promise<number> {
+    const start = new Date(day + "T00:00:00.000Z");
+    const end = new Date(day + "T23:59:59.999Z");
+    const rows = await db.select({ costUsd: receipts.costUsd }).from(receipts).where(and(
+      eq(receipts.programName, programName),
+      eq(receipts.status, "executed"),
+      gte(receipts.occurredAt, start),
+      lte(receipts.occurredAt, end),
+    ));
+    let total = 0;
+    for (const r of rows) total += parseFloat(r.costUsd) || 0;
+    return total;
+  }
+
+  async getReceiptProgramRollup(since: Date): Promise<Array<{
+    programName: string | null;
+    totalCount: number;
+    upCount: number;
+    downCount: number;
+    failedCount: number;
+    totalCostUsd: number;
+  }>> {
+    const rows = await db.select().from(receipts).where(gte(receipts.occurredAt, since));
+    const acc = new Map<string, { totalCount: number; upCount: number; downCount: number; failedCount: number; totalCostUsd: number }>();
+    for (const r of rows) {
+      const key = r.programName || "(none)";
+      const a = acc.get(key) || { totalCount: 0, upCount: 0, downCount: 0, failedCount: 0, totalCostUsd: 0 };
+      a.totalCount++;
+      if (r.feedback === "up") a.upCount++;
+      if (r.feedback === "down") a.downCount++;
+      if (r.status === "failed" || r.status === "budget-blocked" || r.status === "permission-blocked") a.failedCount++;
+      a.totalCostUsd += parseFloat(r.costUsd) || 0;
+      acc.set(key, a);
+    }
+    return Array.from(acc.entries()).map(([programName, v]) => ({
+      programName: programName === "(none)" ? null : programName,
+      ...v,
+    }));
+  }
+
+  async getReceiptDailySummary(day: string): Promise<{
+    totalCount: number;
+    totalCostUsd: number;
+    bySurface: Array<{ surface: string; count: number }>;
+    upCount: number;
+    downCount: number;
+    blockedCount: number;
+    failedCount: number;
+    ratedPct: number;
+    positivePct: number;
+    biggestCost: { id: number; surface: string; actionVerb: string; target: string | null; costUsd: number } | null;
+    topDownSurface: { surface: string; count: number } | null;
+  }> {
+    const start = new Date(day + "T00:00:00.000Z");
+    const end = new Date(day + "T23:59:59.999Z");
+    const rows = await db.select().from(receipts).where(and(
+      gte(receipts.occurredAt, start),
+      lte(receipts.occurredAt, end),
+    ));
+    const surfaceCounts = new Map<string, number>();
+    const downBySurface = new Map<string, number>();
+    let totalCostUsd = 0;
+    let upCount = 0;
+    let downCount = 0;
+    let blockedCount = 0;
+    let failedCount = 0;
+    let biggest: { id: number; surface: string; actionVerb: string; target: string | null; costUsd: number } | null = null;
+    for (const r of rows) {
+      surfaceCounts.set(r.surface, (surfaceCounts.get(r.surface) || 0) + 1);
+      const cost = parseFloat(r.costUsd) || 0;
+      totalCostUsd += cost;
+      if (r.feedback === "up") upCount++;
+      if (r.feedback === "down") {
+        downCount++;
+        downBySurface.set(r.surface, (downBySurface.get(r.surface) || 0) + 1);
+      }
+      if (r.status === "budget-blocked" || r.status === "permission-blocked") blockedCount++;
+      if (r.status === "failed") failedCount++;
+      if (!biggest || cost > biggest.costUsd) {
+        biggest = { id: r.id, surface: r.surface, actionVerb: r.actionVerb, target: r.target, costUsd: cost };
+      }
+    }
+    const total = rows.length;
+    const rated = upCount + downCount;
+    const ratedPct = total ? Math.round((rated / total) * 100) : 0;
+    const positivePct = rated ? Math.round((upCount / rated) * 100) : 0;
+    let topDown: { surface: string; count: number } | null = null;
+    for (const [surface, count] of downBySurface) {
+      if (!topDown || count > topDown.count) topDown = { surface, count };
+    }
+    return {
+      totalCount: total,
+      totalCostUsd,
+      bySurface: Array.from(surfaceCounts.entries()).map(([surface, count]) => ({ surface, count })).sort((a, b) => b.count - a.count),
+      upCount,
+      downCount,
+      blockedCount,
+      failedCount,
+      ratedPct,
+      positivePct,
+      biggestCost: biggest && biggest.costUsd > 0 ? biggest : null,
+      topDownSurface: topDown,
+    };
+  }
+
+  async findPendingProposalForTarget(targetName: string, source: string): Promise<OpenclawProposal | undefined> {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const [row] = await db.select().from(openclawProposals).where(and(
+      eq(openclawProposals.targetName, targetName),
+      eq(openclawProposals.source, source),
+      eq(openclawProposals.status, "pending"),
+      gte(openclawProposals.createdAt, today),
+    )).limit(1);
+    return row;
   }
 
   async upsertRouterTrace(t: InsertRouterTrace): Promise<RouterTrace> {

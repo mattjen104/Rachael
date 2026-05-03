@@ -491,3 +491,15 @@ The web app can connect to a remote backend (e.g., DigitalOcean droplet) instead
 - Takeover: keyboard receives `prompt` frames for pending takeover-points; `Y/N` resolves via `resolveTakeoverPoint`.
 - Web UI: Cockpit → DEVICES tab (`KeyboardDevicesPanel` in `CockpitView.tsx`)
 - Firmware: `firmware/lilygo-keyboard/lilygo-keyboard.ino` + README — dual mode (CHAT preserved / RACHAEL), `Sym+R/Sym+C` chord, NVS persistence, OLED paging, corner mode+link glyph.
+
+## Receipts Ledger (Task #114)
+
+- DB table `receipts` (`shared/schema.ts`) is a hash-chained, append-only ledger of every autonomous agent action: `surface`, `actionVerb`, `target`, `targetMeta`, `trajectoryId`, `category`, `costTokens`, `costUsd`, `wallClockMs`, `verifierScore`, `feedback` (up/down/null), `prevHash`/`hash`, `status` (executed | budget-blocked | permission-blocked | failed). New `programs.dailyBudgetUsd` column for per-program $ caps.
+- Single write helper: `server/receipt-ledger.ts` exports `recordReceipt()` (sync, returns `{receipt, blocked}`), `recordReceiptSafe()` (fire-and-forget), `verifyChain()`, `runWeeklySelfReview()`. Last hash is cached in-process; sha256 of canonicalized JSON of the row + `prevHash`.
+- Wire-points (every autonomous sink writes one receipt):
+  - `server/control-bus.ts::recordAction()` — passthrough mirror for `actor==="agent"` covers iOS dispatch, scheduled program lifecycle (`program-start/complete/error`), nav-paths, voice commands.
+  - `server/briefing-utils.ts::pushViaNtfy` — direct write per ntfy push.
+  - `server/cu-router.ts::persistRunTrace` — one row per cu-router run, links `trajectoryId` to the router_traces inspector.
+- API: `GET /api/receipts` (filters: program/surface/category/feedback/sinceDay/untilDay/limit), `GET /api/receipts/summary?day=…`, `POST /api/receipts/:id/feedback` `{feedback:"up"|"down"|null}`, `GET /api/receipts/verify-chain`, `GET /api/receipts/export.csv`, `GET /api/receipts/export.ndjson`, `POST /api/receipts/self-review/run`.
+- Weekly self-review: `runWeeklySelfReview()` scans 7d rollup; emits OpenClaw proposals for programs with high spend / low feedback / high failure ratios. Idempotent within a day. Auto-runs Saturday 06:00 from `agent-runtime.tick`.
+- UI: `client/src/components/views/LedgerView.tsx` — sidebar slot `L` (LDG). Daily summary card (count, $ spent, 👍/👎/blocked/failed, by-surface), filters, J/K nav, Y/N feedback, U clear. Detail pane shows hash chain, trajectory deep-link, verifier score, target meta. CSV/NDJSON download buttons + verify-chain button.

@@ -15,6 +15,7 @@ export const programs = pgTable("programs", {
   costTier: text("cost_tier").notNull().default("cheap"),
   computeTarget: text("compute_target").notNull().default("local"),
   tags: text("tags").array().notNull().default([]),
+  dailyBudgetUsd: text("daily_budget_usd"),
   lastRun: timestamp("last_run"),
   nextRun: timestamp("next_run"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -33,6 +34,7 @@ export const insertProgramSchema = z.object({
   costTier: z.string().default("cheap"),
   computeTarget: z.enum(["local"]).default("local"),
   tags: z.array(z.string()).default([]),
+  dailyBudgetUsd: z.string().nullable().optional(),
 });
 export type InsertProgram = z.infer<typeof insertProgramSchema>;
 export type Program = typeof programs.$inferSelect;
@@ -957,6 +959,60 @@ export const routerTraces = pgTable("router_traces", {
   status: text("status").notNull().default("ok"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Receipts — accountability ledger for every autonomous agent action.
+// Hash-chained, append-only. Each row records what happened, what it cost,
+// the verifier score, and one-keystroke 👍/👎 feedback that flows back into
+// the trajectory memory and skill library.
+// ────────────────────────────────────────────────────────────────────────────
+
+export type ReceiptStatus = "executed" | "budget-blocked" | "permission-blocked" | "failed";
+export type ReceiptFeedback = "up" | "down";
+
+export const receipts = pgTable("receipts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+  programId: integer("program_id"),
+  programName: text("program_name"),
+  surface: text("surface").notNull(),
+  actionVerb: text("action_verb").notNull(),
+  target: text("target"),
+  targetMeta: jsonb("target_meta").$type<Record<string, unknown>>().default({}),
+  trajectoryId: text("trajectory_id"),
+  category: text("category"),
+  isObservation: boolean("is_observation").notNull().default(false),
+  costTokens: jsonb("cost_tokens").$type<Record<string, number>>().default({}),
+  costUsd: text("cost_usd").notNull().default("0"),
+  wallClockMs: integer("wall_clock_ms").notNull().default(0),
+  verifierScore: integer("verifier_score"),
+  feedback: text("feedback"),
+  feedbackAt: timestamp("feedback_at"),
+  prevHash: text("prev_hash").notNull().default(""),
+  hash: text("hash").notNull(),
+  status: text("status").notNull().default("executed"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertReceiptSchema = z.object({
+  occurredAt: z.date().optional(),
+  programId: z.number().nullable().optional(),
+  programName: z.string().nullable().optional(),
+  surface: z.string(),
+  actionVerb: z.string(),
+  target: z.string().nullable().optional(),
+  targetMeta: z.record(z.string(), z.unknown()).default({}),
+  trajectoryId: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+  isObservation: z.boolean().default(false),
+  costTokens: z.record(z.string(), z.number()).default({}),
+  costUsd: z.string().default("0"),
+  wallClockMs: z.number().default(0),
+  verifierScore: z.number().nullable().optional(),
+  status: z.enum(["executed", "budget-blocked", "permission-blocked", "failed"]).default("executed"),
+});
+export type InsertReceipt = z.infer<typeof insertReceiptSchema>;
+export type Receipt = typeof receipts.$inferSelect;
 
 export const insertRouterTraceSchema = z.object({
   runId: z.string(),

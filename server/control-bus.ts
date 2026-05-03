@@ -425,6 +425,35 @@ export function recordAction(
 ): void {
   pushActivity({ actor, type: "action", action, target, permissionLevel, result, details });
   logAudit(actor, action, target || null, permissionLevel || null, result, details);
+  // Mirror every autonomous action into the receipts ledger so the Ledger
+  // view shows a single accountability stream. Human-initiated audit rows
+  // are skipped (they're already visible in the audit log surface).
+  if (actor === "agent") {
+    const verbMatch = /^([a-z][a-z0-9-]*)/i.exec(action);
+    const verb = verbMatch ? verbMatch[1] : "action";
+    const programMatch = /^[a-z-]+:\s*([a-zA-Z0-9_-]+)/.exec(action);
+    const programName = programMatch ? programMatch[1] : null;
+    let surface = "control-bus";
+    if (action.startsWith("ios/")) surface = "ios";
+    else if (action.startsWith("voice-cmd")) surface = "voice";
+    else if (action.startsWith("program-") || action.startsWith("local-compute")) surface = "program-runner";
+    else if (action.startsWith("nav-") || action.startsWith("execute") || action.startsWith("completed")) surface = "scraper";
+    let status: "executed" | "permission-blocked" | "failed" = "executed";
+    if (result === "blocked" || permissionLevel === "blocked") status = "permission-blocked";
+    else if (result === "error" || result.startsWith("error")) status = "failed";
+    // Lazy import to avoid circular load between control-bus and storage.
+    import("./receipt-ledger").then(({ recordReceiptSafe }) => {
+      recordReceiptSafe({
+        programName,
+        surface,
+        actionVerb: verb,
+        target: target || null,
+        targetMeta: { fullAction: action, result, details: details?.slice(0, 200) || null },
+        category: surface,
+        status,
+      });
+    }).catch(() => {});
+  }
 }
 
 export function getActivityStream(limit = 50): ActivityEvent[] {

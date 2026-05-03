@@ -588,6 +588,37 @@ async function executeProgram(programName: string, resumeCtx?: ProgramResumeCont
     return;
   }
 
+  // Pre-action budget gate — refuse to execute when the program has already
+  // blown its daily $ cap. Writes a `budget-blocked` receipt and returns,
+  // so the caller (scheduler) sees an explicit refusal in the ledger.
+  try {
+    const { checkBudget, recordReceipt } = await import("./receipt-ledger");
+    const gate = await checkBudget(programName, 0);
+    if (gate.blocked) {
+      ps.status = "idle";
+      emitEvent("agent-runtime", `Program "${programName}" refused: ${gate.reason}`, "warn", { program: programName });
+      await recordReceipt({
+        programName,
+        surface: "program-runner",
+        actionVerb: "program-start",
+        target: programName,
+        targetMeta: { reason: gate.reason, budget: gate.budget, spent: gate.spent },
+        category: "program-runner",
+        status: "budget-blocked",
+        enforceBudget: false,
+      });
+      if (cmd) completeCommand(cmd.id, "blocked");
+      return;
+    }
+  } catch (err) {
+    // Loud failure — refuse to proceed if we can't even check the gate.
+    emitEvent("agent-runtime", `Program "${programName}" aborted: budget-gate check failed (${(err as Error)?.message || err})`, "error", { program: programName });
+    ps.status = "error";
+    ps.error = (err as Error)?.message || String(err);
+    if (cmd) completeCommand(cmd.id, "error");
+    return;
+  }
+
   ps.status = "running";
   ps.error = null;
   const isResume = !!resumeCtx;
@@ -1141,6 +1172,17 @@ async function tick(): Promise<void> {
     if (now.getMinutes() < 2) {
       persistQualityScores(storage);
       refreshRosterPricing().catch(() => {});
+    }
+
+    // Saturday 06:00 weekly self-review — emits OpenClaw proposals for any
+    // program that spent money this week with no positive feedback.
+    if (now.getDay() === 6 && now.getHours() === 6 && now.getMinutes() < 2) {
+      try {
+        const { runWeeklySelfReview } = await import("./receipt-ledger");
+        await runWeeklySelfReview();
+      } catch (e) {
+        console.error("[agent-runtime] Weekly self-review error:", e);
+      }
     }
 
     if (now.getHours() === 3 && now.getMinutes() < 2) {

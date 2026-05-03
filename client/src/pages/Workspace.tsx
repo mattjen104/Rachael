@@ -15,6 +15,7 @@ import VoiceView from "@/components/views/VoiceView";
 import EvolutionPanel from "@/components/views/EvolutionPanel";
 import TrajectoryView from "@/components/views/TrajectoryView";
 import GalaxyKbView from "@/components/views/GalaxyKbView";
+import LedgerView from "@/components/views/LedgerView";
 import Minibuffer from "@/components/editor/Minibuffer";
 import InlineEditor from "@/components/editor/InlineEditor";
 import NotificationToast from "@/components/layout/NotificationToast";
@@ -215,6 +216,13 @@ export default function Workspace() {
         setViewMode("trajectory");
         return;
       }
+
+      if ((e.key === "L" || e.key === "l") && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (viewMode === "ledger") return;
+        e.preventDefault();
+        setViewMode("ledger");
+        return;
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -234,6 +242,7 @@ export default function Workspace() {
       case "evolution": return <EvolutionPanel />;
       case "trajectory": return <TrajectoryView />;
       case "galaxy-kb": return <GalaxyKbView selectedEntryId={selectedItemId} />;
+      case "ledger": return <LedgerView />;
       default: return null;
     }
   };

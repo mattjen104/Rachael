@@ -2332,23 +2332,49 @@ ${fullHtml}`;
           headers["Email"] = email;
         }
         let resp: Response | null = null;
+        let pushErr: any = null;
         const maxRetries = 3;
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-          resp = await fetch(`https://ntfy.sh/${channel}`, {
-            method: "POST",
-            headers,
-            body: ntfyLines.join("\n"),
-          });
-          if (resp.ok) break;
-          if (resp.status === 429 && attempt < maxRetries - 1) {
-            const waitSec = Math.pow(2, attempt + 1) * 15;
-            emitEvent("cli", `ntfy.sh rate limited (429), retrying in ${waitSec}s (attempt ${attempt + 2}/${maxRetries})`, "warn", { metadata: { command: "notify" } });
-            await new Promise(r => setTimeout(r, waitSec * 1000));
-          } else {
-            break;
+        const t0 = Date.now();
+        try {
+          for (let attempt = 0; attempt < maxRetries; attempt++) {
+            resp = await fetch(`https://ntfy.sh/${channel}`, {
+              method: "POST",
+              headers,
+              body: ntfyLines.join("\n"),
+            });
+            if (resp.ok) break;
+            if (resp.status === 429 && attempt < maxRetries - 1) {
+              const waitSec = Math.pow(2, attempt + 1) * 15;
+              emitEvent("cli", `ntfy.sh rate limited (429), retrying in ${waitSec}s (attempt ${attempt + 2}/${maxRetries})`, "warn", { metadata: { command: "notify" } });
+              await new Promise(r => setTimeout(r, waitSec * 1000));
+            } else {
+              break;
+            }
           }
+        } catch (e: any) {
+          pushErr = e;
         }
-        if (resp && resp.ok) {
+        // Awaited receipt — single ledger row per notify, loud on failure.
+        try {
+          const { recordReceipt } = await import("./receipt-ledger");
+          await recordReceipt({
+            surface: "ntfy",
+            actionVerb: "notify",
+            target: channel,
+            targetMeta: pushErr
+              ? { error: (pushErr.message || "").slice(0, 200), command: "notify" }
+              : { httpStatus: resp?.status, command: "notify", htmlUrl, audioUrl },
+            category: "notification",
+            status: pushErr || !resp?.ok ? "failed" : "executed",
+            wallClockMs: Date.now() - t0,
+            enforceBudget: false,
+          });
+        } catch (recErr: any) {
+          emitEvent("cli", `BLIND ACTION: notify ledger write failed (${recErr?.message || recErr})`, "error", { metadata: { command: "notify" } });
+        }
+        if (pushErr) {
+          results.push(`ntfy.sh error: ${pushErr.message}`);
+        } else if (resp && resp.ok) {
           results.push(`Sent to ntfy.sh/${channel}${email ? ` + email to ${email}` : ""}`);
           if (htmlUrl) results.push(`Briefing: ${htmlUrl}`);
           if (audioUrl) results.push(`Audio: ${audioUrl}`);

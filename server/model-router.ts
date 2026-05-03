@@ -349,6 +349,26 @@ function resetIfNewDay(): void {
   }
 }
 
+function recordModelReceipt(model: string, tokens: number, cost: number, programName?: string): void {
+  // Fire-and-forget: per-LLM-call receipt with **real** $ from the rate table.
+  // Failure is still loud — recordReceiptSafe emits a BLIND-ACTION event on
+  // ledger write failure even when the caller doesn't await.
+  import("./receipt-ledger").then(({ recordReceiptSafe }) => {
+    recordReceiptSafe({
+      programName: programName ?? null,
+      surface: "model-router",
+      actionVerb: "llm-call",
+      target: model,
+      targetMeta: { tokens },
+      category: "model",
+      isObservation: true,
+      costTokens: { total: tokens },
+      costUsd: cost,
+      enforceBudget: false,
+    });
+  }).catch(() => undefined);
+}
+
 export function trackTokenUsage(model: string, tokens: number, programName?: string): void {
   resetIfNewDay();
   const normalized = model.replace(/^openrouter\//, "");
@@ -356,11 +376,13 @@ export function trackTokenUsage(model: string, tokens: number, programName?: str
   const costPer1M = entry ? ((entry.inputCostPer1M || 0) + (entry.outputCostPer1M || 0)) / 2 : 0;
   const estimatedCost = (tokens / 1_000_000) * costPer1M;
   dailyUsage.push({ model, tokens, timestamp: Date.now(), programName, estimatedCost });
+  recordModelReceipt(model, tokens, estimatedCost, programName);
 }
 
 export function trackExternalCost(model: string, cost: number, tokens: number, programName?: string): void {
   resetIfNewDay();
   dailyUsage.push({ model, tokens, timestamp: Date.now(), programName, estimatedCost: cost });
+  recordModelReceipt(model, tokens, cost, programName);
 }
 
 export interface DailyTokenReport {

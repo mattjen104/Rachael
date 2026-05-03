@@ -150,6 +150,33 @@ async function persistRunTrace(runId: string, status: string): Promise<void> {
   } catch (err) {
     console.error("[cu-router] failed to persist trace", err);
   }
+  // One ledger row per cu-router run captures the trajectory + cost so the
+  // Ledger view can deep-link straight to the Trajectory Inspector. Awaited
+  // so write failures surface loudly through the receipt-ledger event bus
+  // rather than silently dropping the audit row.
+  try {
+    const { recordReceipt } = await import("./receipt-ledger");
+    const lastEvent = buf.events[buf.events.length - 1];
+    await recordReceipt({
+      programName: buf.programName ?? null,
+      surface: "cu-router",
+      actionVerb: lastEvent?.actionVerb || "run",
+      target: buf.surfaceKind,
+      targetMeta: {
+        runId,
+        steps: buf.totalSteps,
+        tierMisses: buf.tierMisses,
+        coordClicks: buf.coordClicks,
+        terminalReason: lastEvent?.reason,
+      },
+      trajectoryId: runId,
+      category: "computer-use",
+      costUsd: buf.estimatedCostUsd,
+      status: status === "abort" ? "failed" : "executed",
+    });
+  } catch (err) {
+    console.error("[cu-router] failed to record receipt", err);
+  }
 }
 
 export function getRouterTraceBuffer(runId: string): RouterTraceEvent[] | undefined {

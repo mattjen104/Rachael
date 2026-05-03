@@ -88,17 +88,60 @@ export async function pushViaNtfy(
   }
   if (notifyEmail) ntfyHeaders["Email"] = notifyEmail;
 
+  // Pre-action budget gate: if the caller's program has blown its daily $ cap,
+  // refuse to push and log a budget-blocked receipt. The notification has a
+  // very small per-call cost but we still respect program-level $ caps.
+  const { checkBudget, recordReceipt } = await import("./receipt-ledger");
+  const programNameForGate = (ntfyHeaders as any).__programName || null;
+  if (programNameForGate) {
+    const gate = await checkBudget(programNameForGate, 0);
+    if (gate.blocked) {
+      await recordReceipt({
+        programName: programNameForGate,
+        surface: "ntfy",
+        actionVerb: "notify",
+        target: notifyChannel,
+        targetMeta: { title, reason: gate.reason },
+        category: "notification",
+        status: "budget-blocked",
+        enforceBudget: false,
+      });
+      return "blocked: " + gate.reason;
+    }
+  }
+
+  const t0 = Date.now();
+  let resp: Response | null = null;
+  let pushErr: any = null;
   try {
-    const resp = await fetch("https://ntfy.sh/" + notifyChannel, {
+    resp = await fetch("https://ntfy.sh/" + notifyChannel, {
       method: "POST",
       headers: ntfyHeaders,
       body: plainText,
       signal: AbortSignal.timeout(15000),
     });
-    return resp.ok ? "sent to " + notifyChannel : "ntfy error: " + resp.status;
   } catch (e: any) {
-    return "notify error: " + (e.message || "").slice(0, 80);
+    pushErr = e;
   }
+
+  // Awaited receipt — failure is loud (recordReceipt throws on DB error and
+  // emits a BLIND-ACTION event). Do NOT swallow.
+  await recordReceipt({
+    programName: programNameForGate,
+    surface: "ntfy",
+    actionVerb: "notify",
+    target: notifyChannel,
+    targetMeta: pushErr
+      ? { title, error: (pushErr.message || "").slice(0, 200) }
+      : { title, htmlUrl, bytes: plainText.length, httpStatus: resp?.status },
+    category: "notification",
+    status: pushErr || !resp?.ok ? "failed" : "executed",
+    wallClockMs: Date.now() - t0,
+    enforceBudget: false,
+  });
+
+  if (pushErr) return "notify error: " + (pushErr.message || "").slice(0, 80);
+  return resp!.ok ? "sent to " + notifyChannel : "ntfy error: " + resp!.status;
 }
 
 export async function saveBriefingAndNotify(
