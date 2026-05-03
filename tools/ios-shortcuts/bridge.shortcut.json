@@ -1,0 +1,23 @@
+{
+  "name": "Rachael Bridge",
+  "description": "Entry point Shortcut. Pulls queued actions from Rachael, dispatches to helper Shortcuts, returns results.",
+  "inputs": ["pairing-code (first run)"],
+  "secretsKept": ["X-Device-Token"],
+  "envelopeIn": { "id": "number", "action": "string", "args": "dictionary", "ttlSeconds": "number" },
+  "envelopeOut": { "id": "number", "status": "completed|failed|skipped", "result": "dictionary?", "error": "string?" },
+  "actions": [
+    { "type": "GetContentsOfURL", "url": "{{BRIDGE_URL}}/queue", "method": "GET", "headers": { "X-Device-Token": "{{TOKEN}}" } },
+    { "type": "RepeatWithEach", "over": "Contents" },
+    { "type": "GetDictionaryValue", "key": "action" },
+    { "type": "If", "branches": [
+      { "match": "send-imessage", "run": "send-imessage" },
+      { "match": "open-url", "run": "open-url" },
+      { "match": "run-named-shortcut", "run": "run-named-shortcut" },
+      { "match": "set-timer", "run": "set-timer" },
+      { "match": "append-note", "run": "append-note" },
+      { "match": "append-reminder", "run": "append-reminder" },
+      { "match": "query-health", "run": "query-health" }
+    ]},
+    { "type": "GetContentsOfURL", "url": "{{BRIDGE_URL}}/queue/{{id}}/result", "method": "POST", "headers": { "X-Device-Token": "{{TOKEN}}" }, "body": "{{result}}" }
+  ]
+}

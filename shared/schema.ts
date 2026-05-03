@@ -820,6 +820,84 @@ export type InsertKeyboardPairing = z.infer<typeof insertKeyboardPairingSchema>;
 export type KeyboardPairing = typeof keyboardPairings.$inferSelect;
 
 // ────────────────────────────────────────────────────────────────────────────
+// Paired devices — keyboard, iOS Shortcuts bridge, iOS WDA bridge
+// ────────────────────────────────────────────────────────────────────────────
+
+export type DeviceKind = "lilygo-keyboard" | "ios-shortcuts" | "ios-wda";
+
+export const pairedDevices = pgTable("paired_devices", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  kind: text("kind").notNull(),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  armed: boolean("armed").notNull().default(false),
+  capabilities: jsonb("capabilities").$type<Record<string, unknown>>().default({}),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  lastSeen: timestamp("last_seen"),
+  revoked: boolean("revoked").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPairedDeviceSchema = z.object({
+  kind: z.enum(["lilygo-keyboard", "ios-shortcuts", "ios-wda"]),
+  name: z.string(),
+  tokenHash: z.string(),
+  armed: z.boolean().default(false),
+  capabilities: z.record(z.string(), z.any()).default({}),
+  metadata: z.record(z.string(), z.any()).default({}),
+});
+export type InsertPairedDevice = z.infer<typeof insertPairedDeviceSchema>;
+export type PairedDevice = typeof pairedDevices.$inferSelect;
+
+export const devicePairingCodes = pgTable("device_pairing_codes", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  code: text("code").notNull().unique(),
+  kind: text("kind").notNull(),
+  proposedName: text("proposed_name").notNull().default(""),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  consumedDeviceId: integer("consumed_device_id"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertDevicePairingCodeSchema = z.object({
+  code: z.string(),
+  kind: z.enum(["lilygo-keyboard", "ios-shortcuts", "ios-wda"]),
+  proposedName: z.string().default(""),
+  metadata: z.record(z.string(), z.any()).default({}),
+  expiresAt: z.date(),
+});
+export type InsertDevicePairingCode = z.infer<typeof insertDevicePairingCodeSchema>;
+export type DevicePairingCode = typeof devicePairingCodes.$inferSelect;
+
+// Outbound action queue used by the polling-fallback transport (the iOS
+// Shortcuts bridge runs on a schedule and pulls queued actions). APNs path
+// also writes here for audit/retry.
+export const deviceActionQueue = pgTable("device_action_queue", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  deviceId: integer("device_id").notNull().references(() => pairedDevices.id, { onDelete: "cascade" }),
+  action: text("action").notNull(),
+  args: jsonb("args").$type<Record<string, unknown>>().default({}),
+  status: text("status").notNull().default("pending"),
+  result: jsonb("result").$type<Record<string, unknown>>(),
+  source: text("source").notNull().default("agent"),
+  transport: text("transport").notNull().default("apns"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  claimedAt: timestamp("claimed_at"),
+  completedAt: timestamp("completed_at"),
+});
+
+export const insertDeviceActionSchema = z.object({
+  deviceId: z.number(),
+  action: z.string(),
+  args: z.record(z.string(), z.any()).default({}),
+  source: z.string().default("agent"),
+  transport: z.enum(["apns", "polling", "wda"]).default("apns"),
+});
+export type InsertDeviceAction = z.infer<typeof insertDeviceActionSchema>;
+export type DeviceAction = typeof deviceActionQueue.$inferSelect;
+
+// ────────────────────────────────────────────────────────────────────────────
 // Epic Hyperdrive grammar (canonical abstraction contract)
 // Discovered/persisted by `epic discover`; consumed via GET /api/epic/grammar/:phash
 // ────────────────────────────────────────────────────────────────────────────

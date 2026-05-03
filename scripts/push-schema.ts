@@ -211,6 +211,44 @@ const evolutionTables = [
   )`,
 ];
 
+const iosDeviceTables = [
+  `CREATE TABLE IF NOT EXISTS paired_devices (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    armed BOOLEAN NOT NULL DEFAULT false,
+    capabilities JSONB DEFAULT '{}',
+    metadata JSONB DEFAULT '{}',
+    last_seen TIMESTAMP,
+    revoked BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS device_pairing_codes (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    proposed_name TEXT,
+    metadata JSONB DEFAULT '{}',
+    consumed_device_id INTEGER,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS device_action_queue (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    device_id INTEGER NOT NULL REFERENCES paired_devices(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    args JSONB DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    result JSONB,
+    source TEXT NOT NULL DEFAULT 'agent',
+    transport TEXT NOT NULL DEFAULT 'apns',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    claimed_at TIMESTAMP,
+    completed_at TIMESTAMP
+  )`,
+];
+
 const extraTables = [
   `CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -259,13 +297,23 @@ async function pushSchema() {
   for (const ddl of extraTables) {
     await db.execute(sql.raw(ddl));
   }
+  for (const ddl of iosDeviceTables) {
+    await db.execute(sql.raw(ddl));
+  }
   for (const alt of alterations) {
     try { await db.execute(sql.raw(alt)); } catch {}
   }
   for (const idx of indexes) {
     try { await db.execute(sql.raw(idx)); } catch {}
   }
-  console.log(`[push-schema] Ensured ${tables.length + extraTables.length} tables exist`);
+  const indexesIos = [
+    `CREATE INDEX IF NOT EXISTS idx_device_action_queue_device_status ON device_action_queue(device_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_device_action_queue_claimed_at ON device_action_queue(claimed_at) WHERE status = 'claimed'`,
+  ];
+  for (const idx of indexesIos) {
+    try { await db.execute(sql.raw(idx)); } catch {}
+  }
+  console.log(`[push-schema] Ensured ${tables.length + extraTables.length + iosDeviceTables.length} tables exist`);
   await pool.end();
 }
 

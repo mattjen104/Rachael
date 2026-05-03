@@ -55,7 +55,7 @@ app.get("/api/auth/check", (_req: Request, res: Response) => {
 });
 
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (!req.path.startsWith("/api") || req.path === "/api/auth/check" || req.path === "/api/cockpit/events" || req.path.startsWith("/api/bridge/") || req.path.startsWith("/api/epic/agent/") || req.path.startsWith("/api/epic/record/") || req.path.startsWith("/api/epic/activities") || req.path.startsWith("/api/epic/tree") || (req.path.startsWith("/api/epic/grammar") && (req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1")) || req.path.startsWith("/api/secrets/form/") || req.path === "/api/secrets/submit" || req.path === "/api/keyboard/pair/start" || req.path === "/api/keyboard/pair/status") return next();
+  if (!req.path.startsWith("/api") || req.path === "/api/auth/check" || req.path === "/api/cockpit/events" || req.path.startsWith("/api/bridge/") || req.path.startsWith("/api/epic/agent/") || req.path.startsWith("/api/epic/record/") || req.path.startsWith("/api/epic/activities") || req.path.startsWith("/api/epic/tree") || (req.path.startsWith("/api/epic/grammar") && (req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1")) || req.path.startsWith("/api/secrets/form/") || req.path === "/api/secrets/submit" || req.path === "/api/keyboard/pair/start" || req.path === "/api/keyboard/pair/status" || req.path === "/api/ios/pair/confirm" || /^\/api\/ios\/devices\/\d+\/(queue|actions)/.test(req.path)) return next();
 
   if (!API_KEY) {
     const writeMethods = ["POST", "PUT", "PATCH", "DELETE"];
@@ -98,8 +98,13 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      const sensitiveRoutes = ["/api/mail/", "/api/chat/", "/api/secrets", "/api/outlook-emails", "/api/snow-tickets", "/api/boot/", "/api/bridge/", "/api/keyboard/"];
-      const isSensitive = sensitiveRoutes.some(r => path.startsWith(r));
+      const sensitiveRoutes = ["/api/mail/", "/api/chat/", "/api/secrets", "/api/outlook-emails", "/api/snow-tickets", "/api/boot/", "/api/bridge/", "/api/keyboard/", "/api/ios/pair/", "/api/ios/dispatch"];
+      const sensitiveRoutePatterns: RegExp[] = [
+        /^\/api\/ios\/devices\/\d+\/queue/,
+        /^\/api\/ios\/devices\/\d+\/actions/,
+        /^\/api\/ios\/devices(\?|$)/,
+      ];
+      const isSensitive = sensitiveRoutes.some(r => path.startsWith(r)) || sensitiveRoutePatterns.some(r => r.test(path));
       if (capturedJsonResponse && !isSensitive) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }

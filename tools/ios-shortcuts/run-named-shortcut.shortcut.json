@@ -1,0 +1,8 @@
+{
+  "name": "run-named-shortcut",
+  "input": { "name": "string", "input": "string?" },
+  "actions": [
+    { "type": "RunShortcut", "name": "{{Dictionary.name}}", "input": "{{Dictionary.input}}" },
+    { "type": "Output", "value": { "ok": true, "result": "{{ShortcutResult}}" } }
+  ]
+}

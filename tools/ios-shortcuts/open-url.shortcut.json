@@ -1,0 +1,9 @@
+{
+  "name": "open-url",
+  "input": { "url": "string" },
+  "actions": [
+    { "type": "GetDictionaryValue", "key": "url" },
+    { "type": "OpenURLs" },
+    { "type": "Output", "value": { "ok": true } }
+  ]
+}

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rachael.wda</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/xcodebuild</string>
+    <string>-project</string>
+    <string>/Users/USERNAME/src/WebDriverAgent/WebDriverAgent.xcodeproj</string>
+    <string>-scheme</string>
+    <string>WebDriverAgentRunner</string>
+    <string>-destination</string>
+    <string>id=PHONE_UDID_HERE</string>
+    <string>test</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+    <key>Crashed</key>
+    <true/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/rachael-wda.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rachael-wda.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,39 @@
+{
+  "_comment": "Per-app/per-action takeover policy for iOS adapters. 'takeover' = always require human approval, 'approval' = approval but armed devices may auto-approve, 'autonomous' = run if device is armed. Edit this file to relax/tighten per app.",
+  "_levels": "autonomous = run when device armed; approval = require human OK (auto-approved when device explicitly armed for this action); takeover = always escalate to human, even when armed",
+  "ios-shortcuts": {
+    "default": "autonomous",
+    "actions": {
+      "send-message": "approval",
+      "send-imessage": "approval",
+      "send-email": "approval",
+      "open-url": "autonomous",
+      "run-named-shortcut": "autonomous",
+      "set-timer": "autonomous",
+      "append-note": "autonomous",
+      "append-reminder": "autonomous",
+      "query-health": "approval"
+    }
+  },
+  "ios-wda": {
+    "default": "approval",
+    "sensitiveBundles": [
+      "com.apple.MobileSMS",
+      "com.apple.mobilemail",
+      "com.apple.Health",
+      "com.apple.mobilesafari.banking",
+      "com.chase.sig.Chase",
+      "com.bofa.ecom.mobile",
+      "com.wellsfargo.mobile"
+    ],
+    "sensitiveBundlePolicy": "takeover",
+    "actions": {
+      "Tap": "approval",
+      "Type": "approval",
+      "Swipe": "autonomous",
+      "KeyHome": "autonomous",
+      "LaunchApp": "approval",
+      "Screenshot": "autonomous"
+    }
+  }
+}

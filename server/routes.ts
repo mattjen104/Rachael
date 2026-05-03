@@ -25,6 +25,7 @@ import { startRecordingSession, addAudioChunk, stopRecordingSession, getActiveRe
 import { createSecretRequest, getSecretRequest, validateAndSubmitSecrets, getSecret, listSecretNames, renderSecretForm, type SecretField } from "./secrets";
 import { CAPTURE_TEMPLATES } from "@shared/capture-templates";
 import multer from "multer";
+import { registerIosRoutes } from "./ios-routes";
 
 interface AppNotification {
   id: string;
@@ -138,6 +139,8 @@ export async function registerRoutes(
     await storage.deleteKeyboardDevice(id);
     res.status(204).send();
   });
+
+  registerIosRoutes(app, httpServer);
 
   app.get("/api/programs", async (_req, res) => {
     const progs = await storage.getPrograms();

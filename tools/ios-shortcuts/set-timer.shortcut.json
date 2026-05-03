@@ -1,0 +1,8 @@
+{
+  "name": "set-timer",
+  "input": { "seconds": "number" },
+  "actions": [
+    { "type": "StartTimer", "duration": "{{Dictionary.seconds}}", "unit": "seconds" },
+    { "type": "Output", "value": { "ok": true } }
+  ]
+}

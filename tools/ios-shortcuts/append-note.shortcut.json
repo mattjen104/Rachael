@@ -1,0 +1,9 @@
+{
+  "name": "append-note",
+  "input": { "folder": "string", "body": "string" },
+  "actions": [
+    { "type": "FindNotes", "where": "folder == {{Dictionary.folder}}" },
+    { "type": "AppendToNote", "text": "{{Dictionary.body}}" },
+    { "type": "Output", "value": { "ok": true } }
+  ]
+}

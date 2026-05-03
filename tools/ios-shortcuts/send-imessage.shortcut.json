@@ -1,0 +1,10 @@
+{
+  "name": "send-imessage",
+  "input": { "recipient": "string", "body": "string" },
+  "actions": [
+    { "type": "GetDictionaryValue", "key": "recipient" },
+    { "type": "FindContacts", "where": "name == recipient" },
+    { "type": "SendMessage", "to": "Contact", "message": "{{Dictionary.body}}" },
+    { "type": "Output", "value": { "ok": true, "deliveredAt": "{{CurrentDate}}" } }
+  ]
+}

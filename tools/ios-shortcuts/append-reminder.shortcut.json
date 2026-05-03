@@ -1,0 +1,8 @@
+{
+  "name": "append-reminder",
+  "input": { "list": "string", "body": "string" },
+  "actions": [
+    { "type": "AddReminder", "list": "{{Dictionary.list}}", "title": "{{Dictionary.body}}" },
+    { "type": "Output", "value": { "ok": true } }
+  ]
+}

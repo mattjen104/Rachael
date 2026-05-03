@@ -19,6 +19,8 @@ import { initQdrant } from "./qdrant-client";
 import { storeMemoryWithQdrant, searchMemoriesHybrid, getMemoryContextHybrid, runConsolidation } from "./memory-consolidation";
 import { runEvolutionPipeline, checkAutoRollback, validateProposal, addToGoldenSuite, consolidateObservations } from "./evolution-engine";
 import { runGalaxyContextCycle, extractTermsFromEpicResults, addToContextQueue, isGalaxyContextEnabled } from "./galaxy-scraper";
+import { dispatchToIos, type IosAdapter } from "./ios-adapters";
+import { initApnsSender } from "./ios-apns";
 
 export type ProgramStatus = "idle" | "queued" | "running" | "completed" | "error";
 
@@ -1312,7 +1314,48 @@ export function toggleRuntime(): boolean {
   return runtime.active;
 }
 
+/**
+ * Direct runtime entry point for iOS-targeted instructions. Until the smart
+ * router (CU-02) lands, callers (programs, manual triggers, the cockpit UI)
+ * route through here so dispatch is uniformly observed by the control bus and
+ * subject to the same takeover policy.
+ */
+export async function executeIosAction(
+  action: string,
+  args: Record<string, unknown> = {},
+  opts: { preferredAdapter?: IosAdapter; source?: string; allowFallback?: boolean } = {}
+): Promise<{ ok: boolean; status: string; actionId: number; error?: string }> {
+  const result = await dispatchToIos(action, args, {
+    preferredAdapter: opts.preferredAdapter,
+    source: opts.source || "agent-runtime",
+    allowFallback: opts.allowFallback,
+  });
+  return { ok: result.ok, status: result.status, actionId: result.actionId, error: result.error };
+}
+
 export async function manualTrigger(programName: string): Promise<ProgramState> {
+  // Lightweight ad-hoc iOS dispatch: `manualTrigger("ios:open-url?url=https://example.com")`.
+  // Routes through the same control-bus + policy checks via executeIosAction.
+  if (programName.startsWith("ios:")) {
+    const rest = programName.slice(4);
+    const [action, qs] = rest.split("?");
+    const args: Record<string, unknown> = {};
+    if (qs) for (const pair of qs.split("&")) {
+      const [k, v] = pair.split("=");
+      if (k) args[decodeURIComponent(k)] = v ? decodeURIComponent(v) : true;
+    }
+    const r = await executeIosAction(action, args, { source: "manual" });
+    return {
+      name: programName,
+      status: r.ok ? "completed" : "error",
+      lastRun: new Date(),
+      nextRun: null,
+      lastOutput: JSON.stringify(r),
+      error: r.error || null,
+      iteration: 0,
+    };
+  }
+
   let ps = runtime.programs.get(programName);
   if (!ps) {
     const prog = await storage.getProgramByName(programName);
@@ -1433,6 +1476,19 @@ export function initRuntime(): void {
     tickInterval = setInterval(tick, TICK_INTERVAL_MS);
     setTimeout(tick, 5000);
   }
+
+  initApnsSender();
+
+  // Sweep stuck `claimed` device actions every 30s so a crashed phone bridge
+  // or dropped WebSocket can't permanently lose actions. After 3 reclaims an
+  // action is dead-lettered as "failed" with a stale-claim error.
+  setInterval(() => {
+    storage.reclaimStaleDeviceActions(60_000, 3).then(({ reclaimed, deadLettered }) => {
+      if (reclaimed > 0 || deadLettered > 0) {
+        emitEvent("ios:queue", `Reclaimed ${reclaimed} stale action(s); dead-lettered ${deadLettered}`, deadLettered > 0 ? "warn" : "info");
+      }
+    }).catch(e => console.error("[ios-queue] reclaim sweep failed:", e));
+  }, 30_000);
 
   loadRosterFromConfig(storage).then(() => {
     console.log("[agent-runtime] Model roster loaded from config");

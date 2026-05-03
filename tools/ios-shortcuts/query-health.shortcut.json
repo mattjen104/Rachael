@@ -1,0 +1,8 @@
+{
+  "name": "query-health",
+  "input": { "metric": "string" },
+  "actions": [
+    { "type": "FindHealthSamples", "type_": "{{Dictionary.metric}}", "limit": 1, "sort": "Most Recent" },
+    { "type": "Output", "value": { "metric": "{{Dictionary.metric}}", "value": "{{HealthSampleValue}}", "ts": "{{HealthSampleDate}}" } }
+  ]
+}

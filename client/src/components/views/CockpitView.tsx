@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useCockpitEvents, type CockpitEvent } from "@/hooks/use-cockpit-events";
 import { useControlState, useToggleControlMode, useResolveTakeoverPoint, useAuditLog, useSiteProfiles, useNavigationPaths, useUpdateSiteProfile, useUpdateNavigationPath, useActionPermissions, useSetActionPermission } from "@/hooks/use-org-data";
+import IosDevicesPanel from "@/components/IosDevicesPanel";
 import { apiRequest } from "@/lib/queryClient";
 
 interface NavigationState {
@@ -457,6 +458,12 @@ export default function CockpitView() {
                 </span>
               </div>
             ))}
+          </div>
+        )}
+
+        {tab === "devices" && (
+          <div className="h-full overflow-y-auto" data-testid="cockpit-devices">
+            <IosDevicesPanel />
           </div>
         )}
 

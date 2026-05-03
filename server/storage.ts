@@ -31,6 +31,9 @@ import {
   type SnowTicket, type InsertSnowTicket, snowTickets,
   type KeyboardDevice, type InsertKeyboardDevice, keyboardDevices,
   type KeyboardPairing, type InsertKeyboardPairing, keyboardPairings,
+  type PairedDevice, type InsertPairedDevice, pairedDevices,
+  type DevicePairingCode, type InsertDevicePairingCode, devicePairingCodes,
+  type DeviceAction, type InsertDeviceAction, deviceActionQueue,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
@@ -244,6 +247,28 @@ export interface IStorage {
   getKeyboardPairingByPendingHash(tokenHash: string): Promise<KeyboardPairing | undefined>;
   updateKeyboardPairing(id: number, data: Partial<{ status: string; deviceId: number | null }>): Promise<KeyboardPairing | undefined>;
   cleanExpiredKeyboardPairings(): Promise<void>;
+
+  getPairedDevices(opts?: { kind?: string; includeRevoked?: boolean }): Promise<PairedDevice[]>;
+  getPairedDevice(id: number): Promise<PairedDevice | undefined>;
+  getPairedDeviceByTokenHash(tokenHash: string): Promise<PairedDevice | undefined>;
+  createPairedDevice(d: InsertPairedDevice): Promise<PairedDevice>;
+  updatePairedDevice(id: number, data: Partial<InsertPairedDevice> & { armed?: boolean; revoked?: boolean; lastSeen?: Date | null }): Promise<PairedDevice | undefined>;
+  touchPairedDevice(id: number): Promise<void>;
+  revokePairedDevice(id: number): Promise<void>;
+
+  createPairingCode(c: InsertDevicePairingCode): Promise<DevicePairingCode>;
+  getPairingCode(code: string): Promise<DevicePairingCode | undefined>;
+  consumePairingCode(code: string, deviceId: number): Promise<DevicePairingCode | undefined>;
+  claimPairingCode(code: string): Promise<DevicePairingCode | undefined>;
+  cleanExpiredPairingCodes(): Promise<void>;
+
+  enqueueDeviceAction(a: InsertDeviceAction): Promise<DeviceAction>;
+  getPendingDeviceActions(deviceId: number, limit?: number): Promise<DeviceAction[]>;
+  claimDeviceActions(deviceId: number, limit?: number): Promise<DeviceAction[]>;
+  reclaimStaleDeviceActions(staleAfterMs?: number, maxReclaims?: number): Promise<{ reclaimed: number; deadLettered: number }>;
+  completeDeviceAction(id: number, result: Record<string, unknown>, status?: string): Promise<DeviceAction | undefined>;
+  getDeviceAction(id: number): Promise<DeviceAction | undefined>;
+  listDeviceActions(deviceId?: number, limit?: number): Promise<DeviceAction[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1208,6 +1233,148 @@ export class DatabaseStorage implements IStorage {
   }
   async cleanExpiredKeyboardPairings(): Promise<void> {
     await db.delete(keyboardPairings).where(lte(keyboardPairings.expiresAt, new Date()));
+  }
+
+  async getPairedDevices(opts: { kind?: string; includeRevoked?: boolean } = {}): Promise<PairedDevice[]> {
+    const conds = [];
+    if (opts.kind) conds.push(eq(pairedDevices.kind, opts.kind));
+    if (!opts.includeRevoked) conds.push(eq(pairedDevices.revoked, false));
+    const base = db.select().from(pairedDevices).orderBy(desc(pairedDevices.createdAt));
+    return conds.length ? base.where(and(...conds)) : base;
+  }
+  async getPairedDevice(id: number): Promise<PairedDevice | undefined> {
+    const [d] = await db.select().from(pairedDevices).where(eq(pairedDevices.id, id));
+    return d;
+  }
+  async getPairedDeviceByTokenHash(tokenHash: string): Promise<PairedDevice | undefined> {
+    const [d] = await db.select().from(pairedDevices).where(eq(pairedDevices.tokenHash, tokenHash));
+    return d;
+  }
+  async createPairedDevice(d: InsertPairedDevice): Promise<PairedDevice> {
+    const [created] = await db.insert(pairedDevices).values(d).returning();
+    return created;
+  }
+  async updatePairedDevice(id: number, data: Partial<InsertPairedDevice> & { armed?: boolean; revoked?: boolean; lastSeen?: Date | null }): Promise<PairedDevice | undefined> {
+    const [updated] = await db.update(pairedDevices).set(data).where(eq(pairedDevices.id, id)).returning();
+    return updated;
+  }
+  async touchPairedDevice(id: number): Promise<void> {
+    await db.update(pairedDevices).set({ lastSeen: new Date() }).where(eq(pairedDevices.id, id));
+  }
+  async revokePairedDevice(id: number): Promise<void> {
+    await db.update(pairedDevices).set({ revoked: true }).where(eq(pairedDevices.id, id));
+  }
+
+  async createPairingCode(c: InsertDevicePairingCode): Promise<DevicePairingCode> {
+    const [created] = await db.insert(devicePairingCodes).values(c).returning();
+    return created;
+  }
+  async getPairingCode(code: string): Promise<DevicePairingCode | undefined> {
+    const [pc] = await db.select().from(devicePairingCodes).where(eq(devicePairingCodes.code, code));
+    return pc;
+  }
+  async consumePairingCode(code: string, deviceId: number): Promise<DevicePairingCode | undefined> {
+    const [updated] = await db.update(devicePairingCodes)
+      .set({ consumedDeviceId: deviceId })
+      .where(and(eq(devicePairingCodes.code, code), sql`${devicePairingCodes.consumedDeviceId} IS NULL`))
+      .returning();
+    return updated;
+  }
+  /**
+   * Atomically reserve a pairing code (sentinel -1) so concurrent confirm
+   * requests cannot both create devices from the same code. Caller must call
+   * `consumePairingCode(code, realDeviceId)` after successfully creating the
+   * device, or `releasePairingCode(code)` if device creation fails.
+   */
+  async claimPairingCode(code: string): Promise<DevicePairingCode | undefined> {
+    const [claimed] = await db.update(devicePairingCodes)
+      .set({ consumedDeviceId: -1 })
+      .where(and(
+        eq(devicePairingCodes.code, code),
+        sql`${devicePairingCodes.consumedDeviceId} IS NULL`,
+        sql`${devicePairingCodes.expiresAt} > NOW()`
+      ))
+      .returning();
+    return claimed;
+  }
+  async releasePairingCode(code: string): Promise<void> {
+    await db.update(devicePairingCodes)
+      .set({ consumedDeviceId: null })
+      .where(and(eq(devicePairingCodes.code, code), eq(devicePairingCodes.consumedDeviceId, -1)));
+  }
+  async cleanExpiredPairingCodes(): Promise<void> {
+    await db.delete(devicePairingCodes).where(sql`${devicePairingCodes.expiresAt} < NOW()`);
+  }
+
+  async enqueueDeviceAction(a: InsertDeviceAction): Promise<DeviceAction> {
+    const [created] = await db.insert(deviceActionQueue).values(a).returning();
+    return created;
+  }
+  async getPendingDeviceActions(deviceId: number, limit = 25): Promise<DeviceAction[]> {
+    return db.select().from(deviceActionQueue)
+      .where(and(eq(deviceActionQueue.deviceId, deviceId), eq(deviceActionQueue.status, "pending")))
+      .orderBy(asc(deviceActionQueue.createdAt))
+      .limit(limit);
+  }
+  async claimDeviceActions(deviceId: number, limit = 10): Promise<DeviceAction[]> {
+    const pending = await this.getPendingDeviceActions(deviceId, limit);
+    if (pending.length === 0) return [];
+    const ids = pending.map(p => p.id);
+    const claimed = await db.update(deviceActionQueue)
+      .set({ status: "claimed", claimedAt: new Date() })
+      .where(and(
+        eq(deviceActionQueue.deviceId, deviceId),
+        eq(deviceActionQueue.status, "pending"),
+        sql`${deviceActionQueue.id} IN (${sql.join(ids.map(i => sql`${i}`), sql`, `)})`,
+      ))
+      .returning();
+    return claimed;
+  }
+  async completeDeviceAction(id: number, result: Record<string, unknown>, status: string = "completed"): Promise<DeviceAction | undefined> {
+    const [updated] = await db.update(deviceActionQueue)
+      .set({ status, result, completedAt: new Date() })
+      .where(eq(deviceActionQueue.id, id))
+      .returning();
+    return updated;
+  }
+  /**
+   * Reclaim actions that have been stuck in `claimed` longer than `staleAfterMs`
+   * (typically because the polling client or WDA bridge crashed/disconnected
+   * mid-processing). Up to `maxReclaims` per action; after that the action is
+   * marked failed so it doesn't loop forever.
+   * Returns counts so the sweeper can log meaningfully.
+   */
+  async reclaimStaleDeviceActions(staleAfterMs: number = 60_000, maxReclaims: number = 3): Promise<{ reclaimed: number; deadLettered: number }> {
+    const cutoff = new Date(Date.now() - staleAfterMs);
+    const stale = await db.select().from(deviceActionQueue)
+      .where(and(eq(deviceActionQueue.status, "claimed"), sql`${deviceActionQueue.claimedAt} < ${cutoff}`));
+    let reclaimed = 0;
+    let deadLettered = 0;
+    for (const a of stale) {
+      const args = (a.args ?? {}) as Record<string, unknown>;
+      const prior = typeof args._reclaimCount === "number" ? args._reclaimCount as number : 0;
+      if (prior >= maxReclaims) {
+        await db.update(deviceActionQueue)
+          .set({ status: "failed", completedAt: new Date(), result: { ...(a.result || {}), error: "stale-claim: device never reported result", reclaims: prior } })
+          .where(eq(deviceActionQueue.id, a.id));
+        deadLettered++;
+      } else {
+        await db.update(deviceActionQueue)
+          .set({ status: "pending", claimedAt: null, args: { ...args, _reclaimCount: prior + 1 } })
+          .where(eq(deviceActionQueue.id, a.id));
+        reclaimed++;
+      }
+    }
+    return { reclaimed, deadLettered };
+  }
+
+  async getDeviceAction(id: number): Promise<DeviceAction | undefined> {
+    const [a] = await db.select().from(deviceActionQueue).where(eq(deviceActionQueue.id, id));
+    return a;
+  }
+  async listDeviceActions(deviceId?: number, limit = 100): Promise<DeviceAction[]> {
+    const base = db.select().from(deviceActionQueue).orderBy(desc(deviceActionQueue.createdAt)).limit(limit);
+    return deviceId !== undefined ? base.where(eq(deviceActionQueue.deviceId, deviceId)) : base;
   }
 }
 
