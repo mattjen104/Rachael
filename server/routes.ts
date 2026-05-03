@@ -3834,6 +3834,62 @@ export async function registerRoutes(
     }
   });
 
+  // ---------------------------------------------------------------------
+  // Task-96: cu-core SkillLibrary CRUD + approval seam (used by
+  // EvolutionPanel to surface proposed recipes and toggle their status).
+  // ---------------------------------------------------------------------
+  app.get("/api/cu-recipes", async (req, res) => {
+    try {
+      const { RecipeStatusSchema, SurfaceKindSchema } = await import("@rachael/cu-core");
+      const statusRaw = typeof req.query.status === "string" ? req.query.status : undefined;
+      const surfaceRaw = typeof req.query.surfaceKind === "string" ? req.query.surfaceKind : undefined;
+      const status = statusRaw ? RecipeStatusSchema.safeParse(statusRaw) : undefined;
+      const surfaceKind = surfaceRaw ? SurfaceKindSchema.safeParse(surfaceRaw) : undefined;
+      if (statusRaw && status && !status.success) {
+        return res.status(400).json({ message: `invalid status: ${statusRaw}` });
+      }
+      if (surfaceRaw && surfaceKind && !surfaceKind.success) {
+        return res.status(400).json({ message: `invalid surfaceKind: ${surfaceRaw}` });
+      }
+      const { getSkillLibrary } = await import("./skill-library");
+      const list = await getSkillLibrary().list({
+        status: status?.success ? status.data : undefined,
+        surfaceKind: surfaceKind?.success ? surfaceKind.data : undefined,
+      });
+      res.json(list);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/cu-recipes/:id", async (req, res) => {
+    try {
+      const { getSkillLibrary } = await import("./skill-library");
+      const r = await getSkillLibrary().get(req.params.id);
+      if (!r) return res.status(404).json({ message: "Recipe not found" });
+      const runs = await storage.listCuRecipeRuns(req.params.id, 20);
+      res.json({ recipe: r, runs });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/cu-recipes/:id/status", async (req, res) => {
+    try {
+      const { RecipeStatusSchema } = await import("@rachael/cu-core");
+      const parsed = RecipeStatusSchema.safeParse(req.body?.status);
+      if (!parsed.success) {
+        return res.status(400).json({ message: `status must be one of proposed|approved|rejected|archived` });
+      }
+      const { getSkillLibrary } = await import("./skill-library");
+      const updated = await getSkillLibrary().setStatus(req.params.id, parsed.data);
+      if (!updated) return res.status(404).json({ message: "Recipe not found" });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/evolution/judge-costs", async (_req, res) => {
     try {
       const { getJudgeCostSummary } = await import("./llm-judges");

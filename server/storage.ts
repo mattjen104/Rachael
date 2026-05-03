@@ -40,6 +40,8 @@ import {
   type StandupEpisode, type InsertStandupEpisode, standupEpisodes,
   type StandupSegment, type InsertStandupSegment, standupSegments,
   type StandupFeedToken, type InsertStandupFeedToken, standupFeedTokens,
+  type CuRecipe, type InsertCuRecipe, cuRecipes,
+  type CuRecipeRun, type InsertCuRecipeRun, cuRecipeRuns,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc, type SQL } from "drizzle-orm";
@@ -255,6 +257,14 @@ export interface IStorage {
   listTrajectoryBranchesForRun(parentRunId: string): Promise<TrajectoryBranch[]>;
   updateTrajectoryBranchStatus(branchId: string, status: string, childRunId?: string | null): Promise<TrajectoryBranch | undefined>;
   updateTrajectoryBranchNotes(branchId: string, notes: string): Promise<TrajectoryBranch | undefined>;
+
+  // cu-core SkillLibrary persistence (task-96)
+  listCuRecipes(filter?: { status?: string | string[]; surfaceKind?: string }): Promise<CuRecipe[]>;
+  getCuRecipe(id: string): Promise<CuRecipe | undefined>;
+  upsertCuRecipe(r: InsertCuRecipe): Promise<CuRecipe>;
+  setCuRecipeStatus(id: string, status: string): Promise<CuRecipe | undefined>;
+  recordCuRecipeRun(r: InsertCuRecipeRun): Promise<CuRecipeRun>;
+  listCuRecipeRuns(recipeId: string, limit?: number): Promise<CuRecipeRun[]>;
 
   getJudgeCostsForDate(date: string): Promise<JudgeCost[]>;
   createJudgeCost(c: InsertJudgeCost): Promise<JudgeCost>;
@@ -1281,6 +1291,79 @@ export class DatabaseStorage implements IStorage {
   async updateTrajectoryBranchNotes(branchId: string, notes: string): Promise<TrajectoryBranch | undefined> {
     const [updated] = await db.update(trajectoryBranches).set({ notes }).where(eq(trajectoryBranches.branchId, branchId)).returning();
     return updated;
+  }
+
+  async listCuRecipes(filter: { status?: string | string[]; surfaceKind?: string } = {}): Promise<CuRecipe[]> {
+    const conds: SQL[] = [];
+    if (filter.status) {
+      const list = Array.isArray(filter.status) ? filter.status : [filter.status];
+      const orExpr = or(...list.map((s) => eq(cuRecipes.status, s)));
+      if (orExpr) conds.push(orExpr);
+    }
+    if (filter.surfaceKind) conds.push(eq(cuRecipes.surfaceKind, filter.surfaceKind));
+    const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
+    const q = where ? db.select().from(cuRecipes).where(where) : db.select().from(cuRecipes);
+    return q.orderBy(desc(cuRecipes.updatedAt));
+  }
+
+  async getCuRecipe(id: string): Promise<CuRecipe | undefined> {
+    const [row] = await db.select().from(cuRecipes).where(eq(cuRecipes.id, id)).limit(1);
+    return row;
+  }
+
+  async upsertCuRecipe(r: InsertCuRecipe): Promise<CuRecipe> {
+    const existing = await this.getCuRecipe(r.id);
+    if (existing) {
+      const [updated] = await db.update(cuRecipes).set({
+        version: r.version,
+        name: r.name,
+        description: r.description ?? null,
+        surfaceKind: r.surfaceKind ?? null,
+        status: r.status,
+        origin: r.origin,
+        recipe: r.recipe,
+        successCount: r.successCount,
+        runCount: r.runCount,
+        successRate: r.successRate,
+        sourceTrajectoryRunId: r.sourceTrajectoryRunId ?? null,
+        sourceProgramName: r.sourceProgramName ?? null,
+        lastUsedAt: r.lastUsedAt ?? null,
+        updatedAt: new Date(),
+      }).where(eq(cuRecipes.id, r.id)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(cuRecipes).values(r).returning();
+    return created;
+  }
+
+  async setCuRecipeStatus(id: string, status: string): Promise<CuRecipe | undefined> {
+    const [updated] = await db.update(cuRecipes)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(cuRecipes.id, id))
+      .returning();
+    return updated;
+  }
+
+  async recordCuRecipeRun(r: InsertCuRecipeRun): Promise<CuRecipeRun> {
+    const [run] = await db.insert(cuRecipeRuns).values(r).returning();
+    const stored = await this.getCuRecipe(r.recipeId);
+    if (stored) {
+      const runCount = stored.runCount + 1;
+      const successCount = stored.successCount + (r.outcome === "ok" ? 1 : 0);
+      const rate = (successCount / Math.max(runCount, 1)).toFixed(4);
+      await db.update(cuRecipes).set({
+        runCount, successCount, successRate: rate,
+        lastUsedAt: new Date(), updatedAt: new Date(),
+      }).where(eq(cuRecipes.id, r.recipeId));
+    }
+    return run;
+  }
+
+  async listCuRecipeRuns(recipeId: string, limit = 50): Promise<CuRecipeRun[]> {
+    return db.select().from(cuRecipeRuns)
+      .where(eq(cuRecipeRuns.recipeId, recipeId))
+      .orderBy(desc(cuRecipeRuns.createdAt))
+      .limit(limit);
   }
 
   async getJudgeCostsForDate(date: string): Promise<JudgeCost[]> {

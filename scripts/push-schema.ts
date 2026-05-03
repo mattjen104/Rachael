@@ -278,6 +278,7 @@ const alterations = [
   `ALTER TABLE captures ADD COLUMN IF NOT EXISTS image_url TEXT`,
   `ALTER TABLE captures ADD COLUMN IF NOT EXISTS template TEXT`,
   `ALTER TABLE programs ADD COLUMN IF NOT EXISTS compute_target TEXT NOT NULL DEFAULT 'local'`,
+  `ALTER TABLE programs ADD COLUMN IF NOT EXISTS daily_budget_usd TEXT`,
 ];
 
 const indexes = [

@@ -78,7 +78,32 @@ interface JudgeCostSummary {
 
 export default function EvolutionPanel() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"overview" | "versions" | "golden" | "observations" | "costs">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "versions" | "golden" | "observations" | "costs" | "skills">("overview");
+
+  const { data: cuRecipes = [] } = useQuery<CuRecipeEntry[]>({
+    queryKey: ["/api/cu-recipes"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/cu-recipes"), { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch cu-core recipes");
+      return res.json();
+    },
+    refetchInterval: 30000,
+  });
+
+  const setRecipeStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const res = await fetch(apiUrl(`/api/cu-recipes/${id}/status`), {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error("Failed to update recipe status");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cu-recipes"] });
+    },
+  });
 
   const { data: state, isLoading } = useQuery<EvolutionState>({
     queryKey: ["/api/evolution/state"],
@@ -170,6 +195,7 @@ export default function EvolutionPanel() {
     { id: "golden" as const, label: "Golden Suite" },
     { id: "observations" as const, label: "Observations" },
     { id: "costs" as const, label: "Judge Costs" },
+    { id: "skills" as const, label: "Skills" },
   ];
 
   return (
@@ -407,9 +433,87 @@ export default function EvolutionPanel() {
             )}
           </div>
         )}
+
+        {activeTab === "skills" && (
+          <div className="space-y-3" data-testid="skills-tab">
+            <div className="text-[11px] font-mono text-muted-foreground">
+              cu-core SkillLibrary: hand-authored seeds + auto-promoted recipes from successful trajectories. Proposals require approval before the matcher can pick them.
+            </div>
+            {(["proposed", "approved", "rejected", "archived"] as const).map((status) => {
+              const items = cuRecipes.filter((r) => r.status === status);
+              if (items.length === 0 && status !== "proposed") return null;
+              return (
+                <div key={status} className="border border-border rounded p-2" data-testid={`skills-section-${status}`}>
+                  <h3 className="text-xs font-mono font-bold mb-2 text-muted-foreground uppercase">{status} ({items.length})</h3>
+                  {items.length === 0 && (
+                    <div className="text-[11px] font-mono text-muted-foreground" data-testid={`skills-empty-${status}`}>None</div>
+                  )}
+                  <div className="space-y-1">
+                    {items.map((r) => (
+                      <div key={r.id} className="flex items-center gap-2 text-xs font-mono p-1.5 bg-muted/40 rounded" data-testid={`skill-row-${r.id}`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold truncate" data-testid={`text-skill-name-${r.id}`}>{r.recipe.name}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">
+                            {r.origin} · v{r.version} · {r.recipe.surfaceKind ?? "any"} · runs {r.runCount} · success {(r.successRate * 100).toFixed(0)}%
+                          </div>
+                          {r.recipe.description && (
+                            <div className="text-[10px] text-muted-foreground truncate" data-testid={`text-skill-desc-${r.id}`}>{r.recipe.description}</div>
+                          )}
+                        </div>
+                        <div className="flex gap-1">
+                          {status !== "approved" && (
+                            <button
+                              data-testid={`btn-skill-approve-${r.id}`}
+                              className="px-2 py-0.5 text-[10px] bg-green-600/20 hover:bg-green-600/30 text-green-300 rounded"
+                              onClick={() => setRecipeStatusMutation.mutate({ id: r.id, status: "approved" })}
+                              disabled={setRecipeStatusMutation.isPending}
+                            >
+                              Approve
+                            </button>
+                          )}
+                          {status !== "rejected" && (
+                            <button
+                              data-testid={`btn-skill-reject-${r.id}`}
+                              className="px-2 py-0.5 text-[10px] bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded"
+                              onClick={() => setRecipeStatusMutation.mutate({ id: r.id, status: "rejected" })}
+                              disabled={setRecipeStatusMutation.isPending}
+                            >
+                              Reject
+                            </button>
+                          )}
+                          {status !== "archived" && (
+                            <button
+                              data-testid={`btn-skill-archive-${r.id}`}
+                              className="px-2 py-0.5 text-[10px] bg-muted hover:bg-muted/70 rounded"
+                              onClick={() => setRecipeStatusMutation.mutate({ id: r.id, status: "archived" })}
+                              disabled={setRecipeStatusMutation.isPending}
+                            >
+                              Archive
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+interface CuRecipeEntry {
+  id: string;
+  version: number;
+  status: "proposed" | "approved" | "rejected" | "archived";
+  origin: "seed" | "auto" | "hand";
+  recipe: { name: string; description?: string; surfaceKind?: string };
+  successCount: number;
+  runCount: number;
+  successRate: number;
 }
 
 function MetricCard({ label, value, testId, color }: { label: string; value: string; testId: string; color?: string }) {

@@ -1147,3 +1147,73 @@ export const insertStandupFeedTokenSchema = z.object({
 });
 export type InsertStandupFeedToken = z.infer<typeof insertStandupFeedTokenSchema>;
 export type StandupFeedToken = typeof standupFeedTokens.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// cu-core SkillLibrary persistence (task-96).
+// `cu_recipes` stores `StoredRecipe` (cu-core Recipe + status/version/stats)
+// `cu_recipe_runs` records every invocation outcome for success-rate tracking
+// Distinct from the unrelated `recipes` table above (cron commands).
+// ---------------------------------------------------------------------------
+export const cuRecipes = pgTable("cu_recipes", {
+  id: text("id").primaryKey(),
+  version: integer("version").notNull().default(1),
+  name: text("name").notNull(),
+  description: text("description"),
+  surfaceKind: text("surface_kind"),
+  status: text("status").notNull().default("proposed"),
+  origin: text("origin").notNull().default("auto"),
+  recipe: jsonb("recipe").$type<Record<string, unknown>>().notNull(),
+  successCount: integer("success_count").notNull().default(0),
+  runCount: integer("run_count").notNull().default(0),
+  successRate: text("success_rate").notNull().default("0"),
+  sourceTrajectoryRunId: text("source_trajectory_run_id"),
+  sourceProgramName: text("source_program_name"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertCuRecipeSchema = z.object({
+  id: z.string(),
+  version: z.number().int().positive().default(1),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  surfaceKind: z.string().nullable().optional(),
+  status: z.string().default("proposed"),
+  origin: z.string().default("auto"),
+  recipe: z.record(z.string(), z.unknown()),
+  successCount: z.number().int().nonnegative().default(0),
+  runCount: z.number().int().nonnegative().default(0),
+  successRate: z.string().default("0"),
+  sourceTrajectoryRunId: z.string().nullable().optional(),
+  sourceProgramName: z.string().nullable().optional(),
+  lastUsedAt: z.date().nullable().optional(),
+});
+export type InsertCuRecipe = z.infer<typeof insertCuRecipeSchema>;
+export type CuRecipe = typeof cuRecipes.$inferSelect;
+
+export const cuRecipeRuns = pgTable("cu_recipe_runs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  recipeId: text("recipe_id").notNull(),
+  recipeVersion: integer("recipe_version").notNull(),
+  runId: text("run_id").notNull(),
+  programName: text("program_name"),
+  outcome: text("outcome").notNull(),
+  failedAtStepIndex: integer("failed_at_step_index"),
+  durationMs: integer("duration_ms").notNull().default(0),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCuRecipeRunSchema = z.object({
+  recipeId: z.string(),
+  recipeVersion: z.number().int().positive(),
+  runId: z.string(),
+  programName: z.string().nullable().optional(),
+  outcome: z.enum(["ok", "fallback", "abort"]),
+  failedAtStepIndex: z.number().int().nullable().optional(),
+  durationMs: z.number().int().nonnegative().default(0),
+  reason: z.string().nullable().optional(),
+});
+export type InsertCuRecipeRun = z.infer<typeof insertCuRecipeRunSchema>;
+export type CuRecipeRun = typeof cuRecipeRuns.$inferSelect;

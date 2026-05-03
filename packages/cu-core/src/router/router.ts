@@ -269,6 +269,9 @@ export class Router {
         actionVerb: actedAction.verb as ActionVerb,
         attemptedLocator,
         reason: actOk ? "act ok" : `act failed: ${actError ?? "unknown"}`,
+        // Persist the full action payload so downstream promotion can recover
+        // a replayable RecipeStep[] (verb + target + text/url/cmd, etc).
+        metadata: { actedAction, ok: actOk, intent: input.intent },
       });
       lastActOk = actOk;
       lastActError = actError;

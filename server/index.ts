@@ -121,6 +121,14 @@ app.use((req, res, next) => {
 (async () => {
   const { initRuntime } = await import("./agent-runtime");
   await registerRoutes(httpServer, app);
+
+  // Task-96: seed cu-core SkillLibrary with hand-authored recipes.
+  try {
+    const { seedSkillLibrary } = await import("./skill-library");
+    await seedSkillLibrary();
+  } catch (err) {
+    console.error("[server] seedSkillLibrary failed:", err);
+  }
   initRuntime();
 
   // Wire the four cu-core surface adapters onto a process-wide ComputerUseBus.

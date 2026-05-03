@@ -371,15 +371,22 @@ export const RecipeStepSchema = z.object({
 });
 export type RecipeStep = z.infer<typeof RecipeStepSchema>;
 
+export const RecipeParameterSchema = z.object({
+  type: z.enum(["string", "number", "boolean"]),
+  description: z.string().optional(),
+  required: z.boolean().optional(),
+});
+export type RecipeParameter = z.infer<typeof RecipeParameterSchema>;
+
 export const RecipeSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
-  parameters: z.record(z.string(), z.object({
-    type: z.enum(["string", "number", "boolean"]),
-    description: z.string().optional(),
-    required: z.boolean().optional(),
-  })).optional(),
+  parameters: z.record(z.string(), RecipeParameterSchema).optional(),
   surfaceKind: SurfaceKindSchema.optional(),
+  // Recipe-level guards: evaluated by the matcher against the current
+  // observation BEFORE selection. Lets a recipe declare "I only apply when
+  // the URL contains /orders/" without depending on the first step's pre.
+  preconditions: z.array(VerifierSchema).optional(),
   steps: z.array(RecipeStepSchema),
   successCriteria: z.array(VerifierSchema).optional(),
   provenance: z

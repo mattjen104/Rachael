@@ -339,7 +339,89 @@ export async function executeNavigationPath(
   }
 
   result.durationMs = Date.now() - startTime;
+
+  // Task-96: bridge the existing production execution path into the
+  // SkillLibrary promotion pipeline. A successful navigation run produces
+  // a synthetic RouterTraceEvent[] (one act event per step + a final
+  // complete event), which `promoteSuccessfulTrajectory` validates and
+  // dedupes the same way it would for cu-router runs.
+  if (result.success && result.stepResults.length >= 2) {
+    void bridgeNavigationToSkillLibrary(profile, navPath, result, pageId).catch((err) =>
+      console.error("[universal-scraper] skill-library bridge failed:", err),
+    );
+  }
+
   return result;
+}
+
+async function bridgeNavigationToSkillLibrary(
+  profile: SiteProfile,
+  navPath: NavigationPath,
+  result: ScrapeResult,
+  pageId: string,
+): Promise<void> {
+  const { promoteSuccessfulTrajectory } = await import("./skill-library");
+  const { newTraceId } = await import("@rachael/cu-core");
+  type Ev = Parameters<typeof promoteSuccessfulTrajectory>[0]["events"][number];
+  const runId = `nav-${profile.name}-${navPath.name}-${pageId}`;
+  const ts = Date.now();
+  const surfaceKind = "browser-tab" as const;
+  const events: Ev[] = result.stepResults.map((sr, i) => ({
+    id: newTraceId("bridge"),
+    ts,
+    runId,
+    stepIndex: i,
+    kind: "act",
+    surfaceId: pageId,
+    surfaceKind,
+    actionVerb: navActionToVerb(sr.action),
+    reason: sr.success ? "act ok" : `act failed: ${sr.error ?? "unknown"}`,
+    metadata: {
+      actedAction: navStepToAction(sr.action, sr),
+      ok: sr.success,
+      source: "free-plan",
+    },
+  }));
+  events.push({
+    id: newTraceId("bridge"),
+    ts,
+    runId,
+    stepIndex: result.stepResults.length - 1,
+    kind: "complete",
+    surfaceId: pageId,
+    surfaceKind,
+    actionVerb: navActionToVerb(result.stepResults[result.stepResults.length - 1]?.action ?? "wait"),
+    reason: "step complete",
+    metadata: { source: "free-plan", ok: true },
+  });
+  await promoteSuccessfulTrajectory({
+    runId,
+    programName: `${profile.name}/${navPath.name}`,
+    surfaceKind,
+    events,
+  });
+}
+
+function navActionToVerb(action: string): "Click" | "Type" | "Goto" | "Key" | "Wait" {
+  switch (action) {
+    case "click":
+    case "click_text":
+      return "Click";
+    case "type":
+      return "Type";
+    case "navigate":
+      return "Goto";
+    case "press_key":
+      return "Key";
+    default:
+      return "Wait";
+  }
+}
+
+function navStepToAction(action: string, sr: StepResult): Record<string, unknown> {
+  // Minimal shape — promotion only needs `verb` to recover a replayable
+  // step; richer payloads come from the cu-core router path.
+  return { verb: navActionToVerb(action), description: sr.description };
 }
 
 export async function bestEffortExtract(url: string): Promise<ScrapeResult> {

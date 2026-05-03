@@ -521,3 +521,13 @@ The web app can connect to a remote backend (e.g., DigitalOcean droplet) instead
 - API: `GET /api/receipts` (filters: program/surface/category/feedback/sinceDay/untilDay/limit), `GET /api/receipts/summary?day=…`, `POST /api/receipts/:id/feedback` `{feedback:"up"|"down"|null}`, `GET /api/receipts/verify-chain`, `GET /api/receipts/export.csv`, `GET /api/receipts/export.ndjson`, `POST /api/receipts/self-review/run`.
 - Weekly self-review: `runWeeklySelfReview()` scans 7d rollup; emits OpenClaw proposals for programs with high spend / low feedback / high failure ratios. Idempotent within a day. Auto-runs Saturday 06:00 from `agent-runtime.tick`.
 - UI: `client/src/components/views/LedgerView.tsx` — sidebar slot `L` (LDG). Daily summary card (count, $ spent, 👍/👎/blocked/failed, by-surface), filters, J/K nav, Y/N feedback, U clear. Detail pane shows hash chain, trajectory deep-link, verifier score, target meta. CSV/NDJSON download buttons + verify-chain button.
+
+## Trajectory Memory & Skill Library (Task #96)
+
+- DB tables: `cu_recipes` (PK text id, jsonb recipe, status proposed/approved/rejected/archived, origin seed/auto/hand, success metrics) and `cu_recipe_runs` (audit log) — see `shared/schema.ts:981+`. Distinct from the unrelated cron `recipes` table.
+- cu-core module: `packages/cu-core/src/skills/` with `library.ts` (InMemorySkillLibrary), `matcher.ts` (approved-only intent match), `executor.ts` (verifier-gated runRecipe with fallback signal), `promotion.ts` (buildProposedRecipe), `seeds.ts` (8 hand-authored: epic patient/flowsheet/galaxy, outlook reply, teams send, snow open/create, browser open).
+- Provenance: emitter wrappers `withSourceTag(emit, recipeId, version)` and `withFreePlanSource(emit)` tag every trace event with `metadata.source = "recipe:<id>@<v>" | "free-plan"`.
+- Server: `server/skill-library.ts` exposes `DbSkillLibrary`, `getSkillLibrary()`, `seedSkillLibrary()` (idempotent, called from `server/index.ts` after routes register; seeds boot as `approved`/`origin=seed`), and `promoteSuccessfulTrajectory()` (cheap LLM summarizer via openrouter `gemini-flash-1.5` + heuristic fallback → status `proposed`, dedup via in-process `promotedRunIds`).
+- Promotion hook: in `server/cu-router.ts` `routerTraceEmitter`, on `complete` events from a free-plan trajectory (no `metadata.source` recipe tag) we fire-and-forget `promoteSuccessfulTrajectory`.
+- API: `GET /api/cu-recipes?status=&surfaceKind=`, `GET /api/cu-recipes/:id` (returns recipe + last 20 runs), `POST /api/cu-recipes/:id/status` ({status: proposed|approved|rejected|archived}).
+- UI: `EvolutionPanel.tsx` adds a "Skills" tab grouped by status with Approve / Reject / Archive buttons. Proposed recipes never enter the matcher until human approval.

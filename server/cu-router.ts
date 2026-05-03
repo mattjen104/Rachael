@@ -9,6 +9,7 @@ import type {
   ModelChoice,
   ModelRouterAdapter,
   RouterTraceEvent,
+  SurfaceKind,
   TaskProfile,
   TierMissInfo,
 } from "@rachael/cu-core";
@@ -39,7 +40,7 @@ interface RunBuffer {
   tierMisses: number;
   coordClicks: number;
   estimatedCostUsd: number;
-  surfaceKind: string;
+  surfaceKind: SurfaceKind;
   programName?: string;
 }
 
@@ -66,8 +67,50 @@ function sweepTraceBuffers(now = Date.now()): void {
   }
 }
 
-export function finalizeRouterTraceRun(runId: string): void {
-  traceBuffers.delete(runId);
+/**
+ * Terminal hook for a router run. Callers (`routedRecipeOrPlan`,
+ * `routedStep`, agent-runtime) MUST invoke this once a high-level run is
+ * truly done — cu-core's Router emits `kind: "complete"` PER STEP, so we
+ * cannot use that as a run-finalization signal. This function:
+ *   1. flips the run buffer to `finalized`
+ *   2. persists the full trace to `router_traces`
+ *   3. on `status === "ok"` and `source === "free-plan"`, hands the
+ *      trajectory to the SkillLibrary promotion pipeline
+ *   4. evicts the buffer (subject to TTL/cap rules)
+ *
+ * `evict=true` (default) deletes the buffer immediately on terminal events
+ * that are pure aborts where no further trace events are expected.
+ */
+export async function finalizeRouterTraceRun(
+  runId: string,
+  status: "ok" | "abort" = "ok",
+  opts: { source?: string } = {},
+): Promise<void> {
+  const entry = traceBuffers.get(runId);
+  if (!entry) return;
+  entry.finalized = true;
+  await persistRunTrace(runId, status);
+  if (status === "ok") {
+    const sourceMeta = opts.source ?? (entry.buf.events.find((e) => e.metadata?.source)?.metadata
+      ?.source as string | undefined) ?? "free-plan";
+    if (sourceMeta === "free-plan") {
+      const eventsCopy = entry.buf.events.map((e) => ({ ...e }));
+      const surfaceKind: SurfaceKind = entry.buf.surfaceKind;
+      const programName = entry.buf.programName;
+      try {
+        const { promoteSuccessfulTrajectory } = await import("./skill-library");
+        await promoteSuccessfulTrajectory({
+          runId,
+          programName,
+          surfaceKind,
+          events: eventsCopy,
+        });
+      } catch (err) {
+        console.error("[cu-router] promotion failed:", err);
+      }
+    }
+  }
+  sweepTraceBuffers(Date.now());
 }
 
 export interface RouterTraceEmitterOptions {
@@ -124,9 +167,14 @@ export function routerTraceEmitter(
   entry.touchedAt = Date.now();
   traceBuffers.set(event.runId, entry);
 
-  if (event.kind === "complete" || event.kind === "abort") {
-    entry.finalized = true;
-    void persistRunTrace(event.runId, event.kind === "abort" ? "abort" : "ok");
+  // NOTE: cu-core's Router emits `kind: "complete"` PER STEP, not once per
+  // run, and `kind: "abort"` when the recovery policy gives up on a step.
+  // Run-level finalization (persistence + promotion) is therefore explicit:
+  // callers invoke `finalizeRouterTraceRun(runId, status)` once the whole
+  // high-level run is done. We keep the buffer alive in the meantime so a
+  // multi-step trajectory accumulates correctly.
+  if (event.kind === "abort") {
+    void persistRunTrace(event.runId, "abort");
   }
   sweepTraceBuffers(entry.touchedAt);
 }
