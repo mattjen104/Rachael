@@ -26,6 +26,7 @@ import { createSecretRequest, getSecretRequest, validateAndSubmitSecrets, getSec
 import { CAPTURE_TEMPLATES } from "@shared/capture-templates";
 import multer from "multer";
 import { registerIosRoutes } from "./ios-routes";
+import { registerTrajectoryRoutes } from "./trajectory-routes";
 
 interface AppNotification {
   id: string;
@@ -141,6 +142,7 @@ export async function registerRoutes(
   });
 
   registerIosRoutes(app, httpServer);
+  registerTrajectoryRoutes(app);
 
   app.get("/api/programs", async (_req, res) => {
     const progs = await storage.getPrograms();

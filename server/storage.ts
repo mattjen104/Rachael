@@ -35,6 +35,7 @@ import {
   type DevicePairingCode, type InsertDevicePairingCode, devicePairingCodes,
   type DeviceAction, type InsertDeviceAction, deviceActionQueue,
   type RouterTrace, type InsertRouterTrace, routerTraces,
+  type TrajectoryBranch, type InsertTrajectoryBranch, trajectoryBranches,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
@@ -205,6 +206,12 @@ export interface IStorage {
   upsertRouterTrace(t: InsertRouterTrace): Promise<RouterTrace>;
   getRouterTrace(runId: string): Promise<RouterTrace | undefined>;
   listRouterTraces(limit?: number): Promise<RouterTrace[]>;
+
+  createTrajectoryBranch(b: InsertTrajectoryBranch): Promise<TrajectoryBranch>;
+  getTrajectoryBranch(branchId: string): Promise<TrajectoryBranch | undefined>;
+  listTrajectoryBranchesForRun(parentRunId: string): Promise<TrajectoryBranch[]>;
+  updateTrajectoryBranchStatus(branchId: string, status: string, childRunId?: string | null): Promise<TrajectoryBranch | undefined>;
+  updateTrajectoryBranchNotes(branchId: string, notes: string): Promise<TrajectoryBranch | undefined>;
 
   getJudgeCostsForDate(date: string): Promise<JudgeCost[]>;
   createJudgeCost(c: InsertJudgeCost): Promise<JudgeCost>;
@@ -1002,6 +1009,34 @@ export class DatabaseStorage implements IStorage {
 
   async listRouterTraces(limit = 50): Promise<RouterTrace[]> {
     return db.select().from(routerTraces).orderBy(desc(routerTraces.createdAt)).limit(limit);
+  }
+
+  async createTrajectoryBranch(b: InsertTrajectoryBranch): Promise<TrajectoryBranch> {
+    const [created] = await db.insert(trajectoryBranches).values(b).returning();
+    return created;
+  }
+
+  async getTrajectoryBranch(branchId: string): Promise<TrajectoryBranch | undefined> {
+    const [row] = await db.select().from(trajectoryBranches).where(eq(trajectoryBranches.branchId, branchId)).limit(1);
+    return row;
+  }
+
+  async listTrajectoryBranchesForRun(parentRunId: string): Promise<TrajectoryBranch[]> {
+    return db.select().from(trajectoryBranches)
+      .where(eq(trajectoryBranches.parentRunId, parentRunId))
+      .orderBy(desc(trajectoryBranches.createdAt));
+  }
+
+  async updateTrajectoryBranchStatus(branchId: string, status: string, childRunId?: string | null): Promise<TrajectoryBranch | undefined> {
+    const patch: Record<string, unknown> = { status };
+    if (childRunId !== undefined) patch.childRunId = childRunId;
+    const [updated] = await db.update(trajectoryBranches).set(patch).where(eq(trajectoryBranches.branchId, branchId)).returning();
+    return updated;
+  }
+
+  async updateTrajectoryBranchNotes(branchId: string, notes: string): Promise<TrajectoryBranch | undefined> {
+    const [updated] = await db.update(trajectoryBranches).set({ notes }).where(eq(trajectoryBranches.branchId, branchId)).returning();
+    return updated;
   }
 
   async getJudgeCostsForDate(date: string): Promise<JudgeCost[]> {

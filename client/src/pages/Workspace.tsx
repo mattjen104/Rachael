@@ -13,6 +13,7 @@ import CockpitView from "@/components/views/CockpitView";
 import SnowView from "@/components/views/SnowView";
 import VoiceView from "@/components/views/VoiceView";
 import EvolutionPanel from "@/components/views/EvolutionPanel";
+import TrajectoryView from "@/components/views/TrajectoryView";
 import GalaxyKbView from "@/components/views/GalaxyKbView";
 import Minibuffer from "@/components/editor/Minibuffer";
 import InlineEditor from "@/components/editor/InlineEditor";
@@ -207,6 +208,13 @@ export default function Workspace() {
         if (idx < views.length) setViewMode(views[idx]);
         return;
       }
+
+      if ((e.key === "T" || e.key === "t") && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (viewMode === "trajectory") return;
+        e.preventDefault();
+        setViewMode("trajectory");
+        return;
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -224,6 +232,7 @@ export default function Workspace() {
       case "snow": return <SnowView />;
       case "voice": return <VoiceView />;
       case "evolution": return <EvolutionPanel />;
+      case "trajectory": return <TrajectoryView />;
       case "galaxy-kb": return <GalaxyKbView selectedEntryId={selectedItemId} />;
       default: return null;
     }

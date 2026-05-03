@@ -1,0 +1,1 @@
+{"id":"drifty","surfaceKind":"browser-tab","recordedAt":1,"steps":[{"action":{"verb":"Wait","ms":0},"observationsAfter":[{"kind":"DomSnapshot","digest":"wrong-digest"}]}]}

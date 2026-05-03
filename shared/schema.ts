@@ -971,3 +971,38 @@ export const insertRouterTraceSchema = z.object({
 });
 export type InsertRouterTrace = z.infer<typeof insertRouterTraceSchema>;
 export type RouterTrace = typeof routerTraces.$inferSelect;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Trajectory branches — when an analyst takes over and edits an action at
+// a specific step, we persist the branch (parentRunId + parentStepIndex +
+// editedAction) so the inspector can render replay diffs and the OSS bench
+// can replay branches deterministically.
+// ────────────────────────────────────────────────────────────────────────────
+
+export const trajectoryBranches = pgTable("trajectory_branches", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  branchId: text("branch_id").notNull().unique(),
+  parentRunId: text("parent_run_id").notNull(),
+  parentStepIndex: integer("parent_step_index").notNull(),
+  childRunId: text("child_run_id"),
+  reason: text("reason").notNull().default("takeover"),
+  editedAction: jsonb("edited_action").$type<Record<string, unknown>>(),
+  notes: text("notes"),
+  createdBy: text("created_by").notNull().default("analyst"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertTrajectoryBranchSchema = z.object({
+  branchId: z.string(),
+  parentRunId: z.string(),
+  parentStepIndex: z.number().int().nonnegative(),
+  childRunId: z.string().nullable().optional(),
+  reason: z.enum(["takeover", "edit-resume", "what-if"]).default("takeover"),
+  editedAction: z.record(z.string(), z.unknown()).nullable().optional(),
+  notes: z.string().nullable().optional(),
+  createdBy: z.string().default("analyst"),
+  status: z.enum(["pending", "running", "completed", "aborted"]).default("pending"),
+});
+export type InsertTrajectoryBranch = z.infer<typeof insertTrajectoryBranchSchema>;
+export type TrajectoryBranch = typeof trajectoryBranches.$inferSelect;
