@@ -1,0 +1,52 @@
+{
+  "$comment": "Adapter capability manifest read by the smart router (next task). Numbers are derived from production traces in late 2025; keep them honest. Update this file when adapters change shape.",
+  "version": 1,
+  "adapters": {
+    "browser-playwright": {
+      "surfaceKind": "browser-tab",
+      "observations": ["AxTree", "DomSnapshot", "SomScreenshot", "RawScreenshot"],
+      "actions": ["Click", "Type", "Key", "Scroll", "Goto", "Wait"],
+      "locators": ["selector", "coords"],
+      "medianObserveMs": 180,
+      "medianActMs": 220,
+      "tokensPerObservation": 800,
+      "cost": "low",
+      "notes": "AxTree via CDP Accessibility.getFullAXTree."
+    },
+    "browser-extension": {
+      "surfaceKind": "browser-extension",
+      "observations": ["AxTree", "DomSnapshot", "SomScreenshot", "RawScreenshot"],
+      "actions": ["Click", "Type", "Key", "Scroll", "Goto", "Wait"],
+      "locators": ["selector", "coords"],
+      "medianObserveMs": 1400,
+      "medianActMs": 1600,
+      "tokensPerObservation": 1200,
+      "cost": "high",
+      "requiresUserBrowser": true,
+      "notes": "Domains controlled by an allowlist (existing isBridgeOnlyDomain policy)."
+    },
+    "windows-uia": {
+      "surfaceKind": "desktop-window",
+      "observations": ["UiaTree", "RawScreenshot"],
+      "actions": ["Click", "Type", "Key", "Scroll", "Hint"],
+      "locators": ["uia", "hint", "coords"],
+      "medianObserveMs": 250,
+      "medianActMs": 180,
+      "tokensPerObservation": 600,
+      "cost": "low",
+      "notes": "Cost rises ~3x when UIA misses and the agent falls back to coords clicks."
+    },
+    "citrix-vision": {
+      "surfaceKind": "citrix-session",
+      "observations": ["SomScreenshot", "RawScreenshot"],
+      "actions": ["Hint", "Click", "Type", "Key"],
+      "locators": ["hint", "mark", "coords"],
+      "medianObserveMs": 1800,
+      "medianActMs": 700,
+      "tokensPerObservation": 2400,
+      "cost": "high",
+      "visionOnly": true,
+      "notes": "Hyperspace under Citrix exposes no UIA/DOM. SoM is primary; vim-hint overlay is the fallback."
+    }
+  }
+}

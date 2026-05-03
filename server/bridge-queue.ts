@@ -66,6 +66,76 @@ export interface BridgeResult {
   cuObservation?: CuObservation;
 }
 
+// ---------------------------------------------------------------------------
+// Live wiring for `BrowserExtensionAdapter`. The adapter (in cu-core) only
+// knows about the abstract `BridgeQueueApi`; this is the production binding
+// that translates a typed `Action` into the existing job submission shape and
+// converts a returned `BridgeResult` into a typed `Observation`.
+//
+// The translation is intentionally narrow — only the verbs / observation
+// kinds the extension actually supports today are routed end-to-end. Anything
+// unsupported throws so the router can pick a different surface.
+// ---------------------------------------------------------------------------
+
+function _digest(input: string): string {
+  // Tiny non-crypto digest matching @rachael/cu-core/digest. We avoid the
+  // dependency cycle by reimplementing the 4-byte FNV-1a hash inline.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+function _resultToDom(result: BridgeResult, surfaceId: string): CuObservation {
+  const text = result.text ?? "";
+  const obs: CuObservation = {
+    kind: "DomSnapshot",
+    surfaceId,
+    timestamp: result.completedAt,
+    digest: _digest(`${result.url ?? ""}|${text.slice(0, 4096)}`),
+    url: result.url,
+    title: result.title,
+    text,
+    elements: [],
+  };
+  return obs;
+}
+
+export function makeExtensionBridgeQueueApi(opts: { surfaceId?: string; submittedBy?: string } = {}) {
+  const surfaceId = opts.surfaceId ?? "browser-extension:default";
+  const submittedBy = opts.submittedBy ?? "cu-bus";
+  return {
+    isAllowed: (url: string) => isBridgeOnlyDomain(url),
+    async submit(action: CuAction): Promise<CuObservation | null> {
+      if (action.verb === "Goto") {
+        const jobId = submitJob("dom", action.url, submittedBy);
+        const result = await waitForResult(jobId);
+        if (result.error) throw new Error(result.error);
+        return _resultToDom(result, surfaceId);
+      }
+      if (action.verb === "Wait") {
+        await new Promise((r) => setTimeout(r, action.ms ?? 0));
+        return null;
+      }
+      throw new Error(`Extension bridge does not yet route action verb: ${action.verb}`);
+    },
+    async observe(kind: CuObservation["kind"]): Promise<CuObservation> {
+      if (kind !== "DomSnapshot") {
+        throw new Error(`Extension bridge live wiring only emits DomSnapshot today (asked: ${kind})`);
+      }
+      // Re-fetch the most recently navigated URL would require state we
+      // don't store here; the router supplies a `Goto` first, then calls
+      // `observe`, which we satisfy from the cached result on the next
+      // submitted job. For now, a same-tab `dom` poll is the honest answer.
+      throw new Error(
+        "Extension bridge observe() requires a prior Goto job; smart router should pair them.",
+      );
+    },
+  };
+}
+
 const pendingJobs: BridgeJob[] = [];
 const results = new Map<string, BridgeResult>();
 const waiters = new Map<string, Array<(result: BridgeResult) => void>>();

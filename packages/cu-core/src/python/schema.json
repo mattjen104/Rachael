@@ -1,0 +1,733 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "rachael-cu-core",
+  "definitions": {
+    "Action": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Click"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "selector"
+                        },
+                        "css": {
+                          "type": "string"
+                        },
+                        "nth": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "css"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "uia"
+                        },
+                        "automationId": {
+                          "type": "string"
+                        },
+                        "controlType": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "hint"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "key"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "mark"
+                        },
+                        "mark": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "mark"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "coords"
+                        },
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "rationale": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "button": {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "right",
+                    "middle"
+                  ]
+                }
+              },
+              "required": [
+                "verb",
+                "target"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Type"
+                },
+                "target": {
+                  "$ref": "#/definitions/Action/anyOf/0/anyOf/0/properties/target"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "clearFirst": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "verb",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Key"
+                },
+                "chord": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "verb",
+                "chord"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Hint"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "verb",
+                "hint"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Scroll"
+                },
+                "target": {
+                  "$ref": "#/definitions/Action/anyOf/0/anyOf/0/properties/target"
+                },
+                "dy": {
+                  "type": "number"
+                },
+                "dx": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "verb"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Wait"
+                },
+                "ms": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "until": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "verb"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Goto"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "verb",
+                "url"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string",
+                  "const": "Shell"
+                },
+                "cmd": {
+                  "type": "string"
+                },
+                "cwd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "verb",
+                "cmd"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": {
+              "type": "string",
+              "const": "Composite"
+            },
+            "label": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Action"
+              }
+            }
+          },
+          "required": [
+            "verb",
+            "steps"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Observation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "surfaceId": {
+              "type": "string"
+            },
+            "timestamp": {
+              "type": "number"
+            },
+            "digest": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "AxTree"
+            },
+            "root": {}
+          },
+          "required": [
+            "surfaceId",
+            "timestamp",
+            "digest",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "surfaceId": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/surfaceId"
+            },
+            "timestamp": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/timestamp"
+            },
+            "digest": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/digest"
+            },
+            "kind": {
+              "type": "string",
+              "const": "DomSnapshot"
+            },
+            "url": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "html": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tag": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "href": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tag"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "surfaceId",
+            "timestamp",
+            "digest",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "surfaceId": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/surfaceId"
+            },
+            "timestamp": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/timestamp"
+            },
+            "digest": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/digest"
+            },
+            "kind": {
+              "type": "string",
+              "const": "UiaTree"
+            },
+            "windowTitle": {
+              "type": "string"
+            },
+            "elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "automationId": {
+                    "type": "string"
+                  },
+                  "controlType": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  },
+                  "rect": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "w": {
+                        "type": "number"
+                      },
+                      "h": {
+                        "type": "number"
+                      },
+                      "cx": {
+                        "type": "number"
+                      },
+                      "cy": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "w",
+                      "h",
+                      "cx",
+                      "cy"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "surfaceId",
+            "timestamp",
+            "digest",
+            "kind",
+            "elements"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "surfaceId": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/surfaceId"
+            },
+            "timestamp": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/timestamp"
+            },
+            "digest": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/digest"
+            },
+            "kind": {
+              "type": "string",
+              "const": "SomScreenshot"
+            },
+            "imageRef": {
+              "type": "string"
+            },
+            "marks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "mark": {
+                    "type": "string"
+                  },
+                  "rect": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "w": {
+                        "type": "number"
+                      },
+                      "h": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "w",
+                      "h"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "mark",
+                  "rect"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "surfaceId",
+            "timestamp",
+            "digest",
+            "kind",
+            "imageRef",
+            "marks"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "surfaceId": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/surfaceId"
+            },
+            "timestamp": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/timestamp"
+            },
+            "digest": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/digest"
+            },
+            "kind": {
+              "type": "string",
+              "const": "RawScreenshot"
+            },
+            "imageRef": {
+              "type": "string"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "surfaceId",
+            "timestamp",
+            "digest",
+            "kind",
+            "imageRef"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "surfaceId": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/surfaceId"
+            },
+            "timestamp": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/timestamp"
+            },
+            "digest": {
+              "$ref": "#/definitions/Observation/anyOf/0/properties/digest"
+            },
+            "kind": {
+              "type": "string",
+              "const": "TextDump"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "surfaceId",
+            "timestamp",
+            "digest",
+            "kind",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Locator": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "selector"
+            },
+            "css": {
+              "type": "string"
+            },
+            "nth": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "css"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "uia"
+            },
+            "automationId": {
+              "type": "string"
+            },
+            "controlType": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "hint"
+            },
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "key"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "mark"
+            },
+            "mark": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "mark"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "coords"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "rationale": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

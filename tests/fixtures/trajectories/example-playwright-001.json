@@ -1,0 +1,12 @@
+{
+  "id": "example-playwright-001",
+  "surfaceKind": "browser-tab",
+  "recordedAt": 1746230400000,
+  "source": { "note": "Synthetic example so the gate can self-test on a fresh checkout." },
+  "steps": [
+    {
+      "action": { "verb": "Wait", "ms": 0 },
+      "observationsAfter": []
+    }
+  ]
+}
