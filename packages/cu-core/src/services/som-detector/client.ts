@@ -8,6 +8,13 @@ export interface SomDetectorHttpOptions {
   baseUrl?: string;
   // Wall-clock cap per detect call. The router should treat a slow detector
   // as "down" rather than block the dispatch loop.
+  //
+  // Default tuned to the measured p95 of the local service (task #112):
+  //   - opencv backend, 1440x900 synthetic UI: p95 ~150ms, p99 ~200ms,
+  //     cold-start ~180ms.
+  //   - ONNX OmniParser backend (CPU) is ~3-5x slower per call.
+  // 1500ms gives ~10x headroom on the opencv path and ~3x on the ONNX path
+  // while keeping the dispatch loop responsive when the service is wedged.
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
@@ -19,7 +26,7 @@ export class SomDetectorHttpClient implements SomDetectorClient {
 
   constructor(opts: SomDetectorHttpOptions = {}) {
     this.baseUrl = opts.baseUrl ?? `http://127.0.0.1:${process.env.SOM_DETECTOR_PORT || 8765}`;
-    this.timeoutMs = opts.timeoutMs ?? 4000;
+    this.timeoutMs = opts.timeoutMs ?? 1500;
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
