@@ -48,6 +48,27 @@ escalate to the premium model only when the cheap output fails validation
 - `GET /api/budget` — current `BudgetStatus`.
 - `GET /api/models` — roster + quality scores.
 
+## `TaskProfile` from the CU smart router (planned)
+
+Once the [CU smart router](./cu-router.md) lands, every CU step calls
+through with a richer `TaskProfile` object:
+
+```ts
+{
+  observationKind: "AxTree" | "DomSnapshot" | "UiaTree" |
+                   "SomScreenshot" | "RawScreenshot" | "TextDump",
+  expectedOutputShape: "selector" | "click_target" | "extracted_json" | …,
+  latencyBudgetMs: number,
+  costCeilingUsd: number,
+}
+```
+
+The router already ranks by cost tier; `TaskProfile` narrows further
+— `SomScreenshot` + `click_target` requires a vision-capable model;
+`AxTree` + `selector` opens up cheap text-only models that would be
+unsuitable for a raw screenshot. See [cu-router](./cu-router.md) for
+the strategy tables this populates.
+
 ## Strategist
 
 `budget-strategist` is a daily 2 AM program that produces a budget-efficiency

@@ -490,3 +490,36 @@ If the owner wants to act on this audit, suggested order:
 8. **#38** migrations.
 
 Everything below that is healthy "as you touch the code" maintenance.
+
+---
+
+## Post-CU stack note
+
+The CU work tracked under task #93 (cu-core) …
+task #98 (OSS extraction), plus the
+[LilyGo keyboard](./integrations-lilygo-keyboard.md) and
+[iOS adapter](./integrations-ios.md), bring two structural mitigations
+that close findings raised here:
+
+- **Screenshot exfiltration (#1).** The planned redaction pipeline
+  ([safety](./safety.md#screenshot-redaction-pipeline-planned)) strips
+  PHI from every `RawScreenshot` / `SomScreenshot` / `DomSnapshot`
+  server-side, default-on, before storage or display. Viewing raw
+  originals requires an audited unlock with a stated reason and an
+  expiry — directly addressing the finding that
+  `/api/epic/agent/screenshot/:id` reads can leak PHI to anyone who
+  guesses an integer id. UUID screenshot ids land alongside the new
+  pipeline.
+- **Shell-execution containment (#4 / #5).** The
+  [armed-vs-echo-only device flag](./safety.md#armed-vs-echo-only-device-flag-planned)
+  on the new `devices` table reinforces the existing
+  `RACHAEL_SELF_HOSTED` guidance: a paired device cannot dispatch any
+  action — including `Shell` actions — while unarmed, regardless of
+  what the agent decides. Combined with the per-app
+  [takeover policy](./safety.md#per-app-takeover-required-policy-for-ios-planned)
+  for iOS, the surface area through which prompt-injected content can
+  reach `bash -c` shrinks further.
+
+These are *additions* to the audit posture, not replacements for the
+fixes recommended in findings #1 / #4 / #5 — those still need to land
+in the existing codepaths.

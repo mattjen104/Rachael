@@ -2,6 +2,14 @@
 
 Source: [`chrome-extension/`](../../chrome-extension/)
 
+> **Planned wrapping (see task #94 (surface adapters)).** Once
+> [`cu-core`](./computer-use.md) lands, the extension is the
+> **`browser-extension`** adapter and the on-the-wire format between
+> background.js and the server is Zod-validated cu-core
+> `Action` / `Observation` (codegen'd schemas — same JSON the
+> Playwright adapter speaks, so the router doesn't care which one
+> answered). The bridge queue stays as the transport.
+
 ## Files
 
 | File                  | Role                                                  |

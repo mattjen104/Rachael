@@ -67,3 +67,32 @@ cockpit or by issuing any CLI command (which records as actor `human`).
    program continues.
 
 If the level is `blocked`, the action is refused and audit-logged.
+
+## Transport boundary (planned)
+
+The control bus is **in-process today** — it lives entirely inside the
+Express server and the agent runtime polls it. The
+[CU work](./computer-use.md) generalizes this:
+
+- The same `enqueueCommand` / `dequeueCommand` shape becomes one
+  *transport* for the cu-core bus.
+- A WSS transport is added by the
+  [LilyGo keyboard](./integrations-lilygo-keyboard.md) work
+  (`/ws/keyboard`) so paired devices can ack takeover prompts.
+- Another WSS transport is added by the
+  [iOS adapter](./integrations-ios.md) (`/ws/wda`) for the
+  WebDriverAgent bridge running on the Mac host.
+- A queue+APNs transport is added for the iOS Shortcuts adapter.
+
+All transports speak the same cu-core message shape, so the existing
+takeover / pause / resume machinery applies uniformly.
+
+## Takeover-from-any-step (planned)
+
+The [analyst trajectory inspector](./cu-inspector.md) exposes a "take
+over from this step" action that pauses the trajectory mid-flight.
+Implementation reuses the parked-resume-callback pattern documented
+above — the inspector calls `createTakeoverPoint(reason, context)` with
+a `stepId` in `context`, and `resolveTakeoverPoint` triggers the
+parked `onResume` to either branch (edit-and-resume) or hand the
+remainder to the human.

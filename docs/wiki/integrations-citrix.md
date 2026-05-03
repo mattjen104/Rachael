@@ -29,6 +29,20 @@ CLI: `citrix` (in [`server/cli-engine.ts`](../../server/cli-engine.ts)),
 UCSD `*.ucsd.edu` is a bridge-only domain — the extension must be
 installed and connected. There is no direct fallback.
 
+## Vision-only surface (planned)
+
+Once the [cu-core abstraction](./computer-use.md) lands, Citrix is
+wrapped by the **`citrix-vision`** adapter. It is **vision-only** by
+design: Citrix's HDX channel does not expose UIA / accessibility / DOM
+through to the client side, so neither `AxTree`, `UiaTree`, nor
+`DomSnapshot` are obtainable — only `RawScreenshot` and the
+SoM-marked variant `SomScreenshot`. An **OmniParser SoM detector
+service** fronts the screenshot path: OmniParser detects clickable
+elements and labels them with marks, the smart router binds locators
+to `ElementMark`, and OCR / hint overlays act as the next-tier
+fallback. See [desktop-tools](./desktop-tools.md) for how this fits
+with the Windows-native adapter.
+
 ## Citrix launcher program
 
 A scheduled program `citrix-launcher` discovers available Citrix-published

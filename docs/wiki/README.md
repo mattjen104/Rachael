@@ -27,6 +27,16 @@ engine, multiple LLM integrations, and 10 specialized views.
 - [Frontend shell & views](./frontend.md) — `Workspace.tsx`, the 10 ViewModes, routing, theming, AuthGate
 - [Minibuffer & command palette](./minibuffer.md) — the M-x style command bar
 
+### Computer use
+- [Computer use — `cu-core` abstraction](./computer-use.md) — `Surface`, `Observation`, `Action`, `Locator`, `Verifier`, `Recipe`, the in-process bus, and the cheapest-reliable priority cascade *(planned — see page)*
+- [CU smart router & verification loop](./cu-router.md) — strategy tables, budget object, recovery policy, `RouterTrace` *(planned)*
+- [CU skill library (recipes)](./cu-skills.md) — promotion pipeline, matcher, fallback-on-verifier-failure, seed recipes *(planned)*
+- [Analyst trajectory inspector & HITL](./cu-inspector.md) — step timeline, four panels, take-over-from-here, edit-and-resume, redaction *(planned)*
+
+#### Devices
+- [LilyGo T-Keyboard remote](./integrations-lilygo-keyboard.md) *(planned)*
+- [iOS computer-use (Shortcuts + WebDriverAgent)](./integrations-ios.md) *(planned)*
+
 ### Backend
 - [Server bootstrap](./backend-server.md) — `server/index.ts`, middleware stack, auth gating
 - [REST API routes](./backend-routes.md) — every route group in `server/routes.ts`

@@ -79,6 +79,17 @@ inside the working `POST /api/epic/agent/heartbeat` payload as
 `streamData[]`. `_drain_all_stream_data()` (in the desktop agent) collects
 pending data from all open captures.
 
+## Recipe-promotion hook (planned)
+
+When the [CU skill library](./cu-skills.md) lands, a successful replay
+is *also* a successful trajectory and feeds the skill library's
+promotion pipeline. The replay engine grows an **export-on-success**
+hook that ships its trace (per-step verifier verdicts + timing) into
+the trajectory store; the summarizer turns it into a draft `Recipe`
+for analyst review. Today's `nav_recipe_*` keys in `agent_config`
+become seed recipes in the new `recipes` table on first migration —
+see [cu-skills](./cu-skills.md#relationship-to-todays-replay-engine).
+
 ## TreeView surface
 
 Every destination node renders a `>> Go here` action that issues

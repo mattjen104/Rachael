@@ -176,6 +176,45 @@ poll. They check the bridge token internally where required.
 - `POST /api/secrets/submit` (public) — store secrets
 - `GET  /api/secrets/:name` (auth) — retrieve
 
+### Devices, recipes, inspector, iOS (planned)
+
+The following routes are **planned, not yet present** — they land with
+the CU stack tasks (task #96 (trajectory memory & skills),
+task #97 (analyst inspector)), the LilyGo keyboard
+(task #101 (LilyGo keyboard)), and the iOS adapter
+(task #102 (iOS adapter)).
+
+- `GET    /api/devices` — list paired devices.
+- `POST   /api/devices/pair` — start pairing (returns 6-digit code) or
+  claim a code from the device.
+- `POST   /api/devices/:id/arm` — flip the `armed` flag (audit-logged).
+- `DELETE /api/devices/:id` — unpair.
+- `WSS    /ws/keyboard` — LilyGo T-Keyboard transport (auth via
+  paired-device token in the upgrade `Authorization: Bearer` header).
+  See [integrations-lilygo-keyboard](./integrations-lilygo-keyboard.md).
+- `WSS    /ws/wda` — WebDriverAgent bridge transport for the iOS WDA
+  adapter (`tools/ios_wda_bridge.py` connects from the user's Mac).
+- `POST   /api/ios/cmd` — server-side enqueue of an iOS action.
+- `POST   /api/ios/result` — Apple Shortcuts adapter posts results
+  back.
+- `GET    /api/recipes` *(CU — distinct from today's CLI-chain
+  `/api/recipes`; see [data-model § disambiguation](./data-model.md#disambiguation-note)
+  — the existing route will be renamed `/api/cli-recipes` or the new
+  one namespaced `/api/cu-recipes`)*.
+- `POST   /api/recipes/:id/replay` — replay a CU recipe.
+- `GET    /api/recipes/proposals` — pending analyst-promotion queue.
+- `POST   /api/recipes/proposals/:id/approve|reject` — analyst
+  decision; on approve a `recipes` row is committed.
+- `GET    /api/inspector/trajectories` — list recent trajectories.
+- `GET    /api/inspector/trajectories/:id` — full step timeline +
+  per-step `RouterTrace`.
+- `POST   /api/inspector/trajectories/:id/take-over` — pause and
+  create a takeover point at the current step.
+- `POST   /api/inspector/trajectories/:id/branch` — edit-and-resume.
+- `POST   /api/inspector/unlock` — owner-only, audited unlock of raw
+  (un-redacted) observations for one trajectory; expiry required. See
+  [safety](./safety.md).
+
 ### Misc
 - `GET  /api/tree` — giant consolidated state for the Tree view
 - `GET  /api/notifications` — in-process notifications (max 100)

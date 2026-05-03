@@ -2,6 +2,21 @@
 
 Source: [`tools/`](../../tools/)
 
+> **Planned wrapping (see task #94 (surface adapters)).** Today the desktop
+> Python lives outside any shared abstraction. Once
+> [`cu-core`](./computer-use.md) lands, `tools/epic_agent.py` will be
+> wrapped by two CU adapters: **`windows-uia`** (UIA tree + pywinauto
+> for native Windows apps) and **`citrix-vision`** (vision-only — see
+> [integrations-citrix](./integrations-citrix.md)). The Python ↔ server
+> wire format becomes the cu-core `Action` / `Observation` schema,
+> codegen'd from the Zod definitions in `packages/cu-core` so the
+> Python side validates against the same contract as the TS adapters.
+> The vision path layers
+> **OmniParser SoM detection → OCR / vim hints → raw vision**, with
+> the smart router walking that cascade per the
+> [cheapest-reliable](./computer-use.md#planned-cheapest-reliable-loop)
+> rule.
+
 ## tools/epic_agent.py (~9621 lines)
 
 The polling agent that drives Epic Hyperspace. See

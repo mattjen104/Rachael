@@ -31,6 +31,8 @@ flowchart TB
     Ext[Chrome Extension<br/>chrome-extension/]
     TUI[Python TUI<br/>tools/tui/]
     Desktop[Epic Desktop Agent<br/>tools/epic_agent.py]
+    Lily[LilyGo Keyboard<br/>*planned*]
+    iOS[iPhone — Shortcuts + WDA<br/>*planned*]
   end
 
   subgraph Server[Express server / server/]
@@ -40,6 +42,9 @@ flowchart TB
     Evolution[Evolution Engine<br/>evolution-engine.ts]
     CLI[CLI Engine<br/>cli-engine.ts]
     Bridge[Bridge Queue<br/>bridge-queue.ts]
+    CU[Computer Use Core<br/>packages/cu-core *planned*]
+    Skills[Skill Library<br/>recipes *planned*]
+    Router[CU Smart Router<br/>*planned*]
     Models[Model Router<br/>model-router.ts]
     Memory[Memory<br/>qdrant-client.ts<br/>memory-consolidation.ts]
     Storage[Storage<br/>storage.ts]
@@ -65,6 +70,15 @@ flowchart TB
   Routes --> Storage
   Routes --> CLI
   Routes --> Runtime
+  Routes --> CU
+  Lily -. WSS .-> CU
+  iOS -. WSS / APNs .-> CU
+  Desktop --> CU
+  Ext --> CU
+  CU --> Router
+  Router --> Models
+  Router --> Skills
+  Runtime --> CU
   Runtime --> Models
   Runtime --> Memory
   Runtime --> Evolution
@@ -78,6 +92,19 @@ flowchart TB
   CLI --> Bridge
   Bridge -. job results .- Ext
 ```
+
+## Unified computer-use layer (planned)
+
+The architecture above grows a `cu-core` block that unifies the four
+ways Rachael drives software today (browser via extension, browser via
+Playwright, Windows + Citrix via the Epic Python agent, CLI shells)
+plus two new device surfaces (the LilyGo T-Keyboard and the iPhone via
+Apple Shortcuts + WebDriverAgent). The smart router consults the
+existing model router with a richer `TaskProfile`, the skill library
+captures successful trajectories as recipes, and the analyst inspector
+gives the human a step-level microscope on every run. None of this
+code is merged yet — see the dedicated [computer use](./computer-use.md)
+page and its siblings for the planned design.
 
 ## Key folders
 

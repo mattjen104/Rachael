@@ -19,7 +19,6 @@ Terms used throughout Rachael's UI, CLI, and source code.
 | **Cost tier** | `cheap` / `standard` / `premium` — picks a model from the roster in `server/model-router.ts`. |
 | **Token budget** | `daily_token_budget` agent_config key. LLM-required programs are skipped when exhausted. |
 | **Roster** | The model list returned by `getModelRoster()` (DeepSeek, Qwen, Sonnet, etc.) with live pricing. |
-| **Openclaw** | Internal codename for Rachael's self-modification system. The `openclaw_proposals` table holds proposed config / recipe changes. |
 | **Proposal** | A pending `openclaw_proposals` row. Apply via `proposals approve <id>` or via the cockpit. |
 | **Evolution** | The 6-step LLM-judged self-improvement loop in `server/evolution-engine.ts`. |
 | **Gate** | One of the 5 evolution validation gates (constitution, regression, size, drift, safety). |
@@ -55,3 +54,18 @@ Terms used throughout Rachael's UI, CLI, and source code.
 | **Heartbeat** | Periodic POST from the Chrome extension or Epic desktop agent that keeps "connected" status alive (90s window for extension, 60s for Epic). |
 | **Pulse** | A program/integration that scrapes the user's intranet directory. |
 | **Estate-car-finder, free-stuff-radar, foreclosure-monitor** | Domain-specific seeded scraping programs. See `server/seed-data.ts`. |
+| **Surface** *(planned, [cu-core](./computer-use.md))* | A thing the agent can observe and act on — browser tab, desktop window, Citrix session, CLI shell, paired device. Declares capabilities + cost. |
+| **Observation** *(planned)* | A typed snapshot of a `Surface` — `AxTree`, `UiaTree`, `DomSnapshot`, `SomScreenshot`, `RawScreenshot`, `TextDump`. |
+| **Action** *(planned)* | A typed verb (`Click`, `Type`, `Key`, `Hint`, `Scroll`, `Wait`, `Goto`, `Shell`, `Composite`) with a typed `Locator` target. |
+| **Locator** *(planned)* | How to address an element: `Selector | UiaPath | HintKey | ElementMark | Coords`. Coords are last-resort. |
+| **Verifier** *(planned)* | A pre/post check (`expectElement`, `expectText`, `expectUrl`, `expectImageRegion`, `expectNoChange`, `expectHash`) returning `pass | fail | unknown` with evidence. |
+| **Recipe (CU)** *(planned, [cu-skills](./cu-skills.md))* | A named, parameterized, replayable `(verifier?, action, verifier?)` sequence in the new CU skill library. **Distinct from** today's `recipes` (CLI chains) and the replay engine's `nav_recipe_*` keys — see [data-model](./data-model.md). |
+| **Set-of-Marks (SoM)** *(planned)* | A vision technique that overlays numbered marks on detectable UI elements so an LLM can refer to them by mark id instead of pixel coords. Used by the `citrix-vision` adapter. |
+| **OmniParser** *(planned)* | The screen-element detector that produces SoM marks for [Citrix](./integrations-citrix.md) and other vision-only surfaces. |
+| **Cheapest-Reliable Loop** *(planned)* | The CU router's first principle: walk `AxTree → UiaTree → DomSnapshot → SomScreenshot → RawScreenshot` (and `Selector → UiaPath → Hint → Mark → Coords`) cheap-first, only escalating on verifier failure. |
+| **Trajectory Frame** *(planned)* | One step of a CU run, persisted in `trajectory_frames`; rendered in the [analyst inspector](./cu-inspector.md). |
+| **WebDriverAgent (WDA)** *(planned)* | Facebook-originated XCTest-based iOS UI driver. Built on a Mac host, run via launchd, talks to Rachael through `tools/ios_wda_bridge.py` over WSS. See [integrations-ios](./integrations-ios.md). |
+| **Apple Shortcuts bridge** *(planned)* | The cheap-tier iOS adapter. A single bridge Shortcut on the phone exposes a fixed action set; Rachael triggers it via APNs / polling. |
+| **Echo-only mode** *(planned)* | A paired device's default state: input is displayed for feedback but not dispatched as actions. Flipped by `device arm <id>`, audit-logged. See [safety](./safety.md). |
+| **Takeover-from-step** *(planned)* | The [analyst inspector](./cu-inspector.md)'s ability to pause a CU trajectory at any step and either hand the rest to the human or branch into an edit-and-resume. |
+| **Openclaw** *(updated)* | Internal codename for Rachael's self-modification system; the `openclaw_proposals` table holds proposed config / recipe changes. The CU work extracts the underlying primitives into `@rachael/cu-core` (planned, see task #98 (OSS extraction)); openclaw is the in-app evolution layer that sits on top. |

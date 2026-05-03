@@ -77,6 +77,21 @@ surfaces:
 - Qdrant migration button.
 - Rollback button per version.
 
+## Strategy tables as a new mutation surface (planned)
+
+The [CU smart router](./cu-router.md) keeps per-surface strategy
+tables that map `(taskKind, surfaceKind, observationKind)` →
+`{preferredLocator, model, fallbackChain}`. These tables become a
+**new mutation surface** for the evolution engine alongside the
+existing markdown configs: the router emits an
+`observation-tier miss` observation whenever a preferred tier
+under-delivers (e.g. `AxTree` returns empty for what should be a real
+button), the engine batches these observations, and the standard
+critique → deltas → 5-gate-validation pipeline proposes table edits.
+The same gates apply (constitution, regression on the cu-router
+benchmark suite, size, drift, safety), and bad changes auto-roll-back
+on the same success-rate trigger.
+
 ## Safety considerations
 
 - Constitution gate is fail-closed — if Anthropic is down, no evolution applies.

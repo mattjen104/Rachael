@@ -67,6 +67,47 @@ For every table above, `schema.ts` exports:
 Routes import these from `@shared/schema` and validate `req.body` with
 `safeParse` before passing to `storage`.
 
+## Planned tables (computer-use stack, LilyGo, iOS)
+
+The following tables are **planned, not yet present** in
+[`shared/schema.ts`](../../shared/schema.ts). They land with the CU
+work tracked by task #96 (trajectory memory & skills) (recipes / recipe_runs /
+trajectory_frames) and task #101 (LilyGo keyboard) /
+task #102 (iOS adapter) (devices / pairing_codes).
+
+| Table (planned) | Purpose | Key columns |
+|-----------------|---------|-------------|
+| `recipes` (CU) | CU skill library; **distinct from today's `recipes`** (CLI chains) — the existing table will likely be renamed `cli_recipes` or the new one namespaced `cu_recipes` to disambiguate | name, surfaceKind, taskKind, preconditions (jsonb), steps (jsonb), successCriteria (jsonb), provenance (jsonb), confidence, runCount, successRate, tags[] |
+| `recipe_runs` | One row per CU recipe replay | recipeId (FK→recipes), trajectoryId, boundParams (jsonb), verdict, durationMs, costUsd |
+| `devices` | Paired LilyGo keyboards and iPhones share this table | type ("lilygo-keyboard" \| "ios-shortcuts" \| "ios-wda"), hardwareId (uniq), token (encrypted), armed (bool, default false), mode (text, nullable), policy (jsonb), lastSeen, createdAt |
+| `pairing_codes` | Short-lived codes used during device pairing | code (uniq), hardwareId, deviceType, expiresAt, claimedAt |
+| `trajectory_frames` | Per-step CU traces (one row per RouterTrace step) | trajectoryId, stepIdx, surfaceId, taskKind, observationKind, observationDigest, locatorKind, action (jsonb), model, attemptDurationMs, attemptCostUsd, verifierVerdict, evidence (jsonb) |
+
+### Planned ER additions
+
+```mermaid
+erDiagram
+  recipes ||--o{ recipe_runs : "runs"
+  trajectory_frames }o--|| recipes : "may promote into"
+  pairing_codes ||..|| devices : "claimed produces"
+  devices ||..o{ audit_log : "(actor='device:…')"
+```
+
+`||..||` and `||..o{` here mean the link is logical (matched by
+`hardwareId` / `actor` string), not a hard FK — same convention as the
+existing diagram.
+
+### Disambiguation note
+
+Three things are called "recipe" once the CU work merges. Do not mix
+them up:
+
+1. `recipes` (today) — saved CLI command chains. To be renamed.
+2. `nav_recipe_*` keys in `agent_config` — per-screen-edge nav
+   procedures from [`replay-engine.ts`](../../server/replay-engine.ts).
+   Migrated into the new CU `recipes` table as seed recipes.
+3. `recipes` (planned, CU) — cross-surface CU skill library entries.
+
 ## Known schema issues
 
 See [audit § Data integrity](./audit.md#data-integrity) for the full list.

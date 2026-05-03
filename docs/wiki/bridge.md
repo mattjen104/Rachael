@@ -1,5 +1,16 @@
 # Browser bridge & bridge queue
 
+> **Planned wrapping (see task #94 (surface adapters)).** When
+> [`cu-core`](./computer-use.md) lands, the Playwright path becomes the
+> **`browser-playwright`** adapter and the Chrome extension becomes the
+> **`browser-extension`** adapter — both speaking the cu-core
+> `Action` / `Observation` schema. Playwright gains AX-tree observation
+> via CDP (`Accessibility.getFullAXTree`), which becomes the highest
+> tier in the [observation cascade](./computer-use.md#planned-cheapest-reliable-loop)
+> for browser surfaces. The bridge queue documented below stays — it
+> becomes the transport implementation for the `browser-extension`
+> adapter.
+
 Sources:
 - [`server/bridge-queue.ts`](../../server/bridge-queue.ts) (~437 lines) — server-side queue + `smartFetch`
 - [`server/browser-bridge.ts`](../../server/browser-bridge.ts) (~795 lines) — Playwright-based fallback
