@@ -36,6 +36,24 @@ All data lives in Postgres tables:
 - `agent_memories.source_kb_id` — Links agent memories to their source Galaxy KB entry
 - `outlook_emails` — Persisted Outlook emails (messageId, from, subject, date, body, unread, syncedAt)
 - `snow_tickets` — Persisted ServiceNow tickets (number, type, shortDescription, state, priority, assignedTo, assignmentGroup, updatedOn, source, syncedAt)
+- `standup_episodes` / `standup_segments` / `standup_feed_tokens` — Standup.fm personal podcast (episode metadata, per-segment timing/topic/feedback, RSS subscription tokens)
+
+## Standup.fm — personal daily podcast
+
+`server/standup-engine.ts` turns the existing `standup` CLI brief into a 5-8 min audio episode using the free Edge-TTS pipeline (`server/voice-synth.ts`). `briefToSegments` is a deterministic transformer that splits the brief HTML by `<h2>` topics, expands acronyms (SNOW→ServiceNow, etc.) and emits ordered `ScriptSegment[]`. Each segment is synthesized separately and binary-concatenated into one MP3 (`.briefings/standup-<date>-<kind>.mp3`); per-segment seek timestamps are stored in `standup_segments`.
+
+Surfaces (`server/standup-routes.ts`):
+- `GET /api/standup/episodes` + `/api/standup/episodes/:id` — list/detail with segments
+- `POST /api/standup/generate` — kick off morning/afternoon/weekly generation
+- `POST /api/standup/segments/:id/feedback` — 👍/👎 (-1/0/+1); recent week's feedback feeds `applyFeedbackTrimming` which drops topics with net ≤ -2
+- `POST /api/standup/your-move` — text → CLI command (note/task/raw `/cmd`)
+- `POST /api/standup/check-morning` — loud-failure ntfy alert if no ready morning episode
+- `GET /feed/standup.xml?token=…` — token-gated RSS (auth bypass added in `server/index.ts`)
+- `GET /feed/audio/:token/:slug.mp3` — token-gated audio mirror
+
+Scheduler (`startStandupScheduler` in `server/standup-routes.ts`) runs every 30s and triggers: morning at 5:45, loud-failure check at 5:50, optional afternoon at 14:30 (gated by `agent_config.standup_afternoon_enabled = "true"`), Friday weekly wrap at 16:00. Voices: morning=GuyNeural, afternoon=AndrewMultilingual, weekly=BrianMultilingual.
+
+Frontend: `client/src/components/views/StandupView.tsx` (registered as `standup` view in `Sidebar` + `Workspace`). Episode list, audio player with segment-active highlighting + click-to-seek, 👍/👎 per segment, "Your move" input (M to focus), feed-token manager.
 
 ## Instant Replay / Navigation Replay Engine
 

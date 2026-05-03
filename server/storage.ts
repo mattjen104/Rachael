@@ -37,6 +37,9 @@ import {
   type RouterTrace, type InsertRouterTrace, routerTraces,
   type TrajectoryBranch, type InsertTrajectoryBranch, trajectoryBranches,
   type Receipt, type InsertReceipt, receipts,
+  type StandupEpisode, type InsertStandupEpisode, standupEpisodes,
+  type StandupSegment, type InsertStandupSegment, standupSegments,
+  type StandupFeedToken, type InsertStandupFeedToken, standupFeedTokens,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc, type SQL } from "drizzle-orm";
@@ -1688,6 +1691,77 @@ export class DatabaseStorage implements IStorage {
     const base = db.select().from(deviceActionQueue).orderBy(desc(deviceActionQueue.createdAt)).limit(limit);
     return deviceId !== undefined ? base.where(eq(deviceActionQueue.deviceId, deviceId)) : base;
   }
-}
 
+  // ── Standup.fm ────────────────────────────────────────────────────────────
+  async listStandupEpisodes(limit = 50): Promise<StandupEpisode[]> {
+    return db.select().from(standupEpisodes).orderBy(desc(standupEpisodes.id)).limit(limit);
+  }
+  async getStandupEpisode(id: number): Promise<StandupEpisode | undefined> {
+    const [ep] = await db.select().from(standupEpisodes).where(eq(standupEpisodes.id, id));
+    return ep;
+  }
+  async getStandupEpisodeBySlug(slug: string): Promise<StandupEpisode | undefined> {
+    const [ep] = await db.select().from(standupEpisodes).where(eq(standupEpisodes.slug, slug));
+    return ep;
+  }
+  async getStandupEpisodeByDateKind(date: string, kind: string): Promise<StandupEpisode | undefined> {
+    const [ep] = await db.select().from(standupEpisodes)
+      .where(and(eq(standupEpisodes.publishedDate, date), eq(standupEpisodes.kind, kind)));
+    return ep;
+  }
+  async createStandupEpisode(e: InsertStandupEpisode): Promise<StandupEpisode> {
+    const [created] = await db.insert(standupEpisodes).values(e).returning();
+    return created;
+  }
+  async updateStandupEpisode(id: number, data: Partial<InsertStandupEpisode>): Promise<StandupEpisode | undefined> {
+    const [updated] = await db.update(standupEpisodes).set(data).where(eq(standupEpisodes.id, id)).returning();
+    return updated;
+  }
+  async deleteStandupEpisode(id: number): Promise<void> {
+    await db.delete(standupEpisodes).where(eq(standupEpisodes.id, id));
+  }
+
+  async listStandupSegments(episodeId: number): Promise<StandupSegment[]> {
+    return db.select().from(standupSegments)
+      .where(eq(standupSegments.episodeId, episodeId))
+      .orderBy(asc(standupSegments.ordinal));
+  }
+  async createStandupSegment(s: InsertStandupSegment): Promise<StandupSegment> {
+    const [created] = await db.insert(standupSegments).values(s).returning();
+    return created;
+  }
+  async deleteStandupSegmentsByEpisode(episodeId: number): Promise<void> {
+    await db.delete(standupSegments).where(eq(standupSegments.episodeId, episodeId));
+  }
+  async setStandupSegmentFeedback(id: number, value: number): Promise<StandupSegment | undefined> {
+    const v = Math.max(-1, Math.min(1, Math.round(value)));
+    const [updated] = await db.update(standupSegments)
+      .set({ feedback: v, feedbackAt: new Date() })
+      .where(eq(standupSegments.id, id))
+      .returning();
+    return updated;
+  }
+  async getRecentSegmentFeedback(sinceMs: number): Promise<StandupSegment[]> {
+    const cutoff = new Date(Date.now() - sinceMs);
+    return db.select().from(standupSegments).where(gte(standupSegments.feedbackAt, cutoff));
+  }
+
+  async listStandupFeedTokens(): Promise<StandupFeedToken[]> {
+    return db.select().from(standupFeedTokens).orderBy(desc(standupFeedTokens.createdAt));
+  }
+  async getStandupFeedToken(token: string): Promise<StandupFeedToken | undefined> {
+    const [t] = await db.select().from(standupFeedTokens).where(eq(standupFeedTokens.token, token));
+    return t;
+  }
+  async createStandupFeedToken(t: InsertStandupFeedToken): Promise<StandupFeedToken> {
+    const [created] = await db.insert(standupFeedTokens).values(t).returning();
+    return created;
+  }
+  async touchStandupFeedToken(token: string): Promise<void> {
+    await db.update(standupFeedTokens).set({ lastUsed: new Date() }).where(eq(standupFeedTokens.token, token));
+  }
+  async deleteStandupFeedToken(token: string): Promise<void> {
+    await db.delete(standupFeedTokens).where(eq(standupFeedTokens.token, token));
+  }
+}
 export const storage = new DatabaseStorage();

@@ -86,6 +86,10 @@ export async function registerRoutes(
     console.error("[seed] Failed to seed database:", e);
   }
 
+  const { registerStandupRoutes, startStandupScheduler } = await import("./standup-routes");
+  registerStandupRoutes(app);
+  startStandupScheduler();
+
   attachKeyboardBridge(httpServer);
 
   app.post("/api/keyboard/pair/start", async (_req, res) => {

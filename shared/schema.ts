@@ -1062,3 +1062,88 @@ export const insertTrajectoryBranchSchema = z.object({
 });
 export type InsertTrajectoryBranch = z.infer<typeof insertTrajectoryBranchSchema>;
 export type TrajectoryBranch = typeof trajectoryBranches.$inferSelect;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Standup.fm — personal daily podcast turning the morning brief into audio
+// ────────────────────────────────────────────────────────────────────────────
+
+export type StandupKind = "morning" | "afternoon" | "weekly";
+export type StandupStatus = "pending" | "ready" | "failed";
+
+export const standupEpisodes = pgTable("standup_episodes", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  slug: text("slug").notNull().unique(),
+  kind: text("kind").notNull().default("morning"),
+  publishedDate: text("published_date").notNull(),
+  title: text("title").notNull().default(""),
+  summary: text("summary").notNull().default(""),
+  scriptText: text("script_text").notNull().default(""),
+  audioPath: text("audio_path"),
+  audioUrl: text("audio_url"),
+  durationSec: integer("duration_sec").notNull().default(0),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  voice: text("voice").notNull().default("assistant"),
+  status: text("status").notNull().default("pending"),
+  failureReason: text("failure_reason"),
+  generatedAtMs: integer("generated_at_ms").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertStandupEpisodeSchema = z.object({
+  slug: z.string(),
+  kind: z.enum(["morning", "afternoon", "weekly"]).default("morning"),
+  publishedDate: z.string(),
+  title: z.string().default(""),
+  summary: z.string().default(""),
+  scriptText: z.string().default(""),
+  audioPath: z.string().nullable().optional(),
+  audioUrl: z.string().nullable().optional(),
+  durationSec: z.number().default(0),
+  sizeBytes: z.number().default(0),
+  voice: z.string().default("assistant"),
+  status: z.enum(["pending", "ready", "failed"]).default("pending"),
+  failureReason: z.string().nullable().optional(),
+  generatedAtMs: z.number().default(0),
+});
+export type InsertStandupEpisode = z.infer<typeof insertStandupEpisodeSchema>;
+export type StandupEpisode = typeof standupEpisodes.$inferSelect;
+
+export const standupSegments = pgTable("standup_segments", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  episodeId: integer("episode_id").notNull().references(() => standupEpisodes.id, { onDelete: "cascade" }),
+  ordinal: integer("ordinal").notNull().default(0),
+  topic: text("topic").notNull().default(""),
+  text: text("text").notNull().default(""),
+  startSec: integer("start_sec").notNull().default(0),
+  endSec: integer("end_sec").notNull().default(0),
+  feedback: integer("feedback").notNull().default(0), // -1 / 0 / +1
+  feedbackAt: timestamp("feedback_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertStandupSegmentSchema = z.object({
+  episodeId: z.number(),
+  ordinal: z.number().default(0),
+  topic: z.string().default(""),
+  text: z.string().default(""),
+  startSec: z.number().default(0),
+  endSec: z.number().default(0),
+  feedback: z.number().default(0),
+});
+export type InsertStandupSegment = z.infer<typeof insertStandupSegmentSchema>;
+export type StandupSegment = typeof standupSegments.$inferSelect;
+
+export const standupFeedTokens = pgTable("standup_feed_tokens", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  token: text("token").notNull().unique(),
+  label: text("label").notNull().default("default"),
+  lastUsed: timestamp("last_used"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertStandupFeedTokenSchema = z.object({
+  token: z.string(),
+  label: z.string().default("default"),
+});
+export type InsertStandupFeedToken = z.infer<typeof insertStandupFeedTokenSchema>;
+export type StandupFeedToken = typeof standupFeedTokens.$inferSelect;

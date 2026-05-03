@@ -1,7 +1,7 @@
 import React from "react";
 import { useTvMode } from "@/hooks/use-tv-mode";
 
-export type ViewMode = "agenda" | "tree" | "programs" | "results" | "reader" | "transcripts" | "cockpit" | "snow" | "voice" | "evolution" | "galaxy-kb" | "trajectory" | "ledger";
+export type ViewMode = "agenda" | "tree" | "programs" | "results" | "reader" | "transcripts" | "cockpit" | "snow" | "voice" | "evolution" | "galaxy-kb" | "trajectory" | "ledger" | "standup";
 
 interface SidebarProps {
   current: ViewMode;
@@ -21,6 +21,7 @@ const VIEWS: Array<{ mode: ViewMode; label: string; fullLabel: string; key: stri
   { mode: "evolution", label: "EVO", fullLabel: "Evolution", key: "0" },
   { mode: "trajectory", label: "TRJ", fullLabel: "Trajectory", key: "T" },
   { mode: "ledger", label: "LDG", fullLabel: "Ledger", key: "L" },
+  { mode: "standup", label: "FM", fullLabel: "Standup.fm", key: "S" },
 ];
 
 export default function Sidebar({ current, onSwitch }: SidebarProps) {

@@ -16,6 +16,7 @@ import EvolutionPanel from "@/components/views/EvolutionPanel";
 import TrajectoryView from "@/components/views/TrajectoryView";
 import GalaxyKbView from "@/components/views/GalaxyKbView";
 import LedgerView from "@/components/views/LedgerView";
+import StandupView from "@/components/views/StandupView";
 import Minibuffer from "@/components/editor/Minibuffer";
 import InlineEditor from "@/components/editor/InlineEditor";
 import NotificationToast from "@/components/layout/NotificationToast";
@@ -223,6 +224,13 @@ export default function Workspace() {
         setViewMode("ledger");
         return;
       }
+
+      if ((e.key === "s" || e.key === "S") && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (viewMode === "cockpit") return;
+        e.preventDefault();
+        setViewMode("standup");
+        return;
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -243,6 +251,7 @@ export default function Workspace() {
       case "trajectory": return <TrajectoryView />;
       case "galaxy-kb": return <GalaxyKbView selectedEntryId={selectedItemId} />;
       case "ledger": return <LedgerView />;
+      case "standup": return <StandupView />;
       default: return null;
     }
   };
