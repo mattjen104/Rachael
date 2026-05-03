@@ -34,6 +34,7 @@ import {
   type PairedDevice, type InsertPairedDevice, pairedDevices,
   type DevicePairingCode, type InsertDevicePairingCode, devicePairingCodes,
   type DeviceAction, type InsertDeviceAction, deviceActionQueue,
+  type RouterTrace, type InsertRouterTrace, routerTraces,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
@@ -200,6 +201,10 @@ export interface IStorage {
   getUnconsolidatedObservations(limit?: number): Promise<EvolutionObservation[]>;
   createEvolutionObservation(o: InsertEvolutionObservation): Promise<EvolutionObservation>;
   markObservationConsolidated(id: number): Promise<void>;
+
+  upsertRouterTrace(t: InsertRouterTrace): Promise<RouterTrace>;
+  getRouterTrace(runId: string): Promise<RouterTrace | undefined>;
+  listRouterTraces(limit?: number): Promise<RouterTrace[]>;
 
   getJudgeCostsForDate(date: string): Promise<JudgeCost[]>;
   createJudgeCost(c: InsertJudgeCost): Promise<JudgeCost>;
@@ -966,6 +971,37 @@ export class DatabaseStorage implements IStorage {
 
   async markObservationConsolidated(id: number): Promise<void> {
     await db.update(evolutionObservations).set({ consolidated: true }).where(eq(evolutionObservations.id, id));
+  }
+
+  async upsertRouterTrace(t: InsertRouterTrace): Promise<RouterTrace> {
+    const existing = await this.getRouterTrace(t.runId);
+    if (existing) {
+      const [updated] = await db.update(routerTraces)
+        .set({
+          programName: t.programName ?? existing.programName,
+          surfaceKind: t.surfaceKind,
+          events: t.events,
+          totalSteps: t.totalSteps,
+          tierMisses: t.tierMisses,
+          coordClicks: t.coordClicks,
+          estimatedCostUsd: t.estimatedCostUsd,
+          status: t.status,
+        })
+        .where(eq(routerTraces.runId, t.runId))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(routerTraces).values(t).returning();
+    return created;
+  }
+
+  async getRouterTrace(runId: string): Promise<RouterTrace | undefined> {
+    const [row] = await db.select().from(routerTraces).where(eq(routerTraces.runId, runId)).limit(1);
+    return row;
+  }
+
+  async listRouterTraces(limit = 50): Promise<RouterTrace[]> {
+    return db.select().from(routerTraces).orderBy(desc(routerTraces.createdAt)).limit(limit);
   }
 
   async getJudgeCostsForDate(date: string): Promise<JudgeCost[]> {

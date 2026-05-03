@@ -937,3 +937,37 @@ export interface EpicGrammarResponse {
 export interface EpicGrammarIndexResponse {
   activities: EpicGrammarActivity[];
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Computer-use Router traces — one row per run, captures the structured
+// RouterTrace event chain so the analyst inspector (downstream task) can
+// render which tier was chosen, which fell back, and where takeover fired.
+// ────────────────────────────────────────────────────────────────────────────
+
+export const routerTraces = pgTable("router_traces", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  runId: text("run_id").notNull().unique(),
+  programName: text("program_name"),
+  surfaceKind: text("surface_kind").notNull(),
+  events: jsonb("events").$type<Array<Record<string, unknown>>>().notNull().default([]),
+  totalSteps: integer("total_steps").notNull().default(0),
+  tierMisses: integer("tier_misses").notNull().default(0),
+  coordClicks: integer("coord_clicks").notNull().default(0),
+  estimatedCostUsd: text("estimated_cost_usd").notNull().default("0"),
+  status: text("status").notNull().default("ok"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertRouterTraceSchema = z.object({
+  runId: z.string(),
+  programName: z.string().nullable().optional(),
+  surfaceKind: z.string(),
+  events: z.array(z.record(z.string(), z.unknown())).default([]),
+  totalSteps: z.number().default(0),
+  tierMisses: z.number().default(0),
+  coordClicks: z.number().default(0),
+  estimatedCostUsd: z.string().default("0"),
+  status: z.string().default("ok"),
+});
+export type InsertRouterTrace = z.infer<typeof insertRouterTraceSchema>;
+export type RouterTrace = typeof routerTraces.$inferSelect;

@@ -652,6 +652,37 @@ export async function validateProposal(
   };
 }
 
+// ---------------------------------------------------------------------------
+// CU-router feedback hook — `server/cu-router-runtime.ts` calls this every
+// time the smart router escalated past the cheapest observation tier. We
+// record the miss as a structured pattern observation so the next cycle of
+// `consolidateObservations()` can mutate the strategy table.
+// ---------------------------------------------------------------------------
+
+interface RouterTierMissFeedback {
+  surfaceKind: string;
+  intent?: string;
+  cheapest: string;
+  succeededAt: string;
+  fallbackChain: string[];
+}
+
+const tierMissCounts = new Map<string, number>();
+
+export function recordRouterTierMiss(info: RouterTierMissFeedback): void {
+  const key = `${info.surfaceKind}|${info.cheapest}|${info.succeededAt}`;
+  tierMissCounts.set(key, (tierMissCounts.get(key) ?? 0) + 1);
+  console.log(`[evolution-engine] tier-miss key=${key} count=${tierMissCounts.get(key)} chain=${info.fallbackChain.join("→")}`);
+}
+
+export function getTierMissCounts(): Record<string, number> {
+  return Object.fromEntries(Array.from(tierMissCounts.entries()));
+}
+
+export function clearTierMissCounts(): void {
+  tierMissCounts.clear();
+}
+
 export async function getEvolutionState(): Promise<{
   currentVersion: number;
   totalVersions: number;

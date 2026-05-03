@@ -1,0 +1,54 @@
+{
+  "_comment": "Baseline numbers for the 30-task curated bench. Locked in to detect regressions in tier mix and coord-click rate at PR time. Update deliberately when surface adapters change or strategy tables are mutated.",
+  "_methodology": "Run scripts/bench-router.ts with the stubbed surface that mimics production tier-hit rates from October 2025 telemetry. Each task yields the observation tier listed in suite.ts. Coord-click counts come from the two intentional 'no-handle' tasks (uia-10, cv-10).",
+  "totalTasks": 30,
+  "perSurface": {
+    "browser-tab": {
+      "tasks": 6,
+      "passed": 6,
+      "tierHitRate": { "AxTree": 0.66, "DomSnapshot": 0.34, "SomScreenshot": 0.0, "RawScreenshot": 0.0 },
+      "meanWallMs": 380,
+      "medianWallMs": 360,
+      "meanCostUsd": 0.0008,
+      "coordClicks": 0,
+      "tierMissRate": 0.16
+    },
+    "browser-extension": {
+      "tasks": 4,
+      "passed": 4,
+      "tierHitRate": { "AxTree": 0.75, "DomSnapshot": 0.25, "SomScreenshot": 0.0, "RawScreenshot": 0.0 },
+      "meanWallMs": 1620,
+      "medianWallMs": 1500,
+      "meanCostUsd": 0.0011,
+      "coordClicks": 0,
+      "tierMissRate": 0.25
+    },
+    "desktop-window": {
+      "tasks": 10,
+      "passed": 10,
+      "tierHitRate": { "UiaTree": 0.9, "RawScreenshot": 0.1 },
+      "meanWallMs": 540,
+      "medianWallMs": 410,
+      "meanCostUsd": 0.0006,
+      "coordClicks": 1,
+      "tierMissRate": 0.1
+    },
+    "citrix-session": {
+      "tasks": 10,
+      "passed": 10,
+      "tierHitRate": { "SomScreenshot": 0.9, "RawScreenshot": 0.1 },
+      "meanWallMs": 2100,
+      "medianWallMs": 1900,
+      "meanCostUsd": 0.0078,
+      "coordClicks": 1,
+      "tierMissRate": 0.1
+    }
+  },
+  "globals": {
+    "passRate": 1.0,
+    "meanCostPerTaskUsd": 0.0031,
+    "medianWallMs": 920,
+    "coordClickRate": 0.067
+  },
+  "lockedInAt": "2026-05-01"
+}

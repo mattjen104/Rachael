@@ -457,6 +457,87 @@ export function parseCostTier(tier: string | undefined): CostTier {
   return "cheap";
 }
 
+// ---------------------------------------------------------------------------
+// CU router bridge — accept a TaskProfile (observation kind, expected output
+// shape, latency budget) and return a model choice with a cost estimate.
+//
+// This is consumed by `packages/cu-core/router` via a thin adapter (host
+// passes this function into Router via the `modelRouter` option). Kept here
+// so the model roster is the single source of truth.
+// ---------------------------------------------------------------------------
+
+export interface CuTaskProfile {
+  observationKind: "AxTree" | "DomSnapshot" | "UiaTree" | "SomScreenshot" | "RawScreenshot" | "TextDump";
+  expectedOutput: "selector" | "click-target" | "extraction" | "summary" | "decision";
+  latencyBudgetMs?: number;
+  needsVision: boolean;
+  intent?: string;
+}
+
+export interface CuModelChoice {
+  modelId: string;
+  estimatedCost: number;
+  reason: string;
+}
+
+const VISION_CAPABLE = new Set([
+  "anthropic/claude-3.5-sonnet",
+  "anthropic/claude-sonnet-4",
+]);
+
+function approxTokensForObservation(kind: CuTaskProfile["observationKind"]): number {
+  switch (kind) {
+    case "AxTree": return 600;
+    case "DomSnapshot": return 1200;
+    case "UiaTree": return 500;
+    case "SomScreenshot": return 2200;
+    case "RawScreenshot": return 3000;
+    case "TextDump": return 400;
+  }
+}
+
+function approxOutputTokens(out: CuTaskProfile["expectedOutput"]): number {
+  switch (out) {
+    case "selector": return 60;
+    case "click-target": return 80;
+    case "extraction": return 400;
+    case "summary": return 200;
+    case "decision": return 120;
+  }
+}
+
+export function pickModelForProfile(profile: CuTaskProfile): CuModelChoice {
+  const taskType: TaskType = profile.expectedOutput === "extraction" ? "extraction"
+    : profile.expectedOutput === "decision" ? "reasoning"
+    : "general";
+
+  let candidate: ModelEntry | null;
+  let reason: string;
+  if (profile.needsVision) {
+    const visionModels = activeRoster.filter((m) => VISION_CAPABLE.has(m.id));
+    visionModels.sort((a, b) => (a.inputCostPer1M ?? 0) - (b.inputCostPer1M ?? 0));
+    candidate = visionModels[0] ?? pickModel(taskType, "premium");
+    reason = `vision required (observation=${profile.observationKind})`;
+  } else {
+    candidate = pickModel(taskType, "cheap") ?? pickModel(taskType, "standard");
+    reason = `structured observation (${profile.observationKind}); cheap tier viable`;
+  }
+
+  if (!candidate) {
+    return { modelId: "none", estimatedCost: 0, reason: "no model available" };
+  }
+
+  const inTok = approxTokensForObservation(profile.observationKind);
+  const outTok = approxOutputTokens(profile.expectedOutput);
+  const inCost = ((candidate.inputCostPer1M ?? 0) * inTok) / 1_000_000;
+  const outCost = ((candidate.outputCostPer1M ?? 0) * outTok) / 1_000_000;
+  return {
+    modelId: candidate.id,
+    estimatedCost: Math.max(inCost + outCost, 0),
+    reason: `${reason}; picked ${candidate.label} (${candidate.tier})`,
+  };
+}
+
 export function estimateTokenCost(model: string, tokens: number): number {
   const normalized = model.replace(/^openrouter\//, "");
   const entry = activeRoster.find(m => m.id === normalized);
