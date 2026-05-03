@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { emitEvent } from "./event-bus";
+import type { Action as CuAction, Observation as CuObservation } from "@rachael/cu-core";
 
 const BRIDGE_ONLY_DOMAINS = ["galaxy.epic.com", ".ucsd.edu", "pulse.ucsd.edu", ".reddit.com", "reddit.com", ".live.com", "outlook.live.com", ".office.com", "outlook.office.com", "teams.microsoft.com", ".service-now.com"];
 export function isBridgeOnlyDomain(url: string): boolean {
@@ -39,6 +40,10 @@ export interface BridgeJob {
   submittedAt: number;
   retryCount: number;
   maxRetries: number;
+  // Type-only seam to @rachael/cu-core. The next task will translate
+  // BridgeJob into a typed `Action`/`Observation` request; in v1 this is
+  // left optional so runtime behavior is unchanged.
+  cuAction?: CuAction;
 }
 
 export interface BridgeResult {
@@ -57,6 +62,8 @@ export interface BridgeResult {
   clickDebug?: any;
   debug?: any;
   tabId?: number;
+  // Type-only seam to @rachael/cu-core; populated by the future bus adapter.
+  cuObservation?: CuObservation;
 }
 
 const pendingJobs: BridgeJob[] = [];

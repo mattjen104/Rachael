@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "async_hooks";
 import { storage } from "./storage";
 import type { PermissionLevel } from "@shared/schema";
+import type { Action as CuAction } from "@rachael/cu-core";
 
 // Per-async-context tag identifying the device that originated the current
 // dispatch (e.g. "lilygo:7"). Set by callers like the keyboard bridge via
@@ -34,6 +35,10 @@ export interface QueuedCommand {
   target?: string;
   timestamp: Date;
   status: "pending" | "executing" | "completed" | "rejected";
+  // Type-only seam to @rachael/cu-core: future callers will populate this
+  // with the typed Action that produced the loose `action`/`target` strings
+  // above. Left optional in v1 so no runtime behavior changes.
+  cuAction?: CuAction;
 }
 
 export interface PausedExecution {

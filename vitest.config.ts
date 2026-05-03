@@ -12,6 +12,7 @@ export default defineConfig({
     alias: {
       "@shared": path.resolve(__dirname, "./shared"),
       "@": path.resolve(__dirname, "./client/src"),
+      "@rachael/cu-core": path.resolve(__dirname, "./packages/cu-core/src/index.ts"),
     },
   },
 });
