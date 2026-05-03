@@ -480,3 +480,14 @@ The web app can connect to a remote backend (e.g., DigitalOcean droplet) instead
 - `server/model-router.ts`, `server/llm-client.ts`, `server/browser-bridge.ts`, `server/app-adapters.ts`, `server/scrape-buffer.ts`
 - `server/output-sanitizer.ts`, `server/rate-limit.ts`, `server/skill-runner.ts`
 - Chrome extension in `chrome-extension/`
+
+## LilyGo T-Keyboard Remote (Task #101)
+
+- DB tables: `keyboard_devices`, `keyboard_pairings` (`shared/schema.ts`)
+- Server: `server/keyboard-bridge.ts` mounts `WebSocketServer({ noServer: true })` on `httpServer.upgrade` for path `/ws/keyboard`. Auth is per-device bearer token (sha256 hashed in DB), independent from `OPENCLAW_API_KEY`.
+- REST: `POST /api/keyboard/pair/start` (unauth), `GET /api/keyboard/pair/status` (unauth, by pendingToken), `POST /api/keyboard/pair/confirm` (web UI), `GET/PATCH/DELETE /api/keyboard/devices`
+- JSON envelope: `{kind, text, ts}` where `kind ∈ status|echo|result|prompt|pair-code|error|page`
+- Devices default to `armed=false` (echo-only). Only armed devices invoke `executeChain()`. All inbound lines are tagged `lilygo:<deviceId>` in audit + event metadata.
+- Takeover: keyboard receives `prompt` frames for pending takeover-points; `Y/N` resolves via `resolveTakeoverPoint`.
+- Web UI: Cockpit → DEVICES tab (`KeyboardDevicesPanel` in `CockpitView.tsx`)
+- Firmware: `firmware/lilygo-keyboard/lilygo-keyboard.ino` + README — dual mode (CHAT preserved / RACHAEL), `Sym+R/Sym+C` chord, NVS persistence, OLED paging, corner mode+link glyph.

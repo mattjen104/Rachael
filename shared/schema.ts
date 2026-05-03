@@ -782,6 +782,43 @@ export const insertSnowTicketSchema = z.object({
 export type InsertSnowTicket = z.infer<typeof insertSnowTicketSchema>;
 export type SnowTicket = typeof snowTickets.$inferSelect;
 
+export const keyboardDevices = pgTable("keyboard_devices", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  armed: boolean("armed").notNull().default(false),
+  lastSeen: timestamp("last_seen"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertKeyboardDeviceSchema = z.object({
+  name: z.string(),
+  tokenHash: z.string(),
+  armed: z.boolean().default(false),
+});
+export type InsertKeyboardDevice = z.infer<typeof insertKeyboardDeviceSchema>;
+export type KeyboardDevice = typeof keyboardDevices.$inferSelect;
+
+export const keyboardPairings = pgTable("keyboard_pairings", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  code: text("code").notNull().unique(),
+  pendingTokenHash: text("pending_token_hash").notNull(),
+  status: text("status").notNull().default("pending"),
+  deviceId: integer("device_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+export const insertKeyboardPairingSchema = z.object({
+  code: z.string(),
+  pendingTokenHash: z.string(),
+  status: z.string().default("pending"),
+  deviceId: z.number().nullable().optional(),
+  expiresAt: z.date(),
+});
+export type InsertKeyboardPairing = z.infer<typeof insertKeyboardPairingSchema>;
+export type KeyboardPairing = typeof keyboardPairings.$inferSelect;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Epic Hyperdrive grammar (canonical abstraction contract)
 // Discovered/persisted by `epic discover`; consumed via GET /api/epic/grammar/:phash

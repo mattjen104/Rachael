@@ -13,7 +13,7 @@ interface NavigationState {
   timestamp: number;
 }
 
-type CockpitTab = "stream" | "navigation" | "audit" | "permissions";
+type CockpitTab = "stream" | "navigation" | "audit" | "permissions" | "devices";
 
 export default function CockpitView() {
   const { events, connected } = useCockpitEvents();
@@ -52,7 +52,7 @@ export default function CockpitView() {
   useEffect(() => {
     const handleTabEvent = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail === "stream" || detail === "audit" || detail === "permissions") {
+      if (detail === "stream" || detail === "audit" || detail === "permissions" || detail === "devices") {
         setTab(detail);
       }
     };
@@ -274,7 +274,7 @@ export default function CockpitView() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          {(["stream", "audit", "permissions"] as CockpitTab[]).map(t => (
+          {(["stream", "audit", "permissions", "devices"] as CockpitTab[]).map(t => (
             <button
               key={t}
               data-testid={`cockpit-tab-${t}`}
@@ -545,6 +545,8 @@ export default function CockpitView() {
             })}
           </div>
         )}
+
+        {tab === "devices" && <KeyboardDevicesPanel />}
       </div>
 
       {focusedEvent && tab === "stream" && !navState && (
@@ -578,6 +580,206 @@ export default function CockpitView() {
         </div>
         <span>{pendingPoints.length > 0 ? `${pendingPoints.length} pending` : `${filteredEvents.length + controlStream.length} events`}</span>
       </div>
+    </div>
+  );
+}
+
+interface KeyboardDeviceRow {
+  id: number;
+  name: string;
+  armed: boolean;
+  lastSeen: string | null;
+  createdAt: string;
+}
+
+function KeyboardDevicesPanel() {
+  const [devices, setDevices] = useState<KeyboardDeviceRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [pairing, setPairing] = useState<{ code: string; pendingToken: string; expiresAt: string } | null>(null);
+  const [pairName, setPairName] = useState("LilyGo Keyboard");
+  const [manualCode, setManualCode] = useState("");
+  const [manualName, setManualName] = useState("LilyGo Keyboard");
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiRequest("GET", "/api/keyboard/devices");
+      setDevices(await res.json());
+    } catch (e: any) {
+      setError(e?.message || "failed to load devices");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  const startPairing = async () => {
+    setError(null);
+    try {
+      const res = await apiRequest("POST", "/api/keyboard/pair/start");
+      setPairing(await res.json());
+    } catch (e: any) {
+      setError(e?.message || "pair start failed");
+    }
+  };
+
+  const confirmPairing = async () => {
+    if (!pairing) return;
+    setError(null);
+    try {
+      await apiRequest("POST", "/api/keyboard/pair/confirm", { code: pairing.code, name: pairName });
+      setPairing(null);
+      refresh();
+    } catch (e: any) {
+      setError(e?.message || "confirm failed");
+    }
+  };
+
+  const confirmManualCode = async () => {
+    setError(null);
+    const code = manualCode.trim();
+    if (!/^\d{6}$/.test(code)) { setError("enter the 6-digit code shown on the keyboard"); return; }
+    try {
+      await apiRequest("POST", "/api/keyboard/pair/confirm", { code, name: manualName });
+      setManualCode("");
+      refresh();
+    } catch (e: any) {
+      setError(e?.message || "confirm failed");
+    }
+  };
+
+  const toggleArmed = async (d: KeyboardDeviceRow) => {
+    await apiRequest("PATCH", `/api/keyboard/devices/${d.id}`, { armed: !d.armed });
+    refresh();
+  };
+
+  const revoke = async (d: KeyboardDeviceRow) => {
+    if (!confirm(`Revoke "${d.name}"?`)) return;
+    await apiRequest("DELETE", `/api/keyboard/devices/${d.id}`);
+    refresh();
+  };
+
+  return (
+    <div className="h-full overflow-y-auto px-2 py-1" data-testid="keyboard-devices-panel">
+      <div className="flex items-center gap-2 py-1 border-b border-border mb-2">
+        <span className="font-bold text-primary">LilyGo Keyboards</span>
+        <span className="text-muted-foreground text-[10px] flex-1">{devices.length} paired</span>
+        <button
+          data-testid="button-pair-start"
+          className="px-1.5 py-0.5 text-[10px] bg-primary/20 text-primary hover:bg-primary/30 cursor-pointer"
+          onClick={startPairing}
+        >
+          + Pair new
+        </button>
+      </div>
+
+      {error && (
+        <div className="text-red-400 text-[10px] py-1" data-testid="text-pair-error">{error}</div>
+      )}
+
+      <div className="border border-border bg-muted/30 p-2 mb-2" data-testid="manual-pair-card">
+        <div className="text-[10px] text-muted-foreground mb-1">
+          Have a 6-digit code from your keyboard? Enter it here:
+        </div>
+        <div className="flex items-center gap-1">
+          <input
+            data-testid="input-manual-code"
+            className="w-20 bg-background border border-border text-[10px] px-1 py-0.5 text-foreground font-mono tracking-widest text-center"
+            placeholder="000000"
+            maxLength={6}
+            inputMode="numeric"
+            value={manualCode}
+            onChange={(e) => setManualCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          />
+          <input
+            data-testid="input-manual-name"
+            className="flex-1 bg-background border border-border text-[10px] px-1 py-0.5 text-foreground"
+            placeholder="device name"
+            value={manualName}
+            onChange={(e) => setManualName(e.target.value)}
+          />
+          <button
+            data-testid="button-manual-confirm"
+            className="px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-400 hover:bg-green-500/30 cursor-pointer"
+            onClick={confirmManualCode}
+          >
+            Confirm code
+          </button>
+        </div>
+      </div>
+
+      {pairing && (
+        <div className="border border-yellow-500/40 bg-yellow-500/5 p-2 mb-2" data-testid="pairing-card">
+          <div className="text-[10px] text-yellow-400 mb-1">PAIRING — enter on device, then confirm</div>
+          <div className="font-mono text-2xl tracking-widest text-center py-1" data-testid="text-pair-code">{pairing.code}</div>
+          <div className="text-[10px] text-muted-foreground text-center mb-2">
+            expires {new Date(pairing.expiresAt).toLocaleTimeString()}
+          </div>
+          <div className="flex items-center gap-1">
+            <input
+              data-testid="input-pair-name"
+              className="flex-1 bg-background border border-border text-[10px] px-1 py-0.5 text-foreground"
+              placeholder="device name"
+              value={pairName}
+              onChange={(e) => setPairName(e.target.value)}
+            />
+            <button
+              data-testid="button-pair-confirm"
+              className="px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-400 hover:bg-green-500/30 cursor-pointer"
+              onClick={confirmPairing}
+            >
+              Confirm
+            </button>
+            <button
+              data-testid="button-pair-cancel"
+              className="px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={() => setPairing(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading && devices.length === 0 && (
+        <div className="text-muted-foreground py-4 text-center text-[10px]">Loading…</div>
+      )}
+      {!loading && devices.length === 0 && (
+        <div className="text-muted-foreground py-4 text-center text-[10px]">No keyboards paired yet.</div>
+      )}
+
+      {devices.map(d => (
+        <div key={d.id} className="flex items-center gap-2 py-1 border-b border-border/30" data-testid={`device-row-${d.id}`}>
+          <span className={`shrink-0 ${d.armed ? "text-green-400" : "text-muted-foreground"}`}>{d.armed ? "●" : "○"}</span>
+          <span className="font-bold flex-1 truncate" data-testid={`text-device-name-${d.id}`}>{d.name}</span>
+          <span className="text-muted-foreground text-[10px] shrink-0">
+            {d.lastSeen ? `seen ${new Date(d.lastSeen).toLocaleTimeString()}` : "never seen"}
+          </span>
+          <button
+            data-testid={`button-armed-${d.id}`}
+            className={`px-1.5 py-0.5 text-[10px] cursor-pointer ${
+              d.armed ? "bg-green-500/20 text-green-400" : "bg-muted text-muted-foreground"
+            }`}
+            onClick={() => toggleArmed(d)}
+            title={d.armed ? "armed — instructions execute" : "echo-only — instructions are logged but not run"}
+          >
+            {d.armed ? "ARMED" : "ECHO"}
+          </button>
+          <button
+            data-testid={`button-revoke-${d.id}`}
+            className="px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-400/20 cursor-pointer"
+            onClick={() => revoke(d)}
+          >
+            Revoke
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

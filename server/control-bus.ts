@@ -1,5 +1,18 @@
+import { AsyncLocalStorage } from "async_hooks";
 import { storage } from "./storage";
 import type { PermissionLevel } from "@shared/schema";
+
+// Per-async-context tag identifying the device that originated the current
+// dispatch (e.g. "lilygo:7"). Set by callers like the keyboard bridge via
+// `runWithSourceDevice(...)`; takeover-points created inside that scope inherit
+// this tag so prompts/answers can be scoped to the originating device.
+const sourceDeviceContext = new AsyncLocalStorage<string>();
+export function runWithSourceDevice<T>(sourceDevice: string, fn: () => Promise<T>): Promise<T> {
+  return sourceDeviceContext.run(sourceDevice, fn);
+}
+export function currentSourceDevice(): string | undefined {
+  return sourceDeviceContext.getStore();
+}
 
 export type ControlMode = "human" | "agent";
 
@@ -11,6 +24,7 @@ export interface TakeoverPoint {
   permissionLevel: PermissionLevel;
   status: "pending" | "confirmed" | "rejected" | "taken-over";
   resolve?: (decision: "confirm" | "reject" | "takeover") => void;
+  sourceDevice?: string;
 }
 
 export interface QueuedCommand {
@@ -351,6 +365,7 @@ export function createTakeoverPoint(
       permissionLevel,
       status: "pending",
       resolve,
+      sourceDevice: currentSourceDevice(),
     };
     state.takeoverPoints.push(tp);
     pushActivity({ actor: "agent", type: "takeover-point", action, target, permissionLevel, result: "awaiting" });

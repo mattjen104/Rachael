@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { storage } from "./storage";
-import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema, insertMealPlanSchema, insertShoppingListSchema, insertPantryItemSchema, insertKiddoFoodLogSchema, insertNightlyRecommendationSchema, type OutlookEmail, type SnowTicket } from "@shared/schema";
+import { insertProgramSchema, insertSkillSchema, insertTaskSchema, insertNoteSchema, insertCaptureSchema, insertOpenclawProposalSchema, insertSiteProfileSchema, insertNavigationPathSchema, insertRadarEngagementSchema, insertMealPlanSchema, insertShoppingListSchema, insertPantryItemSchema, insertKiddoFoodLogSchema, insertNightlyRecommendationSchema, type OutlookEmail, type SnowTicket, type InsertKeyboardDevice } from "@shared/schema";
 import { parseCaptureEntry, formatOrgEntry } from "./capture-parser";
 import { detectContentType, fetchUrlMetadata } from "./content-detector";
 import { seedDatabase } from "./seed-data";
@@ -17,6 +17,7 @@ import { subscribe, getEventHistory, type CockpitEvent } from "./event-bus";
 import { createNavigationSession, updateNavigationState, getNavigationSession, getActiveSessions, closeNavigationSession, getNavigationHistory } from "./navigation-session";
 import { getControlState, getControlMode, toggleControlMode, setControlMode, getActivityStream, getPendingTakeoverPoints, resolveTakeoverPoint, recordAction, checkPermission, createTakeoverPoint, enqueueCommand, dequeueCommand, completeCommand, drainQueue, getQueueDepth, setActionPermission, getActionPermissions, getPausedExecutions, removePausedExecution, clearPausedExecutions, onResume, type PausedExecution } from "./control-bus";
 import { executeChain, executeChainRaw, getCommandHelp } from "./cli-engine";
+import { attachKeyboardBridge, createPairingFlow, confirmPairing, getPairingStatusByPendingToken } from "./keyboard-bridge";
 import { synthesizeRecipe, buildReplayPlan, getAllRecipesForWindow, fuzzyMatchNode, findShortestPath, getRecipe } from "./replay-engine";
 import { insertRecipeSchema } from "@shared/schema";
 import { claimJobsTracked, resolveResult, getQueueStatus, submitJob, waitForResult, validateBridgeToken, getBridgeToken, recordHeartbeat, isExtensionConnected, smartFetch } from "./bridge-queue";
@@ -81,6 +82,62 @@ export async function registerRoutes(
   } catch (e) {
     console.error("[seed] Failed to seed database:", e);
   }
+
+  attachKeyboardBridge(httpServer);
+
+  app.post("/api/keyboard/pair/start", async (_req, res) => {
+    try {
+      const { code, pendingToken, expiresAt } = await createPairingFlow();
+      res.json({ code, pendingToken, expiresAt });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/keyboard/pair/status", async (req, res) => {
+    const pendingToken = String(req.query.pendingToken || "");
+    if (!pendingToken) return res.status(400).json({ message: "pendingToken required" });
+    try {
+      const status = await getPairingStatusByPendingToken(pendingToken);
+      res.json(status);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/keyboard/pair/confirm", async (req, res) => {
+    const { code, name } = req.body || {};
+    if (!code || typeof code !== "string") return res.status(400).json({ message: "code required" });
+    if (!name || typeof name !== "string") return res.status(400).json({ message: "name required" });
+    const result = await confirmPairing(code, name);
+    if (!result.ok) return res.status(400).json({ message: result.error });
+    res.json({ deviceId: result.deviceId });
+  });
+
+  app.get("/api/keyboard/devices", async (_req, res) => {
+    const devices = await storage.getKeyboardDevices();
+    res.json(devices.map(d => ({
+      id: d.id, name: d.name, armed: d.armed, lastSeen: d.lastSeen, createdAt: d.createdAt,
+    })));
+  });
+
+  app.patch("/api/keyboard/devices/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const body = (req.body ?? {}) as { armed?: unknown; name?: unknown };
+    const updates: Partial<Pick<InsertKeyboardDevice, "armed" | "name">> = {};
+    if (typeof body.armed === "boolean") updates.armed = body.armed;
+    if (typeof body.name === "string") updates.name = body.name.slice(0, 64);
+    if (Object.keys(updates).length === 0) return res.status(400).json({ message: "no updatable fields" });
+    const updated = await storage.updateKeyboardDevice(id, updates);
+    if (!updated) return res.status(404).json({ message: "device not found" });
+    res.json({ id: updated.id, name: updated.name, armed: updated.armed, lastSeen: updated.lastSeen });
+  });
+
+  app.delete("/api/keyboard/devices/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    await storage.deleteKeyboardDevice(id);
+    res.status(204).send();
+  });
 
   app.get("/api/programs", async (_req, res) => {
     const progs = await storage.getPrograms();

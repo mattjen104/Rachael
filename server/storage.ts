@@ -29,6 +29,8 @@ import {
   type GalaxyKbEntry, type InsertGalaxyKb, galaxyKb,
   type OutlookEmail, type InsertOutlookEmail, outlookEmails,
   type SnowTicket, type InsertSnowTicket, snowTickets,
+  type KeyboardDevice, type InsertKeyboardDevice, keyboardDevices,
+  type KeyboardPairing, type InsertKeyboardPairing, keyboardPairings,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, lte, gte, ilike, sql, asc } from "drizzle-orm";
@@ -228,6 +230,20 @@ export interface IStorage {
   upsertSnowTicket(t: InsertSnowTicket): Promise<SnowTicket>;
   searchSnowTickets(query: string, limit?: number): Promise<SnowTicket[]>;
   getSnowSyncTimestamp(): Promise<Date | null>;
+
+  getKeyboardDevices(): Promise<KeyboardDevice[]>;
+  getKeyboardDevice(id: number): Promise<KeyboardDevice | undefined>;
+  getKeyboardDeviceByTokenHash(tokenHash: string): Promise<KeyboardDevice | undefined>;
+  createKeyboardDevice(d: InsertKeyboardDevice): Promise<KeyboardDevice>;
+  updateKeyboardDevice(id: number, data: Partial<InsertKeyboardDevice>): Promise<KeyboardDevice | undefined>;
+  touchKeyboardDeviceLastSeen(id: number): Promise<void>;
+  deleteKeyboardDevice(id: number): Promise<void>;
+
+  createKeyboardPairing(p: InsertKeyboardPairing): Promise<KeyboardPairing>;
+  getKeyboardPairingByCode(code: string): Promise<KeyboardPairing | undefined>;
+  getKeyboardPairingByPendingHash(tokenHash: string): Promise<KeyboardPairing | undefined>;
+  updateKeyboardPairing(id: number, data: Partial<{ status: string; deviceId: number | null }>): Promise<KeyboardPairing | undefined>;
+  cleanExpiredKeyboardPairings(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1146,6 +1162,52 @@ export class DatabaseStorage implements IStorage {
     const [latest] = await db.select({ syncedAt: snowTickets.syncedAt })
       .from(snowTickets).orderBy(desc(snowTickets.syncedAt)).limit(1);
     return latest?.syncedAt || null;
+  }
+
+  async getKeyboardDevices(): Promise<KeyboardDevice[]> {
+    return db.select().from(keyboardDevices).orderBy(desc(keyboardDevices.createdAt));
+  }
+  async getKeyboardDevice(id: number): Promise<KeyboardDevice | undefined> {
+    const [d] = await db.select().from(keyboardDevices).where(eq(keyboardDevices.id, id));
+    return d;
+  }
+  async getKeyboardDeviceByTokenHash(tokenHash: string): Promise<KeyboardDevice | undefined> {
+    const [d] = await db.select().from(keyboardDevices).where(eq(keyboardDevices.tokenHash, tokenHash));
+    return d;
+  }
+  async createKeyboardDevice(d: InsertKeyboardDevice): Promise<KeyboardDevice> {
+    const [created] = await db.insert(keyboardDevices).values(d).returning();
+    return created;
+  }
+  async updateKeyboardDevice(id: number, data: Partial<InsertKeyboardDevice>): Promise<KeyboardDevice | undefined> {
+    const [updated] = await db.update(keyboardDevices).set(data).where(eq(keyboardDevices.id, id)).returning();
+    return updated;
+  }
+  async touchKeyboardDeviceLastSeen(id: number): Promise<void> {
+    await db.update(keyboardDevices).set({ lastSeen: new Date() }).where(eq(keyboardDevices.id, id));
+  }
+  async deleteKeyboardDevice(id: number): Promise<void> {
+    await db.delete(keyboardDevices).where(eq(keyboardDevices.id, id));
+  }
+
+  async createKeyboardPairing(p: InsertKeyboardPairing): Promise<KeyboardPairing> {
+    const [created] = await db.insert(keyboardPairings).values(p).returning();
+    return created;
+  }
+  async getKeyboardPairingByCode(code: string): Promise<KeyboardPairing | undefined> {
+    const [p] = await db.select().from(keyboardPairings).where(eq(keyboardPairings.code, code));
+    return p;
+  }
+  async getKeyboardPairingByPendingHash(tokenHash: string): Promise<KeyboardPairing | undefined> {
+    const [p] = await db.select().from(keyboardPairings).where(eq(keyboardPairings.pendingTokenHash, tokenHash));
+    return p;
+  }
+  async updateKeyboardPairing(id: number, data: Partial<{ status: string; deviceId: number | null }>): Promise<KeyboardPairing | undefined> {
+    const [updated] = await db.update(keyboardPairings).set(data).where(eq(keyboardPairings.id, id)).returning();
+    return updated;
+  }
+  async cleanExpiredKeyboardPairings(): Promise<void> {
+    await db.delete(keyboardPairings).where(lte(keyboardPairings.expiresAt, new Date()));
   }
 }
 
