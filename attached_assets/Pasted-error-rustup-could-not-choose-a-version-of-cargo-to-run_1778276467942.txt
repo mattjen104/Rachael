@@ -1,0 +1,42 @@
+error: rustup could not choose a version of cargo to run, because one wasn't specified explicitly, and no default is configured.
+help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
+cp: cannot stat '/root/.cargo/bin/librespot': No such file or directory
+chmod: cannot access '/usr/bin/librespot': No such file or directory
+-bash: /usr/bin/librespot: No such file or directory
+root@Phantom:/tmp# df -h /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vda1       8.7G  8.2G  451M  95% /
+root@Phantom:/tmp# df -h
+lsblk
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs           392M  1.8M  390M   1% /run
+/dev/vda1       8.7G  8.2G  451M  95% /
+tmpfs           2.0G  1.1M  2.0G   1% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+/dev/vda16      881M  114M  705M  14% /boot
+/dev/vda15      105M  6.2M   99M   6% /boot/efi
+/dev/sda         20G   13G  6.5G  66% /mnt/volume_sfo3_01
+overlay          20G   13G  6.5G  66% /mnt/volume_sfo3_01/docker/rootfs/overlayfs/e56d1eb0d47221fea4e09c98f84554a274fe35735cba16d4729c83c185ade898
+overlay          20G   13G  6.5G  66% /mnt/volume_sfo3_01/docker/rootfs/overlayfs/23a22b3670d6c0f2ba9bfd8ed3bbc5d0a9035d8af366202776a5c6634b50c235
+overlay          20G   13G  6.5G  66% /mnt/volume_sfo3_01/docker/rootfs/overlayfs/e4655102393c199547dc5dfcf5a23364438e48adb90135f7a6cee27986d1b9f9
+tmpfs           392M   16K  392M   1% /run/user/0
+NAME    MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+loop0     7:0    0  48.4M  1 loop /snap/snapd/26382
+loop1     7:1    0  66.8M  1 loop /snap/core24/1587
+loop2     7:2    0    74M  1 loop /snap/core22/2411
+loop3     7:3    0     4K  1 loop /snap/bare/5
+loop4     7:4    0  49.1M  1 loop /snap/cups/1170
+loop6     7:6    0  91.7M  1 loop /snap/gtk-common-themes/1535
+loop7     7:7    0   395M  1 loop /snap/mesa-2404/1165
+loop8     7:8    0 606.1M  1 loop /snap/gnome-46-2404/153
+loop9     7:9    0  49.1M  1 loop /snap/cups/1183
+loop10    7:10   0 184.4M  1 loop /snap/chromium/3411
+loop11    7:11   0  49.3M  1 loop /snap/snapd/26865
+loop12    7:12   0 184.4M  1 loop /snap/chromium/3423
+sda       8:0    0    20G  0 disk /mnt/volume_sfo3_01
+vda     253:0    0    10G  0 disk 
+├─vda1  253:1    0     9G  0 part /
+├─vda14 253:14   0     4M  0 part 
+├─vda15 253:15   0   106M  0 part /boot/efi
+└─vda16 259:0    0   913M  0 part /boot
+vdb     253:16   0   
